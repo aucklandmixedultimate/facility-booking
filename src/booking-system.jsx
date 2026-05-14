@@ -1735,7 +1735,8 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {} }) {
                     <th style={{ ...thS, textAlign:"right" }}>Daytime</th>
                     <th style={{ ...thS, textAlign:"right" }}>Evening</th>
                     <th style={{ ...thS, textAlign:"right" }}>Total</th>
-                    {anyRates&&<th style={{ ...thS, textAlign:"right" }}>Cost</th>}
+                    {anyRates&&<th style={{ ...thS, textAlign:"right" }}>Day Cost</th>}
+                    {anyRates&&<th style={{ ...thS, textAlign:"right" }}>Eve Cost</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -1747,30 +1748,20 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {} }) {
                       <td style={{ ...tdS, textAlign:"right" }}><span style={{ background:"#fef9c3", color:"#854d0e", borderRadius:6, padding:"2px 8px", fontWeight:600, fontSize:12 }}>{fmtHrs(r.daytime)}</span></td>
                       <td style={{ ...tdS, textAlign:"right" }}><span style={{ background:"#ede9fe", color:"#5b21b6", borderRadius:6, padding:"2px 8px", fontWeight:600, fontSize:12 }}>{fmtHrs(r.evening)}</span></td>
                       <td style={{ ...tdS, textAlign:"right", fontWeight:700 }}>{fmtHrs(r.total)}</td>
-                      {anyRates&&<td style={{ ...tdS, textAlign:"right", fontWeight:700, color:r.cost>0?"#15803d":"#94a3b8" }}>{r.cost>0?fmtCost(r.cost):"—"}</td>}
+                      {anyRates&&<td style={{ ...tdS, textAlign:"right", fontWeight:600, color:r.dayCost>0?"#15803d":"#94a3b8" }}>{r.dayCost>0?fmtCost(r.dayCost):"—"}</td>}
+                      {anyRates&&<td style={{ ...tdS, textAlign:"right", fontWeight:600, color:r.eveCost>0?"#15803d":"#94a3b8" }}>{r.eveCost>0?fmtCost(r.eveCost):"—"}</td>}
                     </tr>
                   ))}
                 </tbody>
                 <tfoot>
-                  {anyRates&&<tr style={{ background:"#f0fdf4", borderTop:"1px solid #d1fae5" }}>
-                    <td style={{ ...tdS, fontWeight:600, fontSize:11, color:"#475569" }} colSpan={3}>Subtotals</td>
-                    <td style={{ ...tdS, textAlign:"right" }}>
-                      <span style={{ background:"#fef9c3", color:"#854d0e", borderRadius:6, padding:"2px 8px", fontWeight:600, fontSize:11 }}>{fmtHrs(totalDaytime)}</span>
-                      {totalDayCost>0&&<div style={{fontSize:10,color:"#059669",fontWeight:600,marginTop:2}}>{fmtCost(totalDayCost)}</div>}
-                    </td>
-                    <td style={{ ...tdS, textAlign:"right" }}>
-                      <span style={{ background:"#ede9fe", color:"#5b21b6", borderRadius:6, padding:"2px 8px", fontWeight:600, fontSize:11 }}>{fmtHrs(totalEvening)}</span>
-                      {totalEveCost>0&&<div style={{fontSize:10,color:"#059669",fontWeight:600,marginTop:2}}>{fmtCost(totalEveCost)}</div>}
-                    </td>
-                    <td colSpan={anyRates?2:1}/>
-                  </tr>}
                   <tr style={{ background:"#f8fafc", borderTop:"2px solid #f1f5f9" }}>
                     <td style={{ ...tdS, fontWeight:700 }} colSpan={2}>Total</td>
                     <td style={{ ...tdS, textAlign:"right", fontWeight:700 }}>{active.length}</td>
                     <td style={{ ...tdS, textAlign:"right" }}><span style={{ background:"#fef9c3", color:"#854d0e", borderRadius:6, padding:"2px 8px", fontWeight:700, fontSize:12 }}>{fmtHrs(totalDaytime)}</span></td>
                     <td style={{ ...tdS, textAlign:"right" }}><span style={{ background:"#ede9fe", color:"#5b21b6", borderRadius:6, padding:"2px 8px", fontWeight:700, fontSize:12 }}>{fmtHrs(totalEvening)}</span></td>
                     <td style={{ ...tdS, textAlign:"right", fontWeight:800 }}>{fmtHrs(totalHrs)}</td>
-                    {anyRates&&<td style={{ ...tdS, textAlign:"right", fontWeight:800, color:"#15803d" }}>{fmtCost(totalBookerCost)}</td>}
+                    {anyRates&&<td style={{ ...tdS, textAlign:"right", fontWeight:800, color:"#15803d" }}>{fmtCost(totalDayCost)}</td>}
+                    {anyRates&&<td style={{ ...tdS, textAlign:"right", fontWeight:800, color:"#15803d" }}>{fmtCost(totalEveCost)}</td>}
                   </tr>
                 </tfoot>
               </table>
