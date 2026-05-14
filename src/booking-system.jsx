@@ -1612,7 +1612,7 @@ function Banner({type,msg}) {
 
 // ─── Main App ─────────────────────────────────────────────────────────────────
 // ─── CARLTON JUNIORS RUGBY SYNC ──────────────────────────────────────────────
-const SYNC_SOURCE = "carltonjuniorsrugby_sync";
+// (sync bookings use empty email/name and are deduped by date+facility+time+purpose)
 const CJR_ORG_ID = "14520";
 const CJR_ICAL   = "https://ics.teamup.com/feed/ksooqhdi7ua5ucp58j/15068031.ics";
 
@@ -1662,11 +1662,21 @@ function parseCJRDateTime(dt) {
 async function fetchCJREvents(year, month) {
   // month is 0-based
   const dateStr = `${year}-${String(month+1).padStart(2,"0")}-01`;
-  const target = `https://www.carltonjuniorsrugby.co.nz/api/v1/calendar/MonthCalendarEvents?organisationId=%20${CJR_ORG_ID}&sportId=0&ical=${encodeURIComponent(CJR_ICAL)}&date=${dateStr}`;
-  const url = `https://corsproxy.io/?url=${encodeURIComponent(target)}`;
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(`CJR API returned ${r.status}`);
-  return r.json();
+  const target = `https://www.carltonjuniorsrugby.co.nz/api/v1/calendar/MonthCalendarEvents?organisationId=%2014520&sportId=0&ical=${encodeURIComponent(CJR_ICAL)}&date=${dateStr}`;
+  // Try corsproxy.io first, fall back to allorigins
+  const proxies = [
+    `https://corsproxy.io/?url=${encodeURIComponent(target)}`,
+    `https://api.allorigins.win/raw?url=${encodeURIComponent(target)}`,
+  ];
+  let lastErr;
+  for (const url of proxies) {
+    try {
+      const r = await fetch(url);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return await r.json();
+    } catch(e) { lastErr = e; }
+  }
+  throw new Error("All proxies failed: " + lastErr?.message);
 }
 
 export default function App() {
@@ -1720,7 +1730,8 @@ export default function App() {
             b.date === date &&
             b.facility_id === facility_id &&
             b.start_hour === start_hour &&
-            b.source === SYNC_SOURCE
+            b.purpose === purpose &&
+            !b.email
           );
           if (dup) { skipped++; continue; }
           const newBk = {
@@ -1733,7 +1744,6 @@ export default function App() {
             name: "",
             email: "",
             status: "approved",
-            source: SYNC_SOURCE,
             created_at: new Date().toISOString(),
           };
           if (configured) {
