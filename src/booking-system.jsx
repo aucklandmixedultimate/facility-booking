@@ -502,6 +502,61 @@ function BookingRow({ row, idx, onChange, onRemove, isOnly, isAdmin, isEditing, 
           </select>
         </div>
       )}
+
+      {/* Live availability indicator */}
+      {(()=>{
+        if (!row.date || !row.facility_id || !row.duration) return null;
+        const draft = { id: row.id || "__draft__", facility_id: row.facility_id, date: row.date, start_hour: row.start_hour, duration: row.duration, status: "pending_amua" };
+        const others = allBookings.filter(b => b.id !== draft.id && !["cancelled","rejected"].includes(b.status));
+        const sameClashes = getSameFacilityOverlaps(draft, others);
+        const adminClashes = sameClashes.filter(b => isAdminBooking(b));
+        const userClashes  = sameClashes.filter(b => !isAdminBooking(b));
+        const crossClashes = getCrossFacilityOverlaps(draft, others).filter(b => !isAdminBooking(b));
+        const facName = FACILITIES.find(f=>f.id===row.facility_id)?.name || row.facility_id;
+        return (
+          <div style={{display:"flex",flexDirection:"column",gap:6}}>
+            {adminClashes.length > 0 && (
+              <div style={{background:"#fef2f2",border:"1px solid #fca5a5",borderRadius:8,padding:"10px 12px"}}>
+                <div style={{fontWeight:700,fontSize:12,color:"#b91c1c",marginBottom:4}}>🚫 {facName} is blocked at this time</div>
+                {adminClashes.map(b=>(
+                  <div key={b.id} style={{fontSize:12,color:"#991b1b",padding:"1px 0"}}>
+                    {fmtTime(b.start_hour)}–{fmtTime(b.start_hour+b.duration)} · {b.purpose||"Facility block"}
+                  </div>
+                ))}
+              </div>
+            )}
+            {userClashes.length > 0 && (
+              <div style={{background:"#fff7ed",border:"1px solid #fed7aa",borderRadius:8,padding:"10px 12px"}}>
+                <div style={{fontWeight:700,fontSize:12,color:"#c2410c",marginBottom:4}}>⚠ {facName} has overlapping bookings</div>
+                {userClashes.map(b=>(
+                  <div key={b.id} style={{fontSize:12,color:"#9a3412",padding:"1px 0"}}>
+                    {fmtTime(b.start_hour)}–{fmtTime(b.start_hour+b.duration)} · {b.name||b.email} · {b.purpose}
+                  </div>
+                ))}
+              </div>
+            )}
+            {crossClashes.length > 0 && (
+              <div style={{background:"#fefce8",border:"1px solid #fde68a",borderRadius:8,padding:"10px 12px"}}>
+                <div style={{fontWeight:700,fontSize:12,color:"#854d0e",marginBottom:4}}>ℹ Other facilities also booked at this time</div>
+                {crossClashes.map(b=>{
+                  const cf=FACILITIES.find(f=>f.id===b.facility_id);
+                  return (
+                    <div key={b.id} style={{fontSize:12,color:"#713f12",padding:"1px 0"}}>
+                      {cf?.name||b.facility_id} · {fmtTime(b.start_hour)}–{fmtTime(b.start_hour+b.duration)} · {b.name||b.email}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {sameClashes.length === 0 && (
+              <div style={{fontSize:12,color:"#16a34a",display:"flex",alignItems:"center",gap:5}}>
+                <span style={{width:7,height:7,borderRadius:"50%",background:"#22c55e",display:"inline-block"}}/>
+                {facName} is available {fmtTime(row.start_hour)}–{fmtTime(row.start_hour+row.duration)} on {fmtDate(row.date)}
+              </div>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 }
