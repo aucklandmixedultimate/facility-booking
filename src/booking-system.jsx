@@ -56,11 +56,16 @@ const DURATIONS = [
   {label:"4 hrs",value:4},{label:"6 hrs",value:6},{label:"8 hrs",value:8},
 ];
 const STATUS_META = {
-  pending:  {bg:"#fff8e1",border:"#f59e0b",text:"#92400e",dot:"#f59e0b",label:"Pending"},
-  approved: {bg:"#f0fdf4",border:"#22c55e",text:"#14532d",dot:"#22c55e",label:"Approved"},
-  rejected: {bg:"#fff1f2",border:"#f43f5e",text:"#881337",dot:"#f43f5e",label:"Rejected"},
-  cancelled:{bg:"#f8f8f8",border:"#94a3b8",text:"#475569",dot:"#94a3b8",label:"Cancelled"},
+  pending_amua: {bg:"#fff8e1",border:"#f59e0b",text:"#92400e",dot:"#f59e0b",label:"Pending AMUA Review"},
+  amua_submit:  {bg:"#dbeafe",border:"#93c5fd",text:"#1e40af",dot:"#3b82f6",label:"AMUA to Submit to CPSA"},
+  pending_cpsa: {bg:"#e0f2fe",border:"#7dd3fc",text:"#075985",dot:"#0ea5e9",label:"Pending CPSA Review"},
+  approved:     {bg:"#f0fdf4",border:"#22c55e",text:"#14532d",dot:"#22c55e",label:"Approved"},
+  rejected:     {bg:"#fff1f2",border:"#f43f5e",text:"#881337",dot:"#f43f5e",label:"Rejected"},
+  cancelled:    {bg:"#f8f8f8",border:"#94a3b8",text:"#475569",dot:"#94a3b8",label:"Cancelled"},
+  clash:        {bg:"#fef3c7",border:"#d97706",text:"#92400e",dot:"#d97706",label:"Clash"},
+  pending:      {bg:"#fff8e1",border:"#f59e0b",text:"#92400e",dot:"#f59e0b",label:"Pending AMUA Review"},
 };
+const REVIEW_STATUSES = new Set(["pending_amua","amua_submit","pending_cpsa","pending"]);
 const MONTHS=["January","February","March","April","May","June","July","August","September","October","November","December"];
 
 function fmtTime(h) {
@@ -335,7 +340,7 @@ function EmailLoginScreen({ onLogin }) {
 
 // ─── Small UI atoms ───────────────────────────────────────────────────────────
 function Badge({status}) {
-  const m=STATUS_META[status]||STATUS_META.pending;
+  const m=STATUS_META[status]||STATUS_META.pending_amua;
   return <span style={{display:"inline-flex",alignItems:"center",gap:5,padding:"2px 10px",borderRadius:999,background:m.bg,border:`1px solid ${m.border}`,color:m.text,fontSize:12,fontWeight:600,whiteSpace:"nowrap"}}><span style={{width:6,height:6,borderRadius:"50%",background:m.dot,display:"inline-block"}}/>{m.label}</span>;
 }
 function EmailChip({email}) {
@@ -480,7 +485,7 @@ function BookingRow({ row, idx, onChange, onRemove, isOnly, isAdmin, isEditing, 
         <div>
           <label style={S.lbl}>Status</label>
           <select style={S.inp} value={row.status} onChange={e=>upd("status",e.target.value)}>
-            {Object.entries(STATUS_META).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
+            {Object.entries(STATUS_META).filter(([k])=>k!=="pending").map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
           </select>
         </div>
       )}
@@ -750,7 +755,7 @@ function MultiEditForm({ bookings: srcBookings, onAddToCart, onClose, allBooking
       start_hour:  newHour,
       duration:    newDuration,
       date:        shiftToNewDow(b.date, newDow),
-      status:      "pending", // re-submit for approval
+      status:      "pending_amua", // re-submit for approval
       updated_at:  new Date().toISOString(),
     }));
     // Basic overlap check
@@ -834,7 +839,7 @@ function BookingForm({ booking, allBookings, onSave, onAddToCart, onClose, isAdm
       duration:    1,
       purpose:     "",
       notes:       "",
-      status:      "pending",
+      status:      "pending_amua",
       recur:       { mode:"none", weeks:4, until:"" },
       ...overrides,
     };
@@ -978,7 +983,7 @@ function BookingDetail({booking,onEdit,onClose,onCancel,isAdmin,onStatusChange,l
   return (
     <div style={{display:"flex",flexDirection:"column",gap:16}}>
       <div style={{background:m.bg,border:`1px solid ${m.border}`,borderRadius:10,padding:"12px 16px"}}>
-        <Badge status={booking.status}/>{booking.status==="pending"&&<p style={{margin:"8px 0 0",fontSize:13,color:m.text}}>Awaiting admin approval.</p>}
+        <Badge status={booking.status}/>{REVIEW_STATUSES.has(booking.status)&&<p style={{margin:"8px 0 0",fontSize:13,color:m.text}}>Awaiting admin review.</p>}
       </div>
       {isPast&&<div style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:"8px 12px",fontSize:12,color:"#64748b",display:"flex",alignItems:"center",gap:6}}>🔒 Past booking — {isAdmin?"admin can delete":"read-only"}</div>}
       <div><EmailChip email={booking.email}/></div>
@@ -1160,11 +1165,11 @@ function WeekCalendar({ bookings, onNewBooking, onBookingClick, selectedFacility
                           onClick={e=>{ e.stopPropagation(); onBookingClick(b); }}
                           onMouseDown={e=>e.stopPropagation()}
                           title={`${b.name} – ${fac?.name}`}
-                          style={{ position:"absolute", top:(b.start_hour-CAL_START)*HOUR_H, height:Math.max(b.duration*HOUR_H-2,20), background:bkBg, borderRadius:6, padding:"3px 6px", cursor:"pointer", overflow:"hidden", opacity:b.status==="pending"?0.75:1, border:deleteIds.has(b.id)?"2.5px solid #ef4444":cartSourceIds.has(b.id)?"2.5px solid #f59e0b":b.status==="pending"?"2px dashed rgba(255,255,255,0.6)":b.status==="rejected"?"2px solid rgba(244,63,94,0.8)":"none", boxShadow:deleteIds.has(b.id)?"0 0 0 3px rgba(239,68,68,0.25)":cartSourceIds.has(b.id)?"0 0 0 3px rgba(245,158,11,0.25)":"0 1px 4px rgba(0,0,0,0.15)", zIndex:2, borderLeft:bkBorderLeft, ...stk }}>
+                          style={{ position:"absolute", top:(b.start_hour-CAL_START)*HOUR_H, height:Math.max(b.duration*HOUR_H-2,20), background:bkBg, borderRadius:6, padding:"3px 6px", cursor:"pointer", overflow:"hidden", opacity:REVIEW_STATUSES.has(b.status)?0.75:1, border:deleteIds.has(b.id)?"2.5px solid #ef4444":cartSourceIds.has(b.id)?"2.5px solid #f59e0b":b.status==="clash"?"2px dashed #d97706":REVIEW_STATUSES.has(b.status)?"2px dashed rgba(255,255,255,0.6)":b.status==="rejected"?"2px solid rgba(244,63,94,0.8)":"none", boxShadow:deleteIds.has(b.id)?"0 0 0 3px rgba(239,68,68,0.25)":cartSourceIds.has(b.id)?"0 0 0 3px rgba(245,158,11,0.25)":"0 1px 4px rgba(0,0,0,0.15)", zIndex:2, borderLeft:bkBorderLeft, ...stk }}>
                           <div style={{ fontSize:11, fontWeight:700, color:"#fff", lineHeight:1.3, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{b.purpose||b.name}</div>
                           {b.duration*HOUR_H>28&&<div style={{display:"flex",alignItems:"center",gap:3,marginTop:1}}>
                             <span style={{fontSize:9,fontWeight:700,color:"rgba(255,255,255,0.9)",background:"rgba(0,0,0,0.2)",borderRadius:3,padding:"1px 4px",whiteSpace:"nowrap"}}>
-                              {b.status==="approved"?"✓ Approved":b.status==="pending"?"⏳ Pending":b.status==="rejected"?"✗ Rejected":"Cancelled"}
+                              {STATUS_META[b.status]?.label || "Unknown"}
                             </span>
                           </div>}
                           {b.duration*HOUR_H>44&&<div style={{ fontSize:10, color:"rgba(255,255,255,0.85)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{fac?.name}</div>}
@@ -1229,8 +1234,17 @@ function MonthCalendar({ bookings, onBookingClick, onNewBooking, selectedFacilit
   const allSelDeletable = selIds.size > 0 && selectedBookings.every(canDelete);
 
   function StatusDot({status}) {
-    const cfg={approved:{c:"#22c55e",l:"✓"},rejected:{c:"#f43f5e",l:"✗"},cancelled:{c:"#94a3b8",l:"—"},pending:{c:"#f59e0b",l:"⏳"}};
-    const {c,l}=cfg[status]||cfg.pending;
+    const cfg={
+      approved:     {c:"#22c55e",l:"✓"},
+      rejected:     {c:"#f43f5e",l:"✗"},
+      cancelled:    {c:"#94a3b8",l:"—"},
+      clash:        {c:"#d97706",l:"!"},
+      pending_amua: {c:"#f59e0b",l:"⏳"},
+      amua_submit:  {c:"#3b82f6",l:"→"},
+      pending_cpsa: {c:"#0ea5e9",l:"⏳"},
+      pending:      {c:"#f59e0b",l:"⏳"},
+    };
+    const {c,l}=cfg[status]||cfg.pending_amua;
     return <span style={{fontSize:8,fontWeight:800,background:c,color:"#fff",borderRadius:3,padding:"1px 3px",lineHeight:"14px",flexShrink:0}}>{l}</span>;
   }
 
@@ -1306,7 +1320,7 @@ function MonthCalendar({ bookings, onBookingClick, onNewBooking, selectedFacilit
                   return (
                     <div key={b.id}
                       onClick={e=>{ e.stopPropagation(); if(selMode) toggleSel(b.id); else onBookingClick(b); }}
-                      style={{ background:chipBg, borderRadius:4, padding:"2px 4px", fontSize:10, fontWeight:700, color:"#fff", overflow:"hidden", whiteSpace:"nowrap", borderLeft:chipLeft, outline:chipOutline, opacity:b.status==="pending"?0.75:1, cursor:"pointer", display:"flex", alignItems:"center", gap:3 }}>
+                      style={{ background:chipBg, borderRadius:4, padding:"2px 4px", fontSize:10, fontWeight:700, color:"#fff", overflow:"hidden", whiteSpace:"nowrap", borderLeft:chipLeft, outline:chipOutline, opacity:REVIEW_STATUSES.has(b.status)?0.75:1, cursor:"pointer", display:"flex", alignItems:"center", gap:3 }}>
                       <StatusDot status={b.status}/>
                       <span style={{overflow:"hidden",textOverflow:"ellipsis",flex:1}}>{fmtTime(b.start_hour)} {b.purpose||b.name}</span>
                     </div>
@@ -1331,6 +1345,80 @@ function MonthCalendar({ bookings, onBookingClick, onNewBooking, selectedFacilit
   );
 }
 
+function AboutTab() {
+  const card = { background:"#fff", border:"1px solid #e2e8f0", borderRadius:12, padding:"20px 24px", marginBottom:16 };
+  const h2 = { margin:"0 0 12px", fontSize:16, fontWeight:700, color:"#0f172a" };
+  const step = { display:"flex", gap:12, alignItems:"flex-start", marginBottom:12 };
+  const stepNum = (n,col) => ({
+    width:28, height:28, borderRadius:"50%", background:col, color:"#fff",
+    fontWeight:700, fontSize:13, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0
+  });
+  const arrow = { textAlign:"center", color:"#94a3b8", fontSize:18, margin:"4px 0 4px 14px" };
+  return (
+    <div style={{maxWidth:680,margin:"0 auto"}}>
+      <div style={card}>
+        <h2 style={h2}>Booking Process</h2>
+        <div style={step}>
+          <div style={stepNum(1,"#6366f1")}> 1</div>
+          <div>
+            <div style={{fontWeight:600,fontSize:14,color:"#0f172a"}}>Submit booking request</div>
+            <div style={{fontSize:13,color:"#475569",marginTop:2}}>Fill in the booking form with your group name, facility, date, time, and purpose. Your request is saved with status <strong>Pending AMUA Review</strong>.</div>
+          </div>
+        </div>
+        <div style={arrow}>↓</div>
+        <div style={step}>
+          <div style={stepNum(2,"#f59e0b")}>2</div>
+          <div>
+            <div style={{fontWeight:600,fontSize:14,color:"#0f172a"}}>AMUA reviews your request</div>
+            <div style={{fontSize:13,color:"#475569",marginTop:2}}>Auckland Mixed Ultimate Association (AMUA) checks availability and eligibility. If there is a scheduling conflict or issue, AMUA may reject or ask you to revise. If accepted, the booking moves to <strong>AMUA to Submit to CPSA</strong>.</div>
+          </div>
+        </div>
+        <div style={arrow}>↓</div>
+        <div style={step}>
+          <div style={stepNum(3,"#0ea5e9")}>3</div>
+          <div>
+            <div style={{fontWeight:600,fontSize:14,color:"#0f172a"}}>AMUA submits to CPSA</div>
+            <div style={{fontSize:13,color:"#475569",marginTop:2}}>AMUA lodges the booking request with Cornwall Park Sport Association (CPSA). Status becomes <strong>Pending CPSA Review</strong>.</div>
+          </div>
+        </div>
+        <div style={arrow}>↓</div>
+        <div style={step}>
+          <div style={stepNum(4,"#22c55e")}>4</div>
+          <div>
+            <div style={{fontWeight:600,fontSize:14,color:"#0f172a"}}>CPSA decision</div>
+            <div style={{fontSize:13,color:"#475569",marginTop:2}}>CPSA reviews and either approves or rejects. An <strong>Approved</strong> booking is confirmed — you will receive an email notification. A rejected booking will show as <strong>Rejected</strong>.</div>
+          </div>
+        </div>
+      </div>
+
+      <div style={card}>
+        <h2 style={h2}>Hiring Rates</h2>
+        <div style={{fontSize:13,color:"#475569",marginBottom:12}}>Rates are set per facility and may vary. Contact AMUA for the most current rates.</div>
+        <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
+          {FACILITIES.map(f=>(
+            <div key={f.id} style={{display:"flex",alignItems:"center",gap:8,background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:"10px 14px",flex:"1 1 180px"}}>
+              <span style={{width:10,height:10,borderRadius:"50%",background:f.color,display:"inline-block",flexShrink:0}}/>
+              <span style={{fontWeight:600,fontSize:13,color:"#0f172a"}}>{f.name}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={card}>
+        <h2 style={h2}>Status Guide</h2>
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          {Object.entries(STATUS_META).filter(([k])=>k!=="pending").map(([k,v])=>(
+            <div key={k} style={{display:"flex",alignItems:"center",gap:10,padding:"6px 10px",background:v.bg,border:`1px solid ${v.border}`,borderRadius:8}}>
+              <span style={{width:8,height:8,borderRadius:"50%",background:v.dot,flexShrink:0}}/>
+              <span style={{fontWeight:600,fontSize:13,color:v.text}}>{v.label}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SummaryTab({ bookings, loggedInEmail, facilityRates = {} }) {
   const now = new Date();
   const [year,        setYear]        = useState(now.getFullYear());
@@ -1348,46 +1436,60 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {} }) {
     return true;
   });
 
+  const EVENING_CUTOFF = 17.5; // 5:30pm
+
+  function splitHours(b) {
+    const end = b.start_hour + b.duration;
+    if (b.start_hour >= EVENING_CUTOFF) return { day: 0, evening: b.duration };
+    if (end > EVENING_CUTOFF) return { day: EVENING_CUTOFF - b.start_hour, evening: end - EVENING_CUTOFF };
+    return { day: b.duration, evening: 0 };
+  }
+
+  function getFacRates(facId) {
+    const r = facilityRates[facId];
+    if (!r) return { day: 0, evening: 0 };
+    if (typeof r === "object") return { day: r.day || 0, evening: r.evening || 0 };
+    return { day: parseFloat(r) || 0, evening: 0 }; // backward compat
+  }
+
   // Per-email aggregation (over filtered active bookings)
   const byEmail = {};
   active.forEach(b => {
     const key = b.email.toLowerCase();
-    if (!byEmail[key]) byEmail[key] = { email:b.email, name:b.name, daytime:0, evening:0, total:0, bookings:0 };
+    if (!byEmail[key]) byEmail[key] = { email:b.email, name:b.name, daytime:0, evening:0, total:0, bookings:0, cost:0 };
     const rec = byEmail[key];
-    let eveningHrs=0, daytimeHrs=0;
-    if (b.start_hour >= 18) {
-      eveningHrs = b.duration;
-    } else if (b.start_hour + b.duration > 18) {
-      eveningHrs = (b.start_hour + b.duration) - 18;
-      daytimeHrs = 18 - b.start_hour;
-    } else {
-      daytimeHrs = b.duration;
-    }
-    rec.evening  += eveningHrs;
-    rec.daytime  += daytimeHrs;
+    const { day, evening } = splitHours(b);
+    const rates = getFacRates(b.facility_id);
+    rec.evening  += evening;
+    rec.daytime  += day;
     rec.total    += b.duration;
     rec.bookings += 1;
+    rec.cost     += day * rates.day + evening * rates.evening;
   });
 
   const rows         = Object.values(byEmail).sort((a,b)=>b.total-a.total);
-  const totalEvening = rows.reduce((s,r)=>s+r.evening,0);
-  const totalDaytime = rows.reduce((s,r)=>s+r.daytime,0);
-  const totalHrs     = rows.reduce((s,r)=>s+r.total,0);
+  const totalEvening  = rows.reduce((s,r)=>s+r.evening,0);
+  const totalDaytime  = rows.reduce((s,r)=>s+r.daytime,0);
+  const totalHrs      = rows.reduce((s,r)=>s+r.total,0);
+  const totalBookerCost = rows.reduce((s,r)=>s+r.cost,0);
 
-  // Per-facility hours and cost calculation
+  // Per-facility hours and cost calculation (split by day/evening rate)
   const byFacility = {};
   active.forEach(b => {
     const fac = FACILITIES.find(x => x.id === b.facility_id);
     if (!fac) return;
-    if (!byFacility[fac.id]) byFacility[fac.id] = { fac, hours: 0 };
-    byFacility[fac.id].hours += b.duration;
+    if (!byFacility[fac.id]) byFacility[fac.id] = { fac, dayHrs: 0, eveningHrs: 0 };
+    const { day, evening } = splitHours(b);
+    byFacility[fac.id].dayHrs     += day;
+    byFacility[fac.id].eveningHrs += evening;
   });
-  const facCosts = Object.values(byFacility).map(({ fac, hours }) => {
-    const rate = parseFloat(facilityRates[fac.id] || 0);
-    return { fac, hours, rate, cost: hours * rate };
+  const facCosts = Object.values(byFacility).map(({ fac, dayHrs, eveningHrs }) => {
+    const rates = getFacRates(fac.id);
+    const cost = dayHrs * rates.day + eveningHrs * rates.evening;
+    return { fac, dayHrs, eveningHrs, hours: dayHrs + eveningHrs, rates, cost };
   });
   const totalCost = facCosts.reduce((s, c) => s + c.cost, 0);
-  const anyRates  = facCosts.some(c => c.rate > 0);
+  const anyRates  = facCosts.some(c => c.rates.day > 0 || c.rates.evening > 0);
 
   function fmtHrs(h) { return h===0?"0h" : h%1===0?`${h}h`:`${Math.floor(h)}h ${Math.round((h%1)*60)}m`; }
   function fmtCost(n) { return "$" + n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g,","); }
@@ -1451,8 +1553,8 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {} }) {
         {[
           { label:"Bookings",      value:active.length,         icon:"📋" },
           { label:"Total Hours",   value:fmtHrs(totalHrs),      icon:"⏱" },
-          { label:"Daytime Hrs",   value:fmtHrs(totalDaytime),  icon:"☀️",  sub:"before 6 PM" },
-          { label:"Evening Hrs",   value:fmtHrs(totalEvening),  icon:"🌙",  sub:"from 6 PM" },
+          { label:"Daytime Hrs",   value:fmtHrs(totalDaytime),  icon:"☀️",  sub:"before 5:30 PM" },
+          { label:"Evening Hrs",   value:fmtHrs(totalEvening),  icon:"🌙",  sub:"from 5:30 PM" },
           { label:"Unique Bookers",value:rows.length,           icon:"👥" },
           ...(anyRates ? [{ label:"Total Cost", value:fmtCost(totalCost), icon:"💰", highlight:true }] : []),
         ].map(c=>(
@@ -1473,18 +1575,24 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {} }) {
             {!anyRates && <span style={{ fontSize:12, fontWeight:400, color:"#94a3b8", marginLeft:8 }}>(set hourly rates in Admin → Facility Rates)</span>}
           </h3>
           <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:10 }}>
-            {facCosts.map(({ fac, hours, rate, cost }) => (
-              <div key={fac.id} style={{ background:"#fff", border:"1px solid #f1f5f9", borderRadius:12, padding:"14px 16px", display:"flex", flexDirection:"column", gap:6, boxShadow:"0 1px 4px rgba(0,0,0,0.04)" }}>
-                <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-                  <span style={{ width:10, height:10, borderRadius:"50%", background:fac.color, flexShrink:0, display:"inline-block" }}/>
-                  <span style={{ fontSize:12, fontWeight:700, color:"#0f172a" }}>{fac.name}</span>
+            {facCosts.map(({ fac, dayHrs, eveningHrs, hours, rates, cost }) => {
+              const hasRates = rates.day > 0 || rates.evening > 0;
+              return (
+                <div key={fac.id} style={{ background:"#fff", border:"1px solid #f1f5f9", borderRadius:12, padding:"14px 16px", display:"flex", flexDirection:"column", gap:6, boxShadow:"0 1px 4px rgba(0,0,0,0.04)" }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                    <span style={{ width:10, height:10, borderRadius:"50%", background:fac.color, flexShrink:0, display:"inline-block" }}/>
+                    <span style={{ fontSize:12, fontWeight:700, color:"#0f172a" }}>{fac.name}</span>
+                  </div>
+                  {dayHrs > 0 && <div style={{ fontSize:12, color:"#64748b" }}>Day: {fmtHrs(dayHrs)} {rates.day > 0 ? `@ ${fmtCost(rates.day)}/hr` : ""}</div>}
+                  {eveningHrs > 0 && <div style={{ fontSize:12, color:"#64748b" }}>Eve: {fmtHrs(eveningHrs)} {rates.evening > 0 ? `@ ${fmtCost(rates.evening)}/hr` : ""}</div>}
+                  {dayHrs === 0 && eveningHrs === 0 && <div style={{ fontSize:12, color:"#94a3b8" }}>{fmtHrs(hours)} total</div>}
+                  <div style={{ fontSize:18, fontWeight:800, color: hasRates ? "#15803d" : "#94a3b8" }}>
+                    {hasRates ? fmtCost(cost) : "—"}
+                  </div>
+                  {!hasRates && <div style={{ fontSize:11, color:"#94a3b8" }}>no rates set</div>}
                 </div>
-                <div style={{ fontSize:13, color:"#475569" }}>{fmtHrs(hours)} @ {rate > 0 ? fmtCost(rate)+"/hr" : "no rate set"}</div>
-                <div style={{ fontSize:18, fontWeight:800, color: rate > 0 ? "#15803d" : "#94a3b8" }}>
-                  {rate > 0 ? fmtCost(cost) : "—"}
-                </div>
-              </div>
-            ))}
+              );
+            })}
             {anyRates && (
               <div style={{ background:"#f0fdf4", border:"1.5px solid #bbf7d0", borderRadius:12, padding:"14px 16px", display:"flex", flexDirection:"column", gap:6 }}>
                 <div style={{ fontSize:12, fontWeight:700, color:"#166534" }}>Total Cost</div>
@@ -1514,6 +1622,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {} }) {
                     <th style={{ ...thS, textAlign:"right" }}>Daytime</th>
                     <th style={{ ...thS, textAlign:"right" }}>Evening</th>
                     <th style={{ ...thS, textAlign:"right" }}>Total</th>
+                    {anyRates&&<th style={{ ...thS, textAlign:"right" }}>Cost</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -1525,6 +1634,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {} }) {
                       <td style={{ ...tdS, textAlign:"right" }}><span style={{ background:"#fef9c3", color:"#854d0e", borderRadius:6, padding:"2px 8px", fontWeight:600, fontSize:12 }}>{fmtHrs(r.daytime)}</span></td>
                       <td style={{ ...tdS, textAlign:"right" }}><span style={{ background:"#ede9fe", color:"#5b21b6", borderRadius:6, padding:"2px 8px", fontWeight:600, fontSize:12 }}>{fmtHrs(r.evening)}</span></td>
                       <td style={{ ...tdS, textAlign:"right", fontWeight:700 }}>{fmtHrs(r.total)}</td>
+                      {anyRates&&<td style={{ ...tdS, textAlign:"right", fontWeight:700, color:r.cost>0?"#15803d":"#94a3b8" }}>{r.cost>0?fmtCost(r.cost):"—"}</td>}
                     </tr>
                   ))}
                 </tbody>
@@ -1535,6 +1645,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {} }) {
                     <td style={{ ...tdS, textAlign:"right" }}><span style={{ background:"#fef9c3", color:"#854d0e", borderRadius:6, padding:"2px 8px", fontWeight:700, fontSize:12 }}>{fmtHrs(totalDaytime)}</span></td>
                     <td style={{ ...tdS, textAlign:"right" }}><span style={{ background:"#ede9fe", color:"#5b21b6", borderRadius:6, padding:"2px 8px", fontWeight:700, fontSize:12 }}>{fmtHrs(totalEvening)}</span></td>
                     <td style={{ ...tdS, textAlign:"right", fontWeight:800 }}>{fmtHrs(totalHrs)}</td>
+                    {anyRates&&<td style={{ ...tdS, textAlign:"right", fontWeight:800, color:"#15803d" }}>{fmtCost(totalBookerCost)}</td>}
                   </tr>
                 </tfoot>
               </table>
@@ -1584,8 +1695,8 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[]
   const si={padding:"7px 12px",borderRadius:8,border:"1.5px solid #e2e8f0",fontSize:13,fontFamily:"inherit",color:"#0f172a",background:"#f8fafc",outline:"none"};
   const today=todayKey();
 
-  // Old unapproved = pending bookings with past dates
-  const oldUnapproved=bookings.filter(b=>b.status==="pending"&&b.date<today);
+  // Old unapproved = bookings in any review state with past dates
+  const oldUnapproved=bookings.filter(b=>REVIEW_STATUSES.has(b.status)&&b.date<today);
 
   const list=bookings.filter(b=>{
     if(sf!=="all"&&b.status!==sf) return false;
@@ -1595,7 +1706,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[]
     return true;
   }).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
 
-  const pendingList = list.filter(b=>b.status==="pending");
+  const pendingList = list.filter(b=>REVIEW_STATUSES.has(b.status));
   const allSelected = pendingList.length>0 && pendingList.every(b=>selected.has(b.id));
 
   function toggleSelect(id) {
@@ -1677,7 +1788,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[]
         <input style={{...si,flex:1,minWidth:160}} placeholder="Search name, email, purpose…" value={q} onChange={e=>setQ(e.target.value)}/>
         <select style={si} value={sf} onChange={e=>setSf(e.target.value)}>
           <option value="all">All statuses</option>
-          {Object.entries(STATUS_META).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
+          {Object.entries(STATUS_META).filter(([k])=>k!=="pending").map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
         </select>
         <select style={si} value={ff} onChange={e=>setFf(e.target.value)}>
           <option value="all">All facilities</option>
@@ -1696,21 +1807,36 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[]
       {/* Facility rates panel */}
       {showRates&&(
         <div style={{background:"#f8fafc",border:"1.5px solid #e2e8f0",borderRadius:12,padding:16}}>
-          <div style={{fontWeight:700,fontSize:14,color:"#0f172a",marginBottom:12}}>Hourly Rates (used in Summary cost calculations)</div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:10}}>
-            {FACILITIES.map(fac=>(
-              <div key={fac.id} style={{display:"flex",alignItems:"center",gap:8,background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,padding:"8px 12px"}}>
-                <span style={{width:10,height:10,borderRadius:"50%",background:fac.color,flexShrink:0,display:"inline-block"}}/>
-                <span style={{fontSize:12,fontWeight:600,color:"#0f172a",flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{fac.name}</span>
-                <span style={{fontSize:12,color:"#64748b"}}>$</span>
-                <input type="number" min="0" step="0.5"
-                  value={facilityRates[fac.id]||""}
-                  onChange={e=>onUpdateFacilityRate(fac.id, parseFloat(e.target.value)||0)}
-                  placeholder="0"
-                  style={{...si,width:72,padding:"4px 8px",textAlign:"right"}}/>
-                <span style={{fontSize:12,color:"#64748b"}}>/hr</span>
-              </div>
-            ))}
+          <div style={{fontWeight:700,fontSize:14,color:"#0f172a",marginBottom:4}}>Hourly Rates (used in Summary cost calculations)</div>
+          <div style={{fontSize:12,color:"#64748b",marginBottom:12}}>Day = before 5:30pm · Evening = 5:30pm onwards</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))",gap:10}}>
+            {FACILITIES.map(fac=>{
+              const rates = typeof facilityRates[fac.id]==="object" ? facilityRates[fac.id] : {day:facilityRates[fac.id]||0,evening:0};
+              return (
+                <div key={fac.id} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,padding:"10px 12px"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8}}>
+                    <span style={{width:10,height:10,borderRadius:"50%",background:fac.color,flexShrink:0,display:"inline-block"}}/>
+                    <span style={{fontSize:12,fontWeight:700,color:"#0f172a"}}>{fac.name}</span>
+                  </div>
+                  <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                    <span style={{fontSize:11,color:"#64748b",width:52}}>Day $</span>
+                    <input type="number" min="0" step="0.5"
+                      value={rates.day||""}
+                      onChange={e=>onUpdateFacilityRate(fac.id,"day",e.target.value)}
+                      placeholder="0"
+                      style={{...si,width:72,padding:"4px 8px",textAlign:"right"}}/>
+                    <span style={{fontSize:11,color:"#64748b"}}>/hr</span>
+                    <span style={{fontSize:11,color:"#7c3aed",width:64,marginLeft:8}}>Evening $</span>
+                    <input type="number" min="0" step="0.5"
+                      value={rates.evening||""}
+                      onChange={e=>onUpdateFacilityRate(fac.id,"evening",e.target.value)}
+                      placeholder="0"
+                      style={{...si,width:72,padding:"4px 8px",textAlign:"right"}}/>
+                    <span style={{fontSize:11,color:"#64748b"}}>/hr</span>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -1803,7 +1929,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[]
       <div style={{display:"flex",flexDirection:"column",gap:10}}>
         {list.map(b=>{
           const f=FACILITIES.find(x=>x.id===b.facility_id);
-          const isPending=b.status==="pending";
+          const isPending=REVIEW_STATUSES.has(b.status);
           const queued=actionQueue.find(a=>a.id===b.id);
           const isDeleteQueued=deleteIds.has(b.id);
           // Row highlight based on queued state
@@ -2049,7 +2175,28 @@ export default function App() {
         }
       }
       if (configured) await loadBookings();
-      showToast(`Sync complete: ${added} added, ${skipped} already existed.`);
+
+      // Auto-detect clashes with newly imported admin events and set user bookings to "clash"
+      const freshBookings = configured ? (await sb.select("bookings")) : bookings;
+      const today = todayKey();
+      const adminBks = freshBookings.filter(b => isAdminBooking(b) && b.date >= today);
+      const userBks  = freshBookings.filter(b => !isAdminBooking(b) && b.date >= today);
+      let clashUpdates = 0;
+      for (const ub of userBks) {
+        const hasClash = adminBks.some(ab => ab.facility_id === ub.facility_id && timeOverlaps(ab, ub));
+        if (hasClash && ub.status !== "clash") {
+          if (configured) {
+            await sb.update("bookings", ub.id, { status: "clash", updated_at: new Date().toISOString() });
+          } else {
+            setBookings(prev => prev.map(b => b.id === ub.id ? {...b, status:"clash"} : b));
+          }
+          clashUpdates++;
+        }
+      }
+      if (configured && clashUpdates > 0) await loadBookings();
+
+      const clashMsg = clashUpdates > 0 ? `, ${clashUpdates} clash${clashUpdates>1?"es":""} flagged` : "";
+      showToast(`Sync complete: ${added} added, ${skipped} already existed${clashMsg}.`);
     } catch(e) {
       showToast("Sync failed: " + e.message, "error");
     } finally {
@@ -2119,8 +2266,9 @@ export default function App() {
       html:buildApprovalEmailHtml({name:booking.name,email:booking.email,bookings:[{...booking,...patch}],newStatus,adminNote:""})});
   }
 
-  function updateFacilityRate(facilityId, rate) {
-    const newRates = { ...facilityRates, [facilityId]: rate };
+  function updateFacilityRate(facilityId, type, value) {
+    const existing = typeof facilityRates[facilityId] === "object" ? facilityRates[facilityId] : { day: 0, evening: 0 };
+    const newRates = { ...facilityRates, [facilityId]: { ...existing, [type]: parseFloat(value) || 0 } };
     setFacilityRates(newRates);
     try{localStorage.setItem("fb_facility_rates",JSON.stringify(newRates));}catch{}
   }
@@ -2160,7 +2308,6 @@ export default function App() {
     const b = bookings.find(x=>x.id===id); if(!b) return;
     setDeleteQueue(prev => prev.find(x=>x.id===id) ? prev : [...prev, b]);
     setViewing(null);
-    setShowDeleteCart(true);
     showToast("Added to removal queue.");
   }
 
@@ -2178,7 +2325,6 @@ export default function App() {
       const existing = new Set(prev.map(b=>b.id));
       return [...prev, ...toAdd.filter(b=>!existing.has(b.id))];
     });
-    setShowDeleteCart(true);
     showToast(`${toAdd.length} booking${toAdd.length>1?"s":""} added to removal queue.`);
   }
 
@@ -2267,14 +2413,12 @@ export default function App() {
     }));
     const sourceIds = selectedBookings.map(b=>b.id);
     setCart(prev => [...prev, { drafts, name: ref.name, email: ref.email, isMultiEdit: true, sourceIds }]);
-    setShowCart(true);
     showToast(`${drafts.length} bookings added to cart for editing!`);
   }
 
   function handleAddToCart(drafts, name, email, sourceIds=[]) {
     setCart(prev => [...prev, { drafts, name, email, sourceIds }]);
     setShowForm(false);
-    setShowCart(true);
     showToast(`${drafts.length} booking${drafts.length>1?"s":""} added to cart!`);
   }
 
@@ -2317,7 +2461,7 @@ export default function App() {
 
   function handleLogout(){try{sessionStorage.removeItem("fb_user_email");}catch(_){}setLoggedInEmail("");setIsAdmin(false);setCart([]);}
 
-  const pendingCount=bookings.filter(b=>b.status==="pending").length;
+  const pendingCount=bookings.filter(b=>REVIEW_STATUSES.has(b.status)).length;
 
   // ─── Clash detection ──────────────────────────────────────────────────────
   const allClashes = getClashes(bookings);
@@ -2398,6 +2542,7 @@ export default function App() {
             <TabBtn id="month"    label={isMobile?"🗓 Month":"🗓 Month"}/>
             <TabBtn id="list"     label={isMobile?"📋 List":"📋 Bookings"} badge={myClashCount>0?myClashCount:undefined}/>
             <TabBtn id="summary"  label={isMobile?"📊":"📊 Summary"}/>
+            <TabBtn id="about"    label={isMobile?"ℹ️":"ℹ️ About"}/>
             {isAdmin&&<TabBtn id="admin" label={isMobile?"⚙ Admin":"⚙ Admin"} badge={pendingCount}/>}
           </div>
         </div>
@@ -2500,6 +2645,7 @@ export default function App() {
         )}
 
         {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<SummaryTab bookings={bookings} loggedInEmail={loggedInEmail} facilityRates={facilityRates}/>}</div>}
+        {tab==="about"&&<div style={{padding:"8px 0"}}><AboutTab/></div>}
         {tab==="admin"&&isAdmin&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onQueueDelete={queueForRemovalSilent} clashes={allClashes} deleteIds={new Set(deleteQueue.map(b=>b.id))} facilityRates={facilityRates} onUpdateFacilityRate={updateFacilityRate} onClearOldUnapproved={handleClearOldUnapproved}/>}</div>}
       </div>
 
