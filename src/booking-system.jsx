@@ -56,16 +56,17 @@ const DURATIONS = [
   {label:"4 hrs",value:4},{label:"6 hrs",value:6},{label:"8 hrs",value:8},
 ];
 const STATUS_META = {
-  pending_amua: {bg:"#fff8e1",border:"#f59e0b",text:"#92400e",dot:"#f59e0b",label:"Pending AMUA Review"},
-  amua_submit:  {bg:"#dbeafe",border:"#93c5fd",text:"#1e40af",dot:"#3b82f6",label:"AMUA to Submit to CPSA"},
-  pending_cpsa: {bg:"#e0f2fe",border:"#7dd3fc",text:"#075985",dot:"#0ea5e9",label:"Pending CPSA Review"},
-  approved:     {bg:"#f0fdf4",border:"#22c55e",text:"#14532d",dot:"#22c55e",label:"Approved"},
+  pending_amua: {bg:"#fff8e1",border:"#f59e0b",text:"#92400e",dot:"#f59e0b",label:"(1/4) Pending AMUA Review"},
+  queued_cpsa:  {bg:"#dbeafe",border:"#93c5fd",text:"#1e40af",dot:"#3b82f6",label:"(2/4) Queued for CPSA"},
+  pending_cpsa: {bg:"#e0f2fe",border:"#7dd3fc",text:"#075985",dot:"#0ea5e9",label:"(3/4) Pending CPSA Review"},
+  approved:     {bg:"#f0fdf4",border:"#22c55e",text:"#14532d",dot:"#22c55e",label:"(4/4) Approved"},
   rejected:     {bg:"#fff1f2",border:"#f43f5e",text:"#881337",dot:"#f43f5e",label:"Rejected"},
   cancelled:    {bg:"#f8f8f8",border:"#94a3b8",text:"#475569",dot:"#94a3b8",label:"Cancelled"},
   clash:        {bg:"#fef3c7",border:"#d97706",text:"#92400e",dot:"#d97706",label:"Clash"},
-  pending:      {bg:"#fff8e1",border:"#f59e0b",text:"#92400e",dot:"#f59e0b",label:"Pending AMUA Review"},
+  amua_submit:  {bg:"#dbeafe",border:"#93c5fd",text:"#1e40af",dot:"#3b82f6",label:"(2/4) Queued for CPSA"},
+  pending:      {bg:"#fff8e1",border:"#f59e0b",text:"#92400e",dot:"#f59e0b",label:"(1/4) Pending AMUA Review"},
 };
-const REVIEW_STATUSES = new Set(["pending_amua","amua_submit","pending_cpsa","pending"]);
+const REVIEW_STATUSES = new Set(["pending_amua","queued_cpsa","amua_submit","pending_cpsa","pending"]);
 const MONTHS=["January","February","March","April","May","June","July","August","September","October","November","December"];
 
 function fmtTime(h) {
@@ -1167,6 +1168,7 @@ function WeekCalendar({ bookings, onNewBooking, onBookingClick, selectedFacility
                           title={`${b.name} – ${fac?.name}`}
                           style={{ position:"absolute", top:(b.start_hour-CAL_START)*HOUR_H, height:Math.max(b.duration*HOUR_H-2,20), background:bkBg, borderRadius:6, padding:"3px 6px", cursor:"pointer", overflow:"hidden", opacity:REVIEW_STATUSES.has(b.status)?0.75:1, border:deleteIds.has(b.id)?"2.5px solid #ef4444":cartSourceIds.has(b.id)?"2.5px solid #f59e0b":b.status==="clash"?"2px dashed #d97706":REVIEW_STATUSES.has(b.status)?"2px dashed rgba(255,255,255,0.6)":b.status==="rejected"?"2px solid rgba(244,63,94,0.8)":"none", boxShadow:deleteIds.has(b.id)?"0 0 0 3px rgba(239,68,68,0.25)":cartSourceIds.has(b.id)?"0 0 0 3px rgba(245,158,11,0.25)":"0 1px 4px rgba(0,0,0,0.15)", zIndex:2, borderLeft:bkBorderLeft, ...stk }}>
                           <div style={{ fontSize:11, fontWeight:700, color:"#fff", lineHeight:1.3, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{b.purpose||b.name}</div>
+                          {b.duration*HOUR_H>22&&!isAdmin_bk&&<div style={{ fontSize:9, color:"rgba(255,255,255,0.8)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{b.name}</div>}
                           {b.duration*HOUR_H>28&&<div style={{display:"flex",alignItems:"center",gap:3,marginTop:1}}>
                             <span style={{fontSize:9,fontWeight:700,color:"rgba(255,255,255,0.9)",background:"rgba(0,0,0,0.2)",borderRadius:3,padding:"1px 4px",whiteSpace:"nowrap"}}>
                               {STATUS_META[b.status]?.label || "Unknown"}
@@ -1240,6 +1242,7 @@ function MonthCalendar({ bookings, onBookingClick, onNewBooking, selectedFacilit
       cancelled:    {c:"#94a3b8",l:"—"},
       clash:        {c:"#d97706",l:"!"},
       pending_amua: {c:"#f59e0b",l:"⏳"},
+      queued_cpsa:  {c:"#3b82f6",l:"→"},
       amua_submit:  {c:"#3b82f6",l:"→"},
       pending_cpsa: {c:"#0ea5e9",l:"⏳"},
       pending:      {c:"#f59e0b",l:"⏳"},
@@ -1295,7 +1298,8 @@ function MonthCalendar({ bookings, onBookingClick, onNewBooking, selectedFacilit
         {cells.map((d,ci)=>{
           if (!d) return <div key={"p"+ci} style={{ minHeight:80, background:"#fafafa", borderRadius:6 }}/>;
           const dk=dateKey(d), isToday=dk===today, isPast=dk<today;
-          const dayBkgs=visible.filter(b=>b.date===dk);
+          const dayBkgs=visible.filter(b=>b.date===dk)
+            .sort((a,b)=>{ const ai=isAdminBooking(a)?1:0,bi=isAdminBooking(b)?1:0; return ai-bi||a.start_hour-b.start_hour; });
           const hasSelected=dayBkgs.some(b=>selIds.has(b.id));
           const cellBg = hasSelected?"#eef2ff":isToday?"#f0f9ff":"#fff";
           const cellBorder = hasSelected?"1.5px solid #6366f1":isToday?"1.5px solid #4a90d9":"1px solid #f1f5f9";
@@ -1349,51 +1353,74 @@ function AboutTab() {
   const card = { background:"#fff", border:"1px solid #e2e8f0", borderRadius:12, padding:"20px 24px", marginBottom:16 };
   const h2 = { margin:"0 0 12px", fontSize:16, fontWeight:700, color:"#0f172a" };
   const step = { display:"flex", gap:12, alignItems:"flex-start", marginBottom:12 };
-  const stepNum = (n,col) => ({
+  const stepNum = (col) => ({
     width:28, height:28, borderRadius:"50%", background:col, color:"#fff",
     fontWeight:700, fontSize:13, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0
   });
   const arrow = { textAlign:"center", color:"#94a3b8", fontSize:18, margin:"4px 0 4px 14px" };
+  const link = { color:"#2563eb", textDecoration:"underline" };
   return (
-    <div style={{maxWidth:680,margin:"0 auto"}}>
+    <div style={{maxWidth:720,margin:"0 auto"}}>
       <div style={card}>
-        <h2 style={h2}>Booking Process</h2>
+        <h2 style={h2}>How to Book</h2>
+        <p style={{margin:"0 0 12px",fontSize:13,color:"#475569"}}>
+          Bookings at Cornwall Park are managed through CPSA (Cornwall Park Sport Association).
+          AMUA (Auckland Mixed Ultimate Association) acts as a facilitating body and can submit booking requests on your behalf.
+          You can also submit directly using the{" "}
+          <a href="https://www.cornwallpark.co.nz/sport/sport-field-hire" target="_blank" rel="noopener noreferrer" style={link}>CPSA field hire form</a>.
+        </p>
+        <h3 style={{margin:"12px 0 8px",fontSize:14,fontWeight:700,color:"#0f172a"}}>Approval Process</h3>
         <div style={step}>
-          <div style={stepNum(1,"#6366f1")}> 1</div>
+          <div style={stepNum("#6366f1")}>1</div>
           <div>
             <div style={{fontWeight:600,fontSize:14,color:"#0f172a"}}>Submit booking request</div>
-            <div style={{fontSize:13,color:"#475569",marginTop:2}}>Fill in the booking form with your group name, facility, date, time, and purpose. Your request is saved with status <strong>Pending AMUA Review</strong>.</div>
+            <div style={{fontSize:13,color:"#475569",marginTop:2}}>Fill in the booking form with your group name, facility, date, time, and purpose. Your request is saved with status <Badge status="pending_amua"/>.</div>
           </div>
         </div>
         <div style={arrow}>↓</div>
         <div style={step}>
-          <div style={stepNum(2,"#f59e0b")}>2</div>
+          <div style={stepNum("#f59e0b")}>2</div>
           <div>
             <div style={{fontWeight:600,fontSize:14,color:"#0f172a"}}>AMUA reviews your request</div>
-            <div style={{fontSize:13,color:"#475569",marginTop:2}}>Auckland Mixed Ultimate Association (AMUA) checks availability and eligibility. If there is a scheduling conflict or issue, AMUA may reject or ask you to revise. If accepted, the booking moves to <strong>AMUA to Submit to CPSA</strong>.</div>
+            <div style={{fontSize:13,color:"#475569",marginTop:2}}>AMUA checks availability and eligibility. If accepted, the booking is queued for submission to CPSA — status becomes <Badge status="queued_cpsa"/>. If there is a conflict or issue, AMUA may reject or request revision.</div>
           </div>
         </div>
         <div style={arrow}>↓</div>
         <div style={step}>
-          <div style={stepNum(3,"#0ea5e9")}>3</div>
+          <div style={stepNum("#0ea5e9")}>3</div>
           <div>
             <div style={{fontWeight:600,fontSize:14,color:"#0f172a"}}>AMUA submits to CPSA</div>
-            <div style={{fontSize:13,color:"#475569",marginTop:2}}>AMUA lodges the booking request with Cornwall Park Sport Association (CPSA). Status becomes <strong>Pending CPSA Review</strong>.</div>
+            <div style={{fontSize:13,color:"#475569",marginTop:2}}>AMUA lodges the request with CPSA using the{" "}
+              <a href="https://www.cornwallpark.co.nz/sport/sport-field-hire" target="_blank" rel="noopener noreferrer" style={link}>CPSA field hire form</a>.
+              Status becomes <Badge status="pending_cpsa"/>. You can also contact CPSA directly — AMUA can co-sign as the responsible party.
+            </div>
           </div>
         </div>
         <div style={arrow}>↓</div>
         <div style={step}>
-          <div style={stepNum(4,"#22c55e")}>4</div>
+          <div style={stepNum("#22c55e")}>4</div>
           <div>
             <div style={{fontWeight:600,fontSize:14,color:"#0f172a"}}>CPSA decision</div>
-            <div style={{fontSize:13,color:"#475569",marginTop:2}}>CPSA reviews and either approves or rejects. An <strong>Approved</strong> booking is confirmed — you will receive an email notification. A rejected booking will show as <strong>Rejected</strong>.</div>
+            <div style={{fontSize:13,color:"#475569",marginTop:2}}>CPSA reviews and either approves or rejects. An <Badge status="approved"/> booking is confirmed and you will be notified. A rejected booking will show as <Badge status="rejected"/>.</div>
           </div>
         </div>
       </div>
 
       <div style={card}>
+        <h2 style={h2}>About Admin Bookings</h2>
+        <p style={{margin:"0 0 8px",fontSize:13,color:"#475569"}}>
+          Bookings shown with a grey/admin tag are imported from the{" "}
+          <a href="https://www.carltonjuniorsrugby.co.nz/venue-hire-fields-1/field-calendar" target="_blank" rel="noopener noreferrer" style={link}>Carlton Juniors Rugby field calendar</a>.
+          These represent existing field bookings and block-outs that may affect availability.
+        </p>
+        <p style={{margin:0,fontSize:13,color:"#94a3b8"}}>
+          Note: the CJR calendar covers sports field bookings only. It does <strong>not</strong> include availability of function rooms or meeting rooms.
+        </p>
+      </div>
+
+      <div style={card}>
         <h2 style={h2}>Hiring Rates</h2>
-        <div style={{fontSize:13,color:"#475569",marginBottom:12}}>Rates are set per facility and may vary. Contact AMUA for the most current rates.</div>
+        <p style={{margin:"0 0 12px",fontSize:13,color:"#475569"}}>Rates are set per facility and time of day. Contact AMUA for current rates.</p>
         <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
           {FACILITIES.map(f=>(
             <div key={f.id} style={{display:"flex",alignItems:"center",gap:8,background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:"10px 14px",flex:"1 1 180px"}}>
@@ -1407,7 +1434,7 @@ function AboutTab() {
       <div style={card}>
         <h2 style={h2}>Status Guide</h2>
         <div style={{display:"flex",flexDirection:"column",gap:8}}>
-          {Object.entries(STATUS_META).filter(([k])=>k!=="pending").map(([k,v])=>(
+          {Object.entries(STATUS_META).filter(([k])=>!["pending","amua_submit"].includes(k)).map(([k,v])=>(
             <div key={k} style={{display:"flex",alignItems:"center",gap:10,padding:"6px 10px",background:v.bg,border:`1px solid ${v.border}`,borderRadius:8}}>
               <span style={{width:8,height:8,borderRadius:"50%",background:v.dot,flexShrink:0}}/>
               <span style={{fontWeight:600,fontSize:13,color:v.text}}>{v.label}</span>
@@ -1427,9 +1454,10 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {} }) {
   // Rebuild color cache for all emails in the dataset so chips render correctly
   bookings.forEach(b => emailColor(b.email));
 
-  const allEmails = [...new Set(bookings.map(b=>b.email).filter(Boolean))].sort();
+  const allEmails = [...new Set(bookings.filter(b=>!isAdminBooking(b)).map(b=>b.email).filter(Boolean))].sort();
 
   const active = bookings.filter(b => {
+    if (isAdminBooking(b)) return false;
     if (["cancelled","rejected"].includes(b.status)) return false;
     if (new Date(b.date+"T00:00:00").getFullYear() !== year) return false;
     if (emailFilter !== "all" && b.email.toLowerCase() !== emailFilter.toLowerCase()) return false;
@@ -1675,12 +1703,15 @@ function AdminLogin({onLogin}) {
 // ─── Admin Panel with action queue, bulk approve, facility rates ──────────────
 function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[],deleteIds=new Set(),facilityRates={},onUpdateFacilityRate,onClearOldUnapproved}) {
   const [sf,setSf]=useState("all"), [ff,setFf]=useState("all"), [q,setQ]=useState("");
+  const [sortCol,setSortCol]=useState("date"), [sortDir,setSortDir]=useState("desc");
   const [selected,setSelected]=useState(new Set());
   const [bulkNote,setBulkNote]=useState("");
   const [bulkSending,setBulkSending]=useState(false);
-  const [bulkStatus,setBulkStatus]=useState("approved");
+  const [bulkStatus,setBulkStatus]=useState("queued_cpsa");
   const [bulkSkipEmail,setBulkSkipEmail]=useState(false);
   const [clashSending,setClashSending]=useState(false);
+  const [showClashNotify,setShowClashNotify]=useState(false);
+  const [clashNotifyUser,setClashNotifyUser]=useState(null);
   // Per-row action queue: [{id, newStatus}]
   const [actionQueue,setActionQueue]=useState([]);
   const [actionNote,setActionNote]=useState("");
@@ -1698,13 +1729,30 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[]
   // Old unapproved = bookings in any review state with past dates
   const oldUnapproved=bookings.filter(b=>REVIEW_STATUSES.has(b.status)&&b.date<today);
 
+  function matchesQ(b) {
+    const t=q.toLowerCase();
+    return !t||`${b.name} ${b.email} ${b.purpose} ${b.notes||""}`.toLowerCase().includes(t);
+  }
+
   const list=bookings.filter(b=>{
     if(sf!=="all"&&b.status!==sf) return false;
     if(ff!=="all"&&b.facility_id!==ff) return false;
-    const t=q.toLowerCase();
-    if(t&&!`${b.name} ${b.email} ${b.purpose}`.toLowerCase().includes(t)) return false;
+    if(!matchesQ(b)) return false;
     return true;
-  }).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
+  }).sort((a,b)=>{
+    const dir=sortDir==="asc"?1:-1;
+    if(sortCol==="date") return dir*(a.date.localeCompare(b.date)||a.start_hour-b.start_hour);
+    if(sortCol==="name") return dir*(a.name||"").localeCompare(b.name||"");
+    if(sortCol==="facility") return dir*(a.facility_id||"").localeCompare(b.facility_id||"");
+    if(sortCol==="status") return dir*(a.status||"").localeCompare(b.status||"");
+    return dir*(new Date(b.created_at)-new Date(a.created_at));
+  });
+
+  function toggleSort(col) {
+    if(sortCol===col) setSortDir(d=>d==="asc"?"desc":"asc");
+    else { setSortCol(col); setSortDir("asc"); }
+  }
+  const sortArrow = (col) => sortCol===col ? (sortDir==="asc"?" ↑":" ↓") : "";
 
   const pendingList = list.filter(b=>REVIEW_STATUSES.has(b.status));
   const allSelected = pendingList.length>0 && pendingList.every(b=>selected.has(b.id));
@@ -1730,16 +1778,34 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[]
     if(!actionQueue.length) return;
     setActionSending(true);
     try{
-      const approved=actionQueue.filter(a=>a.newStatus==="approved").map(a=>a.id);
-      const rejected=actionQueue.filter(a=>a.newStatus==="rejected").map(a=>a.id);
-      if(approved.length) await onBulkStatusChange(approved,"approved",actionNote,actionSkipEmail);
-      if(rejected.length) await onBulkStatusChange(rejected,"rejected",actionNote,actionSkipEmail);
+      const byStatus = {};
+      actionQueue.forEach(a => {
+        if(!byStatus[a.newStatus]) byStatus[a.newStatus] = [];
+        byStatus[a.newStatus].push(a.id);
+      });
+      for(const [status, ids] of Object.entries(byStatus)) {
+        await onBulkStatusChange(ids, status, actionNote, actionSkipEmail);
+      }
       setActionQueue([]); setActionNote("");
     } finally { setActionSending(false); }
   }
 
-  async function handleSendClashEmails() {
-    if (!clashes.length) return;
+  async function sendClashEmailToUser(email, name, userClashes) {
+    const rows = userClashes.map(c => {
+      const f = FACILITIES.find(x => x.id === c.admin.facility_id);
+      return "<tr><td style='padding:6px 8px'>" + (c.admin.purpose||"Admin booking") + "</td><td style='padding:6px 8px'>" + (f?.name||"") + "</td><td style='padding:6px 8px'>" + fmtDate(c.admin.date) + "</td><td style='padding:6px 8px'>" + fmtTime(c.admin.start_hour) + "–" + fmtTime(c.admin.start_hour+c.admin.duration) + "</td><td style='padding:6px 8px'>" + (c.user.purpose||"Your booking") + "</td></tr>";
+    }).join("");
+    const html = "<div style='font-family:sans-serif;max-width:600px'>"
+      + "<h2 style='color:#9f1239'>⚠️ Scheduling Clash Notice</h2>"
+      + "<p>Hi " + (name||email) + ",</p>"
+      + "<p>One or more of your bookings at Cornwall Park clash with scheduled field bookings on the same facility at the same time.</p>"
+      + "<table style='width:100%;border-collapse:collapse;font-size:13px;margin:16px 0;border:1px solid #f1f5f9'><thead><tr style='background:#f8fafc'><th style='padding:8px;text-align:left'>Field Booking</th><th style='padding:8px'>Facility</th><th style='padding:8px'>Date</th><th style='padding:8px'>Time</th><th style='padding:8px'>Your Booking</th></tr></thead><tbody>" + rows + "</tbody></table>"
+      + "<p>Please contact AMUA to discuss rescheduling.</p>"
+      + "<p style='color:#64748b;font-size:12px'>Automated notification from FacilityBook – AMUA.</p></div>";
+    await sendApprovalEmail({ to: email, subject: "⚠️ Scheduling Clash – Action Required", html });
+  }
+
+  async function handleSendClashEmails(targetEmail) {
     setClashSending(true);
     const byUser = {};
     clashes.forEach(c => {
@@ -1749,23 +1815,19 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[]
       byUser[email].clashes.push(c);
     });
     try {
-      for (const [email, { name, clashes: uc }] of Object.entries(byUser)) {
-        const rows = uc.map(c => {
-          const f = FACILITIES.find(x => x.id === c.admin.facility_id);
-          return "<tr><td>" + (c.admin.purpose||"Admin booking") + "</td><td>" + (f?.name||"") + "</td><td>" + fmtDate(c.admin.date) + "</td><td>" + fmtTime(c.admin.start_hour) + "–" + fmtTime(c.admin.start_hour+c.admin.duration) + "</td><td>" + (c.user.purpose||"Your booking") + "</td></tr>";
-        }).join("");
-        const html = "<div style='font-family:sans-serif;max-width:600px'>"
-          + "<h2 style='color:#9f1239'>⚠️ Scheduling Clash Notice</h2>"
-          + "<p>Hi " + (name||email) + ",</p>"
-          + "<p>One or more of your bookings at Cornwall Park clash with scheduled admin/maintenance events on the same field at the same time.</p>"
-          + "<table style='width:100%;border-collapse:collapse;font-size:13px;margin:16px 0'><thead><tr style='background:#f8fafc'><th style='padding:8px;text-align:left'>Admin Event</th><th>Facility</th><th>Date</th><th>Time</th><th>Your Booking</th></tr></thead><tbody>" + rows + "</tbody></table>"
-          + "<p>Please contact us to discuss rescheduling.</p>"
-          + "<p style='color:#64748b;font-size:12px'>Automated notification from FacilityBook – AMUA.</p></div>";
-        await sendApprovalEmail({ to: email, subject: "⚠️ Scheduling Clash – Action Required", html });
+      if(targetEmail) {
+        const u = byUser[targetEmail];
+        if(u) await sendClashEmailToUser(targetEmail, u.name, u.clashes);
+        alert("Clash notification sent to " + targetEmail + ".");
+      } else {
+        for (const [email, { name, clashes: uc }] of Object.entries(byUser)) {
+          await sendClashEmailToUser(email, name, uc);
+        }
+        alert("Clash notifications sent to " + Object.keys(byUser).length + " user(s).");
       }
-      alert("Clash notifications sent to " + Object.keys(byUser).length + " user(s).");
+      setShowClashNotify(false); setClashNotifyUser(null);
     } catch(e) {
-      alert("Failed to send some emails: " + e.message);
+      alert("Failed to send email: " + e.message);
     } finally {
       setClashSending(false);
     }
@@ -1845,7 +1907,11 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[]
       {actionQueue.length>0&&(
         <div style={{background:"#f0fdf4",border:"1.5px solid #86efac",borderRadius:12,padding:16,display:"flex",flexDirection:"column",gap:10}}>
           <div style={{fontWeight:700,fontSize:14,color:"#166534"}}>
-            📋 Action Queue — {actionQueue.filter(a=>a.newStatus==="approved").length} approve, {actionQueue.filter(a=>a.newStatus==="rejected").length} reject
+            📋 Action Queue — {[
+              actionQueue.filter(a=>a.newStatus==="queued_cpsa").length && `${actionQueue.filter(a=>a.newStatus==="queued_cpsa").length} queue for CPSA`,
+              actionQueue.filter(a=>a.newStatus==="approved").length && `${actionQueue.filter(a=>a.newStatus==="approved").length} CPSA approved`,
+              actionQueue.filter(a=>a.newStatus==="rejected").length && `${actionQueue.filter(a=>a.newStatus==="rejected").length} reject`,
+            ].filter(Boolean).join(", ") || "empty"}
             <button onClick={()=>setActionQueue([])} style={{...S.btn({border:"1px solid #86efac",background:"transparent",color:"#166534",fontSize:11,padding:"2px 8px"}),marginLeft:12}}>Clear</button>
           </div>
           <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
@@ -1876,13 +1942,14 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[]
             <>
               <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
                 <select style={si} value={bulkStatus} onChange={e=>setBulkStatus(e.target.value)}>
-                  <option value="approved">Approve</option>
+                  <option value="queued_cpsa">Queue for CPSA</option>
+                  <option value="approved">CPSA Approved</option>
                   <option value="rejected">Reject</option>
                 </select>
                 <input style={{...si,flex:1,minWidth:200}} placeholder="Optional note to include in email…" value={bulkNote} onChange={e=>setBulkNote(e.target.value)}/>
                 <button onClick={handleBulkAction} disabled={bulkSending}
-                  style={S.btn({background:bulkStatus==="approved"?"#22c55e":"#f43f5e",color:"#fff",opacity:bulkSending?0.6:1})}>
-                  {bulkSending?"Processing…":`${bulkStatus==="approved"?"✓ Approve":"✗ Reject"} ${selected.size}`}
+                  style={S.btn({background:bulkStatus==="rejected"?"#f43f5e":bulkStatus==="approved"?"#22c55e":"#3b82f6",color:"#fff",opacity:bulkSending?0.6:1})}>
+                  {bulkSending?"Processing…":`Apply to ${selected.size}`}
                 </button>
               </div>
               <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:12,color:"#64748b"}}>
@@ -1900,15 +1967,16 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[]
           <div style={{display:"flex",alignItems:"center",gap:8,justifyContent:"space-between",flexWrap:"wrap"}}>
             <div>
               <span style={{fontWeight:700,fontSize:14,color:"#9f1239"}}>⚠️ {clashes.length} scheduling clash{clashes.length>1?"es":""} detected</span>
-              <div style={{fontSize:12,color:"#be123c",marginTop:2}}>Future admin bookings overlap with user bookings. Affected users can be notified below.</div>
+              <div style={{fontSize:12,color:"#be123c",marginTop:2}}>Future field bookings overlap with user bookings. Select a user to notify.</div>
             </div>
-            <button onClick={handleSendClashEmails} disabled={clashSending}
-              style={S.btn({background:clashSending?"#e2e8f0":"#f43f5e",color:clashSending?"#94a3b8":"#fff",fontWeight:700,opacity:clashSending?0.7:1})}>
-              {clashSending?"Sending…":"📧 Notify affected users"}
+            <button onClick={()=>setShowClashNotify(true)} disabled={clashSending}
+              style={S.btn({background:"#f43f5e",color:"#fff",fontWeight:700,opacity:clashSending?0.7:1})}>
+              📧 Notify affected users
             </button>
           </div>
+          {/* Filterable clash list */}
           <div style={{display:"flex",flexDirection:"column",gap:6,maxHeight:220,overflowY:"auto"}}>
-            {clashes.map((c,i)=>{
+            {clashes.filter(c=>matchesQ(c.user)||matchesQ(c.admin)).map((c,i)=>{
               const fa=FACILITIES.find(x=>x.id===c.admin.facility_id);
               return(
                 <div key={i} style={{background:"#fff",border:"1px solid #fecdd3",borderRadius:8,padding:"8px 12px",fontSize:12,color:"#0f172a",display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
@@ -1924,66 +1992,98 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[]
         </div>
       )}
 
-      {list.length===0&&<div style={{textAlign:"center",padding:"40px 0",color:"#94a3b8",fontSize:14}}>No bookings found.</div>}
-
-      <div style={{display:"flex",flexDirection:"column",gap:10}}>
-        {list.map(b=>{
-          const f=FACILITIES.find(x=>x.id===b.facility_id);
-          const isPending=REVIEW_STATUSES.has(b.status);
-          const queued=actionQueue.find(a=>a.id===b.id);
-          const isDeleteQueued=deleteIds.has(b.id);
-          // Row highlight based on queued state
-          const rowBg=isDeleteQueued?"#fff1f2":queued?.newStatus==="approved"?"#f0fdf4":queued?.newStatus==="rejected"?"#fef2f2":"#fff";
-          const rowBorder=isDeleteQueued?"#fecaca":queued?"#86efac":selected.has(b.id)?"#6366f1":"#f1f5f9";
-          return (
-            <div key={b.id} style={{background:rowBg,border:`1.5px solid ${rowBorder}`,borderRadius:12,padding:"14px 16px",display:"flex",gap:14,alignItems:"flex-start",transition:"border-color 0.15s"}}>
-              {isPending&&<input type="checkbox" checked={selected.has(b.id)} onChange={()=>toggleSelect(b.id)} style={{width:16,height:16,accentColor:"#6366f1",marginTop:2,flexShrink:0}}/>}
-              {!isPending&&<div style={{width:16,flexShrink:0}}/>}
-              <div style={{width:4,borderRadius:4,background:f?.color||"#e2e8f0",alignSelf:"stretch",flexShrink:0}}/>
-              <div style={{flex:1,minWidth:0}}>
-                <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:4}}>
-                  <span style={{fontWeight:700,fontSize:14,color:"#0f172a"}}>{b.name}</span>
-                  <Badge status={b.status}/>
-                  <EmailChip email={b.email}/>
-                  {queued&&<span style={{fontSize:11,fontWeight:700,background:queued.newStatus==="approved"?"#dcfce7":"#fee2e2",color:queued.newStatus==="approved"?"#166534":"#991b1b",borderRadius:4,padding:"1px 6px"}}>
-                    {queued.newStatus==="approved"?"✓ queued: approve":"✗ queued: reject"}
-                  </span>}
-                  {isDeleteQueued&&<span style={{fontSize:11,fontWeight:700,background:"#fee2e2",color:"#991b1b",borderRadius:4,padding:"1px 6px"}}>🗑 queued: delete</span>}
-                  <span style={{fontSize:12,color:"#94a3b8",marginLeft:"auto"}}>{fmtDate(b.date)}</span>
-                </div>
-                <div style={{fontSize:13,color:"#475569"}}>{f?.name} · {fmtTime(b.start_hour)}–{fmtTime(b.start_hour+b.duration)} · {b.purpose}</div>
-              </div>
-              <div style={{display:"flex",gap:6,flexShrink:0}}>
-                {isPending&&<>
-                  <button
-                    onClick={()=>queueAction(b.id,"approved")}
-                    style={S.btn({padding:"5px 10px",fontSize:12,
-                      background: isDeleteQueued?"#e2e8f0" : queued?.newStatus==="approved"?"#15803d":"#22c55e",
-                      color: isDeleteQueued?"#94a3b8":"#fff",
-                      outline: queued?.newStatus==="approved"?"2px solid #15803d":"none",
-                      opacity: isDeleteQueued?0.5:1})}>✓</button>
-                  <button
-                    onClick={()=>queueAction(b.id,"rejected")}
-                    style={S.btn({padding:"5px 10px",fontSize:12,
-                      background: isDeleteQueued?"#e2e8f0" : queued?.newStatus==="rejected"?"#be123c":"#f43f5e",
-                      color: isDeleteQueued?"#94a3b8":"#fff",
-                      outline: queued?.newStatus==="rejected"?"2px solid #be123c":"none",
-                      opacity: isDeleteQueued?0.5:1})}>✗</button>
-                </>}
-                <button onClick={()=>onEdit(b)}
-                  style={S.btn({padding:"5px 10px",fontSize:12,border:"1.5px solid #e2e8f0",background:"#fff",color:isDeleteQueued||queued?"#94a3b8":"#475569",opacity:isDeleteQueued||queued?0.5:1})}>Edit</button>
-                <button
-                  onClick={()=>!isDeleteQueued&&onQueueDelete(b.id)}
-                  style={S.btn({padding:"5px 10px",fontSize:12,
-                    border: isDeleteQueued?"1.5px solid #dc2626":"1.5px solid #f43f5e",
-                    background: isDeleteQueued?"#fee2e2":"#fff",
-                    color: isDeleteQueued?"#dc2626":"#f43f5e",
-                    fontWeight: isDeleteQueued?700:400})}>🗑</button>
-              </div>
-            </div>
-          );
-        })}
-      </div>
+      {/* Bookings table */}
+      {list.length===0
+        ? <div style={{textAlign:"center",padding:"40px 0",color:"#94a3b8",fontSize:14}}>No bookings found.</div>
+        : (
+        <div style={{overflowX:"auto",borderRadius:12,border:"1px solid #f1f5f9"}}>
+          <table style={{width:"100%",borderCollapse:"collapse",background:"#fff",fontSize:13}}>
+            <thead>
+              <tr style={{background:"#f8fafc"}}>
+                <th style={{padding:"8px 10px",textAlign:"center",width:32}}>
+                  <input type="checkbox" checked={allSelected} onChange={toggleAll} style={{width:14,height:14,accentColor:"#6366f1"}}/>
+                </th>
+                {[["date","Date"],["name","Booker"],["facility","Facility"],["status","Status"]].map(([col,label])=>(
+                  <th key={col} onClick={()=>toggleSort(col)} style={{padding:"8px 10px",textAlign:"left",cursor:"pointer",userSelect:"none",fontWeight:700,color:"#475569",whiteSpace:"nowrap"}}>
+                    {label}{sortArrow(col)}
+                  </th>
+                ))}
+                <th style={{padding:"8px 10px",textAlign:"left",fontWeight:700,color:"#475569"}}>Time · Purpose</th>
+                <th style={{padding:"8px 10px",textAlign:"right",fontWeight:700,color:"#475569"}}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {list.map((b,ri)=>{
+                const f=FACILITIES.find(x=>x.id===b.facility_id);
+                const isPending=REVIEW_STATUSES.has(b.status);
+                const isAmuaStage=b.status==="pending_amua"||b.status==="pending";
+                const isCpsaStage=b.status==="queued_cpsa"||b.status==="amua_submit"||b.status==="pending_cpsa";
+                const queued=actionQueue.find(a=>a.id===b.id);
+                const isDeleteQueued=deleteIds.has(b.id);
+                const rowBg=isDeleteQueued?"#fff1f2":queued?"#f0fdf4":selected.has(b.id)?"#f5f3ff":"#fff";
+                const queueLabel = queued ? {queued_cpsa:"→ Queue for CPSA",approved:"✓ CPSA Approved",rejected:"✗ Reject"}[queued.newStatus]||queued.newStatus : null;
+                return (
+                  <tr key={b.id} style={{background:rowBg,borderTop:ri>0?"1px solid #f1f5f9":"none",transition:"background 0.1s"}}>
+                    <td style={{padding:"8px 10px",textAlign:"center"}}>
+                      {isPending&&<input type="checkbox" checked={selected.has(b.id)} onChange={()=>toggleSelect(b.id)} style={{width:14,height:14,accentColor:"#6366f1"}}/>}
+                    </td>
+                    <td style={{padding:"8px 10px",whiteSpace:"nowrap"}}>{fmtDate(b.date)}</td>
+                    <td style={{padding:"8px 10px"}}>
+                      <div style={{fontWeight:600,color:"#0f172a"}}>{b.name}</div>
+                      <EmailChip email={b.email}/>
+                    </td>
+                    <td style={{padding:"8px 10px"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:4}}>
+                        <span style={{width:8,height:8,borderRadius:"50%",background:f?.color,display:"inline-block",flexShrink:0}}/>
+                        <span style={{color:"#0f172a"}}>{f?.name}</span>
+                      </div>
+                    </td>
+                    <td style={{padding:"8px 10px"}}>
+                      <Badge status={b.status}/>
+                      {queueLabel&&<div style={{fontSize:10,fontWeight:700,color:queued.newStatus==="rejected"?"#991b1b":"#166534",marginTop:2}}>{queueLabel}</div>}
+                      {isDeleteQueued&&<div style={{fontSize:10,fontWeight:700,color:"#991b1b",marginTop:2}}>🗑 queued: delete</div>}
+                    </td>
+                    <td style={{padding:"8px 10px",color:"#475569"}}>
+                      {fmtTime(b.start_hour)}–{fmtTime(b.start_hour+b.duration)}
+                      <div style={{fontSize:12,color:"#94a3b8",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:200}}>{b.purpose}</div>
+                    </td>
+                    <td style={{padding:"8px 10px"}}>
+                      <div style={{display:"flex",gap:4,justifyContent:"flex-end",flexWrap:"wrap"}}>
+                        {isPending&&!isDeleteQueued&&<>
+                          {isAmuaStage&&<button
+                            onClick={()=>queueAction(b.id,"queued_cpsa")}
+                            title="Queue for CPSA"
+                            style={S.btn({padding:"4px 8px",fontSize:11,
+                              background:queued?.newStatus==="queued_cpsa"?"#1d4ed8":"#3b82f6",color:"#fff",
+                              outline:queued?.newStatus==="queued_cpsa"?"2px solid #1d4ed8":"none"})}>CPSA →</button>}
+                          {isCpsaStage&&<button
+                            onClick={()=>queueAction(b.id,"approved")}
+                            title="Mark CPSA Approved"
+                            style={S.btn({padding:"4px 8px",fontSize:11,
+                              background:queued?.newStatus==="approved"?"#15803d":"#22c55e",color:"#fff",
+                              outline:queued?.newStatus==="approved"?"2px solid #15803d":"none"})}>✓ Approved</button>}
+                          <button
+                            onClick={()=>queueAction(b.id,"rejected")}
+                            title="Reject"
+                            style={S.btn({padding:"4px 8px",fontSize:11,
+                              background:queued?.newStatus==="rejected"?"#be123c":"#f43f5e",color:"#fff",
+                              outline:queued?.newStatus==="rejected"?"2px solid #be123c":"none"})}>✗</button>
+                        </>}
+                        <button onClick={()=>onEdit(b)} style={S.btn({padding:"4px 8px",fontSize:11,border:"1.5px solid #e2e8f0",background:"#fff",color:"#475569"})}>Edit</button>
+                        <button onClick={()=>!isDeleteQueued&&onQueueDelete(b.id)}
+                          style={S.btn({padding:"4px 8px",fontSize:11,
+                            border:isDeleteQueued?"1.5px solid #dc2626":"1.5px solid #fca5a5",
+                            background:isDeleteQueued?"#fee2e2":"#fff",
+                            color:isDeleteQueued?"#dc2626":"#f43f5e"})}>🗑</button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/* Clear old unapproved confirmation modal */}
       {showClearModal&&(
@@ -2018,6 +2118,65 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[]
           </div>
         </div>
       )}
+
+      {/* Clash notify modal */}
+      {showClashNotify&&(()=>{
+        const byUser = {};
+        clashes.forEach(c => {
+          const em = c.user.email?.toLowerCase();
+          if(!em) return;
+          if(!byUser[em]) byUser[em] = { name:c.user.name, email:em, clashes:[] };
+          byUser[em].clashes.push(c);
+        });
+        const users = Object.values(byUser);
+        const selUser = clashNotifyUser ? byUser[clashNotifyUser] : null;
+        return (
+          <div onClick={e=>e.target===e.currentTarget&&(setShowClashNotify(false),setClashNotifyUser(null))}
+            style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.55)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:2000,backdropFilter:"blur(2px)"}}>
+            <div style={{background:"#fff",borderRadius:16,padding:28,maxWidth:600,width:"92%",maxHeight:"88vh",overflowY:"auto",boxShadow:"0 8px 40px rgba(0,0,0,0.2)"}}>
+              <h2 style={{margin:"0 0 4px",fontSize:18,fontWeight:700,color:"#9f1239"}}>📧 Notify Affected Users</h2>
+              <p style={{margin:"0 0 16px",fontSize:13,color:"#64748b"}}>Select a user to preview their clashes, then send. Or notify all at once.</p>
+              <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:16}}>
+                {users.map(u=>(
+                  <button key={u.email} onClick={()=>setClashNotifyUser(prev=>prev===u.email?null:u.email)}
+                    style={{...S.btn({background:clashNotifyUser===u.email?"#fff1f2":"#f8fafc",border:clashNotifyUser===u.email?"1.5px solid #f43f5e":"1.5px solid #e2e8f0",color:"#0f172a"}),textAlign:"left",display:"flex",alignItems:"center",gap:10,padding:"10px 14px"}}>
+                    <EmailChip email={u.email}/>
+                    <span style={{fontWeight:600,fontSize:13}}>{u.name}</span>
+                    <span style={{marginLeft:"auto",fontSize:12,color:"#94a3b8"}}>{u.clashes.length} clash{u.clashes.length>1?"es":""}</span>
+                  </button>
+                ))}
+              </div>
+              {selUser&&(
+                <div style={{background:"#fff1f2",border:"1px solid #fecdd3",borderRadius:10,padding:14,marginBottom:16}}>
+                  <div style={{fontWeight:700,fontSize:13,color:"#9f1239",marginBottom:8}}>Clashes for {selUser.name}:</div>
+                  {selUser.clashes.map((c,i)=>{
+                    const fa=FACILITIES.find(x=>x.id===c.admin.facility_id);
+                    return(
+                      <div key={i} style={{fontSize:12,color:"#0f172a",padding:"6px 0",borderBottom:i<selUser.clashes.length-1?"1px solid #fecdd3":"none"}}>
+                        <span style={{fontWeight:600}}>🔒 {c.admin.purpose||"Admin booking"}</span>
+                        {" vs "}
+                        <span>{c.user.purpose||"Your booking"}</span>
+                        <span style={{color:"#94a3b8",marginLeft:8}}>{fa?.name} · {fmtDate(c.admin.date)} {fmtTime(c.admin.start_hour)}–{fmtTime(c.admin.start_hour+c.admin.duration)}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              <div style={{display:"flex",gap:10,justifyContent:"flex-end",flexWrap:"wrap"}}>
+                <button onClick={()=>{setShowClashNotify(false);setClashNotifyUser(null);}} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#475569"})}>Cancel</button>
+                {selUser&&<button onClick={()=>handleSendClashEmails(selUser.email)} disabled={clashSending}
+                  style={S.btn({background:"#f43f5e",color:"#fff",fontWeight:700,opacity:clashSending?0.6:1})}>
+                  {clashSending?"Sending…":`Send to ${selUser.name}`}
+                </button>}
+                <button onClick={()=>handleSendClashEmails(null)} disabled={clashSending}
+                  style={S.btn({background:"#9f1239",color:"#fff",fontWeight:700,opacity:clashSending?0.6:1})}>
+                  {clashSending?"Sending…":`Notify all ${users.length} user${users.length>1?"s":""}`}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -2103,7 +2262,7 @@ export default function App() {
   const [bookings, setBookings] =useState([]);
   const [loading,  setLoading]  =useState(true);
   const [dbError,  setDbError]  =useState("");
-  const [tab,      setTab]      =useState("calendar");
+  const [tab,      setTab]      =useState("about");
   const [isAdmin,  setIsAdmin]  =useState(false);
   const [showLogin,setShowLogin]=useState(false);
   const [selFac,   setSelFac]   =useState("all");
@@ -2473,6 +2632,10 @@ export default function App() {
   // ─── List-tab filters (booker + clash) ────────────────────────────────────
   const [listBookerFilter, setListBookerFilter] = useState("all");
   const [listShowClashes, setListShowClashes]   = useState(false);
+  const [listSearch,      setListSearch]        = useState("");
+  const [listStatusFilter,setListStatusFilter]  = useState("all");
+  const [listSortCol,     setListSortCol]       = useState("date");
+  const [listSortDir,     setListSortDir]       = useState("asc");
 
   function TabBtn({id,label,badge}){return(
     <button onClick={()=>setTab(id)} style={{padding:"8px 12px",borderRadius:8,border:"none",cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",background:tab===id?"#0f172a":"transparent",color:tab===id?"#fff":"#64748b",display:"flex",alignItems:"center",gap:5,whiteSpace:"nowrap",flexShrink:0}}>
@@ -2538,11 +2701,11 @@ export default function App() {
           </div>
           {/* Bottom row: tabs (always visible, scrollable) */}
           <div style={{display:"flex",gap:2,overflowX:"auto",paddingBottom:8,WebkitOverflowScrolling:"touch",scrollbarWidth:"none",msOverflowStyle:"none"}}>
+            <TabBtn id="about"    label={isMobile?"ℹ️":"ℹ️ About"}/>
             <TabBtn id="calendar" label={isMobile?"📅 Week":"📅 Week"}/>
             <TabBtn id="month"    label={isMobile?"🗓 Month":"🗓 Month"}/>
             <TabBtn id="list"     label={isMobile?"📋 List":"📋 Bookings"} badge={myClashCount>0?myClashCount:undefined}/>
             <TabBtn id="summary"  label={isMobile?"📊":"📊 Summary"}/>
-            <TabBtn id="about"    label={isMobile?"ℹ️":"ℹ️ About"}/>
             {isAdmin&&<TabBtn id="admin" label={isMobile?"⚙ Admin":"⚙ Admin"} badge={pendingCount}/>}
           </div>
         </div>
@@ -2568,76 +2731,117 @@ export default function App() {
         {tab==="list"&&(
           <div style={S.card}>
             {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:(()=>{
-              // Unique booker emails (non-admin)
               const bookerEmails = [...new Set(bookings.filter(b=>!isAdminBooking(b)&&b.email).map(b=>b.email.toLowerCase()))];
-              // Clash-involved booking IDs
               const clashAdminIds = new Set(allClashes.map(c=>c.admin.id));
               const clashUserIds  = new Set(allClashes.map(c=>c.user.id));
               const allClashIds   = new Set([...clashAdminIds,...clashUserIds]);
+              const lq = listSearch.toLowerCase();
 
+              const listDir = listSortDir==="asc"?1:-1;
               let visible = [...bookings]
                 .filter(b => selFac==="all" || b.facility_id===selFac)
                 .filter(b => listBookerFilter==="all" || b.email?.toLowerCase()===listBookerFilter)
+                .filter(b => listStatusFilter==="all" || b.status===listStatusFilter)
                 .filter(b => !listShowClashes || allClashIds.has(b.id))
-                .sort((a,b)=>a.date.localeCompare(b.date)||a.start_hour-b.start_hour);
+                .filter(b => !lq || `${b.name} ${b.email} ${b.purpose} ${FACILITIES.find(x=>x.id===b.facility_id)?.name||""}`.toLowerCase().includes(lq))
+                .sort((a,b)=>{
+                  if(listSortCol==="date") return listDir*(a.date.localeCompare(b.date)||a.start_hour-b.start_hour);
+                  if(listSortCol==="booker") return listDir*(a.name||"").localeCompare(b.name||"");
+                  if(listSortCol==="facility") return listDir*(a.facility_id||"").localeCompare(b.facility_id||"");
+                  if(listSortCol==="status") return listDir*(a.status||"").localeCompare(b.status||"");
+                  return listDir*(a.date.localeCompare(b.date)||a.start_hour-b.start_hour);
+                });
+
+              function lToggleSort(col) {
+                if(listSortCol===col) setListSortDir(d=>d==="asc"?"desc":"asc");
+                else { setListSortCol(col); setListSortDir("asc"); }
+              }
+              const lArrow = col => listSortCol===col?(listSortDir==="asc"?" ↑":" ↓"):"";
+              const si2={padding:"6px 10px",borderRadius:7,border:"1.5px solid #e2e8f0",fontSize:12,fontFamily:"inherit",color:"#0f172a",background:"#f8fafc",outline:"none"};
 
               return (
                 <>
-                  {/* Filter bar */}
-                  <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14,alignItems:"center"}}>
-                    {/* Clash toggle */}
+                  {/* Filter / search bar */}
+                  <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12,alignItems:"center"}}>
+                    <input style={{...si2,flex:"1 1 160px"}} placeholder="Search name, email, purpose, facility…" value={listSearch} onChange={e=>setListSearch(e.target.value)}/>
+                    <select style={si2} value={listStatusFilter} onChange={e=>setListStatusFilter(e.target.value)}>
+                      <option value="all">All statuses</option>
+                      {Object.entries(STATUS_META).filter(([k])=>!["pending","amua_submit"].includes(k)).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
+                    </select>
                     {allClashes.length>0&&(
                       <button onClick={()=>setListShowClashes(v=>!v)}
-                        style={{...S.btn({background:listShowClashes?"#ef4444":"#fff",color:listShowClashes?"#fff":"#ef4444",border:"1.5px solid #ef4444",fontSize:12,padding:"6px 12px"}),fontWeight:700,display:"flex",alignItems:"center",gap:5}}>
-                        ⚠️ {listShowClashes?"All bookings":`Show clashes (${allClashes.length})`}
+                        style={S.btn({background:listShowClashes?"#ef4444":"#fff",color:listShowClashes?"#fff":"#ef4444",border:"1.5px solid #ef4444",fontSize:12,fontWeight:700})}>
+                        ⚠️ {listShowClashes?"All":"Clashes only"} ({allClashes.length})
                       </button>
                     )}
-                    {/* Booker chips */}
-                    <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
-                      <span style={{fontSize:11,fontWeight:600,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.05em"}}>Filter:</span>
-                      <button onClick={()=>setListBookerFilter("all")}
-                        style={{...S.btn({background:listBookerFilter==="all"?"#0f172a":"#f8fafc",color:listBookerFilter==="all"?"#fff":"#475569",border:"1.5px solid #e2e8f0",fontSize:12,padding:"4px 10px"})}}>
-                        All
+                  </div>
+                  {/* Booker filter chips */}
+                  <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12,alignItems:"center"}}>
+                    <span style={{fontSize:11,fontWeight:600,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.05em"}}>Booker:</span>
+                    <button onClick={()=>setListBookerFilter("all")}
+                      style={S.btn({background:listBookerFilter==="all"?"#0f172a":"#f8fafc",color:listBookerFilter==="all"?"#fff":"#475569",border:"1.5px solid #e2e8f0",fontSize:11,padding:"3px 9px"})}>All</button>
+                    {bookerEmails.map(em=>(
+                      <button key={em} onClick={()=>setListBookerFilter(p=>p===em?"all":em)}
+                        style={S.btn({background:listBookerFilter===em?emailColor(em):"#f8fafc",color:listBookerFilter===em?"#fff":"#475569",border:`1.5px solid ${listBookerFilter===em?emailColor(em):"#e2e8f0"}`,fontSize:11,padding:"3px 9px"})}>
+                        {em.split("@")[0]}
                       </button>
-                      {bookerEmails.map(em=>(
-                        <button key={em} onClick={()=>setListBookerFilter(prev=>prev===em?"all":em)}
-                          style={{...S.btn({background:listBookerFilter===em?emailColor(em):"#f8fafc",color:listBookerFilter===em?"#fff":"#475569",border:`1.5px solid ${listBookerFilter===em?emailColor(em):"#e2e8f0"}`,fontSize:11,padding:"4px 10px"})}}>
-                          {em.split("@")[0]}
-                        </button>
-                      ))}
-                    </div>
+                    ))}
                   </div>
 
-                  {visible.length===0&&<div style={{textAlign:"center",padding:"40px 0",color:"#94a3b8",fontSize:14}}>{listShowClashes?"No clashes found.":"No bookings found."}</div>}
-                  <div style={{display:"flex",flexDirection:"column",gap:10}}>
-                    {visible.map(b=>{
-                      const f=FACILITIES.find(x=>x.id===b.facility_id);
-                      const isAdmin_bk=isAdminBooking(b);
-                      const isClash=allClashIds.has(b.id);
-                      const ec=isAdmin_bk?"#94a3b8":emailColor(b.email);
-                      return(
-                        <div key={b.id} onClick={()=>setViewing(b)}
-                          style={{background:isAdmin_bk?"#f8fafc":"#fff",border:isClash?"1.5px solid #ef4444":"1.5px solid #f1f5f9",borderRadius:12,padding:"14px 16px",display:"flex",gap:14,alignItems:"center",cursor:"pointer",borderLeft:`5px solid ${ec}`,opacity:isAdmin_bk?0.85:1}}
-                          onMouseEnter={e=>{e.currentTarget.style.boxShadow="0 2px 8px rgba(0,0,0,0.06)";}}
-                          onMouseLeave={e=>{e.currentTarget.style.boxShadow="none";}}>
-                          <div style={{width:4,borderRadius:4,background:f?.color||"#e2e8f0",alignSelf:"stretch",flexShrink:0}}/>
-                          <div style={{flex:1,minWidth:0}}>
-                            <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:2}}>
-                              <span style={{fontWeight:700,fontSize:14,color:"#0f172a"}}>{b.purpose||"Booking"}</span>
-                              <Badge status={b.status}/>
-                              {isAdmin_bk
-                                ? <span style={{fontSize:11,fontWeight:700,color:"#94a3b8",background:"#f1f5f9",borderRadius:4,padding:"1px 6px"}}>🔒 admin</span>
-                                : <EmailChip email={b.email}/>
-                              }
-                              {isClash&&<span style={{fontSize:11,fontWeight:700,color:"#ef4444",background:"#fff1f2",borderRadius:4,padding:"1px 6px"}}>⚠️ clash</span>}
-                            </div>
-                            <div style={{fontSize:13,color:"#475569"}}>{f?.name} · {fmtDate(b.date)} · {fmtTime(b.start_hour)}–{fmtTime(b.start_hour+b.duration)}</div>
-                            {!isAdmin_bk&&<div style={{fontSize:12,color:"#94a3b8"}}>{b.name}</div>}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
+                  {visible.length===0
+                    ? <div style={{textAlign:"center",padding:"40px 0",color:"#94a3b8",fontSize:14}}>No bookings match the current filters.</div>
+                    : <div style={{overflowX:"auto",borderRadius:10,border:"1px solid #f1f5f9"}}>
+                        <table style={{width:"100%",borderCollapse:"collapse",background:"#fff",fontSize:13}}>
+                          <thead>
+                            <tr style={{background:"#f8fafc"}}>
+                              {[["date","Date"],["booker","Booker"],["facility","Facility"],["status","Status"]].map(([col,label])=>(
+                                <th key={col} onClick={()=>lToggleSort(col)}
+                                  style={{padding:"8px 10px",textAlign:"left",cursor:"pointer",userSelect:"none",fontWeight:700,color:"#475569",whiteSpace:"nowrap",borderBottom:"1px solid #f1f5f9"}}>
+                                  {label}{lArrow(col)}
+                                </th>
+                              ))}
+                              <th style={{padding:"8px 10px",textAlign:"left",fontWeight:700,color:"#475569",borderBottom:"1px solid #f1f5f9"}}>Time</th>
+                              <th style={{padding:"8px 10px",textAlign:"left",fontWeight:700,color:"#475569",borderBottom:"1px solid #f1f5f9"}}>Purpose</th>
+                              <th style={{padding:"8px 10px",fontWeight:700,color:"#475569",borderBottom:"1px solid #f1f5f9"}}></th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {visible.map((b,ri)=>{
+                              const f=FACILITIES.find(x=>x.id===b.facility_id);
+                              const isAdmin_bk=isAdminBooking(b);
+                              const isClash=allClashIds.has(b.id);
+                              return(
+                                <tr key={b.id} onClick={()=>setViewing(b)} style={{background:isAdmin_bk?"#f8fafc":isClash?"#fff5f5":"#fff",borderTop:ri>0?"1px solid #f1f5f9":"none",cursor:"pointer"}}
+                                  onMouseEnter={e=>e.currentTarget.style.background=isAdmin_bk?"#f1f5f9":"#f8fafc"}
+                                  onMouseLeave={e=>e.currentTarget.style.background=isAdmin_bk?"#f8fafc":isClash?"#fff5f5":"#fff"}>
+                                  <td style={{padding:"8px 10px",whiteSpace:"nowrap",fontWeight:500}}>{fmtDate(b.date)}</td>
+                                  <td style={{padding:"8px 10px"}}>
+                                    {isAdmin_bk
+                                      ? <span style={{fontSize:11,fontWeight:700,color:"#94a3b8",background:"#f1f5f9",borderRadius:4,padding:"2px 7px"}}>🔒 admin</span>
+                                      : <><div style={{fontWeight:600,color:"#0f172a"}}>{b.name}</div><EmailChip email={b.email}/></>
+                                    }
+                                  </td>
+                                  <td style={{padding:"8px 10px"}}>
+                                    <span style={{width:8,height:8,borderRadius:"50%",background:f?.color,display:"inline-block",marginRight:5,verticalAlign:"middle"}}/>
+                                    {f?.name}
+                                  </td>
+                                  <td style={{padding:"8px 10px"}}>
+                                    <Badge status={b.status}/>
+                                    {isClash&&<span style={{display:"block",fontSize:10,fontWeight:700,color:"#ef4444",marginTop:2}}>⚠️ clash</span>}
+                                  </td>
+                                  <td style={{padding:"8px 10px",whiteSpace:"nowrap",color:"#475569"}}>{fmtTime(b.start_hour)}–{fmtTime(b.start_hour+b.duration)}</td>
+                                  <td style={{padding:"8px 10px",color:"#475569",maxWidth:220,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{b.purpose}</td>
+                                  <td style={{padding:"8px 10px",textAlign:"right"}}>
+                                    <span style={{fontSize:11,color:"#6366f1",fontWeight:600}}>View →</span>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                  }
+                  <div style={{marginTop:8,fontSize:12,color:"#94a3b8"}}>{visible.length} booking{visible.length!==1?"s":""} shown</div>
                 </>
               );
             })()}
