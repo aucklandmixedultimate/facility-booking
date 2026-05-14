@@ -2326,6 +2326,12 @@ export default function App() {
   const [facilityRates, setFacilityRates] = useState(()=>{
     try{return JSON.parse(localStorage.getItem("fb_facility_rates")||"{}");}catch{return {};}
   });
+  const [listBookerFilter, setListBookerFilter] = useState("all");
+  const [listShowClashes, setListShowClashes]   = useState(false);
+  const [listSearch,      setListSearch]        = useState("");
+  const [listStatusFilter,setListStatusFilter]  = useState("all");
+  const [listSortCol,     setListSortCol]       = useState("date");
+  const [listSortDir,     setListSortDir]       = useState("asc");
 
   const isMobile = useMobile();
   const configured = !SUPABASE_URL.includes("YOUR_PROJECT");
@@ -2708,14 +2714,6 @@ export default function App() {
   const myClashCount = isAdmin
     ? allClashes.length
     : allClashes.filter(c => c.user.email?.toLowerCase() === loggedInEmail?.toLowerCase()).length;
-
-  // ─── List-tab filters (booker + clash) ────────────────────────────────────
-  const [listBookerFilter, setListBookerFilter] = useState("all");
-  const [listShowClashes, setListShowClashes]   = useState(false);
-  const [listSearch,      setListSearch]        = useState("");
-  const [listStatusFilter,setListStatusFilter]  = useState("all");
-  const [listSortCol,     setListSortCol]       = useState("date");
-  const [listSortDir,     setListSortDir]       = useState("asc");
 
   function TabBtn({id,label,badge}){return(
     <button onClick={()=>setTab(id)} style={{padding:"8px 12px",borderRadius:8,border:"none",cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",background:tab===id?"#0f172a":"transparent",color:tab===id?"#fff":"#64748b",display:"flex",alignItems:"center",gap:5,whiteSpace:"nowrap",flexShrink:0}}>
