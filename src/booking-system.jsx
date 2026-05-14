@@ -839,11 +839,7 @@ function BookingForm({ booking, allBookings, onSave, onAddToCart, onClose, isAdm
   const isEditing  = !!booking?.id && !booking?._multiEdit;
   const isMultiEdit = !!booking?._multiEdit;
 
-  // ── Multi-edit mode: simple time/weekday change across multiple bookings ──
-  if (isMultiEdit) {
-    return <MultiEditForm bookings={booking._bookings} onAddToCart={onAddToCart} onClose={onClose} allBookings={allBookings}/>;
-  }
-
+  // All hooks must be declared before any conditional return
   function makeBlankRow(overrides={}) {
     return {
       facility_id: FACILITIES[0].id,
@@ -862,7 +858,7 @@ function BookingForm({ booking, allBookings, onSave, onAddToCart, onClose, isAdm
     ? [{ facility_id:booking.facility_id, date:booking.date, start_hour:booking.start_hour,
          duration:booking.duration, purpose:booking.purpose, notes:booking.notes||"",
          status:booking.status, recur:booking.recur||{mode:"none",weeks:4,until:""} }]
-    : [makeBlankRow(booking ? { facility_id:booking.facility_id||FACILITIES[0].id,
+    : [makeBlankRow(booking && !isMultiEdit ? { facility_id:booking.facility_id||FACILITIES[0].id,
         date:booking.date||todayKey(), start_hour:booking.start_hour||9, duration:booking.duration||1 } : {})];
 
   const [name,  setName]  = useState(booking?.name  || "");
@@ -870,6 +866,11 @@ function BookingForm({ booking, allBookings, onSave, onAddToCart, onClose, isAdm
   const [rows,  setRows]  = useState(initRows);
   const [error, setError] = useState("");
   const [warn,  setWarn]  = useState(null);
+
+  // ── Multi-edit mode: simple time/weekday change across multiple bookings ──
+  if (isMultiEdit) {
+    return <MultiEditForm bookings={booking._bookings} onAddToCart={onAddToCart} onClose={onClose} allBookings={allBookings}/>;
+  }
 
   function updateRow(idx, upd) { setRows(rs=>rs.map((r,i)=>i===idx?upd:r)); }
   function addRow()   { setRows(rs=>[...rs, makeBlankRow()]); }
