@@ -1662,7 +1662,8 @@ function parseCJRDateTime(dt) {
 async function fetchCJREvents(year, month) {
   // month is 0-based
   const dateStr = `${year}-${String(month+1).padStart(2,"0")}-01`;
-  const url = `https://www.carltonjuniorsrugby.co.nz/api/v1/calendar/MonthCalendarEvents?organisationId=%20${CJR_ORG_ID}&sportId=0&ical=${encodeURIComponent(CJR_ICAL)}&date=${dateStr}`;
+  const target = `https://www.carltonjuniorsrugby.co.nz/api/v1/calendar/MonthCalendarEvents?organisationId=%20${CJR_ORG_ID}&sportId=0&ical=${encodeURIComponent(CJR_ICAL)}&date=${dateStr}`;
+  const url = `https://corsproxy.io/?url=${encodeURIComponent(target)}`;
   const r = await fetch(url);
   if (!r.ok) throw new Error(`CJR API returned ${r.status}`);
   return r.json();
