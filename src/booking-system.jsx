@@ -113,10 +113,11 @@ function timeOverlaps(a,b) {
 }
 function isAdminBooking(b)  { return b.email === "admin"; }
 function getClashes(allBookings) {
-  // Returns pairs: admin booking overlapping a non-admin booking on same facility
+  // Returns pairs: admin booking overlapping a non-admin booking on same facility (future dates only)
+  const today = todayKey();
   const clashes = [];
-  const adminBks = allBookings.filter(isAdminBooking);
-  const userBks  = allBookings.filter(b => !isAdminBooking(b));
+  const adminBks = allBookings.filter(b => isAdminBooking(b) && b.date >= today);
+  const userBks  = allBookings.filter(b => !isAdminBooking(b) && b.date >= today);
   adminBks.forEach(ab => {
     userBks.forEach(ub => {
       if (ab.facility_id === ub.facility_id && timeOverlaps(ab, ub)) {
@@ -680,11 +681,12 @@ function InlineDraftEditor({ draft, onSave, onCancel }) {
 
 function DeleteCartModal({ deleteQueue, setDeleteQueue, onClose, onSubmit, isAdmin }) {
   const [adminNote, setAdminNote] = useState('');
+  const [skipEmail, setSkipEmail] = useState(false);
   return (
     <div style={{display:'flex',flexDirection:'column',gap:0,height:'100%'}}>
       <div style={{background:'#fef2f2',border:'1px solid #fecaca',borderRadius:10,padding:'12px 16px',marginBottom:14}}>
         <div style={{fontWeight:700,fontSize:14,color:'#7f1d1d',marginBottom:4}}>🗑 Removal Queue</div>
-        <div style={{fontSize:13,color:'#991b1b'}}>Review the bookings below before permanently removing them. A notification email will be sent to each booker.</div>
+        <div style={{fontSize:13,color:'#991b1b'}}>Review the bookings below before permanently removing them.</div>
       </div>
       <div style={{flex:1,overflowY:'auto',maxHeight:'45vh',display:'flex',flexDirection:'column',gap:6,paddingRight:2,marginBottom:12}}>
         {deleteQueue.map((b,i)=>{
@@ -703,16 +705,20 @@ function DeleteCartModal({ deleteQueue, setDeleteQueue, onClose, onSubmit, isAdm
         })}
       </div>
       {isAdmin && (
-        <div style={{marginBottom:12}}>
+        <div style={{marginBottom:12,display:'flex',flexDirection:'column',gap:8}}>
           <label style={S.lbl}>Admin Note (optional — included in email)</label>
           <textarea style={{...S.inp,resize:'vertical',minHeight:52,fontSize:13}} value={adminNote} onChange={e=>setAdminNote(e.target.value)} placeholder="Reason for removal..."/>
+          <label style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer',fontSize:13,color:'#475569'}}>
+            <input type="checkbox" checked={skipEmail} onChange={e=>setSkipEmail(e.target.checked)} style={{width:15,height:15,accentColor:'#0f172a'}}/>
+            Remove without notifying bookers by email
+          </label>
         </div>
       )}
       <div style={{display:'flex',gap:10,justifyContent:'space-between',paddingTop:10,borderTop:'1px solid #f1f5f9',flexShrink:0}}>
         <button onClick={()=>setDeleteQueue([])} style={S.btn({border:'1.5px solid #e2e8f0',background:'#fff',color:'#94a3b8'})}>Clear Queue</button>
         <div style={{display:'flex',gap:10}}>
           <button onClick={onClose} style={S.btn({border:'1.5px solid #e2e8f0',background:'#fff',color:'#475569'})}>Cancel</button>
-          <button onClick={()=>onSubmit(adminNote)} style={S.btn({background:'#7f1d1d',color:'#fff'})}>
+          <button onClick={()=>onSubmit(adminNote,skipEmail)} style={S.btn({background:'#7f1d1d',color:'#fff'})}>
             🗑 Confirm Removal ({deleteQueue.length})
           </button>
         </div>
@@ -1325,10 +1331,10 @@ function MonthCalendar({ bookings, onBookingClick, onNewBooking, selectedFacilit
   );
 }
 
-function SummaryTab({ bookings, loggedInEmail }) {
+function SummaryTab({ bookings, loggedInEmail, facilityRates = {} }) {
   const now = new Date();
   const [year,        setYear]        = useState(now.getFullYear());
-  const [emailFilter, setEmailFilter] = useState(loggedInEmail || "all");
+  const [emailFilter, setEmailFilter] = useState("all");
 
   // Rebuild color cache for all emails in the dataset so chips render correctly
   bookings.forEach(b => emailColor(b.email));
@@ -1368,7 +1374,23 @@ function SummaryTab({ bookings, loggedInEmail }) {
   const totalDaytime = rows.reduce((s,r)=>s+r.daytime,0);
   const totalHrs     = rows.reduce((s,r)=>s+r.total,0);
 
+  // Per-facility hours and cost calculation
+  const byFacility = {};
+  active.forEach(b => {
+    const fac = FACILITIES.find(x => x.id === b.facility_id);
+    if (!fac) return;
+    if (!byFacility[fac.id]) byFacility[fac.id] = { fac, hours: 0 };
+    byFacility[fac.id].hours += b.duration;
+  });
+  const facCosts = Object.values(byFacility).map(({ fac, hours }) => {
+    const rate = parseFloat(facilityRates[fac.id] || 0);
+    return { fac, hours, rate, cost: hours * rate };
+  });
+  const totalCost = facCosts.reduce((s, c) => s + c.cost, 0);
+  const anyRates  = facCosts.some(c => c.rate > 0);
+
   function fmtHrs(h) { return h===0?"0h" : h%1===0?`${h}h`:`${Math.floor(h)}h ${Math.round((h%1)*60)}m`; }
+  function fmtCost(n) { return "$" + n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g,","); }
 
   // CSV export — all columns from every booking (not filtered)
   function exportCSV() {
@@ -1432,15 +1454,47 @@ function SummaryTab({ bookings, loggedInEmail }) {
           { label:"Daytime Hrs",   value:fmtHrs(totalDaytime),  icon:"☀️",  sub:"before 6 PM" },
           { label:"Evening Hrs",   value:fmtHrs(totalEvening),  icon:"🌙",  sub:"from 6 PM" },
           { label:"Unique Bookers",value:rows.length,           icon:"👥" },
+          ...(anyRates ? [{ label:"Total Cost", value:fmtCost(totalCost), icon:"💰", highlight:true }] : []),
         ].map(c=>(
-          <div key={c.label} style={{ background:"#fff", border:"1px solid #f1f5f9", borderRadius:12, padding:"16px 18px", boxShadow:"0 1px 4px rgba(0,0,0,0.04)" }}>
+          <div key={c.label} style={{ background: c.highlight?"#f0fdf4":"#fff", border:`1px solid ${c.highlight?"#bbf7d0":"#f1f5f9"}`, borderRadius:12, padding:"16px 18px", boxShadow:"0 1px 4px rgba(0,0,0,0.04)" }}>
             <div style={{ fontSize:22, marginBottom:6 }}>{c.icon}</div>
-            <div style={{ fontSize:22, fontWeight:800, color:"#0f172a", letterSpacing:"-0.03em" }}>{c.value}</div>
+            <div style={{ fontSize:22, fontWeight:800, color: c.highlight?"#15803d":"#0f172a", letterSpacing:"-0.03em" }}>{c.value}</div>
             <div style={{ fontSize:12, fontWeight:600, color:"#64748b", marginTop:2 }}>{c.label}</div>
             {c.sub&&<div style={{ fontSize:11, color:"#94a3b8" }}>{c.sub}</div>}
           </div>
         ))}
       </div>
+
+      {/* Cost by facility tiles */}
+      {facCosts.length > 0 && (
+        <div>
+          <h3 style={{ margin:"0 0 10px", fontSize:15, fontWeight:700, color:"#0f172a" }}>
+            Cost by Facility — {year}{emailFilter!=="all"?` · ${emailFilter}`:""}
+            {!anyRates && <span style={{ fontSize:12, fontWeight:400, color:"#94a3b8", marginLeft:8 }}>(set hourly rates in Admin → Facility Rates)</span>}
+          </h3>
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:10 }}>
+            {facCosts.map(({ fac, hours, rate, cost }) => (
+              <div key={fac.id} style={{ background:"#fff", border:"1px solid #f1f5f9", borderRadius:12, padding:"14px 16px", display:"flex", flexDirection:"column", gap:6, boxShadow:"0 1px 4px rgba(0,0,0,0.04)" }}>
+                <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                  <span style={{ width:10, height:10, borderRadius:"50%", background:fac.color, flexShrink:0, display:"inline-block" }}/>
+                  <span style={{ fontSize:12, fontWeight:700, color:"#0f172a" }}>{fac.name}</span>
+                </div>
+                <div style={{ fontSize:13, color:"#475569" }}>{fmtHrs(hours)} @ {rate > 0 ? fmtCost(rate)+"/hr" : "no rate set"}</div>
+                <div style={{ fontSize:18, fontWeight:800, color: rate > 0 ? "#15803d" : "#94a3b8" }}>
+                  {rate > 0 ? fmtCost(cost) : "—"}
+                </div>
+              </div>
+            ))}
+            {anyRates && (
+              <div style={{ background:"#f0fdf4", border:"1.5px solid #bbf7d0", borderRadius:12, padding:"14px 16px", display:"flex", flexDirection:"column", gap:6 }}>
+                <div style={{ fontSize:12, fontWeight:700, color:"#166534" }}>Total Cost</div>
+                <div style={{ fontSize:13, color:"#15803d" }}>{fmtHrs(totalHrs)} combined</div>
+                <div style={{ fontSize:18, fontWeight:800, color:"#15803d" }}>{fmtCost(totalCost)}</div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Table */}
       <div>
@@ -1507,16 +1561,31 @@ function AdminLogin({onLogin}) {
   );
 }
 
-// ─── Admin Panel with bulk approve + per-email email summaries ────────────────
-function AdminPanel({bookings,onBulkStatusChange,onEdit,onDelete,clashes=[]}) {
+// ─── Admin Panel with action queue, bulk approve, facility rates ──────────────
+function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[],deleteIds=new Set(),facilityRates={},onUpdateFacilityRate,onClearOldUnapproved}) {
   const [sf,setSf]=useState("all"), [ff,setFf]=useState("all"), [q,setQ]=useState("");
   const [selected,setSelected]=useState(new Set());
   const [bulkNote,setBulkNote]=useState("");
   const [bulkSending,setBulkSending]=useState(false);
   const [bulkStatus,setBulkStatus]=useState("approved");
+  const [bulkSkipEmail,setBulkSkipEmail]=useState(false);
   const [clashSending,setClashSending]=useState(false);
+  // Per-row action queue: [{id, newStatus}]
+  const [actionQueue,setActionQueue]=useState([]);
+  const [actionNote,setActionNote]=useState("");
+  const [actionSkipEmail,setActionSkipEmail]=useState(false);
+  const [actionSending,setActionSending]=useState(false);
+  // Clear old unapproved modal
+  const [showClearModal,setShowClearModal]=useState(false);
+  const [clearSkipEmail,setClearSkipEmail]=useState(false);
+  // Facility rates section
+  const [showRates,setShowRates]=useState(false);
 
   const si={padding:"7px 12px",borderRadius:8,border:"1.5px solid #e2e8f0",fontSize:13,fontFamily:"inherit",color:"#0f172a",background:"#f8fafc",outline:"none"};
+  const today=todayKey();
+
+  // Old unapproved = pending bookings with past dates
+  const oldUnapproved=bookings.filter(b=>b.status==="pending"&&b.date<today);
 
   const list=bookings.filter(b=>{
     if(sf!=="all"&&b.status!==sf) return false;
@@ -1537,10 +1606,30 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onDelete,clashes=[]}) {
     else setSelected(s=>{ const ns=new Set(s); pendingList.forEach(b=>ns.add(b.id)); return ns; });
   }
 
+  // Toggle a booking in/out of the per-row action queue
+  function queueAction(id, newStatus) {
+    setActionQueue(prev=>{
+      const existing=prev.find(a=>a.id===id);
+      if(existing && existing.newStatus===newStatus) return prev.filter(a=>a.id!==id); // toggle off
+      return [...prev.filter(a=>a.id!==id), {id, newStatus}];
+    });
+  }
+
+  async function submitActionQueue() {
+    if(!actionQueue.length) return;
+    setActionSending(true);
+    try{
+      const approved=actionQueue.filter(a=>a.newStatus==="approved").map(a=>a.id);
+      const rejected=actionQueue.filter(a=>a.newStatus==="rejected").map(a=>a.id);
+      if(approved.length) await onBulkStatusChange(approved,"approved",actionNote,actionSkipEmail);
+      if(rejected.length) await onBulkStatusChange(rejected,"rejected",actionNote,actionSkipEmail);
+      setActionQueue([]); setActionNote("");
+    } finally { setActionSending(false); }
+  }
+
   async function handleSendClashEmails() {
     if (!clashes.length) return;
     setClashSending(true);
-    // Group clashes by user email
     const byUser = {};
     clashes.forEach(c => {
       const email = c.user.email?.toLowerCase();
@@ -1576,15 +1665,15 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onDelete,clashes=[]}) {
     if(ids.length===0) return;
     setBulkSending(true);
     try {
-      await onBulkStatusChange(ids, bulkStatus, bulkNote);
+      await onBulkStatusChange(ids, bulkStatus, bulkNote, bulkSkipEmail);
       setSelected(new Set()); setBulkNote("");
     } finally { setBulkSending(false); }
   }
 
   return (
-    <div>
-      {/* Filters */}
-      <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:16}}>
+    <div style={{display:"flex",flexDirection:"column",gap:16}}>
+      {/* Top action bar */}
+      <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
         <input style={{...si,flex:1,minWidth:160}} placeholder="Search name, email, purpose…" value={q} onChange={e=>setQ(e.target.value)}/>
         <select style={si} value={sf} onChange={e=>setSf(e.target.value)}>
           <option value="all">All statuses</option>
@@ -1594,11 +1683,62 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onDelete,clashes=[]}) {
           <option value="all">All facilities</option>
           {FACILITIES.map(f=><option key={f.id} value={f.id}>{f.name}</option>)}
         </select>
+        {oldUnapproved.length>0&&(
+          <button onClick={()=>setShowClearModal(true)} style={S.btn({background:"#7c3aed",color:"#fff",fontWeight:700,fontSize:12})}>
+            🧹 Clear old unapproved ({oldUnapproved.length})
+          </button>
+        )}
+        <button onClick={()=>setShowRates(v=>!v)} style={S.btn({border:"1.5px solid #e2e8f0",background:showRates?"#f8fafc":"#fff",color:"#475569",fontSize:12})}>
+          💲 Facility Rates
+        </button>
       </div>
 
-      {/* Bulk action panel */}
+      {/* Facility rates panel */}
+      {showRates&&(
+        <div style={{background:"#f8fafc",border:"1.5px solid #e2e8f0",borderRadius:12,padding:16}}>
+          <div style={{fontWeight:700,fontSize:14,color:"#0f172a",marginBottom:12}}>Hourly Rates (used in Summary cost calculations)</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:10}}>
+            {FACILITIES.map(fac=>(
+              <div key={fac.id} style={{display:"flex",alignItems:"center",gap:8,background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,padding:"8px 12px"}}>
+                <span style={{width:10,height:10,borderRadius:"50%",background:fac.color,flexShrink:0,display:"inline-block"}}/>
+                <span style={{fontSize:12,fontWeight:600,color:"#0f172a",flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{fac.name}</span>
+                <span style={{fontSize:12,color:"#64748b"}}>$</span>
+                <input type="number" min="0" step="0.5"
+                  value={facilityRates[fac.id]||""}
+                  onChange={e=>onUpdateFacilityRate(fac.id, parseFloat(e.target.value)||0)}
+                  placeholder="0"
+                  style={{...si,width:72,padding:"4px 8px",textAlign:"right"}}/>
+                <span style={{fontSize:12,color:"#64748b"}}>/hr</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Per-row action queue submission panel */}
+      {actionQueue.length>0&&(
+        <div style={{background:"#f0fdf4",border:"1.5px solid #86efac",borderRadius:12,padding:16,display:"flex",flexDirection:"column",gap:10}}>
+          <div style={{fontWeight:700,fontSize:14,color:"#166534"}}>
+            📋 Action Queue — {actionQueue.filter(a=>a.newStatus==="approved").length} approve, {actionQueue.filter(a=>a.newStatus==="rejected").length} reject
+            <button onClick={()=>setActionQueue([])} style={{...S.btn({border:"1px solid #86efac",background:"transparent",color:"#166534",fontSize:11,padding:"2px 8px"}),marginLeft:12}}>Clear</button>
+          </div>
+          <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+            <input style={{...si,flex:1,minWidth:200}} placeholder="Optional note for emails…" value={actionNote} onChange={e=>setActionNote(e.target.value)}/>
+            <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",fontSize:12,color:"#475569",flexShrink:0}}>
+              <input type="checkbox" checked={actionSkipEmail} onChange={e=>setActionSkipEmail(e.target.checked)} style={{width:14,height:14,accentColor:"#0f172a"}}/>
+              No email notifications
+            </label>
+            <button onClick={submitActionQueue} disabled={actionSending}
+              style={S.btn({background:"#166534",color:"#fff",fontWeight:700,opacity:actionSending?0.6:1})}>
+              {actionSending?"Processing…":`Submit ${actionQueue.length} action${actionQueue.length>1?"s":""}`}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk selection action panel */}
       {pendingList.length>0&&(
-        <div style={{background:"#f8fafc",border:"1.5px solid #e2e8f0",borderRadius:12,padding:16,marginBottom:16,display:"flex",flexDirection:"column",gap:12}}>
+        <div style={{background:"#f8fafc",border:"1.5px solid #e2e8f0",borderRadius:12,padding:16,display:"flex",flexDirection:"column",gap:12}}>
           <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
             <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:13,fontWeight:600,color:"#0f172a"}}>
               <input type="checkbox" checked={allSelected} onChange={toggleAll} style={{width:16,height:16,accentColor:"#0f172a"}}/>
@@ -1616,10 +1756,13 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onDelete,clashes=[]}) {
                 <input style={{...si,flex:1,minWidth:200}} placeholder="Optional note to include in email…" value={bulkNote} onChange={e=>setBulkNote(e.target.value)}/>
                 <button onClick={handleBulkAction} disabled={bulkSending}
                   style={S.btn({background:bulkStatus==="approved"?"#22c55e":"#f43f5e",color:"#fff",opacity:bulkSending?0.6:1})}>
-                  {bulkSending?"Sending…":`${bulkStatus==="approved"?"✓ Approve":"✗ Reject"} ${selected.size} booking${selected.size>1?"s":""} & Email`}
+                  {bulkSending?"Processing…":`${bulkStatus==="approved"?"✓ Approve":"✗ Reject"} ${selected.size}`}
                 </button>
               </div>
-              <div style={{fontSize:12,color:"#64748b"}}>Each booker will receive an email summary of their affected bookings.</div>
+              <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:12,color:"#64748b"}}>
+                <input type="checkbox" checked={bulkSkipEmail} onChange={e=>setBulkSkipEmail(e.target.checked)} style={{width:14,height:14,accentColor:"#0f172a"}}/>
+                Don't send email notifications to bookers
+              </label>
             </>
           )}
         </div>
@@ -1627,8 +1770,33 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onDelete,clashes=[]}) {
 
       {/* Clash notification panel */}
       {clashes.length>0&&(
-        <div style={{background:"#fff1f2",border:"1.5px solid #fda4af",borderRadius:12,padding:16,marginBottom:16,display:"flex",flexDirection:"column",gap:10}}>
-          <div style={{display:"flex",alignItems:"center",gap:8,justifyContent:"space-between",flexWrap:"wrap"}}>            <div>              <span style={{fontWeight:700,fontSize:14,color:"#9f1239"}}>⚠️ {clashes.length} scheduling clash{clashes.length>1?"es":""} detected</span>              <div style={{fontSize:12,color:"#be123c",marginTop:2}}>Admin bookings overlap with user bookings on the same field/time. Affected users can be notified below.</div>            </div>            <button onClick={handleSendClashEmails} disabled={clashSending}              style={S.btn({background:clashSending?"#e2e8f0":"#f43f5e",color:clashSending?"#94a3b8":"#fff",fontWeight:700,opacity:clashSending?0.7:1})}>              {clashSending?"Sending…":"📧 Notify affected users"}            </button>          </div>          <div style={{display:"flex",flexDirection:"column",gap:6,maxHeight:220,overflowY:"auto"}}>            {clashes.map((c,i)=>{              const fa=FACILITIES.find(x=>x.id===c.admin.facility_id);              return(                <div key={i} style={{background:"#fff",border:"1px solid #fecdd3",borderRadius:8,padding:"8px 12px",fontSize:12,color:"#0f172a",display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>                  <span style={{fontWeight:700,color:"#9f1239"}}>🔒 {c.admin.purpose||"Admin booking"}</span>                  <span style={{color:"#94a3b8"}}>vs</span>                  <EmailChip email={c.user.email}/>                  <span style={{color:"#475569"}}>{c.user.purpose||"User booking"}</span>                  <span style={{color:"#94a3b8",marginLeft:"auto"}}>{fa?.name} · {fmtDate(c.admin.date)} {fmtTime(c.admin.start_hour)}–{fmtTime(c.admin.start_hour+c.admin.duration)}</span>                </div>              );            })}          </div>        </div>      )}
+        <div style={{background:"#fff1f2",border:"1.5px solid #fda4af",borderRadius:12,padding:16,display:"flex",flexDirection:"column",gap:10}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,justifyContent:"space-between",flexWrap:"wrap"}}>
+            <div>
+              <span style={{fontWeight:700,fontSize:14,color:"#9f1239"}}>⚠️ {clashes.length} scheduling clash{clashes.length>1?"es":""} detected</span>
+              <div style={{fontSize:12,color:"#be123c",marginTop:2}}>Future admin bookings overlap with user bookings. Affected users can be notified below.</div>
+            </div>
+            <button onClick={handleSendClashEmails} disabled={clashSending}
+              style={S.btn({background:clashSending?"#e2e8f0":"#f43f5e",color:clashSending?"#94a3b8":"#fff",fontWeight:700,opacity:clashSending?0.7:1})}>
+              {clashSending?"Sending…":"📧 Notify affected users"}
+            </button>
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:6,maxHeight:220,overflowY:"auto"}}>
+            {clashes.map((c,i)=>{
+              const fa=FACILITIES.find(x=>x.id===c.admin.facility_id);
+              return(
+                <div key={i} style={{background:"#fff",border:"1px solid #fecdd3",borderRadius:8,padding:"8px 12px",fontSize:12,color:"#0f172a",display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                  <span style={{fontWeight:700,color:"#9f1239"}}>🔒 {c.admin.purpose||"Admin booking"}</span>
+                  <span style={{color:"#94a3b8"}}>vs</span>
+                  <EmailChip email={c.user.email}/>
+                  <span style={{color:"#475569"}}>{c.user.purpose||"User booking"}</span>
+                  <span style={{color:"#94a3b8",marginLeft:"auto"}}>{fa?.name} · {fmtDate(c.admin.date)} {fmtTime(c.admin.start_hour)}–{fmtTime(c.admin.start_hour+c.admin.duration)}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {list.length===0&&<div style={{textAlign:"center",padding:"40px 0",color:"#94a3b8",fontSize:14}}>No bookings found.</div>}
 
@@ -1636,8 +1804,13 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onDelete,clashes=[]}) {
         {list.map(b=>{
           const f=FACILITIES.find(x=>x.id===b.facility_id);
           const isPending=b.status==="pending";
+          const queued=actionQueue.find(a=>a.id===b.id);
+          const isDeleteQueued=deleteIds.has(b.id);
+          // Row highlight based on queued state
+          const rowBg=isDeleteQueued?"#fff1f2":queued?.newStatus==="approved"?"#f0fdf4":queued?.newStatus==="rejected"?"#fef2f2":"#fff";
+          const rowBorder=isDeleteQueued?"#fecaca":queued?"#86efac":selected.has(b.id)?"#6366f1":"#f1f5f9";
           return (
-            <div key={b.id} style={{background:"#fff",border:`1.5px solid ${selected.has(b.id)?"#6366f1":"#f1f5f9"}`,borderRadius:12,padding:"14px 16px",display:"flex",gap:14,alignItems:"flex-start",transition:"border-color 0.15s"}}>
+            <div key={b.id} style={{background:rowBg,border:`1.5px solid ${rowBorder}`,borderRadius:12,padding:"14px 16px",display:"flex",gap:14,alignItems:"flex-start",transition:"border-color 0.15s"}}>
               {isPending&&<input type="checkbox" checked={selected.has(b.id)} onChange={()=>toggleSelect(b.id)} style={{width:16,height:16,accentColor:"#6366f1",marginTop:2,flexShrink:0}}/>}
               {!isPending&&<div style={{width:16,flexShrink:0}}/>}
               <div style={{width:4,borderRadius:4,background:f?.color||"#e2e8f0",alignSelf:"stretch",flexShrink:0}}/>
@@ -1646,22 +1819,79 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onDelete,clashes=[]}) {
                   <span style={{fontWeight:700,fontSize:14,color:"#0f172a"}}>{b.name}</span>
                   <Badge status={b.status}/>
                   <EmailChip email={b.email}/>
+                  {queued&&<span style={{fontSize:11,fontWeight:700,background:queued.newStatus==="approved"?"#dcfce7":"#fee2e2",color:queued.newStatus==="approved"?"#166534":"#991b1b",borderRadius:4,padding:"1px 6px"}}>
+                    {queued.newStatus==="approved"?"✓ queued: approve":"✗ queued: reject"}
+                  </span>}
+                  {isDeleteQueued&&<span style={{fontSize:11,fontWeight:700,background:"#fee2e2",color:"#991b1b",borderRadius:4,padding:"1px 6px"}}>🗑 queued: delete</span>}
                   <span style={{fontSize:12,color:"#94a3b8",marginLeft:"auto"}}>{fmtDate(b.date)}</span>
                 </div>
                 <div style={{fontSize:13,color:"#475569"}}>{f?.name} · {fmtTime(b.start_hour)}–{fmtTime(b.start_hour+b.duration)} · {b.purpose}</div>
               </div>
               <div style={{display:"flex",gap:6,flexShrink:0}}>
                 {isPending&&<>
-                  <button onClick={()=>onBulkStatusChange([b.id],"approved","")} style={S.btn({padding:"5px 10px",fontSize:12,background:"#22c55e",color:"#fff"})}>✓</button>
-                  <button onClick={()=>onBulkStatusChange([b.id],"rejected","")} style={S.btn({padding:"5px 10px",fontSize:12,background:"#f43f5e",color:"#fff"})}>✗</button>
+                  <button
+                    onClick={()=>queueAction(b.id,"approved")}
+                    style={S.btn({padding:"5px 10px",fontSize:12,
+                      background: isDeleteQueued?"#e2e8f0" : queued?.newStatus==="approved"?"#15803d":"#22c55e",
+                      color: isDeleteQueued?"#94a3b8":"#fff",
+                      outline: queued?.newStatus==="approved"?"2px solid #15803d":"none",
+                      opacity: isDeleteQueued?0.5:1})}>✓</button>
+                  <button
+                    onClick={()=>queueAction(b.id,"rejected")}
+                    style={S.btn({padding:"5px 10px",fontSize:12,
+                      background: isDeleteQueued?"#e2e8f0" : queued?.newStatus==="rejected"?"#be123c":"#f43f5e",
+                      color: isDeleteQueued?"#94a3b8":"#fff",
+                      outline: queued?.newStatus==="rejected"?"2px solid #be123c":"none",
+                      opacity: isDeleteQueued?0.5:1})}>✗</button>
                 </>}
-                <button onClick={()=>onEdit(b)}      style={S.btn({padding:"5px 10px",fontSize:12,border:"1.5px solid #e2e8f0",background:"#fff",color:"#475569"})}>Edit</button>
-                <button onClick={()=>onDelete(b.id)} style={S.btn({padding:"5px 10px",fontSize:12,border:"1.5px solid #f43f5e",background:"#fff",color:"#f43f5e"})}>🗑</button>
+                <button onClick={()=>onEdit(b)}
+                  style={S.btn({padding:"5px 10px",fontSize:12,border:"1.5px solid #e2e8f0",background:"#fff",color:isDeleteQueued||queued?"#94a3b8":"#475569",opacity:isDeleteQueued||queued?0.5:1})}>Edit</button>
+                <button
+                  onClick={()=>!isDeleteQueued&&onQueueDelete(b.id)}
+                  style={S.btn({padding:"5px 10px",fontSize:12,
+                    border: isDeleteQueued?"1.5px solid #dc2626":"1.5px solid #f43f5e",
+                    background: isDeleteQueued?"#fee2e2":"#fff",
+                    color: isDeleteQueued?"#dc2626":"#f43f5e",
+                    fontWeight: isDeleteQueued?700:400})}>🗑</button>
               </div>
             </div>
           );
         })}
       </div>
+
+      {/* Clear old unapproved confirmation modal */}
+      {showClearModal&&(
+        <div onClick={e=>e.target===e.currentTarget&&setShowClearModal(false)}
+          style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.55)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:2000,backdropFilter:"blur(2px)"}}>
+          <div style={{background:"#fff",borderRadius:16,padding:28,maxWidth:520,width:"90%",maxHeight:"85vh",overflowY:"auto",boxShadow:"0 8px 40px rgba(0,0,0,0.2)"}}>
+            <h2 style={{margin:"0 0 8px",fontSize:18,fontWeight:700,color:"#0f172a"}}>🧹 Clear Old Unapproved Bookings</h2>
+            <p style={{margin:"0 0 16px",fontSize:13,color:"#64748b"}}>The following past pending bookings will be permanently deleted:</p>
+            <div style={{display:"flex",flexDirection:"column",gap:6,maxHeight:"35vh",overflowY:"auto",marginBottom:16}}>
+              {oldUnapproved.map(b=>{
+                const f=FACILITIES.find(x=>x.id===b.facility_id);
+                return(
+                  <div key={b.id} style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:"8px 12px",fontSize:12}}>
+                    <div style={{fontWeight:600,color:"#0f172a"}}>{b.name} — {f?.name}</div>
+                    <div style={{color:"#64748b"}}>{fmtDate(b.date)} · {fmtTime(b.start_hour)}–{fmtTime(b.start_hour+b.duration)} · {b.purpose}</div>
+                    <div style={{color:"#94a3b8"}}>{b.email}</div>
+                  </div>
+                );
+              })}
+            </div>
+            <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:13,color:"#475569",marginBottom:16}}>
+              <input type="checkbox" checked={clearSkipEmail} onChange={e=>setClearSkipEmail(e.target.checked)} style={{width:15,height:15,accentColor:"#0f172a"}}/>
+              Remove without notifying bookers by email
+            </label>
+            <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
+              <button onClick={()=>setShowClearModal(false)} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#475569"})}>Cancel</button>
+              <button onClick={async()=>{await onClearOldUnapproved(oldUnapproved.map(b=>b.id),clearSkipEmail); setShowClearModal(false);}}
+                style={S.btn({background:"#7c3aed",color:"#fff",fontWeight:700})}>
+                🧹 Delete {oldUnapproved.length} booking{oldUnapproved.length>1?"s":""}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1761,6 +1991,9 @@ export default function App() {
   const [prefill,  setPrefill]  =useState({date:null,startHour:9,duration:1});
   const [toast,    setToast]    =useState(null);
   const [syncingMonth, setSyncingMonth] = useState(false);
+  const [facilityRates, setFacilityRates] = useState(()=>{
+    try{return JSON.parse(localStorage.getItem("fb_facility_rates")||"{}");}catch{return {};}
+  });
 
   const isMobile = useMobile();
   const configured = !SUPABASE_URL.includes("YOUR_PROJECT");
@@ -1886,8 +2119,14 @@ export default function App() {
       html:buildApprovalEmailHtml({name:booking.name,email:booking.email,bookings:[{...booking,...patch}],newStatus,adminNote:""})});
   }
 
+  function updateFacilityRate(facilityId, rate) {
+    const newRates = { ...facilityRates, [facilityId]: rate };
+    setFacilityRates(newRates);
+    try{localStorage.setItem("fb_facility_rates",JSON.stringify(newRates));}catch{}
+  }
+
   // Bulk approve/reject — groups by email and sends one summary per person
-  async function handleBulkStatusChange(ids, newStatus, adminNote) {
+  async function handleBulkStatusChange(ids, newStatus, adminNote, skipEmail=false) {
     const affected=bookings.filter(b=>ids.includes(b.id));
     const patch={status:newStatus,updated_at:new Date().toISOString()};
     if(configured){
@@ -1900,18 +2139,20 @@ export default function App() {
     }
     showToast(`${ids.length} booking${ids.length>1?"s":""} ${newStatus}!`);
 
-    // Group by email, send one email per unique booker
-    const byEmail={};
-    affected.forEach(b=>{
-      const k=b.email.toLowerCase();
-      if(!byEmail[k]) byEmail[k]={name:b.name,email:b.email,bkgs:[]};
-      byEmail[k].bkgs.push({...b,...patch});
-    });
-    await Promise.all(Object.values(byEmail).map(({name,email,bkgs})=>
-      sendApprovalEmail({to:email,
-        subject:`Your Booking${bkgs.length>1?"s have":" has"} been ${newStatus}`,
-        html:buildApprovalEmailHtml({name,email,bookings:bkgs,newStatus,adminNote})})
-    ));
+    if(!skipEmail){
+      // Group by email, send one email per unique booker
+      const byEmail={};
+      affected.forEach(b=>{
+        const k=b.email.toLowerCase();
+        if(!byEmail[k]) byEmail[k]={name:b.name,email:b.email,bkgs:[]};
+        byEmail[k].bkgs.push({...b,...patch});
+      });
+      await Promise.all(Object.values(byEmail).map(({name,email,bkgs})=>
+        sendApprovalEmail({to:email,
+          subject:`Your Booking${bkgs.length>1?"s have":" has"} been ${newStatus}`,
+          html:buildApprovalEmailHtml({name,email,bookings:bkgs,newStatus,adminNote})})
+      ));
+    }
   }
 
   // Queue a booking for removal (shows in removal cart)
@@ -1920,6 +2161,13 @@ export default function App() {
     setDeleteQueue(prev => prev.find(x=>x.id===id) ? prev : [...prev, b]);
     setViewing(null);
     setShowDeleteCart(true);
+    showToast("Added to removal queue.");
+  }
+
+  // Queue for removal without opening the modal (used by admin panel row delete)
+  function queueForRemovalSilent(id) {
+    const b = bookings.find(x=>x.id===id); if(!b) return;
+    setDeleteQueue(prev => prev.find(x=>x.id===id) ? prev : [...prev, b]);
     showToast("Added to removal queue.");
   }
 
@@ -1934,8 +2182,8 @@ export default function App() {
     showToast(`${toAdd.length} booking${toAdd.length>1?"s":""} added to removal queue.`);
   }
 
-  // Submit the deletion queue — delete all, send email summaries grouped by email using order template
-  async function handleDeleteCartSubmit(adminNote) {
+  // Submit the deletion queue — delete all, optionally send email summaries grouped by email
+  async function handleDeleteCartSubmit(adminNote, skipEmail=false) {
     if(deleteQueue.length === 0) return;
     const ids = deleteQueue.map(b=>b.id);
     if(configured){
@@ -1943,21 +2191,48 @@ export default function App() {
       catch(e){showToast("Delete failed: "+e.message,"error");return;}
     } else { setBookings(prev=>prev.filter(b=>!ids.includes(b.id))); }
 
-    // Group by email and send one summary per booker via order template (deletions section)
-    const byEmail = {};
-    deleteQueue.forEach(b => {
-      const k = b.email.toLowerCase();
-      if(!byEmail[k]) byEmail[k] = {name:b.name, email:b.email, bkgs:[]};
-      byEmail[k].bkgs.push(b);
-    });
-    await Promise.all(Object.values(byEmail).map(({name,email,bkgs})=>
-      sendEmail({to:email, subject:`Your Booking${bkgs.length>1?"s have":" has"} been removed`,
-        html:buildOrderEmailHtml({name, email, bookings:[], deletedBookings:bkgs, orderRef:null, isDeletionOnly:true})})
-    ));
+    if(!skipEmail){
+      // Group by email and send one summary per booker via order template (deletions section)
+      const byEmail = {};
+      deleteQueue.forEach(b => {
+        const k = b.email.toLowerCase();
+        if(!byEmail[k]) byEmail[k] = {name:b.name, email:b.email, bkgs:[]};
+        byEmail[k].bkgs.push(b);
+      });
+      await Promise.all(Object.values(byEmail).map(({name,email,bkgs})=>
+        sendEmail({to:email, subject:`Your Booking${bkgs.length>1?"s have":" has"} been removed`,
+          html:buildOrderEmailHtml({name, email, bookings:[], deletedBookings:bkgs, orderRef:null, isDeletionOnly:true})})
+      ));
+    }
 
     showToast(`${ids.length} booking${ids.length>1?"s":""} removed.`);
     setDeleteQueue([]);
     setShowDeleteCart(false);
+  }
+
+  // Delete old unapproved (past pending) bookings silently
+  async function handleClearOldUnapproved(ids, skipEmail) {
+    if(!ids.length) return;
+    const toRemove = bookings.filter(b=>ids.includes(b.id));
+    if(configured){
+      try{ await Promise.all(ids.map(id=>sb.remove("bookings",id))); await loadBookings(); }
+      catch(e){showToast("Delete failed: "+e.message,"error");return;}
+    } else { setBookings(prev=>prev.filter(b=>!ids.includes(b.id))); }
+
+    if(!skipEmail){
+      const byEmail = {};
+      toRemove.forEach(b=>{
+        const k = b.email.toLowerCase();
+        if(!byEmail[k]) byEmail[k]={name:b.name,email:b.email,bkgs:[]};
+        byEmail[k].bkgs.push(b);
+      });
+      await Promise.all(Object.values(byEmail).map(({name,email,bkgs})=>
+        sendEmail({to:email,subject:`Your Booking${bkgs.length>1?"s have":" has"} been removed`,
+          html:buildOrderEmailHtml({name,email,bookings:[],deletedBookings:bkgs,orderRef:null,isDeletionOnly:true})})
+      ));
+    }
+
+    showToast(`${ids.length} old unapproved booking${ids.length>1?"s":""} cleared.`);
   }
 
   async function handleCancel(id) {
@@ -2224,8 +2499,8 @@ export default function App() {
           </div>
         )}
 
-        {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<SummaryTab bookings={bookings} loggedInEmail={loggedInEmail}/>}</div>}
-        {tab==="admin"&&isAdmin&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onDelete={queueForRemoval} clashes={allClashes}/>}</div>}
+        {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<SummaryTab bookings={bookings} loggedInEmail={loggedInEmail} facilityRates={facilityRates}/>}</div>}
+        {tab==="admin"&&isAdmin&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onQueueDelete={queueForRemovalSilent} clashes={allClashes} deleteIds={new Set(deleteQueue.map(b=>b.id))} facilityRates={facilityRates} onUpdateFacilityRate={updateFacilityRate} onClearOldUnapproved={handleClearOldUnapproved}/>}</div>}
       </div>
 
       {/* Modals */}
