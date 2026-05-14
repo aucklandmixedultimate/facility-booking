@@ -111,8 +111,25 @@ function timeOverlaps(a,b) {
   if(["cancelled","rejected"].includes(a.status)||["cancelled","rejected"].includes(b.status)) return false;
   return a.start_hour<b.start_hour+b.duration && a.start_hour+a.duration>b.start_hour;
 }
-function getSameFacilityOverlaps(bk,all)  { return all.filter(b=>b.facility_id===bk.facility_id&&timeOverlaps(bk,b)); }
-function getCrossFacilityOverlaps(bk,all) { return all.filter(b=>b.facility_id!==bk.facility_id&&timeOverlaps(bk,b)); }
+function isAdminBooking(b)  { return b.email === "admin"; }
+function getClashes(allBookings) {
+  // Returns pairs: admin booking overlapping a non-admin booking on same facility
+  const clashes = [];
+  const adminBks = allBookings.filter(isAdminBooking);
+  const userBks  = allBookings.filter(b => !isAdminBooking(b));
+  adminBks.forEach(ab => {
+    userBks.forEach(ub => {
+      if (ab.facility_id === ub.facility_id && timeOverlaps(ab, ub)) {
+        // Avoid duplicate pairs
+        if (!clashes.find(c => c.admin.id === ab.id && c.user.id === ub.id)) {
+          clashes.push({ admin: ab, user: ub });
+        }
+      }
+    });
+  });
+  return clashes;
+}
+
 
 // ─── EmailJS ──────────────────────────────────────────────────────────────────
 const EJ_SERVICE           = "service_w2qamo7";
@@ -1129,12 +1146,15 @@ function WeekCalendar({ bookings, onNewBooking, onBookingClick, selectedFacility
                       const fac=FACILITIES.find(x=>x.id===b.facility_id);
                       const stk=getStackStyle(b,dayBkgs);
                       const ec=emailColor(b.email);
+                      const isAdmin_bk = isAdminBooking(b);
+                      const bkBg = isAdmin_bk ? "#94a3b8" : (fac?.color||"#4a90d9");
+                      const bkBorderLeft = isAdmin_bk ? undefined : (deleteIds.has(b.id)||cartSourceIds.has(b.id) ? undefined : `4px solid ${ec}`);
                       return (
                         <div key={b.id}
                           onClick={e=>{ e.stopPropagation(); onBookingClick(b); }}
                           onMouseDown={e=>e.stopPropagation()}
                           title={`${b.name} – ${fac?.name}`}
-                          style={{ position:"absolute", top:(b.start_hour-CAL_START)*HOUR_H, height:Math.max(b.duration*HOUR_H-2,20), background:fac?.color||"#4a90d9", borderRadius:6, padding:"3px 6px", cursor:"pointer", overflow:"hidden", opacity:b.status==="pending"?0.75:1, border:deleteIds.has(b.id)?"2.5px solid #ef4444":cartSourceIds.has(b.id)?"2.5px solid #f59e0b":b.status==="pending"?"2px dashed rgba(255,255,255,0.6)":b.status==="rejected"?"2px solid rgba(244,63,94,0.8)":"none", boxShadow:deleteIds.has(b.id)?"0 0 0 3px rgba(239,68,68,0.25)":cartSourceIds.has(b.id)?"0 0 0 3px rgba(245,158,11,0.25)":"0 1px 4px rgba(0,0,0,0.15)", zIndex:2, borderLeft:deleteIds.has(b.id)||cartSourceIds.has(b.id)?undefined:`4px solid ${ec}`, ...stk }}>
+                          style={{ position:"absolute", top:(b.start_hour-CAL_START)*HOUR_H, height:Math.max(b.duration*HOUR_H-2,20), background:bkBg, borderRadius:6, padding:"3px 6px", cursor:"pointer", overflow:"hidden", opacity:b.status==="pending"?0.75:1, border:deleteIds.has(b.id)?"2.5px solid #ef4444":cartSourceIds.has(b.id)?"2.5px solid #f59e0b":b.status==="pending"?"2px dashed rgba(255,255,255,0.6)":b.status==="rejected"?"2px solid rgba(244,63,94,0.8)":"none", boxShadow:deleteIds.has(b.id)?"0 0 0 3px rgba(239,68,68,0.25)":cartSourceIds.has(b.id)?"0 0 0 3px rgba(245,158,11,0.25)":"0 1px 4px rgba(0,0,0,0.15)", zIndex:2, borderLeft:bkBorderLeft, ...stk }}>
                           <div style={{ fontSize:11, fontWeight:700, color:"#fff", lineHeight:1.3, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{b.purpose||b.name}</div>
                           {b.duration*HOUR_H>28&&<div style={{display:"flex",alignItems:"center",gap:3,marginTop:1}}>
                             <span style={{fontSize:9,fontWeight:700,color:"rgba(255,255,255,0.9)",background:"rgba(0,0,0,0.2)",borderRadius:3,padding:"1px 4px",whiteSpace:"nowrap"}}>
@@ -1273,9 +1293,10 @@ function MonthCalendar({ bookings, onBookingClick, onNewBooking, selectedFacilit
                   const isSel=selIds.has(b.id);
                   const inDelete = deleteIds.has(b.id);
                   const inCart   = cartSourceIds.has(b.id);
-                  const chipBg = isSel?"#6366f1":fac?.color||"#4a90d9";
+                  const isAdmin_bk = isAdminBooking(b);
+                  const chipBg = isSel?"#6366f1": isAdmin_bk?"#94a3b8" : (fac?.color||"#4a90d9");
                   const chipOutline = inDelete?"2.5px solid #ef4444":inCart?"2.5px solid #f59e0b":isSel?"2px solid #4f46e5":"none";
-                  const chipLeft = inDelete||inCart?"none":"3px solid "+ec;
+                  const chipLeft = inDelete||inCart||isAdmin_bk?"none":"3px solid "+ec;
                   return (
                     <div key={b.id}
                       onClick={e=>{ e.stopPropagation(); if(selMode) toggleSel(b.id); else onBookingClick(b); }}
@@ -1487,12 +1508,13 @@ function AdminLogin({onLogin}) {
 }
 
 // ─── Admin Panel with bulk approve + per-email email summaries ────────────────
-function AdminPanel({bookings,onBulkStatusChange,onEdit,onDelete}) {
+function AdminPanel({bookings,onBulkStatusChange,onEdit,onDelete,clashes=[]}) {
   const [sf,setSf]=useState("all"), [ff,setFf]=useState("all"), [q,setQ]=useState("");
   const [selected,setSelected]=useState(new Set());
   const [bulkNote,setBulkNote]=useState("");
   const [bulkSending,setBulkSending]=useState(false);
   const [bulkStatus,setBulkStatus]=useState("approved");
+  const [clashSending,setClashSending]=useState(false);
 
   const si={padding:"7px 12px",borderRadius:8,border:"1.5px solid #e2e8f0",fontSize:13,fontFamily:"inherit",color:"#0f172a",background:"#f8fafc",outline:"none"};
 
@@ -1513,6 +1535,40 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onDelete}) {
   function toggleAll() {
     if(allSelected) setSelected(s=>{ const ns=new Set(s); pendingList.forEach(b=>ns.delete(b.id)); return ns; });
     else setSelected(s=>{ const ns=new Set(s); pendingList.forEach(b=>ns.add(b.id)); return ns; });
+  }
+
+  async function handleSendClashEmails() {
+    if (!clashes.length) return;
+    setClashSending(true);
+    // Group clashes by user email
+    const byUser = {};
+    clashes.forEach(c => {
+      const email = c.user.email?.toLowerCase();
+      if (!email) return;
+      if (!byUser[email]) byUser[email] = { name: c.user.name, clashes: [] };
+      byUser[email].clashes.push(c);
+    });
+    try {
+      for (const [email, { name, clashes: uc }] of Object.entries(byUser)) {
+        const rows = uc.map(c => {
+          const f = FACILITIES.find(x => x.id === c.admin.facility_id);
+          return "<tr><td>" + (c.admin.purpose||"Admin booking") + "</td><td>" + (f?.name||"") + "</td><td>" + fmtDate(c.admin.date) + "</td><td>" + fmtTime(c.admin.start_hour) + "–" + fmtTime(c.admin.start_hour+c.admin.duration) + "</td><td>" + (c.user.purpose||"Your booking") + "</td></tr>";
+        }).join("");
+        const html = "<div style='font-family:sans-serif;max-width:600px'>"
+          + "<h2 style='color:#9f1239'>⚠️ Scheduling Clash Notice</h2>"
+          + "<p>Hi " + (name||email) + ",</p>"
+          + "<p>One or more of your bookings at Cornwall Park clash with scheduled admin/maintenance events on the same field at the same time.</p>"
+          + "<table style='width:100%;border-collapse:collapse;font-size:13px;margin:16px 0'><thead><tr style='background:#f8fafc'><th style='padding:8px;text-align:left'>Admin Event</th><th>Facility</th><th>Date</th><th>Time</th><th>Your Booking</th></tr></thead><tbody>" + rows + "</tbody></table>"
+          + "<p>Please contact us to discuss rescheduling.</p>"
+          + "<p style='color:#64748b;font-size:12px'>Automated notification from FacilityBook – AMUA.</p></div>";
+        await sendApprovalEmail({ to: email, subject: "⚠️ Scheduling Clash – Action Required", html });
+      }
+      alert("Clash notifications sent to " + Object.keys(byUser).length + " user(s).");
+    } catch(e) {
+      alert("Failed to send some emails: " + e.message);
+    } finally {
+      setClashSending(false);
+    }
   }
 
   async function handleBulkAction() {
@@ -1568,6 +1624,11 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onDelete}) {
           )}
         </div>
       )}
+
+      {/* Clash notification panel */}
+      {clashes.length>0&&(
+        <div style={{background:"#fff1f2",border:"1.5px solid #fda4af",borderRadius:12,padding:16,marginBottom:16,display:"flex",flexDirection:"column",gap:10}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,justifyContent:"space-between",flexWrap:"wrap"}}>            <div>              <span style={{fontWeight:700,fontSize:14,color:"#9f1239"}}>⚠️ {clashes.length} scheduling clash{clashes.length>1?"es":""} detected</span>              <div style={{fontSize:12,color:"#be123c",marginTop:2}}>Admin bookings overlap with user bookings on the same field/time. Affected users can be notified below.</div>            </div>            <button onClick={handleSendClashEmails} disabled={clashSending}              style={S.btn({background:clashSending?"#e2e8f0":"#f43f5e",color:clashSending?"#94a3b8":"#fff",fontWeight:700,opacity:clashSending?0.7:1})}>              {clashSending?"Sending…":"📧 Notify affected users"}            </button>          </div>          <div style={{display:"flex",flexDirection:"column",gap:6,maxHeight:220,overflowY:"auto"}}>            {clashes.map((c,i)=>{              const fa=FACILITIES.find(x=>x.id===c.admin.facility_id);              return(                <div key={i} style={{background:"#fff",border:"1px solid #fecdd3",borderRadius:8,padding:"8px 12px",fontSize:12,color:"#0f172a",display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>                  <span style={{fontWeight:700,color:"#9f1239"}}>🔒 {c.admin.purpose||"Admin booking"}</span>                  <span style={{color:"#94a3b8"}}>vs</span>                  <EmailChip email={c.user.email}/>                  <span style={{color:"#475569"}}>{c.user.purpose||"User booking"}</span>                  <span style={{color:"#94a3b8",marginLeft:"auto"}}>{fa?.name} · {fmtDate(c.admin.date)} {fmtTime(c.admin.start_hour)}–{fmtTime(c.admin.start_hour+c.admin.duration)}</span>                </div>              );            })}          </div>        </div>      )}
 
       {list.length===0&&<div style={{textAlign:"center",padding:"40px 0",color:"#94a3b8",fontSize:14}}>No bookings found.</div>}
 
@@ -1731,7 +1792,7 @@ export default function App() {
             b.facility_id === facility_id &&
             b.start_hour === start_hour &&
             b.purpose === purpose &&
-            !b.email
+            b.email === "admin"
           );
           if (dup) { skipped++; continue; }
           const newBk = {
@@ -1741,8 +1802,8 @@ export default function App() {
             start_hour,
             duration,
             purpose,
-            name: "",
-            email: "",
+            name: "admin",
+            email: "admin",
             status: "approved",
             created_at: new Date().toISOString(),
           };
@@ -1983,6 +2044,17 @@ export default function App() {
 
   const pendingCount=bookings.filter(b=>b.status==="pending").length;
 
+  // ─── Clash detection ──────────────────────────────────────────────────────
+  const allClashes = getClashes(bookings);
+  // For admin: total clash pairs; for user: clashes involving their bookings
+  const myClashCount = isAdmin
+    ? allClashes.length
+    : allClashes.filter(c => c.user.email?.toLowerCase() === loggedInEmail?.toLowerCase()).length;
+
+  // ─── List-tab filters (booker + clash) ────────────────────────────────────
+  const [listBookerFilter, setListBookerFilter] = useState("all");
+  const [listShowClashes, setListShowClashes]   = useState(false);
+
   function TabBtn({id,label,badge}){return(
     <button onClick={()=>setTab(id)} style={{padding:"8px 12px",borderRadius:8,border:"none",cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",background:tab===id?"#0f172a":"transparent",color:tab===id?"#fff":"#64748b",display:"flex",alignItems:"center",gap:5,whiteSpace:"nowrap",flexShrink:0}}>
       {label}{badge>0&&<span style={{background:"#f43f5e",color:"#fff",borderRadius:999,fontSize:10,fontWeight:700,padding:"1px 6px"}}>{badge}</span>}
@@ -2049,7 +2121,7 @@ export default function App() {
           <div style={{display:"flex",gap:2,overflowX:"auto",paddingBottom:8,WebkitOverflowScrolling:"touch",scrollbarWidth:"none",msOverflowStyle:"none"}}>
             <TabBtn id="calendar" label={isMobile?"📅 Week":"📅 Week"}/>
             <TabBtn id="month"    label={isMobile?"🗓 Month":"🗓 Month"}/>
-            <TabBtn id="list"     label={isMobile?"📋 List":"📋 Bookings"}/>
+            <TabBtn id="list"     label={isMobile?"📋 List":"📋 Bookings"} badge={myClashCount>0?myClashCount:undefined}/>
             <TabBtn id="summary"  label={isMobile?"📊":"📊 Summary"}/>
             {isAdmin&&<TabBtn id="admin" label={isMobile?"⚙ Admin":"⚙ Admin"} badge={pendingCount}/>}
           </div>
@@ -2070,44 +2142,90 @@ export default function App() {
 
         {(tab==="calendar"||tab==="month"||tab==="list")&&<FacilityPills/>}
 
-        {tab==="calendar"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<WeekCalendar bookings={bookings} selectedFacility={selFac} onNewBooking={openNew} onBookingClick={setViewing} cartSourceIds={new Set(cart.flatMap(i=>i.sourceIds||[]))} deleteIds={new Set(deleteQueue.map(b=>b.id))} cartNewDrafts={cart.flatMap(i=>(i.sourceIds||[]).length===0?i.drafts:[])} onSyncMonth={handleSyncMonth} syncingMonth={syncingMonth}/>}</div>}
-        {tab==="month"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<MonthCalendar bookings={bookings} selectedFacility={selFac} onBookingClick={setViewing} onNewBooking={openNew} onMultiDelete={queueMultiForRemoval} onMultiAddToCart={handleMultiAddToCart} loggedInEmail={loggedInEmail} isAdmin={isAdmin} cartSourceIds={new Set(cart.flatMap(i=>i.sourceIds||[]))} deleteIds={new Set(deleteQueue.map(b=>b.id))} cartNewDrafts={cart.flatMap(i=>(i.sourceIds||[]).length===0?i.drafts:[])} onSyncMonth={handleSyncMonth} syncingMonth={syncingMonth}/>}</div>}
+        {tab==="calendar"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<WeekCalendar bookings={bookings} selectedFacility={selFac} onNewBooking={openNew} onBookingClick={setViewing} cartSourceIds={new Set(cart.flatMap(i=>i.sourceIds||[]))} deleteIds={new Set(deleteQueue.map(b=>b.id))} cartNewDrafts={cart.flatMap(i=>(i.sourceIds||[]).length===0?i.drafts:[])} onSyncMonth={isAdmin?handleSyncMonth:undefined} syncingMonth={syncingMonth}/>}</div>}
+        {tab==="month"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<MonthCalendar bookings={bookings} selectedFacility={selFac} onBookingClick={setViewing} onNewBooking={openNew} onMultiDelete={queueMultiForRemoval} onMultiAddToCart={handleMultiAddToCart} loggedInEmail={loggedInEmail} isAdmin={isAdmin} cartSourceIds={new Set(cart.flatMap(i=>i.sourceIds||[]))} deleteIds={new Set(deleteQueue.map(b=>b.id))} cartNewDrafts={cart.flatMap(i=>(i.sourceIds||[]).length===0?i.drafts:[])} onSyncMonth={isAdmin?handleSyncMonth:undefined} syncingMonth={syncingMonth}/>}</div>}
 
         {tab==="list"&&(
           <div style={S.card}>
-            {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:(
-              <>
-                {bookings.length===0&&<div style={{textAlign:"center",padding:"40px 0",color:"#94a3b8",fontSize:14}}>No bookings yet.</div>}
-                <div style={{display:"flex",flexDirection:"column",gap:10}}>
-                  {[...bookings].filter(b=>selFac==="all"||b.facility_id===selFac)
-                    .sort((a,b)=>a.date.localeCompare(b.date)||a.start_hour-b.start_hour)
-                    .map(b=>{
-                      const f=FACILITIES.find(x=>x.id===b.facility_id),ec=emailColor(b.email);
+            {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:(()=>{
+              // Unique booker emails (non-admin)
+              const bookerEmails = [...new Set(bookings.filter(b=>!isAdminBooking(b)&&b.email).map(b=>b.email.toLowerCase()))];
+              // Clash-involved booking IDs
+              const clashAdminIds = new Set(allClashes.map(c=>c.admin.id));
+              const clashUserIds  = new Set(allClashes.map(c=>c.user.id));
+              const allClashIds   = new Set([...clashAdminIds,...clashUserIds]);
+
+              let visible = [...bookings]
+                .filter(b => selFac==="all" || b.facility_id===selFac)
+                .filter(b => listBookerFilter==="all" || b.email?.toLowerCase()===listBookerFilter)
+                .filter(b => !listShowClashes || allClashIds.has(b.id))
+                .sort((a,b)=>a.date.localeCompare(b.date)||a.start_hour-b.start_hour);
+
+              return (
+                <>
+                  {/* Filter bar */}
+                  <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14,alignItems:"center"}}>
+                    {/* Clash toggle */}
+                    {allClashes.length>0&&(
+                      <button onClick={()=>setListShowClashes(v=>!v)}
+                        style={{...S.btn({background:listShowClashes?"#ef4444":"#fff",color:listShowClashes?"#fff":"#ef4444",border:"1.5px solid #ef4444",fontSize:12,padding:"6px 12px"}),fontWeight:700,display:"flex",alignItems:"center",gap:5}}>
+                        ⚠️ {listShowClashes?"All bookings":`Show clashes (${allClashes.length})`}
+                      </button>
+                    )}
+                    {/* Booker chips */}
+                    <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+                      <span style={{fontSize:11,fontWeight:600,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.05em"}}>Filter:</span>
+                      <button onClick={()=>setListBookerFilter("all")}
+                        style={{...S.btn({background:listBookerFilter==="all"?"#0f172a":"#f8fafc",color:listBookerFilter==="all"?"#fff":"#475569",border:"1.5px solid #e2e8f0",fontSize:12,padding:"4px 10px"})}}>
+                        All
+                      </button>
+                      {bookerEmails.map(em=>(
+                        <button key={em} onClick={()=>setListBookerFilter(prev=>prev===em?"all":em)}
+                          style={{...S.btn({background:listBookerFilter===em?emailColor(em):"#f8fafc",color:listBookerFilter===em?"#fff":"#475569",border:`1.5px solid ${listBookerFilter===em?emailColor(em):"#e2e8f0"}`,fontSize:11,padding:"4px 10px"})}}>
+                          {em.split("@")[0]}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {visible.length===0&&<div style={{textAlign:"center",padding:"40px 0",color:"#94a3b8",fontSize:14}}>{listShowClashes?"No clashes found.":"No bookings found."}</div>}
+                  <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                    {visible.map(b=>{
+                      const f=FACILITIES.find(x=>x.id===b.facility_id);
+                      const isAdmin_bk=isAdminBooking(b);
+                      const isClash=allClashIds.has(b.id);
+                      const ec=isAdmin_bk?"#94a3b8":emailColor(b.email);
                       return(
                         <div key={b.id} onClick={()=>setViewing(b)}
-                          style={{background:"#fff",border:"1.5px solid #f1f5f9",borderRadius:12,padding:"14px 16px",display:"flex",gap:14,alignItems:"center",cursor:"pointer",borderLeft:`5px solid ${ec}`}}
+                          style={{background:isAdmin_bk?"#f8fafc":"#fff",border:isClash?"1.5px solid #ef4444":"1.5px solid #f1f5f9",borderRadius:12,padding:"14px 16px",display:"flex",gap:14,alignItems:"center",cursor:"pointer",borderLeft:`5px solid ${ec}`,opacity:isAdmin_bk?0.85:1}}
                           onMouseEnter={e=>{e.currentTarget.style.boxShadow="0 2px 8px rgba(0,0,0,0.06)";}}
                           onMouseLeave={e=>{e.currentTarget.style.boxShadow="none";}}>
                           <div style={{width:4,borderRadius:4,background:f?.color||"#e2e8f0",alignSelf:"stretch",flexShrink:0}}/>
                           <div style={{flex:1,minWidth:0}}>
                             <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:2}}>
                               <span style={{fontWeight:700,fontSize:14,color:"#0f172a"}}>{b.purpose||"Booking"}</span>
-                              <Badge status={b.status}/><EmailChip email={b.email}/>
+                              <Badge status={b.status}/>
+                              {isAdmin_bk
+                                ? <span style={{fontSize:11,fontWeight:700,color:"#94a3b8",background:"#f1f5f9",borderRadius:4,padding:"1px 6px"}}>🔒 admin</span>
+                                : <EmailChip email={b.email}/>
+                              }
+                              {isClash&&<span style={{fontSize:11,fontWeight:700,color:"#ef4444",background:"#fff1f2",borderRadius:4,padding:"1px 6px"}}>⚠️ clash</span>}
                             </div>
                             <div style={{fontSize:13,color:"#475569"}}>{f?.name} · {fmtDate(b.date)} · {fmtTime(b.start_hour)}–{fmtTime(b.start_hour+b.duration)}</div>
-                            <div style={{fontSize:12,color:"#94a3b8"}}>{b.name}</div>
+                            {!isAdmin_bk&&<div style={{fontSize:12,color:"#94a3b8"}}>{b.name}</div>}
                           </div>
                         </div>
                       );
                     })}
-                </div>
-              </>
-            )}
+                  </div>
+                </>
+              );
+            })()}
           </div>
         )}
 
         {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<SummaryTab bookings={bookings} loggedInEmail={loggedInEmail}/>}</div>}
-        {tab==="admin"&&isAdmin&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onDelete={queueForRemoval}/>}</div>}
+        {tab==="admin"&&isAdmin&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onDelete={queueForRemoval} clashes={allClashes}/>}</div>}
       </div>
 
       {/* Modals */}
