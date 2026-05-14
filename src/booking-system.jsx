@@ -118,6 +118,12 @@ function timeOverlaps(a,b) {
   return a.start_hour<b.start_hour+b.duration && a.start_hour+a.duration>b.start_hour;
 }
 function isAdminBooking(b)  { return b.email === "admin"; }
+function getSameFacilityOverlaps(draft, others) {
+  return others.filter(o => o.facility_id === draft.facility_id && timeOverlaps(draft, o));
+}
+function getCrossFacilityOverlaps(draft, others) {
+  return others.filter(o => o.facility_id !== draft.facility_id && timeOverlaps(draft, o));
+}
 function getClashes(allBookings) {
   // Returns pairs: admin booking overlapping a non-admin booking on same facility (future dates only)
   const today = todayKey();
@@ -236,11 +242,17 @@ function buildOrderEmailHtml({ name, email, bookings: bkgs=[], deletedBookings=[
 </td></tr></table></body></html>`;
 }
 
-// Build HTML for approval/rejection notification
+// Build HTML for approval/rejection/status notification
 function buildApprovalEmailHtml({ name, email, bookings: bkgs, newStatus, adminNote }) {
   const isApproved = newStatus === "approved";
-  const color = isApproved ? "#22c55e" : "#f43f5e";
-  const label = isApproved ? "Approved ✓" : "Rejected ✗";
+  const isQueued = newStatus === "queued_cpsa" || newStatus === "amua_submit";
+  const color = isApproved ? "#22c55e" : isQueued ? "#3b82f6" : "#f43f5e";
+  const label = isApproved ? "Approved ✓" : isQueued ? "Queued for CPSA Review" : "Rejected ✗";
+  const bodyText = isApproved
+    ? "Great news — your booking request has been approved!"
+    : isQueued
+    ? "Your booking request has been reviewed by AMUA and is now queued to be submitted to CPSA for final approval. We'll notify you once a decision has been made."
+    : "We're sorry — your booking request could not be approved.";
   const rows = bkgs.map(b => {
     const f = FACILITIES.find(x=>x.id===b.facility_id);
     return `<tr>
@@ -258,7 +270,7 @@ function buildApprovalEmailHtml({ name, email, bookings: bkgs, newStatus, adminN
   </td></tr>
   <tr><td style="padding:28px 32px">
     <p style="margin:0 0 6px;font-size:15px;color:#0f172a">Hi <strong>${name}</strong>,</p>
-    <p style="margin:0 0 24px;font-size:14px;color:#475569;line-height:1.6">${isApproved?"Great news — your booking request has been approved!":"We're sorry — your booking request could not be approved."}</p>
+    <p style="margin:0 0 24px;font-size:14px;color:#475569;line-height:1.6">${bodyText}</p>
     <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #f1f5f9;border-radius:10px;overflow:hidden">
       <thead><tr style="background:#f8fafc">
         <th style="padding:10px 14px;text-align:left;font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em">Facility</th>
@@ -976,15 +988,28 @@ function BookingForm({ booking, allBookings, onSave, onAddToCart, onClose, isAdm
 }
 
 // ─── Booking Detail ───────────────────────────────────────────────────────────
-function BookingDetail({booking,onEdit,onClose,onCancel,isAdmin,onStatusChange,loggedInEmail}) {
+function BookingDetail({booking,onEdit,onClose,onCancel,isAdmin,onStatusChange,loggedInEmail,allClashes=[]}) {
   const f=FACILITIES.find(x=>x.id===booking.facility_id);
   const m=STATUS_META[booking.status]||STATUS_META.pending;
   const isPast = booking.date < todayKey();
   const isOwn  = booking.email?.toLowerCase() === loggedInEmail?.toLowerCase();
+  const clashingAdminBks = booking.status==="clash"
+    ? allClashes.filter(c=>c.user.id===booking.id).map(c=>c.admin)
+    : [];
   return (
     <div style={{display:"flex",flexDirection:"column",gap:16}}>
       <div style={{background:m.bg,border:`1px solid ${m.border}`,borderRadius:10,padding:"12px 16px"}}>
         <Badge status={booking.status}/>{REVIEW_STATUSES.has(booking.status)&&<p style={{margin:"8px 0 0",fontSize:13,color:m.text}}>Awaiting admin review.</p>}
+        {booking.status==="clash"&&clashingAdminBks.length>0&&(
+          <div style={{marginTop:10}}>
+            <div style={{fontSize:12,fontWeight:700,color:"#92400e",marginBottom:6}}>Overlapping reservations:</div>
+            {clashingAdminBks.map((ab,i)=>(
+              <div key={i} style={{fontSize:12,color:"#0f172a",padding:"5px 8px",background:"#fff8e1",borderRadius:6,marginBottom:4,border:"1px solid #fcd34d"}}>
+                <strong>{ab.purpose}</strong> — {fmtDate(ab.date)}, {fmtTime(ab.start_hour)}–{fmtTime(ab.start_hour+ab.duration)}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
       {isPast&&<div style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:"8px 12px",fontSize:12,color:"#64748b",display:"flex",alignItems:"center",gap:6}}>🔒 Past booking — {isAdmin?"admin can delete":"read-only"}</div>}
       <div><EmailChip email={booking.email}/></div>
@@ -1475,16 +1500,16 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {} }) {
 
   function getFacRates(facId) {
     const r = facilityRates[facId];
-    if (!r) return { day: 0, evening: 0 };
-    if (typeof r === "object") return { day: r.day || 0, evening: r.evening || 0 };
-    return { day: parseFloat(r) || 0, evening: 0 }; // backward compat
+    if (!r) return { day: 0, evening: 50 };
+    if (typeof r === "object") return { day: r.day ?? 0, evening: r.evening ?? 50 };
+    return { day: parseFloat(r) || 0, evening: 50 }; // backward compat
   }
 
   // Per-email aggregation (over filtered active bookings)
   const byEmail = {};
   active.forEach(b => {
     const key = b.email.toLowerCase();
-    if (!byEmail[key]) byEmail[key] = { email:b.email, name:b.name, daytime:0, evening:0, total:0, bookings:0, cost:0 };
+    if (!byEmail[key]) byEmail[key] = { email:b.email, name:b.name, daytime:0, evening:0, total:0, bookings:0, cost:0, dayCost:0, eveCost:0 };
     const rec = byEmail[key];
     const { day, evening } = splitHours(b);
     const rates = getFacRates(b.facility_id);
@@ -1492,6 +1517,8 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {} }) {
     rec.daytime  += day;
     rec.total    += b.duration;
     rec.bookings += 1;
+    rec.dayCost  += day * rates.day;
+    rec.eveCost  += evening * rates.evening;
     rec.cost     += day * rates.day + evening * rates.evening;
   });
 
@@ -1500,6 +1527,8 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {} }) {
   const totalDaytime  = rows.reduce((s,r)=>s+r.daytime,0);
   const totalHrs      = rows.reduce((s,r)=>s+r.total,0);
   const totalBookerCost = rows.reduce((s,r)=>s+r.cost,0);
+  const totalDayCost    = rows.reduce((s,r)=>s+r.dayCost,0);
+  const totalEveCost    = rows.reduce((s,r)=>s+r.eveCost,0);
 
   // Per-facility hours and cost calculation (split by day/evening rate)
   const byFacility = {};
@@ -1667,6 +1696,18 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {} }) {
                   ))}
                 </tbody>
                 <tfoot>
+                  {anyRates&&<tr style={{ background:"#f0fdf4", borderTop:"1px solid #d1fae5" }}>
+                    <td style={{ ...tdS, fontWeight:600, fontSize:11, color:"#475569" }} colSpan={3}>Subtotals</td>
+                    <td style={{ ...tdS, textAlign:"right" }}>
+                      <span style={{ background:"#fef9c3", color:"#854d0e", borderRadius:6, padding:"2px 8px", fontWeight:600, fontSize:11 }}>{fmtHrs(totalDaytime)}</span>
+                      {totalDayCost>0&&<div style={{fontSize:10,color:"#059669",fontWeight:600,marginTop:2}}>{fmtCost(totalDayCost)}</div>}
+                    </td>
+                    <td style={{ ...tdS, textAlign:"right" }}>
+                      <span style={{ background:"#ede9fe", color:"#5b21b6", borderRadius:6, padding:"2px 8px", fontWeight:600, fontSize:11 }}>{fmtHrs(totalEvening)}</span>
+                      {totalEveCost>0&&<div style={{fontSize:10,color:"#059669",fontWeight:600,marginTop:2}}>{fmtCost(totalEveCost)}</div>}
+                    </td>
+                    <td colSpan={anyRates?2:1}/>
+                  </tr>}
                   <tr style={{ background:"#f8fafc", borderTop:"2px solid #f1f5f9" }}>
                     <td style={{ ...tdS, fontWeight:700 }} colSpan={2}>Total</td>
                     <td style={{ ...tdS, textAlign:"right", fontWeight:700 }}>{active.length}</td>
@@ -1873,7 +1914,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[]
           <div style={{fontSize:12,color:"#64748b",marginBottom:12}}>Day = before 5:30pm · Evening = 5:30pm onwards</div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))",gap:10}}>
             {FACILITIES.map(fac=>{
-              const rates = typeof facilityRates[fac.id]==="object" ? facilityRates[fac.id] : {day:facilityRates[fac.id]||0,evening:0};
+              const rates = typeof facilityRates[fac.id]==="object" ? {day:facilityRates[fac.id].day??0,evening:facilityRates[fac.id].evening??50} : {day:facilityRates[fac.id]||0,evening:50};
               return (
                 <div key={fac.id} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,padding:"10px 12px"}}>
                   <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8}}>
@@ -2056,6 +2097,12 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[]
                             style={S.btn({padding:"4px 8px",fontSize:11,
                               background:queued?.newStatus==="queued_cpsa"?"#1d4ed8":"#3b82f6",color:"#fff",
                               outline:queued?.newStatus==="queued_cpsa"?"2px solid #1d4ed8":"none"})}>CPSA →</button>}
+                          {(b.status==="queued_cpsa"||b.status==="amua_submit")&&<button
+                            onClick={()=>queueAction(b.id,"pending_cpsa")}
+                            title="Mark as Pending CPSA Review (no email)"
+                            style={S.btn({padding:"4px 8px",fontSize:11,
+                              background:queued?.newStatus==="pending_cpsa"?"#0369a1":"#0ea5e9",color:"#fff",
+                              outline:queued?.newStatus==="pending_cpsa"?"2px solid #0369a1":"none"})}>⏳ CPSA</button>}
                           {isCpsaStage&&<button
                             onClick={()=>queueAction(b.id,"approved")}
                             title="Mark CPSA Approved"
@@ -2168,10 +2215,10 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[]
                   style={S.btn({background:"#f43f5e",color:"#fff",fontWeight:700,opacity:clashSending?0.6:1})}>
                   {clashSending?"Sending…":`Send to ${selUser.name}`}
                 </button>}
-                <button onClick={()=>handleSendClashEmails(null)} disabled={clashSending}
+                {!selUser&&<button onClick={()=>handleSendClashEmails(null)} disabled={clashSending}
                   style={S.btn({background:"#9f1239",color:"#fff",fontWeight:700,opacity:clashSending?0.6:1})}>
                   {clashSending?"Sending…":`Notify all ${users.length} user${users.length>1?"s":""}`}
-                </button>
+                </button>}
               </div>
             </div>
           </div>
@@ -2296,8 +2343,38 @@ export default function App() {
     setSyncingMonth(true);
     try {
       const events = await fetchCJREvents(year, month);
-      let added = 0, skipped = 0;
+      let added = 0, skipped = 0, removed = 0;
       const currentBookings = configured ? (await sb.select("bookings")) : bookings;
+
+      // Build set of canonical keys for this month's feed
+      const feedKeys = new Set();
+      for (const ev of events) {
+        const date = parseCJRDate(ev.EventStartDate);
+        if (!date) continue;
+        const { start_hour } = parseCJRDateTime(ev.EventDateTime);
+        const purpose = ev.EventName || "External Booking";
+        const facilityIds = mapCJRFacility(purpose);
+        for (const facility_id of facilityIds) {
+          feedKeys.add(`${date}|${facility_id}|${start_hour}|${purpose}`);
+        }
+      }
+
+      // Remove admin bookings in this month that are no longer in the feed
+      const monthStr = `${year}-${String(month).padStart(2,"0")}`;
+      const staleAdminBks = currentBookings.filter(b =>
+        isAdminBooking(b) &&
+        b.date.startsWith(monthStr) &&
+        !feedKeys.has(`${b.date}|${b.facility_id}|${b.start_hour}|${b.purpose}`)
+      );
+      for (const sb_bk of staleAdminBks) {
+        if (configured) {
+          await sb.remove("bookings", sb_bk.id);
+        } else {
+          setBookings(prev => prev.filter(b => b.id !== sb_bk.id));
+        }
+        removed++;
+      }
+
       for (const ev of events) {
         const date = parseCJRDate(ev.EventStartDate);
         if (!date) { skipped++; continue; }
@@ -2355,7 +2432,8 @@ export default function App() {
       if (configured && clashUpdates > 0) await loadBookings();
 
       const clashMsg = clashUpdates > 0 ? `, ${clashUpdates} clash${clashUpdates>1?"es":""} flagged` : "";
-      showToast(`Sync complete: ${added} added, ${skipped} already existed${clashMsg}.`);
+      const removedMsg = removed > 0 ? `, ${removed} stale removed` : "";
+      showToast(`Sync complete: ${added} added, ${skipped} already existed${removedMsg}${clashMsg}.`);
     } catch(e) {
       showToast("Sync failed: " + e.message, "error");
     } finally {
@@ -2446,7 +2524,8 @@ export default function App() {
     }
     showToast(`${ids.length} booking${ids.length>1?"s":""} ${newStatus}!`);
 
-    if(!skipEmail){
+    const noEmailStatuses = new Set(["pending_cpsa"]);
+    if(!skipEmail && !noEmailStatuses.has(newStatus)){
       // Group by email, send one email per unique booker
       const byEmail={};
       affected.forEach(b=>{
@@ -2454,9 +2533,10 @@ export default function App() {
         if(!byEmail[k]) byEmail[k]={name:b.name,email:b.email,bkgs:[]};
         byEmail[k].bkgs.push({...b,...patch});
       });
+      const statusLabel = STATUS_META[newStatus]?.label || newStatus;
       await Promise.all(Object.values(byEmail).map(({name,email,bkgs})=>
         sendApprovalEmail({to:email,
-          subject:`Your Booking${bkgs.length>1?"s have":" has"} been ${newStatus}`,
+          subject:`Your Booking${bkgs.length>1?"s":""} — ${statusLabel}`,
           html:buildApprovalEmailHtml({name,email,bookings:bkgs,newStatus,adminNote})})
       ));
     }
@@ -2739,6 +2819,7 @@ export default function App() {
 
               const listDir = listSortDir==="asc"?1:-1;
               let visible = [...bookings]
+                .filter(b => !isAdminBooking(b))
                 .filter(b => selFac==="all" || b.facility_id===selFac)
                 .filter(b => listBookerFilter==="all" || b.email?.toLowerCase()===listBookerFilter)
                 .filter(b => listStatusFilter==="all" || b.status===listStatusFilter)
@@ -2884,7 +2965,7 @@ export default function App() {
 
       {viewing&&(
         <Modal title="Booking Details" onClose={()=>setViewing(null)}>
-          <BookingDetail booking={viewing} onEdit={()=>openEdit(viewing)} onClose={()=>setViewing(null)} onCancel={()=>queueForRemoval(viewing.id)} isAdmin={isAdmin} onStatusChange={status=>handleStatusChange(viewing,status)} loggedInEmail={loggedInEmail}/>
+          <BookingDetail booking={viewing} onEdit={()=>openEdit(viewing)} onClose={()=>setViewing(null)} onCancel={()=>queueForRemoval(viewing.id)} isAdmin={isAdmin} onStatusChange={status=>handleStatusChange(viewing,status)} loggedInEmail={loggedInEmail} allClashes={allClashes}/>
         </Modal>
       )}
     </div>
