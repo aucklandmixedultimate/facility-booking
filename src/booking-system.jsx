@@ -910,7 +910,7 @@ function BookingForm({ booking, allBookings, onSave, onAddToCart, onClose, isAdm
   }
 
   const initRows = isEditing
-    ? [{ facility_id:booking.facility_id, date:booking.date, start_hour:booking.start_hour,
+    ? [{ id:booking.id, facility_id:booking.facility_id, date:booking.date, start_hour:booking.start_hour,
          duration:booking.duration, purpose:booking.purpose, notes:booking.notes||"",
          status:booking.status, recur:booking.recur||{mode:"none",weeks:4,until:""} }]
     : [makeBlankRow(booking && !isMultiEdit ? { facility_id:booking.facility_id||FACILITIES[0].id,
