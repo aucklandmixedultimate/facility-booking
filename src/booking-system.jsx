@@ -67,6 +67,12 @@ const STATUS_META = {
   pending:      {bg:"#fff8e1",border:"#f59e0b",text:"#92400e",dot:"#f59e0b",label:"(1/4) Pending AMUA Review"},
 };
 const REVIEW_STATUSES = new Set(["pending_amua","queued_cpsa","amua_submit","pending_cpsa","pending"]);
+const AMUA_INFO = {
+  name:      "Auckland Mixed Ultimate Association (AMUA)",
+  address:   "",
+  gstNumber: "",
+  bank:      "",
+};
 const MONTHS=["January","February","March","April","May","June","July","August","September","October","November","December"];
 
 function fmtTime(h) {
@@ -1527,7 +1533,7 @@ function AboutTab() {
   );
 }
 
-function SummaryTab({ bookings, loggedInEmail, facilityRates = {} }) {
+function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = false }) {
   const now = new Date();
   const thisYear = now.getFullYear();
 
@@ -1536,6 +1542,12 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {} }) {
   const [customFrom,  setCustomFrom]  = useState("");
   const [customTo,    setCustomTo]    = useState("");
   const [emailFilter, setEmailFilter] = useState("all");
+
+  // Invoice modal state
+  const [showInvoice, setShowInvoice] = useState(false);
+  const [invDetail,   setInvDetail]   = useState("grouped");   // "grouped" | "individual"
+  const [invGst,      setInvGst]      = useState("inclusive"); // "inclusive" | "exclusive" | "note"
+  const [invScope,    setInvScope]    = useState("single");    // "single" | "combined" (admin only)
 
   function presetRange(key) {
     const y = thisYear;
@@ -1644,6 +1656,156 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {} }) {
   function fmtHrs(h) { return h===0?"0h" : h%1===0?`${h}h`:`${Math.floor(h)}h ${Math.round((h%1)*60)}m`; }
   function fmtCost(n) { return "$" + n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g,","); }
 
+  // ── Invoice helpers ──────────────────────────────────────────────────────
+  function buildInvoiceLines(bkgs, detail) {
+    if (detail === "grouped") {
+      const groups = {};
+      bkgs.forEach(b => {
+        const { day, evening } = splitHours(b);
+        const rates = getFacRates(b.facility_id);
+        const fac = FACILITIES.find(f => f.id === b.facility_id);
+        const facName = fac?.name || b.facility_id;
+        if (day > 0) {
+          const key = b.facility_id + ":day";
+          if (!groups[key]) groups[key] = { desc:`${facName} – Daytime`, hours:0, rate:rates.day, cost:0 };
+          groups[key].hours += day; groups[key].cost += day * rates.day;
+        }
+        if (evening > 0) {
+          const key = b.facility_id + ":evening";
+          if (!groups[key]) groups[key] = { desc:`${facName} – Evening`, hours:0, rate:rates.evening, cost:0 };
+          groups[key].hours += evening; groups[key].cost += evening * rates.evening;
+        }
+      });
+      return Object.values(groups).map(g => ({
+        desc:  g.desc,
+        detail:`${fmtHrs(g.hours)} @ ${fmtCost(g.rate)}/hr`,
+        cost:  g.cost,
+      }));
+    } else {
+      return bkgs.map(b => {
+        const { day, evening } = splitHours(b);
+        const rates = getFacRates(b.facility_id);
+        const fac = FACILITIES.find(f => f.id === b.facility_id);
+        const cost = day * rates.day + evening * rates.evening;
+        const timeStr = `${fmtTime(b.start_hour)}–${fmtTime(b.start_hour + b.duration)}`;
+        const splitNote = day>0&&evening>0 ? ` (${fmtHrs(day)} day + ${fmtHrs(evening)} eve)` : "";
+        return {
+          desc:   `${fmtDate(b.date)} · ${fac?.name||b.facility_id} · ${timeStr}`,
+          detail: `${b.purpose}${splitNote}`,
+          cost,
+        };
+      }).sort((a,b)=>a.desc.localeCompare(b.desc));
+    }
+  }
+
+  function gstAmounts(subtotal, gstMode) {
+    if (gstMode === "exclusive") {
+      const gst = subtotal * 0.15;
+      return { pre: subtotal, gst, total: subtotal + gst };
+    }
+    // inclusive: rates already include GST
+    const gst = subtotal - subtotal / 1.15;
+    return { pre: subtotal / 1.15, gst, total: subtotal };
+  }
+
+  function buildInvoiceHtml({ bookerName, bookerEmail, lines, gstMode, dateRange, invNumber }) {
+    const subtotal = lines.reduce((s, l) => s + l.cost, 0);
+    const { pre, gst, total } = gstAmounts(subtotal, gstMode);
+    const gstLabel = gstMode === "note" ? "" : gstMode === "exclusive" ? "excl. GST" : "incl. GST";
+    const periodStr = dateRange.from && dateRange.to ? `${fmtDate(dateRange.from)} – ${fmtDate(dateRange.to)}` : "All periods";
+    const rowsHtml = lines.map(l => `
+      <tr>
+        <td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;font-size:13px;color:#0f172a">${l.desc}</td>
+        <td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;font-size:12px;color:#64748b">${l.detail}</td>
+        <td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;font-size:13px;color:#0f172a;text-align:right;white-space:nowrap">${fmtCost(l.cost)}</td>
+      </tr>`).join("");
+    const gstRows = gstMode === "note"
+      ? `<tr><td colspan="2" style="padding:8px 16px;font-size:12px;color:#64748b;text-align:right">GST inclusive</td><td style="padding:8px 16px;font-size:13px;font-weight:700;color:#0f172a;text-align:right">${fmtCost(total)}</td></tr>`
+      : `<tr style="background:#f8fafc"><td colspan="2" style="padding:8px 16px;font-size:12px;color:#64748b;text-align:right">Subtotal (${gstLabel})</td><td style="padding:8px 16px;font-size:13px;color:#0f172a;text-align:right">${fmtCost(pre)}</td></tr>
+         <tr style="background:#f8fafc"><td colspan="2" style="padding:8px 16px;font-size:12px;color:#64748b;text-align:right">GST (15%)</td><td style="padding:8px 16px;font-size:13px;color:#0f172a;text-align:right">${fmtCost(gst)}</td></tr>
+         <tr style="background:#f0fdf4"><td colspan="2" style="padding:10px 16px;font-size:14px;font-weight:700;color:#0f172a;text-align:right">Total</td><td style="padding:10px 16px;font-size:16px;font-weight:800;color:#15803d;text-align:right">${fmtCost(total)}</td></tr>`;
+    const amuaLines = [AMUA_INFO.address, AMUA_INFO.gstNumber ? `GST No: ${AMUA_INFO.gstNumber}` : "", AMUA_INFO.bank].filter(Boolean).map(l=>`<div>${l}</div>`).join("");
+    return `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Invoice ${invNumber}</title><style>
+      @media print { body{margin:0} }
+      body{font-family:'Segoe UI',sans-serif;background:#f8fafc;margin:0;padding:32px 16px}
+      .page{max-width:700px;margin:0 auto;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 4px 32px rgba(0,0,0,0.08)}
+    </style></head><body>
+    <div class="page">
+      <div style="background:#0f172a;padding:32px 40px;display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:16px">
+        <div>
+          <div style="font-size:24px;font-weight:800;color:#fff;letter-spacing:-0.02em">${AMUA_INFO.name}</div>
+          <div style="font-size:13px;color:#94a3b8;margin-top:4px">${amuaLines||"<span style='color:#64748b'>Update AMUA_INFO in booking-system.jsx</span>"}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:28px;font-weight:800;color:#fff">INVOICE</div>
+          <div style="font-size:13px;color:#94a3b8;margin-top:4px">#${invNumber}</div>
+          <div style="font-size:13px;color:#94a3b8">Date: ${todayKey()}</div>
+        </div>
+      </div>
+      <div style="padding:28px 40px;display:grid;grid-template-columns:1fr 1fr;gap:24px;border-bottom:1px solid #f1f5f9">
+        <div>
+          <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px">Bill To</div>
+          <div style="font-size:15px;font-weight:700;color:#0f172a">${bookerName||"(see email)"}</div>
+          <div style="font-size:13px;color:#475569">${bookerEmail}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px">Period</div>
+          <div style="font-size:14px;font-weight:600;color:#0f172a">${periodStr}</div>
+        </div>
+      </div>
+      <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse">
+        <thead><tr style="background:#f8fafc">
+          <th style="padding:10px 16px;text-align:left;font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;border-bottom:2px solid #f1f5f9">Description</th>
+          <th style="padding:10px 16px;text-align:left;font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;border-bottom:2px solid #f1f5f9">Detail</th>
+          <th style="padding:10px 16px;text-align:right;font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;border-bottom:2px solid #f1f5f9">Amount</th>
+        </tr></thead>
+        <tbody>${rowsHtml}</tbody>
+        <tfoot>${gstRows}</tfoot>
+      </table>
+      <div style="padding:20px 40px 32px;font-size:12px;color:#94a3b8;text-align:center">
+        ${AMUA_INFO.bank ? `Bank: ${AMUA_INFO.bank} · ` : ""}Generated by FacilityBook
+      </div>
+    </div></body></html>`;
+  }
+
+  function exportInvoice(format, bkgsForInvoice, bookerName, bookerEmail) {
+    const lines = buildInvoiceLines(bkgsForInvoice, invDetail);
+    const dateRange = { from: dateFrom, to: dateTo };
+    const invNumber = `${todayKey().replace(/-/g,"")}-${bookerEmail.replace(/[^a-z0-9]/gi,"").slice(0,6).toUpperCase()}`;
+    const html = buildInvoiceHtml({ bookerName, bookerEmail, lines, gstMode: invGst, dateRange, invNumber });
+    if (format === "html" || format === "print") {
+      const win = window.open("", "_blank");
+      if (win) {
+        win.document.write(html);
+        win.document.close();
+        if (format === "print") { win.focus(); win.print(); }
+      }
+    } else if (format === "csv") {
+      const subtotal = lines.reduce((s, l) => s + l.cost, 0);
+      const { pre, gst, total } = gstAmounts(subtotal, invGst);
+      const esc = v => `"${String(v||"").replace(/"/g,'""')}"`;
+      const csvRows = lines.map(l => [invNumber, bookerName, bookerEmail, l.desc, l.detail, l.cost.toFixed(2)].map(esc).join(","));
+      csvRows.push(["","","","","Subtotal",pre.toFixed(2)].map(esc).join(","));
+      csvRows.push(["","","","","GST (15%)",gst.toFixed(2)].map(esc).join(","));
+      csvRows.push(["","","","","Total",total.toFixed(2)].map(esc).join(","));
+      const csv = [["Invoice","Name","Email","Description","Detail","Amount"].map(esc).join(","), ...csvRows].join("\n");
+      const blob = new Blob([csv], { type:"text/csv" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a"); a.href=url; a.download=`invoice-${invNumber}.csv`; a.click();
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  // Groups active bookings by booker for combined/per-booker export
+  function getInvoiceScopes() {
+    if (invScope === "combined" || emailFilter !== "all") {
+      const name = emailFilter !== "all" ? (rows.find(r=>r.email.toLowerCase()===emailFilter.toLowerCase())?.name||emailFilter) : "All Bookers";
+      const email = emailFilter !== "all" ? emailFilter : "combined";
+      return [{ name, email, bkgs: active }];
+    }
+    return rows.map(r => ({ name:r.name, email:r.email, bkgs: active.filter(b=>b.email.toLowerCase()===r.email.toLowerCase()) }));
+  }
+
   // CSV export — all columns from every booking (not filtered)
   function exportCSV() {
     const cols = ["id","name","email","phone","facility_id","facility_name","date","start_hour","start_time","duration","end_time","purpose","notes","status","created_at","updated_at"];
@@ -1713,6 +1875,11 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {} }) {
           <button onClick={exportCSV} style={S.btn({ background:"#0f172a", color:"#fff", display:"flex", alignItems:"center", gap:6, marginLeft:"auto" })}>
             ⬇ Export All Data (CSV)
           </button>
+          {anyRates && (
+            <button onClick={()=>setShowInvoice(true)} style={S.btn({ background:"#15803d", color:"#fff", display:"flex", alignItems:"center", gap:6 })}>
+              🧾 Export Invoice
+            </button>
+          )}
         </div>
       </div>
 
@@ -1823,6 +1990,75 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {} }) {
             </div>
           )}
       </div>
+
+      {/* Invoice modal */}
+      {showInvoice && (()=>{
+        const scopes = getInvoiceScopes();
+        const OptionRow = ({label, children}) => (
+          <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+            <span style={{fontSize:12,fontWeight:600,color:"#64748b",minWidth:90}}>{label}</span>
+            {children}
+          </div>
+        );
+        const Pill = ({active, onClick, children}) => (
+          <button onClick={onClick} style={{padding:"4px 12px",borderRadius:8,border:active?"1.5px solid #0f172a":"1.5px solid #e2e8f0",background:active?"#0f172a":"#f8fafc",color:active?"#fff":"#475569",fontWeight:600,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>
+            {children}
+          </button>
+        );
+        return (
+          <div style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.45)",zIndex:999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+            <div style={{background:"#fff",borderRadius:16,padding:28,maxWidth:520,width:"100%",boxShadow:"0 8px 40px rgba(0,0,0,0.18)",display:"flex",flexDirection:"column",gap:18}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <h3 style={{margin:0,fontSize:18,fontWeight:800,color:"#0f172a"}}>🧾 Export Invoice</h3>
+                <button onClick={()=>setShowInvoice(false)} style={{background:"none",border:"none",cursor:"pointer",fontSize:20,color:"#94a3b8",lineHeight:1}}>✕</button>
+              </div>
+
+              <div style={{display:"flex",flexDirection:"column",gap:12}}>
+                {isAdmin && emailFilter==="all" && (
+                  <OptionRow label="Scope">
+                    <Pill active={invScope==="combined"} onClick={()=>setInvScope("combined")}>Combined invoice</Pill>
+                    <Pill active={invScope==="per_booker"} onClick={()=>setInvScope("per_booker")}>Per booker</Pill>
+                  </OptionRow>
+                )}
+                <OptionRow label="Line items">
+                  <Pill active={invDetail==="grouped"} onClick={()=>setInvDetail("grouped")}>Grouped</Pill>
+                  <Pill active={invDetail==="individual"} onClick={()=>setInvDetail("individual")}>Individual</Pill>
+                </OptionRow>
+                <OptionRow label="GST">
+                  <Pill active={invGst==="inclusive"} onClick={()=>setInvGst("inclusive")}>Inclusive (extract)</Pill>
+                  <Pill active={invGst==="exclusive"} onClick={()=>setInvGst("exclusive")}>Exclusive (add on)</Pill>
+                  <Pill active={invGst==="note"} onClick={()=>setInvGst("note")}>Note only</Pill>
+                </OptionRow>
+              </div>
+
+              {/* Summary of what will be invoiced */}
+              <div style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:10,padding:"12px 16px",fontSize:13,color:"#475569"}}>
+                {invScope==="per_booker" && emailFilter==="all"
+                  ? <span><strong>{scopes.length}</strong> separate invoices for {scopes.map(s=>s.name||s.email).join(", ")}</span>
+                  : <span>Invoice for <strong>{scopes[0]?.name||scopes[0]?.email}</strong> — <strong>{active.length}</strong> booking{active.length!==1?"s":""}, total <strong>{fmtCost(active.reduce((s,b)=>{const {day,evening}=splitHours(b);const r=getFacRates(b.facility_id);return s+day*r.day+evening*r.evening;},0))}</strong></span>
+                }
+              </div>
+
+              <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                <div style={{fontSize:12,fontWeight:600,color:"#64748b",marginBottom:2}}>Export as:</div>
+                <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                  {[
+                    {fmt:"html",  label:"Open HTML", icon:"🌐"},
+                    {fmt:"print", label:"Print / Save PDF", icon:"🖨"},
+                    {fmt:"csv",   label:"CSV", icon:"📊"},
+                  ].map(({fmt,label,icon})=>(
+                    <button key={fmt} onClick={()=>{
+                      scopes.forEach(s => exportInvoice(fmt, s.bkgs, s.name, s.email));
+                    }} style={S.btn({background:"#0f172a",color:"#fff",gap:6,display:"flex",alignItems:"center"})}>
+                      {icon} {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -3030,7 +3266,7 @@ export default function App() {
           </div>
         )}
 
-        {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<SummaryTab bookings={bookings} loggedInEmail={loggedInEmail} facilityRates={facilityRates}/>}</div>}
+        {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<SummaryTab bookings={bookings} loggedInEmail={loggedInEmail} facilityRates={facilityRates} isAdmin={isAdmin}/>}</div>}
         {tab==="about"&&<div style={{padding:"8px 0"}}><AboutTab/></div>}
         {tab==="admin"&&isAdmin&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onQueueDelete={queueForRemovalSilent} clashes={allClashes} deleteIds={new Set(deleteQueue.map(b=>b.id))} facilityRates={facilityRates} onUpdateFacilityRate={updateFacilityRate} onClearOldUnapproved={handleClearOldUnapproved}/>}</div>}
       </div>
