@@ -1529,8 +1529,44 @@ function AboutTab() {
 
 function SummaryTab({ bookings, loggedInEmail, facilityRates = {} }) {
   const now = new Date();
-  const [year,        setYear]        = useState(now.getFullYear());
+  const thisYear = now.getFullYear();
+
+  // Date range state: preset key + optional custom from/to
+  const [preset,      setPreset]      = useState("this_year");
+  const [customFrom,  setCustomFrom]  = useState("");
+  const [customTo,    setCustomTo]    = useState("");
   const [emailFilter, setEmailFilter] = useState("all");
+
+  function presetRange(key) {
+    const y = thisYear;
+    const pad = n => String(n).padStart(2,"0");
+    const ymd = (yr,m,d) => `${yr}-${pad(m)}-${pad(d)}`;
+    switch(key) {
+      case "this_year":   return { from: ymd(y,1,1),   to: ymd(y,12,31) };
+      case "last_year":   return { from: ymd(y-1,1,1), to: ymd(y-1,12,31) };
+      case "last_6mo": {
+        const d = new Date(now); d.setMonth(d.getMonth()-6);
+        return { from: d.toISOString().slice(0,10), to: now.toISOString().slice(0,10) };
+      }
+      case "last_3mo": {
+        const d = new Date(now); d.setMonth(d.getMonth()-3);
+        return { from: d.toISOString().slice(0,10), to: now.toISOString().slice(0,10) };
+      }
+      case "all":         return { from: "", to: "" };
+      default:            return { from: customFrom, to: customTo };
+    }
+  }
+
+  const { from: dateFrom, to: dateTo } = preset === "custom" ? { from: customFrom, to: customTo } : presetRange(preset);
+
+  const PRESETS = [
+    { key:"this_year", label:`${thisYear}` },
+    { key:"last_year", label:`${thisYear-1}` },
+    { key:"last_6mo",  label:"6 months" },
+    { key:"last_3mo",  label:"3 months" },
+    { key:"all",       label:"All time" },
+    { key:"custom",    label:"Custom" },
+  ];
 
   // Rebuild color cache for all emails in the dataset so chips render correctly
   bookings.forEach(b => emailColor(b.email));
@@ -1540,7 +1576,8 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {} }) {
   const active = bookings.filter(b => {
     if (isAdminBooking(b)) return false;
     if (["cancelled","rejected"].includes(b.status)) return false;
-    if (new Date(b.date+"T00:00:00").getFullYear() !== year) return false;
+    if (dateFrom && b.date < dateFrom) return false;
+    if (dateTo   && b.date > dateTo)   return false;
     if (emailFilter !== "all" && b.email.toLowerCase() !== emailFilter.toLowerCase()) return false;
     return true;
   });
@@ -1629,14 +1666,31 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {} }) {
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:24 }}>
       {/* Controls */}
-      <div style={{ display:"flex", alignItems:"center", gap:12, flexWrap:"wrap" }}>
-        {/* Year picker */}
-        <div style={{ display:"flex", alignItems:"center", gap:8, background:"#f8fafc", border:"1px solid #e2e8f0", borderRadius:10, padding:"4px 10px" }}>
-          <button onClick={()=>setYear(y=>y-1)} style={{ background:"none", border:"none", cursor:"pointer", fontSize:16, color:"#475569", padding:"0 4px" }}>‹</button>
-          <span style={{ fontSize:15, fontWeight:700, color:"#0f172a", minWidth:48, textAlign:"center" }}>{year}</span>
-          <button onClick={()=>setYear(y=>y+1)} style={{ background:"none", border:"none", cursor:"pointer", fontSize:16, color:"#475569", padding:"0 4px" }}>›</button>
+      <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+        {/* Date range presets */}
+        <div style={{ display:"flex", alignItems:"center", gap:6, flexWrap:"wrap" }}>
+          <span style={{ fontSize:12, fontWeight:600, color:"#64748b", marginRight:2 }}>Period:</span>
+          {PRESETS.map(p=>(
+            <button key={p.key} onClick={()=>setPreset(p.key)}
+              style={{ padding:"5px 12px", borderRadius:8, border: preset===p.key?"1.5px solid #0f172a":"1.5px solid #e2e8f0",
+                background: preset===p.key?"#0f172a":"#f8fafc", color: preset===p.key?"#fff":"#475569",
+                fontWeight:600, fontSize:12, cursor:"pointer", fontFamily:"inherit" }}>
+              {p.label}
+            </button>
+          ))}
         </div>
-
+        {/* Custom date range inputs */}
+        {preset==="custom" && (
+          <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
+            <span style={{ fontSize:12, fontWeight:600, color:"#64748b" }}>From:</span>
+            <input type="date" value={customFrom} onChange={e=>setCustomFrom(e.target.value)}
+              style={{ padding:"5px 10px", borderRadius:8, border:"1.5px solid #e2e8f0", fontSize:13, fontFamily:"inherit", background:"#f8fafc", color:"#0f172a", outline:"none" }}/>
+            <span style={{ fontSize:12, fontWeight:600, color:"#64748b" }}>To:</span>
+            <input type="date" value={customTo} onChange={e=>setCustomTo(e.target.value)}
+              style={{ padding:"5px 10px", borderRadius:8, border:"1.5px solid #e2e8f0", fontSize:13, fontFamily:"inherit", background:"#f8fafc", color:"#0f172a", outline:"none" }}/>
+          </div>
+        )}
+        <div style={{ display:"flex", alignItems:"center", gap:12, flexWrap:"wrap" }}>
         {/* Email filter */}
         <div style={{ display:"flex", alignItems:"center", gap:8 }}>
           <span style={{ fontSize:12, fontWeight:600, color:"#64748b" }}>Filter by email:</span>
@@ -1656,9 +1710,10 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {} }) {
           </button>
         )}
 
-        <button onClick={exportCSV} style={S.btn({ background:"#0f172a", color:"#fff", display:"flex", alignItems:"center", gap:6, marginLeft:"auto" })}>
-          ⬇ Export All Data (CSV)
-        </button>
+          <button onClick={exportCSV} style={S.btn({ background:"#0f172a", color:"#fff", display:"flex", alignItems:"center", gap:6, marginLeft:"auto" })}>
+            ⬇ Export All Data (CSV)
+          </button>
+        </div>
       </div>
 
       {/* KPI cards */}
@@ -1684,7 +1739,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {} }) {
       {facCosts.length > 0 && (
         <div>
           <h3 style={{ margin:"0 0 10px", fontSize:15, fontWeight:700, color:"#0f172a" }}>
-            Cost by Facility — {year}{emailFilter!=="all"?` · ${emailFilter}`:""}
+            Cost by Facility — {PRESETS.find(p=>p.key===preset)?.label}{dateFrom&&dateTo?` (${dateFrom} – ${dateTo})`:""}{emailFilter!=="all"?` · ${emailFilter}`:""}
             {!anyRates && <span style={{ fontSize:12, fontWeight:400, color:"#94a3b8", marginLeft:8 }}>(set hourly rates in Admin → Facility Rates)</span>}
           </h3>
           <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:10 }}>
@@ -1720,7 +1775,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {} }) {
       {/* Table */}
       <div>
         <h3 style={{ margin:"0 0 12px", fontSize:15, fontWeight:700, color:"#0f172a" }}>
-          Hours by Booker — {year}{emailFilter!=="all"?` · ${emailFilter}`:""}
+          Hours by Booker — {PRESETS.find(p=>p.key===preset)?.label}{dateFrom&&dateTo?` (${dateFrom} – ${dateTo})`:""}{emailFilter!=="all"?` · ${emailFilter}`:""}
         </h3>
         {rows.length===0
           ? <div style={{ textAlign:"center", padding:"32px 0", color:"#94a3b8", fontSize:14 }}>No active bookings match the current filter.</div>
