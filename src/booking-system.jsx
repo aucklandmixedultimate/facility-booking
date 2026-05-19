@@ -574,7 +574,9 @@ function BookingRow({ row, idx, onChange, onRemove, isOnly, isAdmin, isEditing, 
 // ─── Cart Modal ───────────────────────────────────────────────────────────────
 function CartModal({ cart, setCart, onClose, onSubmit, openNew, cartIdsSet }) {
   const [editingDraft, setEditingDraft] = useState(null); // {gi, di, draft}
-  const totalCount = cart.reduce((s,i)=>s+i.drafts.length,0);
+  const totalNew  = cart.filter(i=>!i.isEdit&&!i.isMultiEdit).reduce((s,i)=>s+i.drafts.length,0);
+  const totalEdits = cart.filter(i=>i.isEdit||i.isMultiEdit).reduce((s,i)=>s+i.drafts.length,0);
+  const totalCount = totalNew + totalEdits;
 
   function removeDraft(gi, di) {
     setCart(prev => prev.map((item,i) => {
@@ -625,17 +627,22 @@ function CartModal({ cart, setCart, onClose, onSubmit, openNew, cartIdsSet }) {
         ? <div style={{textAlign:'center',padding:'40px 0',color:'#94a3b8',fontSize:14}}>Your cart is empty.</div>
         : (
           <>
-            <div style={{fontSize:13,color:'#64748b',marginBottom:12}}>{totalCount} booking{totalCount>1?'s':''} ready to submit.</div>
+            <div style={{fontSize:13,color:'#64748b',marginBottom:12}}>
+              {[totalNew>0&&`${totalNew} new booking${totalNew>1?'s':''}`, totalEdits>0&&`${totalEdits} edit${totalEdits>1?'s':''}`].filter(Boolean).join(' · ')} ready to submit.
+            </div>
             <div style={{flex:1,overflowY:'auto',maxHeight:'55vh',display:'flex',flexDirection:'column',gap:10,paddingRight:2}}>
               {cart.map((item,gi)=>{
                 const groups = groupDrafts(item.drafts);
                 return (
                   <div key={gi} style={{border:'1.5px solid #e2e8f0',borderRadius:12,overflow:'hidden'}}>
-                    <div style={{background:'#f8fafc',padding:'10px 14px',display:'flex',alignItems:'center',borderBottom:'1px solid #e2e8f0'}}>
-                      <div style={{display:'flex',alignItems:'center',gap:8,flex:1}}>
+                    <div style={{background:item.isEdit||item.isMultiEdit?'#eff6ff':'#f8fafc',padding:'10px 14px',display:'flex',alignItems:'center',borderBottom:'1px solid #e2e8f0'}}>
+                      <div style={{display:'flex',alignItems:'center',gap:8,flex:1,flexWrap:'wrap'}}>
                         <EmailChip email={item.email}/>
                         <span style={{fontSize:13,fontWeight:600,color:'#0f172a'}}>{item.name}</span>
-                        <span style={{fontSize:12,color:'#94a3b8'}}>· {item.drafts.length} booking{item.drafts.length>1?'s':''}</span>
+                        {(item.isEdit||item.isMultiEdit)
+                          ? <span style={{fontSize:11,fontWeight:700,color:'#1d4ed8',background:'#dbeafe',border:'1px solid #93c5fd',borderRadius:4,padding:'1px 7px'}}>✏ edit</span>
+                          : <span style={{fontSize:12,color:'#94a3b8'}}>· {item.drafts.length} booking{item.drafts.length>1?'s':''}</span>
+                        }
                       </div>
                     </div>
                     {groups.map((g,gi2)=>{
@@ -705,7 +712,9 @@ function CartModal({ cart, setCart, onClose, onSubmit, openNew, cartIdsSet }) {
               <button onClick={()=>setCart([])} style={S.btn({border:'1.5px solid #f43f5e',background:'#fff',color:'#f43f5e'})}>Clear All</button>
               <div style={{display:'flex',gap:10}}>
                 <button onClick={()=>{onClose();openNew(todayKey(),9,1);}} style={S.btn({border:'1.5px solid #e2e8f0',background:'#fff',color:'#475569'})}>+ Add More</button>
-                <button onClick={onSubmit} style={S.btn({background:'#2d4a1e',color:'#fff'})}>✓ Submit All Bookings</button>
+                <button onClick={onSubmit} style={S.btn({background:'#2d4a1e',color:'#fff'})}>
+                  ✓ {totalEdits>0&&totalNew===0 ? "Save All Edits" : totalEdits>0 ? "Submit All" : "Submit All Bookings"}
+                </button>
               </div>
             </div>
           </>
@@ -758,7 +767,7 @@ function InlineDraftEditor({ draft, onSave, onCancel }) {
   );
 }
 
-function DeleteCartModal({ deleteQueue, setDeleteQueue, onClose, onSubmit, isAdmin }) {
+function DeleteCartModal({ deleteQueue, setDeleteQueue, onClose, onSubmit, isAdmin, silentMode=false }) {
   const [adminNote, setAdminNote] = useState('');
   const [skipEmail, setSkipEmail] = useState(false);
   return (
@@ -787,9 +796,9 @@ function DeleteCartModal({ deleteQueue, setDeleteQueue, onClose, onSubmit, isAdm
         <div style={{marginBottom:12,display:'flex',flexDirection:'column',gap:8}}>
           <label style={S.lbl}>Admin Note (optional — included in email)</label>
           <textarea style={{...S.inp,resize:'vertical',minHeight:52,fontSize:13}} value={adminNote} onChange={e=>setAdminNote(e.target.value)} placeholder="Reason for removal..."/>
-          <label style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer',fontSize:13,color:'#475569'}}>
-            <input type="checkbox" checked={skipEmail} onChange={e=>setSkipEmail(e.target.checked)} style={{width:15,height:15,accentColor:'#0f172a'}}/>
-            Remove without notifying bookers by email
+          <label style={{display:'flex',alignItems:'center',gap:8,cursor:silentMode?'default':'pointer',fontSize:13,color:silentMode?'#94a3b8':'#475569'}}>
+            <input type="checkbox" checked={silentMode||skipEmail} onChange={e=>!silentMode&&setSkipEmail(e.target.checked)} disabled={silentMode} style={{width:15,height:15,accentColor:'#0f172a'}}/>
+            {silentMode?"Silent mode: no email will be sent":"Remove without notifying bookers by email"}
           </label>
         </div>
       )}
@@ -797,7 +806,7 @@ function DeleteCartModal({ deleteQueue, setDeleteQueue, onClose, onSubmit, isAdm
         <button onClick={()=>setDeleteQueue([])} style={S.btn({border:'1.5px solid #e2e8f0',background:'#fff',color:'#94a3b8'})}>Clear Queue</button>
         <div style={{display:'flex',gap:10}}>
           <button onClick={onClose} style={S.btn({border:'1.5px solid #e2e8f0',background:'#fff',color:'#475569'})}>Cancel</button>
-          <button onClick={()=>onSubmit(adminNote,skipEmail)} style={S.btn({background:'#7f1d1d',color:'#fff'})}>
+          <button onClick={()=>onSubmit(adminNote,silentMode||skipEmail)} style={S.btn({background:'#7f1d1d',color:'#fff'})}>
             🗑 Confirm Removal ({deleteQueue.length})
           </button>
         </div>
@@ -983,9 +992,6 @@ function BookingForm({ booking, allBookings, onSave, onAddToCart, onClose, isAdm
     const cross   = drafts.flatMap(d=>getCrossFacilityOverlaps(d,others));
     if (cross.length > 0 && !warn?.crossDismissed) { setWarn({type:"cross",list:[...new Map(cross.map(x=>[x.id,x])).values()],drafts}); return; }
     setWarn(null);
-    // For edits: call onSave directly
-    if (isEditing) { onSave(drafts, name, email); return; }
-    // For new bookings: add to cart
     onAddToCart(drafts, name, email);
   }
 
@@ -995,12 +1001,12 @@ function BookingForm({ booking, allBookings, onSave, onAddToCart, onClose, isAdm
     const cross  = drafts.flatMap(d=>getCrossFacilityOverlaps(d,others));
     if (cross.length>0) { setWarn({type:"cross",list:[...new Map(cross.map(x=>[x.id,x])).values()],drafts,sameDismissed:true}); return; }
     setWarn(null);
-    isEditing ? onSave(drafts, name, email) : onAddToCart(drafts, name, email);
+    onAddToCart(drafts, name, email);
   }
   function proceedCross() {
     const drafts = warn?.drafts; if(!drafts) return;
     setWarn(null);
-    isEditing ? onSave(drafts, name, email) : onAddToCart(drafts, name, email);
+    onAddToCart(drafts, name, email);
   }
 
   // Overlap warnings
@@ -1041,8 +1047,8 @@ function BookingForm({ booking, allBookings, onSave, onAddToCart, onClose, isAdm
 
       <div style={{display:"flex",gap:10,justifyContent:"flex-end",paddingTop:4}}>
         <button onClick={onClose} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#475569"})}>Cancel</button>
-        <button onClick={handleAddToCart} style={S.btn({background: isEditing?"#0f172a":"#2d4a1e",color:"#fff"})}>
-          {isEditing ? "Save Changes" : "➕ Add to Cart"}
+        <button onClick={handleAddToCart} style={S.btn({background:"#2d4a1e",color:"#fff"})}>
+          {isEditing ? "✏ Add Edit to Cart" : "➕ Add to Cart"}
         </button>
       </div>
     </div>
@@ -2080,7 +2086,7 @@ function AdminLogin({onLogin}) {
 }
 
 // ─── Admin Panel with action queue, bulk approve, facility rates ──────────────
-function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[],deleteIds=new Set(),facilityRates={},onUpdateFacilityRate,onClearOldUnapproved}) {
+function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[],deleteIds=new Set(),facilityRates={},onUpdateFacilityRate,onClearOldUnapproved,silentMode=false}) {
   const [sf,setSf]=useState("all"), [ff,setFf]=useState("all"), [q,setQ]=useState("");
   const [sortCol,setSortCol]=useState("date"), [sortDir,setSortDir]=useState("desc");
   const [selected,setSelected]=useState(new Set());
@@ -2164,7 +2170,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[]
         byStatus[a.newStatus].push(a.id);
       });
       for(const [status, ids] of Object.entries(byStatus)) {
-        await onBulkStatusChange(ids, status, actionNote, actionSkipEmail);
+        await onBulkStatusChange(ids, status, actionNote, silentMode || actionSkipEmail);
       }
       setActionQueue([]); setActionNote("");
     } finally { setActionSending(false); }
@@ -2218,7 +2224,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[]
     if(ids.length===0) return;
     setBulkSending(true);
     try {
-      await onBulkStatusChange(ids, bulkStatus, bulkNote, bulkSkipEmail);
+      await onBulkStatusChange(ids, bulkStatus, bulkNote, silentMode || bulkSkipEmail);
       setSelected(new Set()); setBulkNote("");
     } finally { setBulkSending(false); }
   }
@@ -2296,9 +2302,9 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[]
           </div>
           <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
             <input style={{...si,flex:1,minWidth:200}} placeholder="Optional note for emails…" value={actionNote} onChange={e=>setActionNote(e.target.value)}/>
-            <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",fontSize:12,color:"#475569",flexShrink:0}}>
-              <input type="checkbox" checked={actionSkipEmail} onChange={e=>setActionSkipEmail(e.target.checked)} style={{width:14,height:14,accentColor:"#0f172a"}}/>
-              No email notifications
+            <label style={{display:"flex",alignItems:"center",gap:6,cursor:silentMode?"default":"pointer",fontSize:12,color:silentMode?"#94a3b8":"#475569",flexShrink:0}}>
+              <input type="checkbox" checked={silentMode||actionSkipEmail} onChange={e=>!silentMode&&setActionSkipEmail(e.target.checked)} disabled={silentMode} style={{width:14,height:14,accentColor:"#0f172a"}}/>
+              {silentMode?"Silent mode active":"No email notifications"}
             </label>
             <button onClick={submitActionQueue} disabled={actionSending}
               style={S.btn({background:"#166534",color:"#fff",fontWeight:700,opacity:actionSending?0.6:1})}>
@@ -2332,9 +2338,9 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[]
                   {bulkSending?"Processing…":`Apply to ${selected.size}`}
                 </button>
               </div>
-              <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:12,color:"#64748b"}}>
-                <input type="checkbox" checked={bulkSkipEmail} onChange={e=>setBulkSkipEmail(e.target.checked)} style={{width:14,height:14,accentColor:"#0f172a"}}/>
-                Don't send email notifications to bookers
+              <label style={{display:"flex",alignItems:"center",gap:8,cursor:silentMode?"default":"pointer",fontSize:12,color:silentMode?"#94a3b8":"#64748b"}}>
+                <input type="checkbox" checked={silentMode||bulkSkipEmail} onChange={e=>!silentMode&&setBulkSkipEmail(e.target.checked)} disabled={silentMode} style={{width:14,height:14,accentColor:"#0f172a"}}/>
+                {silentMode?"Silent mode active":"Don't send email notifications to bookers"}
               </label>
             </>
           )}
@@ -2490,13 +2496,13 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[]
                 );
               })}
             </div>
-            <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:13,color:"#475569",marginBottom:16}}>
-              <input type="checkbox" checked={clearSkipEmail} onChange={e=>setClearSkipEmail(e.target.checked)} style={{width:15,height:15,accentColor:"#0f172a"}}/>
-              Remove without notifying bookers by email
+            <label style={{display:"flex",alignItems:"center",gap:8,cursor:silentMode?"default":"pointer",fontSize:13,color:silentMode?"#94a3b8":"#475569",marginBottom:16}}>
+              <input type="checkbox" checked={silentMode||clearSkipEmail} onChange={e=>!silentMode&&setClearSkipEmail(e.target.checked)} disabled={silentMode} style={{width:15,height:15,accentColor:"#0f172a"}}/>
+              {silentMode?"Silent mode active":"Remove without notifying bookers by email"}
             </label>
             <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
               <button onClick={()=>setShowClearModal(false)} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#475569"})}>Cancel</button>
-              <button onClick={async()=>{await onClearOldUnapproved(oldUnapproved.map(b=>b.id),clearSkipEmail); setShowClearModal(false);}}
+              <button onClick={async()=>{await onClearOldUnapproved(oldUnapproved.map(b=>b.id),silentMode||clearSkipEmail); setShowClearModal(false);}}
                 style={S.btn({background:"#7c3aed",color:"#fff",fontWeight:700})}>
                 🧹 Delete {oldUnapproved.length} booking{oldUnapproved.length>1?"s":""}
               </button>
@@ -2662,6 +2668,7 @@ export default function App() {
   const [prefill,  setPrefill]  =useState({date:null,startHour:9,duration:1});
   const [toast,    setToast]    =useState(null);
   const [syncingMonth, setSyncingMonth] = useState(false);
+  const [silentMode, setSilentMode] = useState(false); // admin: suppress all outgoing emails
   const [facilityRates, setFacilityRates] = useState(()=>{
     try{return JSON.parse(localStorage.getItem("fb_facility_rates")||"{}");}catch{return {};}
   });
@@ -2800,6 +2807,7 @@ export default function App() {
 
   // handleSave now accepts an array of drafts + name/email for multi-booking support
   async function handleSave(drafts, bookerName, bookerEmail, { skipEmail = false } = {}) {
+    skipEmail = skipEmail || silentMode;
     const draftsArr = Array.isArray(drafts) ? drafts : [drafts];
     // Strip client-only fields that don't exist in Supabase schema
     const toDb = d => { const {recur, ...rest} = d; return rest; };
@@ -2844,8 +2852,10 @@ export default function App() {
       catch(e){showToast("Update failed: "+e.message,"error");return;}}
     else{setBookings(prev=>prev.map(b=>b.id===booking.id?{...b,...patch}:b));}
     setViewing(null);showToast(`Booking ${newStatus}!`);
-    sendApprovalEmail({to:booking.email,subject:`Booking ${STATUS_META[newStatus]?.label}`,
-      html:buildApprovalEmailHtml({name:booking.name,email:booking.email,bookings:[{...booking,...patch}],newStatus,adminNote:""})});
+    if(!silentMode){
+      sendApprovalEmail({to:booking.email,subject:`Booking ${STATUS_META[newStatus]?.label}`,
+        html:buildApprovalEmailHtml({name:booking.name,email:booking.email,bookings:[{...booking,...patch}],newStatus,adminNote:""})});
+    }
   }
 
   function updateFacilityRate(facilityId, type, value) {
@@ -3001,9 +3011,11 @@ export default function App() {
   }
 
   function handleAddToCart(drafts, name, email, sourceIds=[]) {
-    setCart(prev => [...prev, { drafts, name, email, sourceIds }]);
+    const isEdit = drafts.some(d => d.id && bookings.find(b => b.id === d.id));
+    setCart(prev => [...prev, { drafts, name, email, sourceIds, isEdit }]);
     setShowForm(false);
-    showToast(`${drafts.length} booking${drafts.length>1?"s":""} added to cart!`);
+    setEditing(null);
+    showToast(isEdit ? "Edit added to cart." : `${drafts.length} booking${drafts.length>1?"s":""} added to cart!`);
   }
 
   function removeFromCart(idx) {
@@ -3023,22 +3035,31 @@ export default function App() {
   async function handleCartSubmit() {
     if (cart.length === 0) return;
     const allDrafts = cart.flatMap(item => item.drafts);
-    // Save all drafts
+    // Save all drafts — handleSave skips email so we can send grouped below
     const name = cart[0].name, email = cart[0].email;
     await handleSave(allDrafts, name, email, { skipEmail: true });
-    // handleSave skips email — handleCartSubmit handles all sending grouped by email
-    const byEmail = {};
-    cart.forEach(item => {
-      const k = item.email.toLowerCase();
-      if(!byEmail[k]) byEmail[k] = {name:item.name, email:item.email, drafts:[]};
-      byEmail[k].drafts.push(...item.drafts);
-    });
-    // Send one confirmation email per unique booker
-    for (const {name:n, email:e, drafts:d} of Object.values(byEmail)) {
-      const orderRef = "ORD-"+Date.now().toString(36).toUpperCase();
-      sendEmail({to:e, subject:`Booking Request Received [${orderRef}]`,
-        html:buildOrderEmailHtml({name:n,email:e,bookings:d,orderRef})});
+
+    if (!silentMode) {
+      // New bookings: group by email and send one order confirmation each
+      const newItems = cart.filter(item => !item.isEdit && !item.isMultiEdit);
+      const byEmailNew = {};
+      newItems.forEach(item => {
+        const k = item.email.toLowerCase();
+        if(!byEmailNew[k]) byEmailNew[k] = {name:item.name, email:item.email, drafts:[]};
+        byEmailNew[k].drafts.push(...item.drafts);
+      });
+      for (const {name:n, email:e, drafts:d} of Object.values(byEmailNew)) {
+        const orderRef = "ORD-"+Date.now().toString(36).toUpperCase();
+        sendEmail({to:e, subject:`Booking Request Received [${orderRef}]`,
+          html:buildOrderEmailHtml({name:n,email:e,bookings:d,orderRef})});
+      }
+      // Edits: send one "Booking Updated" per item (each is a separate edit)
+      for (const item of cart.filter(item => item.isEdit)) {
+        sendApprovalEmail({to:item.email, subject:"Booking Updated",
+          html:buildApprovalEmailHtml({name:item.name,email:item.email,bookings:item.drafts,newStatus:item.drafts[0]?.status,adminNote:""})});
+      }
     }
+
     setCart([]);
     setShowCart(false);
   }
@@ -3268,7 +3289,22 @@ export default function App() {
 
         {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<SummaryTab bookings={bookings} loggedInEmail={loggedInEmail} facilityRates={facilityRates} isAdmin={isAdmin}/>}</div>}
         {tab==="about"&&<div style={{padding:"8px 0"}}><AboutTab/></div>}
-        {tab==="admin"&&isAdmin&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onQueueDelete={queueForRemovalSilent} clashes={allClashes} deleteIds={new Set(deleteQueue.map(b=>b.id))} facilityRates={facilityRates} onUpdateFacilityRate={updateFacilityRate} onClearOldUnapproved={handleClearOldUnapproved}/>}</div>}
+        {tab==="admin"&&isAdmin&&<div style={S.card}>
+          {/* Silent mode banner */}
+          <div style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",marginBottom:12,background:silentMode?"#fef3c7":"#f8fafc",border:`1.5px solid ${silentMode?"#f59e0b":"#e2e8f0"}`,borderRadius:10,flexWrap:"wrap"}}>
+            <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",flex:1,minWidth:200}}>
+              <div style={{position:"relative",width:38,height:22,flexShrink:0}} onClick={()=>setSilentMode(v=>!v)}>
+                <div style={{position:"absolute",inset:0,borderRadius:11,background:silentMode?"#f59e0b":"#cbd5e1",transition:"background 0.2s"}}/>
+                <div style={{position:"absolute",top:3,left:silentMode?18:3,width:16,height:16,borderRadius:"50%",background:"#fff",boxShadow:"0 1px 3px rgba(0,0,0,0.2)",transition:"left 0.2s"}}/>
+              </div>
+              <span style={{fontWeight:700,fontSize:13,color:silentMode?"#92400e":"#475569"}}>
+                {silentMode?"🔇 Silent mode ON — no emails will be sent":"🔔 Silent mode off"}
+              </span>
+            </label>
+            {silentMode&&<span style={{fontSize:12,color:"#92400e"}}>All status changes, approvals, deletions and edits will be processed without notifying bookers.</span>}
+          </div>
+          {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onQueueDelete={queueForRemovalSilent} clashes={allClashes} deleteIds={new Set(deleteQueue.map(b=>b.id))} facilityRates={facilityRates} onUpdateFacilityRate={updateFacilityRate} onClearOldUnapproved={handleClearOldUnapproved} silentMode={silentMode}/>}
+        </div>}
       </div>
 
       {/* Modals */}
@@ -3296,7 +3332,7 @@ export default function App() {
 
       {showDeleteCart&&(
         <Modal title="🗑 Removal Queue" onClose={()=>setShowDeleteCart(false)} width={580}>
-          <DeleteCartModal deleteQueue={deleteQueue} setDeleteQueue={setDeleteQueue} onClose={()=>setShowDeleteCart(false)} onSubmit={handleDeleteCartSubmit} isAdmin={isAdmin}/>
+          <DeleteCartModal deleteQueue={deleteQueue} setDeleteQueue={setDeleteQueue} onClose={()=>setShowDeleteCart(false)} onSubmit={handleDeleteCartSubmit} isAdmin={isAdmin} silentMode={silentMode}/>
         </Modal>
       )}
 
