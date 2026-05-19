@@ -1823,6 +1823,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[]
   }
 
   const list=bookings.filter(b=>{
+    if(isAdminBooking(b)) return false;
     if(sf!=="all"&&b.status!==sf) return false;
     if(ff!=="all"&&b.facility_id!==ff) return false;
     if(!matchesQ(b)) return false;
