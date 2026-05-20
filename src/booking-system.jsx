@@ -1539,7 +1539,7 @@ function AboutTab() {
   );
 }
 
-function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = false }) {
+function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = false, approxPlayers = {}, onUpdateApproxPlayers }) {
   const now = new Date();
   const thisYear = now.getFullYear();
 
@@ -1551,6 +1551,9 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
 
   // Invoice modal state
   const [showInvoice, setShowInvoice] = useState(false);
+  // Inline player-count editing: email being edited
+  const [editingPlayers, setEditingPlayers] = useState(null);
+  const [playersInput,   setPlayersInput]   = useState("");
   const [invDetail,   setInvDetail]   = useState("grouped");   // "grouped" | "individual"
   const [invGst,      setInvGst]      = useState("inclusive"); // "inclusive" | "exclusive" | "note"
   const [invScope,    setInvScope]    = useState("single");    // "single" | "combined" (admin only)
@@ -1661,6 +1664,8 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
 
   function fmtHrs(h) { return h===0?"0h" : h%1===0?`${h}h`:`${Math.floor(h)}h ${Math.round((h%1)*60)}m`; }
   function fmtCost(n) { return "$" + n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g,","); }
+  function getPlayers(email) { return approxPlayers[email.toLowerCase()] || 0; }
+  function canEditPlayers(email) { return isAdmin || (loggedInEmail && email.toLowerCase() === loggedInEmail.toLowerCase()); }
 
   // ── Invoice helpers ──────────────────────────────────────────────────────
   function buildInvoiceLines(bkgs, detail) {
@@ -1965,10 +1970,17 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
                     <th style={{ ...thS, textAlign:"right" }}>Total</th>
                     {anyRates&&<th style={{ ...thS, textAlign:"right" }}>Day Cost</th>}
                     {anyRates&&<th style={{ ...thS, textAlign:"right" }}>Eve Cost</th>}
+                    <th style={{ ...thS, textAlign:"right" }}>Players</th>
+                    {anyRates&&<th style={{ ...thS, textAlign:"right", color:"#7c3aed" }}>$/Player</th>}
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map(r=>(
+                  {rows.map(r=>{
+                    const players = getPlayers(r.email);
+                    const canEdit = canEditPlayers(r.email);
+                    const isEditingThis = editingPlayers === r.email.toLowerCase();
+                    const perPlayer = anyRates && players > 0 && r.cost > 0 ? r.cost / players : 0;
+                    return (
                     <tr key={r.email} onMouseEnter={e=>e.currentTarget.style.background="#f8fafc"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
                       <td style={tdS}><div style={{ fontWeight:600 }}>{r.name}</div></td>
                       <td style={tdS}><EmailChip email={r.email}/></td>
@@ -1978,19 +1990,57 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
                       <td style={{ ...tdS, textAlign:"right", fontWeight:700 }}>{fmtHrs(r.total)}</td>
                       {anyRates&&<td style={{ ...tdS, textAlign:"right", fontWeight:600, color:r.dayCost>0?"#15803d":"#94a3b8" }}>{r.dayCost>0?fmtCost(r.dayCost):"—"}</td>}
                       {anyRates&&<td style={{ ...tdS, textAlign:"right", fontWeight:600, color:r.eveCost>0?"#15803d":"#94a3b8" }}>{r.eveCost>0?fmtCost(r.eveCost):"—"}</td>}
+                      <td style={{ ...tdS, textAlign:"right" }}>
+                        {isEditingThis ? (
+                          <input
+                            type="number" min="0" step="1"
+                            value={playersInput}
+                            onChange={e=>setPlayersInput(e.target.value)}
+                            onBlur={()=>{ onUpdateApproxPlayers(r.email, playersInput); setEditingPlayers(null); }}
+                            onKeyDown={e=>{ if(e.key==="Enter"||e.key==="Escape"){ onUpdateApproxPlayers(r.email, playersInput); setEditingPlayers(null); }}}
+                            autoFocus
+                            style={{ width:56, padding:"2px 6px", borderRadius:6, border:"1.5px solid #6366f1", fontSize:13, textAlign:"right", fontFamily:"inherit", outline:"none" }}
+                          />
+                        ) : (
+                          <span
+                            onClick={canEdit ? ()=>{ setEditingPlayers(r.email.toLowerCase()); setPlayersInput(String(players||"")); } : undefined}
+                            title={canEdit ? "Click to edit" : undefined}
+                            style={{ cursor:canEdit?"pointer":"default", padding:"2px 8px", borderRadius:6,
+                              background: players>0?"#f0f9ff":"#f8fafc",
+                              color: players>0?"#0369a1":"#94a3b8",
+                              fontWeight:600, fontSize:12,
+                              border: canEdit?"1px dashed #cbd5e1":"none",
+                              minWidth:28, display:"inline-block", textAlign:"right" }}>
+                            {players > 0 ? players : canEdit ? "+" : "—"}
+                          </span>
+                        )}
+                      </td>
+                      {anyRates&&<td style={{ ...tdS, textAlign:"right", fontWeight:700, color:perPlayer>0?"#7c3aed":"#94a3b8" }}>
+                        {perPlayer>0 ? fmtCost(perPlayer) : "—"}
+                      </td>}
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
                 <tfoot>
-                  <tr style={{ background:"#f8fafc", borderTop:"2px solid #f1f5f9" }}>
-                    <td style={{ ...tdS, fontWeight:700 }} colSpan={2}>Total</td>
-                    <td style={{ ...tdS, textAlign:"right", fontWeight:700 }}>{active.length}</td>
-                    <td style={{ ...tdS, textAlign:"right" }}><span style={{ background:"#fef9c3", color:"#854d0e", borderRadius:6, padding:"2px 8px", fontWeight:700, fontSize:12 }}>{fmtHrs(totalDaytime)}</span></td>
-                    <td style={{ ...tdS, textAlign:"right" }}><span style={{ background:"#ede9fe", color:"#5b21b6", borderRadius:6, padding:"2px 8px", fontWeight:700, fontSize:12 }}>{fmtHrs(totalEvening)}</span></td>
-                    <td style={{ ...tdS, textAlign:"right", fontWeight:800 }}>{fmtHrs(totalHrs)}</td>
-                    {anyRates&&<td style={{ ...tdS, textAlign:"right", fontWeight:800, color:"#15803d" }}>{fmtCost(totalDayCost)}</td>}
-                    {anyRates&&<td style={{ ...tdS, textAlign:"right", fontWeight:800, color:"#15803d" }}>{fmtCost(totalEveCost)}</td>}
-                  </tr>
+                  {(()=>{
+                    const totalPlayers = rows.reduce((s,r)=>s+getPlayers(r.email),0);
+                    const totalCostAll = rows.reduce((s,r)=>s+r.cost,0);
+                    const totalPerPlayer = anyRates && totalPlayers > 0 && totalCostAll > 0 ? totalCostAll / totalPlayers : 0;
+                    return (
+                    <tr style={{ background:"#f8fafc", borderTop:"2px solid #f1f5f9" }}>
+                      <td style={{ ...tdS, fontWeight:700 }} colSpan={2}>Total</td>
+                      <td style={{ ...tdS, textAlign:"right", fontWeight:700 }}>{active.length}</td>
+                      <td style={{ ...tdS, textAlign:"right" }}><span style={{ background:"#fef9c3", color:"#854d0e", borderRadius:6, padding:"2px 8px", fontWeight:700, fontSize:12 }}>{fmtHrs(totalDaytime)}</span></td>
+                      <td style={{ ...tdS, textAlign:"right" }}><span style={{ background:"#ede9fe", color:"#5b21b6", borderRadius:6, padding:"2px 8px", fontWeight:700, fontSize:12 }}>{fmtHrs(totalEvening)}</span></td>
+                      <td style={{ ...tdS, textAlign:"right", fontWeight:800 }}>{fmtHrs(totalHrs)}</td>
+                      {anyRates&&<td style={{ ...tdS, textAlign:"right", fontWeight:800, color:"#15803d" }}>{fmtCost(totalDayCost)}</td>}
+                      {anyRates&&<td style={{ ...tdS, textAlign:"right", fontWeight:800, color:"#15803d" }}>{fmtCost(totalEveCost)}</td>}
+                      <td style={{ ...tdS, textAlign:"right", fontWeight:700, color:totalPlayers>0?"#0369a1":"#94a3b8" }}>{totalPlayers > 0 ? totalPlayers : "—"}</td>
+                      {anyRates&&<td style={{ ...tdS, textAlign:"right", fontWeight:800, color:totalPerPlayer>0?"#7c3aed":"#94a3b8" }}>{totalPerPlayer>0?fmtCost(totalPerPlayer):"—"}</td>}
+                    </tr>
+                    );
+                  })()}
                 </tfoot>
               </table>
             </div>
@@ -2086,7 +2136,7 @@ function AdminLogin({onLogin}) {
 }
 
 // ─── Admin Panel with action queue, bulk approve, facility rates ──────────────
-function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[],deleteIds=new Set(),facilityRates={},onUpdateFacilityRate,onClearOldUnapproved,silentMode=false}) {
+function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[],deleteIds=new Set(),facilityRates={},onUpdateFacilityRate,onClearOldUnapproved,silentMode=false,approxPlayers={},onUpdateApproxPlayers}) {
   const [sf,setSf]=useState("all"), [ff,setFf]=useState("all"), [q,setQ]=useState("");
   const [sortCol,setSortCol]=useState("date"), [sortDir,setSortDir]=useState("desc");
   const [selected,setSelected]=useState(new Set());
@@ -2107,6 +2157,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[]
   const [clearSkipEmail,setClearSkipEmail]=useState(false);
   // Facility rates section
   const [showRates,setShowRates]=useState(false);
+  const [showPlayers,setShowPlayers]=useState(false);
 
   const si={padding:"7px 12px",borderRadius:8,border:"1.5px solid #e2e8f0",fontSize:13,fontFamily:"inherit",color:"#0f172a",background:"#f8fafc",outline:"none"};
   const today=todayKey();
@@ -2250,6 +2301,9 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[]
         <button onClick={()=>setShowRates(v=>!v)} style={S.btn({border:"1.5px solid #e2e8f0",background:showRates?"#f8fafc":"#fff",color:"#475569",fontSize:12})}>
           💲 Facility Rates
         </button>
+        <button onClick={()=>setShowPlayers(v=>!v)} style={S.btn({border:"1.5px solid #e2e8f0",background:showPlayers?"#f8fafc":"#fff",color:"#475569",fontSize:12})}>
+          👥 Player Counts
+        </button>
       </div>
 
       {/* Facility rates panel */}
@@ -2288,6 +2342,44 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[]
           </div>
         </div>
       )}
+
+      {/* Approx player counts panel */}
+      {showPlayers&&(()=>{
+        const bookers = Object.values(
+          bookings.filter(b=>["approved","pending_cpsa","queued_cpsa","pending_amua","amua_submit","pending"].includes(b.status))
+            .reduce((m,b)=>{ const k=b.email.toLowerCase(); if(!m[k]) m[k]={name:b.name,email:b.email}; return m; },{})
+        ).sort((a,b)=>a.name.localeCompare(b.name));
+        return (
+          <div style={{background:"#f8fafc",border:"1.5px solid #e2e8f0",borderRadius:12,padding:16}}>
+            <div style={{fontWeight:700,fontSize:14,color:"#0f172a",marginBottom:4}}>Approximate Players per Booker</div>
+            <div style={{fontSize:12,color:"#64748b",marginBottom:12}}>Used in the Summary view to calculate per-player cost. Editable by each booker in their Summary tab too.</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:8}}>
+              {bookers.map(b=>{
+                const players = approxPlayers[b.email.toLowerCase()] || 0;
+                return (
+                  <div key={b.email} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,padding:"8px 12px",display:"flex",alignItems:"center",gap:10}}>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:12,fontWeight:600,color:"#0f172a",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{b.name}</div>
+                      <div style={{fontSize:11,color:"#64748b",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{b.email}</div>
+                    </div>
+                    <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
+                      <span style={{fontSize:11,color:"#64748b"}}>Players:</span>
+                      <input
+                        type="number" min="0" step="1"
+                        value={players||""}
+                        onChange={e=>onUpdateApproxPlayers(b.email, e.target.value)}
+                        placeholder="0"
+                        style={{...si,width:60,padding:"3px 6px",textAlign:"right",fontSize:13}}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+              {bookers.length===0&&<div style={{fontSize:13,color:"#94a3b8"}}>No active bookers found.</div>}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Per-row action queue submission panel */}
       {actionQueue.length>0&&(
@@ -2674,6 +2766,9 @@ export default function App() {
   });
   const [listBookerFilter, setListBookerFilter] = useState("all");
   const [listShowClashes, setListShowClashes]   = useState(false);
+  const [approxPlayers, setApproxPlayers] = useState(()=>{
+    try{return JSON.parse(localStorage.getItem("fb_approx_players")||"{}");}catch{return {};}
+  });
   const [listSearch,      setListSearch]        = useState("");
   const [listStatusFilter,setListStatusFilter]  = useState("all");
   const [listSortCol,     setListSortCol]       = useState("date");
@@ -2863,6 +2958,13 @@ export default function App() {
     const newRates = { ...facilityRates, [facilityId]: { ...existing, [type]: parseFloat(value) || 0 } };
     setFacilityRates(newRates);
     try{localStorage.setItem("fb_facility_rates",JSON.stringify(newRates));}catch{}
+  }
+
+  function updateApproxPlayers(email, value) {
+    const v = Math.max(0, parseInt(value) || 0);
+    const next = { ...approxPlayers, [email.toLowerCase()]: v };
+    setApproxPlayers(next);
+    try{localStorage.setItem("fb_approx_players",JSON.stringify(next));}catch{}
   }
 
   // Bulk approve/reject — groups by email and sends one summary per person
@@ -3287,7 +3389,7 @@ export default function App() {
           </div>
         )}
 
-        {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<SummaryTab bookings={bookings} loggedInEmail={loggedInEmail} facilityRates={facilityRates} isAdmin={isAdmin}/>}</div>}
+        {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<SummaryTab bookings={bookings} loggedInEmail={loggedInEmail} facilityRates={facilityRates} isAdmin={isAdmin} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers}/>}</div>}
         {tab==="about"&&<div style={{padding:"8px 0"}}><AboutTab/></div>}
         {tab==="admin"&&isAdmin&&<div style={S.card}>
           {/* Silent mode banner */}
@@ -3303,7 +3405,7 @@ export default function App() {
             </label>
             {silentMode&&<span style={{fontSize:12,color:"#92400e"}}>All status changes, approvals, deletions and edits will be processed without notifying bookers.</span>}
           </div>
-          {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onQueueDelete={queueForRemovalSilent} clashes={allClashes} deleteIds={new Set(deleteQueue.map(b=>b.id))} facilityRates={facilityRates} onUpdateFacilityRate={updateFacilityRate} onClearOldUnapproved={handleClearOldUnapproved} silentMode={silentMode}/>}
+          {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onQueueDelete={queueForRemovalSilent} clashes={allClashes} deleteIds={new Set(deleteQueue.map(b=>b.id))} facilityRates={facilityRates} onUpdateFacilityRate={updateFacilityRate} onClearOldUnapproved={handleClearOldUnapproved} silentMode={silentMode} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers}/>}
         </div>}
       </div>
 
