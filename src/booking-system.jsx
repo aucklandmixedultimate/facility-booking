@@ -1539,7 +1539,7 @@ function AboutTab() {
   );
 }
 
-function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = false, approxPlayers = {}, onUpdateApproxPlayers }) {
+function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = false, approxPlayers = {}, onUpdateApproxPlayers, onUpdateFacilityRate }) {
   const now = new Date();
   const thisYear = now.getFullYear();
 
@@ -1551,6 +1551,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
 
   // Invoice modal state
   const [showInvoice, setShowInvoice] = useState(false);
+  const [showRatesEdit, setShowRatesEdit] = useState(false);
   // Inline player-count editing: email being edited
   const [editingPlayers, setEditingPlayers] = useState(null);
   const [playersInput,   setPlayersInput]   = useState("");
@@ -1916,10 +1917,48 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
       {/* Cost by facility tiles */}
       {facCosts.length > 0 && (
         <div>
-          <h3 style={{ margin:"0 0 10px", fontSize:15, fontWeight:700, color:"#0f172a" }}>
-            Cost by Facility — {PRESETS.find(p=>p.key===preset)?.label}{dateFrom&&dateTo?` (${dateFrom} – ${dateTo})`:""}{emailFilter!=="all"?` · ${emailFilter}`:""}
-            {!anyRates && <span style={{ fontSize:12, fontWeight:400, color:"#94a3b8", marginLeft:8 }}>(set hourly rates in Admin → Facility Rates)</span>}
-          </h3>
+          <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10, flexWrap:"wrap" }}>
+            <h3 style={{ margin:0, fontSize:15, fontWeight:700, color:"#0f172a", flex:1 }}>
+              Cost by Facility — {PRESETS.find(p=>p.key===preset)?.label}{dateFrom&&dateTo?` (${dateFrom} – ${dateTo})`:""}{emailFilter!=="all"?` · ${emailFilter}`:""}
+            </h3>
+            {isAdmin && onUpdateFacilityRate && (
+              <button onClick={()=>setShowRatesEdit(v=>!v)}
+                style={S.btn({border:`1.5px solid ${showRatesEdit?"#6366f1":"#e2e8f0"}`,background:showRatesEdit?"#eef2ff":"#fff",color:showRatesEdit?"#4338ca":"#475569",fontSize:12})}>
+                ✏ {showRatesEdit ? "Done" : "Edit Rates"}
+              </button>
+            )}
+          </div>
+          {showRatesEdit && isAdmin && onUpdateFacilityRate && (
+            <div style={{ background:"#f8fafc", border:"1.5px solid #e0e7ff", borderRadius:12, padding:14, marginBottom:14 }}>
+              <div style={{ fontSize:12, color:"#64748b", marginBottom:10 }}>Day rate = before 5:30 pm · Evening rate = 5:30 pm onwards</div>
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))", gap:8 }}>
+                {FACILITIES.map(fac => {
+                  const r = typeof facilityRates[fac.id]==="object" ? facilityRates[fac.id] : { day: facilityRates[fac.id]||0, evening: 50 };
+                  const day = r.day ?? 0, evening = r.evening ?? 50;
+                  return (
+                    <div key={fac.id} style={{ background:"#fff", border:"1px solid #e2e8f0", borderRadius:8, padding:"8px 12px" }}>
+                      <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:7 }}>
+                        <span style={{ width:9, height:9, borderRadius:"50%", background:fac.color, flexShrink:0, display:"inline-block" }}/>
+                        <span style={{ fontSize:12, fontWeight:700, color:"#0f172a" }}>{fac.name}</span>
+                      </div>
+                      <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
+                        <span style={{ fontSize:11, color:"#64748b", width:46 }}>Day $</span>
+                        <input type="number" min="0" step="0.5" value={day||""} placeholder="0"
+                          onChange={e=>onUpdateFacilityRate(fac.id,"day",e.target.value)}
+                          style={{ width:68, padding:"3px 6px", borderRadius:6, border:"1.5px solid #e2e8f0", fontSize:13, textAlign:"right", fontFamily:"inherit", outline:"none" }}/>
+                        <span style={{ fontSize:11, color:"#64748b" }}>/hr</span>
+                        <span style={{ fontSize:11, color:"#7c3aed", width:60, marginLeft:4 }}>Evening $</span>
+                        <input type="number" min="0" step="0.5" value={evening||""} placeholder="0"
+                          onChange={e=>onUpdateFacilityRate(fac.id,"evening",e.target.value)}
+                          style={{ width:68, padding:"3px 6px", borderRadius:6, border:"1.5px solid #e2e8f0", fontSize:13, textAlign:"right", fontFamily:"inherit", outline:"none" }}/>
+                        <span style={{ fontSize:11, color:"#64748b" }}>/hr</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
           <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:10 }}>
             {facCosts.map(({ fac, dayHrs, eveningHrs, hours, rates, cost }) => {
               const hasRates = rates.day > 0 || rates.evening > 0;
@@ -3416,7 +3455,7 @@ export default function App() {
           </div>
         )}
 
-        {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<SummaryTab bookings={bookings} loggedInEmail={loggedInEmail} facilityRates={facilityRates} isAdmin={isAdmin} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers}/>}</div>}
+        {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<SummaryTab bookings={bookings} loggedInEmail={loggedInEmail} facilityRates={facilityRates} isAdmin={isAdmin} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} onUpdateFacilityRate={updateFacilityRate}/>}</div>}
         {tab==="about"&&<div style={{padding:"8px 0"}}><AboutTab/></div>}
         {tab==="admin"&&isAdmin&&<div style={S.card}>
           {/* Silent mode banner */}
