@@ -1952,9 +1952,33 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
 
       {/* Table */}
       <div>
-        <h3 style={{ margin:"0 0 12px", fontSize:15, fontWeight:700, color:"#0f172a" }}>
-          Hours by Booker — {PRESETS.find(p=>p.key===preset)?.label}{dateFrom&&dateTo?` (${dateFrom} – ${dateTo})`:""}{emailFilter!=="all"?` · ${emailFilter}`:""}
-        </h3>
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:12, gap:8, flexWrap:"wrap" }}>
+          <h3 style={{ margin:0, fontSize:15, fontWeight:700, color:"#0f172a" }}>
+            Hours by Booker — {PRESETS.find(p=>p.key===preset)?.label}{dateFrom&&dateTo?` (${dateFrom} – ${dateTo})`:""}{emailFilter!=="all"?` · ${emailFilter}`:""}
+          </h3>
+          {rows.length>0&&<button onClick={()=>{
+            const esc = v => `"${String(v||"").replace(/"/g,'""')}"`;
+            const hdrs = ["Booker","Email","Bookings","Daytime Hrs","Evening Hrs","Total Hrs",
+              ...(anyRates?["Day Cost","Eve Cost","Total Cost"]:[]),
+              "Approx Players",
+              ...(anyRates?["Cost per Player"]:[])];
+            const dataRows = rows.map(r=>{
+              const players = getPlayers(r.email);
+              const perPlayer = anyRates && players>0 && r.cost>0 ? r.cost/players : "";
+              return [r.name,r.email,r.bookings,r.daytime.toFixed(2),r.evening.toFixed(2),r.total.toFixed(2),
+                ...(anyRates?[r.dayCost.toFixed(2),r.eveCost.toFixed(2),r.cost.toFixed(2)]:[]),
+                players||"",
+                ...(anyRates?[perPlayer?perPlayer.toFixed(2):""]:[])].map(esc).join(",");
+            });
+            const csv = [hdrs.map(esc).join(","), ...dataRows].join("\n");
+            const blob = new Blob([csv],{type:"text/csv"});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a"); a.href=url; a.download=`summary-${dateFrom||"all"}.csv`; a.click();
+            URL.revokeObjectURL(url);
+          }} style={S.btn({background:"#0f172a",color:"#fff",fontSize:12,display:"flex",alignItems:"center",gap:5})}>
+            ⬇ Export Table (CSV)
+          </button>}
+        </div>
         {rows.length===0
           ? <div style={{ textAlign:"center", padding:"32px 0", color:"#94a3b8", fontSize:14 }}>No active bookings match the current filter.</div>
           : (
@@ -1970,6 +1994,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
                     <th style={{ ...thS, textAlign:"right" }}>Total</th>
                     {anyRates&&<th style={{ ...thS, textAlign:"right" }}>Day Cost</th>}
                     {anyRates&&<th style={{ ...thS, textAlign:"right" }}>Eve Cost</th>}
+                    {anyRates&&<th style={{ ...thS, textAlign:"right", color:"#15803d" }}>Total Cost</th>}
                     <th style={{ ...thS, textAlign:"right" }}>Players</th>
                     {anyRates&&<th style={{ ...thS, textAlign:"right", color:"#7c3aed" }}>$/Player</th>}
                   </tr>
@@ -1990,6 +2015,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
                       <td style={{ ...tdS, textAlign:"right", fontWeight:700 }}>{fmtHrs(r.total)}</td>
                       {anyRates&&<td style={{ ...tdS, textAlign:"right", fontWeight:600, color:r.dayCost>0?"#15803d":"#94a3b8" }}>{r.dayCost>0?fmtCost(r.dayCost):"—"}</td>}
                       {anyRates&&<td style={{ ...tdS, textAlign:"right", fontWeight:600, color:r.eveCost>0?"#15803d":"#94a3b8" }}>{r.eveCost>0?fmtCost(r.eveCost):"—"}</td>}
+                      {anyRates&&<td style={{ ...tdS, textAlign:"right", fontWeight:700, color:r.cost>0?"#15803d":"#94a3b8" }}>{r.cost>0?fmtCost(r.cost):"—"}</td>}
                       <td style={{ ...tdS, textAlign:"right" }}>
                         {isEditingThis ? (
                           <input
@@ -2036,6 +2062,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
                       <td style={{ ...tdS, textAlign:"right", fontWeight:800 }}>{fmtHrs(totalHrs)}</td>
                       {anyRates&&<td style={{ ...tdS, textAlign:"right", fontWeight:800, color:"#15803d" }}>{fmtCost(totalDayCost)}</td>}
                       {anyRates&&<td style={{ ...tdS, textAlign:"right", fontWeight:800, color:"#15803d" }}>{fmtCost(totalEveCost)}</td>}
+                      {anyRates&&<td style={{ ...tdS, textAlign:"right", fontWeight:800, color:"#15803d" }}>{fmtCost(totalCostAll)}</td>}
                       <td style={{ ...tdS, textAlign:"right", fontWeight:700, color:totalPlayers>0?"#0369a1":"#94a3b8" }}>{totalPlayers > 0 ? totalPlayers : "—"}</td>
                       {anyRates&&<td style={{ ...tdS, textAlign:"right", fontWeight:800, color:totalPerPlayer>0?"#7c3aed":"#94a3b8" }}>{totalPerPlayer>0?fmtCost(totalPerPlayer):"—"}</td>}
                     </tr>
