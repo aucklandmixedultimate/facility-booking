@@ -3107,6 +3107,7 @@ function AdminLogin({onLogin}) {
 // ─── Admin Panel with action queue, bulk approve, facility rates ──────────────
 function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[],deleteIds=new Set(),facilityRates={},onUpdateFacilityRate,onClearOldUnapproved,silentMode=false,approxPlayers={},onUpdateApproxPlayers,approxDurations={},onUpdateApproxDuration,onSyncDB,onShowSchedule,onBulkApply}) {
   const [sf,setSf]=useState("all"), [ff,setFf]=useState("all"), [q,setQ]=useState("");
+  const [adminBookerFilter,setAdminBookerFilter]=useState("all");
   const [adminDateFrom,setAdminDateFrom]=useState(""), [adminDateTo,setAdminDateTo]=useState("");
   const [adminColPurpose,setAdminColPurpose]=useState("");
   const [sortCol,setSortCol]=useState("date"), [sortDir,setSortDir]=useState("desc");
@@ -3140,6 +3141,11 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[]
   // Old unapproved = bookings in any review state with past dates
   const oldUnapproved=bookings.filter(b=>REVIEW_STATUSES.has(b.status)&&b.date<today);
 
+  // Booker chip data
+  const adminBookerMap = {};
+  bookings.filter(b=>!isAdminBooking(b)&&b.email&&b.name).forEach(b=>{adminBookerMap[b.email.toLowerCase()]=b.name;});
+  const adminBookerEmails = Object.keys(adminBookerMap).sort();
+
   function matchesQ(b) {
     const t=q.toLowerCase();
     return !t||`${b.name} ${b.email} ${b.purpose} ${b.notes||""}`.toLowerCase().includes(t);
@@ -3149,7 +3155,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[]
     if(isAdminBooking(b)) return false;
     if(sf!=="all"&&b.status!==sf) return false;
     if(ff!=="all"&&b.facility_id!==ff) return false;
-    if(!matchesQ(b)) return false;
+    if(adminBookerFilter!=="all"&&b.email?.toLowerCase()!==adminBookerFilter) return false;
     if(adminDateFrom&&b.date<adminDateFrom) return false;
     if(adminDateTo&&b.date>adminDateTo) return false;
     if(adminColPurpose&&!(b.purpose||"").toLowerCase().includes(adminColPurpose.toLowerCase())) return false;
@@ -3564,9 +3570,17 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[]
                       style={{padding:"2px 4px",fontSize:10,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",width:"100%",minWidth:90}}/>
                   </div>
                 </th>
-                <th style={{padding:"3px 4px"}}>
-                  <input placeholder="Search booker…" value={q} onChange={e=>setQ(e.target.value)}
-                    style={{padding:"3px 6px",fontSize:11,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",width:"100%"}}/>
+                <th style={{padding:"3px 4px",whiteSpace:"normal"}}>
+                  <div style={{display:"flex",gap:3,flexWrap:"wrap",alignItems:"center"}}>
+                    <button onClick={()=>setAdminBookerFilter("all")}
+                      style={{padding:"1px 7px",fontSize:10,borderRadius:10,border:"1.5px solid #e2e8f0",background:adminBookerFilter==="all"?"#0f172a":"#fff",color:adminBookerFilter==="all"?"#fff":"#475569",cursor:"pointer",fontWeight:adminBookerFilter==="all"?700:400,lineHeight:1.6}}>All</button>
+                    {adminBookerEmails.map(em=>(
+                      <button key={em} onClick={()=>setAdminBookerFilter(p=>p===em?"all":em)}
+                        style={{padding:"1px 7px",fontSize:10,borderRadius:10,border:`1.5px solid ${adminBookerFilter===em?emailColor(em):"#e2e8f0"}`,background:adminBookerFilter===em?emailColor(em):"#fff",color:adminBookerFilter===em?"#fff":"#475569",cursor:"pointer",fontWeight:adminBookerFilter===em?700:400,lineHeight:1.6}}>
+                        {adminBookerMap[em]||em.split("@")[0]}
+                      </button>
+                    ))}
+                  </div>
                 </th>
                 <th style={{padding:"3px 4px"}}>
                   <select value={ff} onChange={e=>setFf(e.target.value)}
@@ -3587,8 +3601,8 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[]
                     style={{padding:"3px 6px",fontSize:11,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",width:"100%"}}/>
                 </th>
                 <th style={{padding:"3px 4px"}}>
-                  {(q||sf!=="all"||ff!=="all"||adminDateFrom||adminDateTo||adminColPurpose)&&(
-                    <button onClick={()=>{setQ("");setSf("all");setFf("all");setAdminDateFrom("");setAdminDateTo("");setAdminColPurpose("");}}
+                  {(adminBookerFilter!=="all"||sf!=="all"||ff!=="all"||adminDateFrom||adminDateTo||adminColPurpose)&&(
+                    <button onClick={()=>{setAdminBookerFilter("all");setSf("all");setFf("all");setAdminDateFrom("");setAdminDateTo("");setAdminColPurpose("");}}
                       style={{padding:"2px 7px",fontSize:10,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",color:"#64748b",cursor:"pointer",whiteSpace:"nowrap"}}>
                       ✕ Clear
                     </button>
@@ -3612,9 +3626,10 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[]
                       {isPending&&<input type="checkbox" checked={selected.has(b.id)} onChange={()=>toggleSelect(b.id)} style={{width:14,height:14,accentColor:"#6366f1"}}/>}
                     </td>
                     <td style={{padding:"8px 10px",whiteSpace:"nowrap"}}>{fmtDate(b.date)}</td>
-                    <td style={{padding:"8px 10px"}}>
-                      <div style={{fontWeight:600,color:"#0f172a"}}>{b.name}</div>
-                      <EmailChip email={b.email}/>
+                    <td style={{padding:"8px 10px"}} onClick={e=>{e.stopPropagation();setAdminBookerFilter(p=>p===b.email.toLowerCase()?"all":b.email.toLowerCase());}}>
+                      <span style={{display:"inline-block",padding:"3px 10px",borderRadius:10,background:emailColor(b.email),color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer",outline:adminBookerFilter===b.email.toLowerCase()?"2px solid #0f172a":"none",outlineOffset:1}}>
+                        {b.name}
+                      </span>
                     </td>
                     <td style={{padding:"8px 10px"}}>
                       <div style={{display:"flex",alignItems:"center",gap:4}}>
@@ -4563,12 +4578,12 @@ export default function App() {
         {tab==="list"&&(
           <div style={S.card}>
             {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:(()=>{
-              const bookerEmails = [...new Set(bookings.filter(b=>!isAdminBooking(b)&&b.email).map(b=>b.email.toLowerCase()))];
+              const bookerMap = {};
+              bookings.filter(b=>!isAdminBooking(b)&&b.email&&b.name).forEach(b=>{bookerMap[b.email.toLowerCase()]=b.name;});
+              const bookerEmails = Object.keys(bookerMap).sort();
               const clashAdminIds = new Set(allClashes.map(c=>c.admin.id));
               const clashUserIds  = new Set(allClashes.map(c=>c.user.id));
               const allClashIds   = new Set([...clashAdminIds,...clashUserIds]);
-              const lnq = listNameSearch.toLowerCase();
-
               const listDir = listSortDir==="asc"?1:-1;
               let visible = [...bookings]
                 .filter(b => !isAdminBooking(b))
@@ -4579,7 +4594,6 @@ export default function App() {
                 .filter(b => !listShowClashes || allClashIds.has(b.id))
                 .filter(b => !listDateFrom || b.date>=listDateFrom)
                 .filter(b => !listDateTo   || b.date<=listDateTo)
-                .filter(b => !lnq || `${b.name} ${b.email}`.toLowerCase().includes(lnq))
                 .filter(b => !listColPurpose || (b.purpose||"").toLowerCase().includes(listColPurpose.toLowerCase()))
                 .sort((a,b)=>{
                   if(listSortCol==="date") return listDir*(a.date.localeCompare(b.date)||a.start_hour-b.start_hour);
@@ -4594,7 +4608,7 @@ export default function App() {
                 else { setListSortCol(col); setListSortDir("asc"); }
               }
               const lArrow = col => listSortCol===col?(listSortDir==="asc"?" ↑":" ↓"):"";
-              const anyListFilter = listNameSearch||listDateFrom||listDateTo||listStatusFilter!=="all"||listColPurpose||listColFacility!=="all";
+              const anyListFilter = listDateFrom||listDateTo||listStatusFilter!=="all"||listColPurpose||listColFacility!=="all";
 
               return (
                 <>
@@ -4611,19 +4625,6 @@ export default function App() {
                       📅 Summarise
                     </button>
                   </div>
-                  {/* Booker filter chips */}
-                  <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10,alignItems:"center"}}>
-                    <span style={{fontSize:11,fontWeight:600,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.05em"}}>Booker:</span>
-                    <button onClick={()=>setListBookerFilter("all")}
-                      style={S.btn({background:listBookerFilter==="all"?"#0f172a":"#f8fafc",color:listBookerFilter==="all"?"#fff":"#475569",border:"1.5px solid #e2e8f0",fontSize:11,padding:"3px 9px"})}>All</button>
-                    {bookerEmails.map(em=>(
-                      <button key={em} onClick={()=>setListBookerFilter(p=>p===em?"all":em)}
-                        style={S.btn({background:listBookerFilter===em?emailColor(em):"#f8fafc",color:listBookerFilter===em?"#fff":"#475569",border:`1.5px solid ${listBookerFilter===em?emailColor(em):"#e2e8f0"}`,fontSize:11,padding:"3px 9px"})}>
-                        {em.split("@")[0]}
-                      </button>
-                    ))}
-                  </div>
-
                   {visible.length===0
                     ? <div style={{textAlign:"center",padding:"40px 0",color:"#94a3b8",fontSize:14}}>No bookings match the current filters.</div>
                     : <div style={{overflowX:"auto",borderRadius:10,border:"1px solid #f1f5f9"}}>
@@ -4649,9 +4650,17 @@ export default function App() {
                                     style={{padding:"2px 3px",fontSize:10,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",width:"100%",minWidth:88}}/>
                                 </div>
                               </th>
-                              <th style={{padding:"3px 4px"}}>
-                                <input placeholder="Search booker…" value={listNameSearch} onChange={e=>setListNameSearch(e.target.value)}
-                                  style={{padding:"3px 6px",fontSize:11,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",width:"100%"}}/>
+                              <th style={{padding:"3px 4px",whiteSpace:"normal"}}>
+                                <div style={{display:"flex",gap:3,flexWrap:"wrap",alignItems:"center"}}>
+                                  <button onClick={()=>setListBookerFilter("all")}
+                                    style={{padding:"1px 7px",fontSize:10,borderRadius:10,border:"1.5px solid #e2e8f0",background:listBookerFilter==="all"?"#0f172a":"#fff",color:listBookerFilter==="all"?"#fff":"#475569",cursor:"pointer",fontWeight:listBookerFilter==="all"?700:400,lineHeight:1.6}}>All</button>
+                                  {bookerEmails.map(em=>(
+                                    <button key={em} onClick={()=>setListBookerFilter(p=>p===em?"all":em)}
+                                      style={{padding:"1px 7px",fontSize:10,borderRadius:10,border:`1.5px solid ${listBookerFilter===em?emailColor(em):"#e2e8f0"}`,background:listBookerFilter===em?emailColor(em):"#fff",color:listBookerFilter===em?"#fff":"#475569",cursor:"pointer",fontWeight:listBookerFilter===em?700:400,lineHeight:1.6}}>
+                                      {bookerMap[em]||em.split("@")[0]}
+                                    </button>
+                                  ))}
+                                </div>
                               </th>
                               <th style={{padding:"3px 4px"}}>
                                 <select value={listColFacility} onChange={e=>setListColFacility(e.target.value)}
@@ -4673,7 +4682,7 @@ export default function App() {
                                   <input placeholder="Search purpose…" value={listColPurpose} onChange={e=>setListColPurpose(e.target.value)}
                                     style={{padding:"3px 6px",fontSize:11,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",flex:1}}/>
                                   {anyListFilter&&(
-                                    <button onClick={()=>{setListNameSearch("");setListDateFrom("");setListDateTo("");setListStatusFilter("all");setListColPurpose("");setListColFacility("all");}}
+                                    <button onClick={()=>{setListDateFrom("");setListDateTo("");setListStatusFilter("all");setListColPurpose("");setListColFacility("all");}}
                                       title="Clear all column filters"
                                       style={{padding:"2px 5px",fontSize:10,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",color:"#64748b",cursor:"pointer",flexShrink:0}}>✕</button>
                                   )}
@@ -4694,10 +4703,12 @@ export default function App() {
                                   onMouseEnter={e=>e.currentTarget.style.background=isAdmin_bk?"#f1f5f9":"#f8fafc"}
                                   onMouseLeave={e=>e.currentTarget.style.background=isAdmin_bk?"#f8fafc":isClash?"#fff5f5":"#fff"}>
                                   <td style={{padding:"4px 8px",whiteSpace:"nowrap",color:"#475569",fontSize:11}}>{dateShort}</td>
-                                  <td style={{padding:"4px 8px"}}>
+                                  <td style={{padding:"4px 8px"}} onClick={isAdmin_bk?undefined:e=>{e.stopPropagation();setListBookerFilter(p=>p===b.email.toLowerCase()?"all":b.email.toLowerCase());}}>
                                     {isAdmin_bk
-                                      ? <span style={{fontSize:10,fontWeight:700,color:"#94a3b8",background:"#f1f5f9",borderRadius:4,padding:"1px 5px"}}>🔒 admin</span>
-                                      : <><span style={{fontWeight:600,color:"#0f172a",fontSize:12}}>{b.name}</span><br/><span style={{fontSize:10,color:"#94a3b8"}}>{b.email}</span></>
+                                      ? <span style={{fontSize:10,fontWeight:700,color:"#94a3b8",background:"#f1f5f9",borderRadius:10,padding:"2px 7px"}}>🔒 admin</span>
+                                      : <span style={{display:"inline-block",padding:"2px 9px",borderRadius:10,background:emailColor(b.email),color:"#fff",fontSize:11,fontWeight:600,cursor:"pointer",outline:listBookerFilter===b.email.toLowerCase()?"2px solid #0f172a":"none",outlineOffset:1}}>
+                                          {b.name}
+                                        </span>
                                     }
                                   </td>
                                   <td style={{padding:"4px 8px",whiteSpace:"nowrap"}}>
