@@ -4501,7 +4501,7 @@ export default function App() {
     </div>
   );
 
-  const emailLegend=[...new Set(bookings.map(b=>b.email).filter(Boolean))];
+  const emailLegend=[...new Set(bookings.filter(b=>!isAdminBooking(b)).map(b=>b.email).filter(Boolean))];
 
   return (
     <div style={{minHeight:"100vh",background:"#f8fafc",fontFamily:"'DM Sans','Segoe UI',system-ui,sans-serif"}}>
@@ -4565,8 +4565,20 @@ export default function App() {
 
         {emailLegend.length>0&&(tab==="calendar"||tab==="month"||tab==="list")&&(
           <div style={{display:"flex",gap:6,marginBottom:12,alignItems:"center",overflowX:"auto",WebkitOverflowScrolling:"touch",scrollbarWidth:"none",msOverflowStyle:"none",paddingBottom:2}}>
-            <span style={{fontSize:11,fontWeight:600,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.05em",flexShrink:0}}>Bookers:</span>
-            {emailLegend.map(e=><EmailChip key={e} email={e}/>)}
+            <button onClick={()=>setListBookerFilter("all")}
+              style={{padding:"5px 12px",borderRadius:20,border:"1.5px solid",cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",flexShrink:0,borderColor:listBookerFilter==="all"?"#0f172a":"#e2e8f0",background:listBookerFilter==="all"?"#0f172a":"#fff",color:listBookerFilter==="all"?"#fff":"#475569"}}>
+              All
+            </button>
+            {emailLegend.map(e=>{
+              const active=listBookerFilter===e.toLowerCase();
+              const c=emailColor(e);
+              return(
+                <button key={e} onClick={()=>setListBookerFilter(p=>p===e.toLowerCase()?"all":e.toLowerCase())}
+                  style={{padding:"5px 12px",borderRadius:20,border:`1.5px solid ${active?c:"#e2e8f0"}`,cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",flexShrink:0,background:active?c:"#fff",color:active?"#fff":"#475569"}}>
+                  {e.split("@")[0]}
+                </button>
+              );
+            })}
           </div>
         )}
 
