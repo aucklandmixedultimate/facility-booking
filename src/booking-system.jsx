@@ -2639,7 +2639,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
                     const dur = getApproxDuration(b.email);
                     return s + (isPerBooking ? dur*r[cat] : (splitHours(b).day*r.day+splitHours(b).evening*r.evening));
                   }, 0);
-                  const groupCosts = m.groups.map(g=>({email:g.email, cost:getCost(g), count:g.bkgs.length}));
+                  const groupCosts = m.groups.map(g=>({email:g.email, cost:getCost(g), count:g.bkgs.length, bkgs:g.bkgs}));
                   const totalCost = groupCosts.reduce((s,g)=>s+g.cost, 0);
                   // After-merge schedule = committed target's schedule with committed overrides applied,
                   // restricted to the overlap window across all bookers' date ranges. Sessions outside
