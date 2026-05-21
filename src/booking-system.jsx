@@ -1801,6 +1801,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
   const [scheduleFacSensitive,setScheduleFacSensitive]= useState(false);
   const [sandboxMode,         setSandboxMode]         = useState(false);
   const [sandboxSelected,     setSandboxSelected]     = useState(new Set());
+  const [previewMerge,        setPreviewMerge]        = useState(false);
   const [patternModal, setPatternModal] = useState(null);
   const [oneOffModal, setOneOffModal] = useState(null);
   const [mergeTarget, setMergeTarget] = useState(null);
@@ -2511,7 +2512,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
             </label>
           )}
           {showSchedule&&isAdmin&&(
-            <button onClick={()=>setSandboxMode(v=>!v)} style={S.btn({
+            <button onClick={()=>{setSandboxMode(v=>!v);setPreviewMerge(false);setSandboxSelected(new Set());}} style={S.btn({
               background:sandboxMode?"#7c3aed":"#f8fafc",
               color:sandboxMode?"#fff":"#475569",
               border:`1.5px solid ${sandboxMode?"#7c3aed":"#e2e8f0"}`,
@@ -2586,7 +2587,22 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
                   Select the same pattern (day + time{scheduleFacSensitive?" + facility":""}) from at least 2 different bookers to preview a merge.
                 </div>
               )}
-              {hasMergeable && (()=>{
+              {hasMergeable && !previewMerge && (
+                <div style={{display:"flex",alignItems:"center",gap:10,background:"#f5f3ff",border:"1.5px solid #c4b5fd",borderRadius:10,padding:"10px 14px",marginBottom:12,flexWrap:"wrap"}}>
+                  <span style={{fontSize:12,fontWeight:600,color:"#5b21b6",flex:1}}>
+                    Ready to merge {mergePreview.length} pattern{mergePreview.length!==1?"s":""} ({mergePreview.reduce((s,m)=>s+m.numBookers,0)} bookers selected). Add more selections or preview now.
+                  </span>
+                  <button onClick={()=>setPreviewMerge(true)}
+                    style={S.btn({background:"#7c3aed",color:"#fff",fontSize:12,fontWeight:700})}>
+                    👁 Preview Merge
+                  </button>
+                  <button onClick={()=>{setSandboxSelected(new Set());setPreviewMerge(false);}}
+                    style={S.btn({border:"1.5px solid #c4b5fd",background:"#fff",color:"#7c3aed",fontSize:12})}>
+                    Clear
+                  </button>
+                </div>
+              )}
+              {hasMergeable && previewMerge && (()=>{
                 return mergePreview.map((m,mi)=>{
                   const key = m.mergeKey || mi;
                   const currentTarget = mergeTarget || m.groups[0]?.email;
@@ -2759,6 +2775,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
                                             if(e.target.checked) next.add(selKey); else next.delete(selKey);
                                             return next;
                                           });
+                                          setPreviewMerge(false);
                                         }}
                                         style={{cursor:"pointer"}}/>
                                     )}
