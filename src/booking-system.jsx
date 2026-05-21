@@ -3825,7 +3825,7 @@ function findMatchingUserBooking(allBookings, ev, facilityIds) {
   // Eligible bookings: same date, time-overlap, facility within the mapped set, non-admin, in an approvable state
   const candidates = allBookings.filter(b => {
     if (b.email === "admin") return false;
-    if (!["approved","cpsa_confirmed","cpsa_review_needed"].includes(b.status)) return false;
+    if (!["approved","cpsa_confirmed","cpsa_review_needed","clash"].includes(b.status)) return false;
     if (b.date !== date) return false;
     if (!facilityIds.includes(b.facility_id)) return false;
     if (b.start_hour + b.duration <= start_hour) return false;
