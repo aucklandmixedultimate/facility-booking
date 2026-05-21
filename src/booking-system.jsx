@@ -1557,10 +1557,10 @@ function PatternModal({ email, name, pk, bkgs, isAdmin, facilityRates, pricingMo
   const facId = parts.length>2 ? parts[0] : null;
   const fac = facId ? FACILITIES.find(f=>f.id===facId) : null;
 
-  const [bulkTime, setBulkTime] = React.useState(startH);
-  const [bulkDur, setBulkDur] = React.useState(bkgs[0]?.duration ?? 2);
-  const [bulkFac, setBulkFac] = React.useState(bkgs[0]?.facility_id ?? "");
-  const [cancelFrom, setCancelFrom] = React.useState("");
+  const [bulkTime, setBulkTime] = useState(startH);
+  const [bulkDur, setBulkDur] = useState(bkgs[0]?.duration ?? 2);
+  const [bulkFac, setBulkFac] = useState(bkgs[0]?.facility_id ?? "");
+  const [cancelFrom, setCancelFrom] = useState("");
 
   const sorted = [...bkgs].sort((a,b)=>a.date.localeCompare(b.date));
 
@@ -1689,7 +1689,7 @@ function OneOffModal({ email, name, bkgs, isAdmin, onClose }) {
 }
 
 function ScheduleSummaryModal({ bookings, onClose }) {
-  const [facSensitive, setFacSensitive] = React.useState(false);
+  const [facSensitive, setFacSensitive] = useState(false);
   const active = bookings.filter(b=>["approved","pending_cpsa","queued_cpsa","pending_amua","amua_submit","pending"].includes(b.status)&&!isAdminBooking(b));
 
   function dayName(d){return["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][new Date(d+"T12:00").getDay()];}
