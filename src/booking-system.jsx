@@ -1539,7 +1539,7 @@ function AboutTab() {
   );
 }
 
-function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = false, approxPlayers = {}, onUpdateApproxPlayers, onUpdateFacilityRate }) {
+function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = false, approxPlayers = {}, onUpdateApproxPlayers, onUpdateFacilityRate, pricingMode = "hourly", onSetPricingMode, perBookingTiers = {}, onUpdatePerBookingTier }) {
   const now = new Date();
   const thisYear = now.getFullYear();
 
@@ -1552,6 +1552,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
   // Invoice modal state
   const [showInvoice, setShowInvoice] = useState(false);
   const [showRatesEdit, setShowRatesEdit] = useState(false);
+  const [showTierEditor, setShowTierEditor] = useState(false);
   // Inline player-count editing: email being edited
   const [editingPlayers, setEditingPlayers] = useState(null);
   const [playersInput,   setPlayersInput]   = useState("");
@@ -1620,6 +1621,15 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
     return { day: parseFloat(r) || 0, evening: 50 }; // backward compat
   }
 
+  const isPerBooking = pricingMode === "per_booking";
+
+  function getBookingCost(b) {
+    if (isPerBooking) return Number(perBookingTiers[String(b.duration)]) || 0;
+    const { day, evening } = splitHours(b);
+    const rates = getFacRates(b.facility_id);
+    return day * rates.day + evening * rates.evening;
+  }
+
   // Per-email aggregation (over filtered active bookings)
   const byEmail = {};
   active.forEach(b => {
@@ -1632,12 +1642,14 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
     rec.daytime  += day;
     rec.total    += b.duration;
     rec.bookings += 1;
-    rec.dayCost  += day * rates.day;
-    rec.eveCost  += evening * rates.evening;
-    rec.cost     += day * rates.day + evening * rates.evening;
+    if (!isPerBooking) {
+      rec.dayCost  += day * rates.day;
+      rec.eveCost  += evening * rates.evening;
+    }
+    rec.cost += getBookingCost(b);
   });
 
-  const rows         = Object.values(byEmail).sort((a,b)=>b.total-a.total);
+  const rows          = Object.values(byEmail).sort((a,b)=>b.total-a.total);
   const totalEvening  = rows.reduce((s,r)=>s+r.evening,0);
   const totalDaytime  = rows.reduce((s,r)=>s+r.daytime,0);
   const totalHrs      = rows.reduce((s,r)=>s+r.total,0);
@@ -1645,23 +1657,25 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
   const totalDayCost    = rows.reduce((s,r)=>s+r.dayCost,0);
   const totalEveCost    = rows.reduce((s,r)=>s+r.eveCost,0);
 
-  // Per-facility hours and cost calculation (split by day/evening rate)
+  // Per-facility cost (adapts to pricing mode)
   const byFacility = {};
   active.forEach(b => {
     const fac = FACILITIES.find(x => x.id === b.facility_id);
     if (!fac) return;
-    if (!byFacility[fac.id]) byFacility[fac.id] = { fac, dayHrs: 0, eveningHrs: 0 };
+    if (!byFacility[fac.id]) byFacility[fac.id] = { fac, dayHrs: 0, eveningHrs: 0, cost: 0 };
     const { day, evening } = splitHours(b);
     byFacility[fac.id].dayHrs     += day;
     byFacility[fac.id].eveningHrs += evening;
+    byFacility[fac.id].cost       += getBookingCost(b);
   });
-  const facCosts = Object.values(byFacility).map(({ fac, dayHrs, eveningHrs }) => {
+  const facCosts = Object.values(byFacility).map(({ fac, dayHrs, eveningHrs, cost }) => {
     const rates = getFacRates(fac.id);
-    const cost = dayHrs * rates.day + eveningHrs * rates.evening;
     return { fac, dayHrs, eveningHrs, hours: dayHrs + eveningHrs, rates, cost };
   });
   const totalCost = facCosts.reduce((s, c) => s + c.cost, 0);
-  const anyRates  = facCosts.some(c => c.rates.day > 0 || c.rates.evening > 0);
+  const anyRates  = isPerBooking
+    ? Object.values(perBookingTiers).some(v => v > 0)
+    : facCosts.some(c => c.rates.day > 0 || c.rates.evening > 0);
 
   function fmtHrs(h) { return h===0?"0h" : h%1===0?`${h}h`:`${Math.floor(h)}h ${Math.round((h%1)*60)}m`; }
   function fmtCost(n) { return "$" + n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g,","); }
@@ -1895,6 +1909,58 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
         </div>
       </div>
 
+      {/* Pricing mode toggle + per-booking tier editor */}
+      <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+        <div style={{ display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
+          <span style={{ fontSize:12, fontWeight:600, color:"#64748b" }}>Pricing:</span>
+          {[
+            { key:"hourly",      label:"⏱ Per Hour" },
+            { key:"per_booking", label:"🎟 Per Booking" },
+          ].map(opt=>(
+            <button key={opt.key} onClick={()=>{ onSetPricingMode(opt.key); if(opt.key==="per_booking") setShowTierEditor(true); }}
+              style={{ padding:"5px 14px", borderRadius:8, fontWeight:600, fontSize:12, cursor:"pointer", fontFamily:"inherit",
+                border: pricingMode===opt.key ? "1.5px solid #0f172a" : "1.5px solid #e2e8f0",
+                background: pricingMode===opt.key ? "#0f172a" : "#f8fafc",
+                color: pricingMode===opt.key ? "#fff" : "#475569" }}>
+              {opt.label}
+            </button>
+          ))}
+          {isPerBooking && isAdmin && onUpdatePerBookingTier && (
+            <button onClick={()=>setShowTierEditor(v=>!v)}
+              style={S.btn({ border:`1.5px solid ${showTierEditor?"#6366f1":"#e2e8f0"}`, background:showTierEditor?"#eef2ff":"#fff", color:showTierEditor?"#4338ca":"#475569", fontSize:12 })}>
+              ✏ {showTierEditor ? "Hide Prices" : "Set Prices"}
+            </button>
+          )}
+          {isPerBooking && !anyRates && (
+            <span style={{ fontSize:12, color:"#94a3b8" }}>
+              {isAdmin ? "— set per-booking prices below" : "— prices not yet configured"}
+            </span>
+          )}
+        </div>
+
+        {isPerBooking && showTierEditor && isAdmin && onUpdatePerBookingTier && (
+          <div style={{ background:"#f8fafc", border:"1.5px solid #e0e7ff", borderRadius:12, padding:14 }}>
+            <div style={{ fontWeight:700, fontSize:13, color:"#0f172a", marginBottom:6 }}>Price per Booking by Duration</div>
+            <div style={{ fontSize:12, color:"#64748b", marginBottom:10 }}>Set a flat price for each booking length. Bookings with no price set will show as $0.</div>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))", gap:8 }}>
+              {DURATIONS.map(d => (
+                <div key={d.value} style={{ background:"#fff", border:"1px solid #e2e8f0", borderRadius:8, padding:"8px 12px", display:"flex", alignItems:"center", gap:8 }}>
+                  <span style={{ fontSize:12, fontWeight:600, color:"#0f172a", flex:1 }}>{d.label}</span>
+                  <span style={{ fontSize:12, color:"#64748b" }}>$</span>
+                  <input
+                    type="number" min="0" step="0.5"
+                    value={perBookingTiers[String(d.value)] || ""}
+                    placeholder="0"
+                    onChange={e=>onUpdatePerBookingTier(d.value, e.target.value)}
+                    style={{ width:64, padding:"3px 6px", borderRadius:6, border:"1.5px solid #e2e8f0", fontSize:13, textAlign:"right", fontFamily:"inherit", outline:"none" }}
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* KPI cards */}
       <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:12 }}>
         {[
@@ -1921,7 +1987,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
             <h3 style={{ margin:0, fontSize:15, fontWeight:700, color:"#0f172a", flex:1 }}>
               Cost by Facility — {PRESETS.find(p=>p.key===preset)?.label}{dateFrom&&dateTo?` (${dateFrom} – ${dateTo})`:""}{emailFilter!=="all"?` · ${emailFilter}`:""}
             </h3>
-            {isAdmin && onUpdateFacilityRate && (
+            {isAdmin && onUpdateFacilityRate && !isPerBooking && (
               <button onClick={()=>setShowRatesEdit(v=>!v)}
                 style={S.btn({border:`1.5px solid ${showRatesEdit?"#6366f1":"#e2e8f0"}`,background:showRatesEdit?"#eef2ff":"#fff",color:showRatesEdit?"#4338ca":"#475569",fontSize:12})}>
                 ✏ {showRatesEdit ? "Done" : "Edit Rates"}
@@ -1961,20 +2027,25 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
           )}
           <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:10 }}>
             {facCosts.map(({ fac, dayHrs, eveningHrs, hours, rates, cost }) => {
-              const hasRates = rates.day > 0 || rates.evening > 0;
+              const hasRates = isPerBooking ? cost > 0 : (rates.day > 0 || rates.evening > 0);
               return (
                 <div key={fac.id} style={{ background:"#fff", border:"1px solid #f1f5f9", borderRadius:12, padding:"14px 16px", display:"flex", flexDirection:"column", gap:6, boxShadow:"0 1px 4px rgba(0,0,0,0.04)" }}>
                   <div style={{ display:"flex", alignItems:"center", gap:6 }}>
                     <span style={{ width:10, height:10, borderRadius:"50%", background:fac.color, flexShrink:0, display:"inline-block" }}/>
                     <span style={{ fontSize:12, fontWeight:700, color:"#0f172a" }}>{fac.name}</span>
                   </div>
-                  {dayHrs > 0 && <div style={{ fontSize:12, color:"#64748b" }}>Day: {fmtHrs(dayHrs)} {rates.day > 0 ? `@ ${fmtCost(rates.day)}/hr` : ""}</div>}
-                  {eveningHrs > 0 && <div style={{ fontSize:12, color:"#64748b" }}>Eve: {fmtHrs(eveningHrs)} {rates.evening > 0 ? `@ ${fmtCost(rates.evening)}/hr` : ""}</div>}
-                  {dayHrs === 0 && eveningHrs === 0 && <div style={{ fontSize:12, color:"#94a3b8" }}>{fmtHrs(hours)} total</div>}
+                  {isPerBooking
+                    ? <div style={{ fontSize:12, color:"#64748b" }}>{active.filter(b=>b.facility_id===fac.id).length} booking{active.filter(b=>b.facility_id===fac.id).length!==1?"s":""} · {fmtHrs(hours)}</div>
+                    : (<>
+                        {dayHrs > 0 && <div style={{ fontSize:12, color:"#64748b" }}>Day: {fmtHrs(dayHrs)} {rates.day > 0 ? `@ ${fmtCost(rates.day)}/hr` : ""}</div>}
+                        {eveningHrs > 0 && <div style={{ fontSize:12, color:"#64748b" }}>Eve: {fmtHrs(eveningHrs)} {rates.evening > 0 ? `@ ${fmtCost(rates.evening)}/hr` : ""}</div>}
+                        {dayHrs === 0 && eveningHrs === 0 && <div style={{ fontSize:12, color:"#94a3b8" }}>{fmtHrs(hours)} total</div>}
+                      </>)
+                  }
                   <div style={{ fontSize:18, fontWeight:800, color: hasRates ? "#15803d" : "#94a3b8" }}>
                     {hasRates ? fmtCost(cost) : "—"}
                   </div>
-                  {!hasRates && <div style={{ fontSize:11, color:"#94a3b8" }}>no rates set</div>}
+                  {!hasRates && <div style={{ fontSize:11, color:"#94a3b8" }}>{isPerBooking ? "no prices set" : "no rates set"}</div>}
                 </div>
               );
             })}
@@ -1998,14 +2069,16 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
           {rows.length>0&&<button onClick={()=>{
             const esc = v => `"${String(v||"").replace(/"/g,'""')}"`;
             const hdrs = ["Booker","Email","Bookings","Daytime Hrs","Evening Hrs","Total Hrs",
-              ...(anyRates?["Day Cost","Eve Cost","Total Cost"]:[]),
+              ...(anyRates&&!isPerBooking?["Day Cost","Eve Cost"]:[]),
+              ...(anyRates?["Total Cost"]:[]),
               "Approx Players",
               ...(anyRates?["Cost per Player"]:[])];
             const dataRows = rows.map(r=>{
               const players = getPlayers(r.email);
               const perPlayer = anyRates && players>0 && r.cost>0 ? r.cost/players : "";
               return [r.name,r.email,r.bookings,r.daytime.toFixed(2),r.evening.toFixed(2),r.total.toFixed(2),
-                ...(anyRates?[r.dayCost.toFixed(2),r.eveCost.toFixed(2),r.cost.toFixed(2)]:[]),
+                ...(anyRates&&!isPerBooking?[r.dayCost.toFixed(2),r.eveCost.toFixed(2)]:[]),
+                ...(anyRates?[r.cost.toFixed(2)]:[]),
                 players||"",
                 ...(anyRates?[perPlayer?perPlayer.toFixed(2):""]:[])].map(esc).join(",");
             });
@@ -2031,8 +2104,8 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
                     <th style={{ ...thS, textAlign:"right" }}>Daytime</th>
                     <th style={{ ...thS, textAlign:"right" }}>Evening</th>
                     <th style={{ ...thS, textAlign:"right" }}>Total</th>
-                    {anyRates&&<th style={{ ...thS, textAlign:"right" }}>Day Cost</th>}
-                    {anyRates&&<th style={{ ...thS, textAlign:"right" }}>Eve Cost</th>}
+                    {anyRates&&!isPerBooking&&<th style={{ ...thS, textAlign:"right" }}>Day Cost</th>}
+                    {anyRates&&!isPerBooking&&<th style={{ ...thS, textAlign:"right" }}>Eve Cost</th>}
                     {anyRates&&<th style={{ ...thS, textAlign:"right", color:"#15803d" }}>Total Cost</th>}
                     <th style={{ ...thS, textAlign:"right" }}>Players</th>
                     {anyRates&&<th style={{ ...thS, textAlign:"right", color:"#7c3aed" }}>$/Player</th>}
@@ -2052,8 +2125,8 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
                       <td style={{ ...tdS, textAlign:"right" }}><span style={{ background:"#fef9c3", color:"#854d0e", borderRadius:6, padding:"2px 8px", fontWeight:600, fontSize:12 }}>{fmtHrs(r.daytime)}</span></td>
                       <td style={{ ...tdS, textAlign:"right" }}><span style={{ background:"#ede9fe", color:"#5b21b6", borderRadius:6, padding:"2px 8px", fontWeight:600, fontSize:12 }}>{fmtHrs(r.evening)}</span></td>
                       <td style={{ ...tdS, textAlign:"right", fontWeight:700 }}>{fmtHrs(r.total)}</td>
-                      {anyRates&&<td style={{ ...tdS, textAlign:"right", fontWeight:600, color:r.dayCost>0?"#15803d":"#94a3b8" }}>{r.dayCost>0?fmtCost(r.dayCost):"—"}</td>}
-                      {anyRates&&<td style={{ ...tdS, textAlign:"right", fontWeight:600, color:r.eveCost>0?"#15803d":"#94a3b8" }}>{r.eveCost>0?fmtCost(r.eveCost):"—"}</td>}
+                      {anyRates&&!isPerBooking&&<td style={{ ...tdS, textAlign:"right", fontWeight:600, color:r.dayCost>0?"#15803d":"#94a3b8" }}>{r.dayCost>0?fmtCost(r.dayCost):"—"}</td>}
+                      {anyRates&&!isPerBooking&&<td style={{ ...tdS, textAlign:"right", fontWeight:600, color:r.eveCost>0?"#15803d":"#94a3b8" }}>{r.eveCost>0?fmtCost(r.eveCost):"—"}</td>}
                       {anyRates&&<td style={{ ...tdS, textAlign:"right", fontWeight:700, color:r.cost>0?"#15803d":"#94a3b8" }}>{r.cost>0?fmtCost(r.cost):"—"}</td>}
                       <td style={{ ...tdS, textAlign:"right" }}>
                         {isEditingThis ? (
@@ -2099,8 +2172,8 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
                       <td style={{ ...tdS, textAlign:"right" }}><span style={{ background:"#fef9c3", color:"#854d0e", borderRadius:6, padding:"2px 8px", fontWeight:700, fontSize:12 }}>{fmtHrs(totalDaytime)}</span></td>
                       <td style={{ ...tdS, textAlign:"right" }}><span style={{ background:"#ede9fe", color:"#5b21b6", borderRadius:6, padding:"2px 8px", fontWeight:700, fontSize:12 }}>{fmtHrs(totalEvening)}</span></td>
                       <td style={{ ...tdS, textAlign:"right", fontWeight:800 }}>{fmtHrs(totalHrs)}</td>
-                      {anyRates&&<td style={{ ...tdS, textAlign:"right", fontWeight:800, color:"#15803d" }}>{fmtCost(totalDayCost)}</td>}
-                      {anyRates&&<td style={{ ...tdS, textAlign:"right", fontWeight:800, color:"#15803d" }}>{fmtCost(totalEveCost)}</td>}
+                      {anyRates&&!isPerBooking&&<td style={{ ...tdS, textAlign:"right", fontWeight:800, color:"#15803d" }}>{fmtCost(totalDayCost)}</td>}
+                      {anyRates&&!isPerBooking&&<td style={{ ...tdS, textAlign:"right", fontWeight:800, color:"#15803d" }}>{fmtCost(totalEveCost)}</td>}
                       {anyRates&&<td style={{ ...tdS, textAlign:"right", fontWeight:800, color:"#15803d" }}>{fmtCost(totalCostAll)}</td>}
                       <td style={{ ...tdS, textAlign:"right", fontWeight:700, color:totalPlayers>0?"#0369a1":"#94a3b8" }}>{totalPlayers > 0 ? totalPlayers : "—"}</td>
                       {anyRates&&<td style={{ ...tdS, textAlign:"right", fontWeight:800, color:totalPerPlayer>0?"#7c3aed":"#94a3b8" }}>{totalPerPlayer>0?fmtCost(totalPerPlayer):"—"}</td>}
@@ -2835,6 +2908,10 @@ export default function App() {
   const [approxPlayers, setApproxPlayers] = useState(()=>{
     try{return JSON.parse(localStorage.getItem("fb_approx_players")||"{}");}catch{return {};}
   });
+  const [pricingMode, setPricingModeState] = useState(()=>localStorage.getItem("fb_pricing_mode")||"hourly");
+  const [perBookingTiers, setPerBookingTiers] = useState(()=>{
+    try{return JSON.parse(localStorage.getItem("fb_per_booking_tiers")||"{}");}catch{return {};}
+  });
   const [listSearch,      setListSearch]        = useState("");
   const [listStatusFilter,setListStatusFilter]  = useState("all");
   const [listSortCol,     setListSortCol]       = useState("date");
@@ -3026,6 +3103,15 @@ export default function App() {
     try{localStorage.setItem("fb_facility_rates",JSON.stringify(newRates));}catch{}
   }
 
+  function setPricingMode(mode) {
+    setPricingModeState(mode);
+    try{localStorage.setItem("fb_pricing_mode", mode);}catch{}
+  }
+  function updatePerBookingTier(duration, value) {
+    const next = { ...perBookingTiers, [String(duration)]: parseFloat(value) || 0 };
+    setPerBookingTiers(next);
+    try{localStorage.setItem("fb_per_booking_tiers", JSON.stringify(next));}catch{}
+  }
   function updateApproxPlayers(email, value) {
     const v = Math.max(0, parseInt(value) || 0);
     const next = { ...approxPlayers, [email.toLowerCase()]: v };
@@ -3455,7 +3541,7 @@ export default function App() {
           </div>
         )}
 
-        {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<SummaryTab bookings={bookings} loggedInEmail={loggedInEmail} facilityRates={facilityRates} isAdmin={isAdmin} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} onUpdateFacilityRate={updateFacilityRate}/>}</div>}
+        {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<SummaryTab bookings={bookings} loggedInEmail={loggedInEmail} facilityRates={facilityRates} isAdmin={isAdmin} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} onUpdateFacilityRate={updateFacilityRate} pricingMode={pricingMode} onSetPricingMode={setPricingMode} perBookingTiers={perBookingTiers} onUpdatePerBookingTier={updatePerBookingTier}/>}</div>}
         {tab==="about"&&<div style={{padding:"8px 0"}}><AboutTab/></div>}
         {tab==="admin"&&isAdmin&&<div style={S.card}>
           {/* Silent mode banner */}
