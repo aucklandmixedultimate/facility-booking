@@ -1806,6 +1806,8 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
   const [oneOffModal, setOneOffModal] = useState(null);
   const [mergeTarget, setMergeTarget] = useState(null);
   const [mergeResolution, setMergeResolution] = useState({});
+  const [committedResolution, setCommittedResolution] = useState({});
+  const [committedTarget, setCommittedTarget] = useState(null);
 
   function presetRange(key) {
     const y = thisYear;
@@ -2593,7 +2595,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
                   <span style={{fontSize:12,fontWeight:600,color:"#5b21b6",flex:1}}>
                     Ready to merge {mergePreview.length} pattern{mergePreview.length!==1?"s":""} ({mergePreview.reduce((s,m)=>s+m.numBookers,0)} bookers selected). Add more selections or preview now.
                   </span>
-                  <button onClick={()=>setPreviewMerge(true)}
+                  <button onClick={()=>{setCommittedResolution(mergeResolution);setCommittedTarget(mergeTarget);setPreviewMerge(true);}}
                     style={S.btn({background:"#7c3aed",color:"#fff",fontSize:12,fontWeight:700})}>
                     👁 Preview Merge
                   </button>
@@ -2606,12 +2608,16 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
               {hasMergeable && previewMerge && (()=>{
                 return mergePreview.map((m,mi)=>{
                   const key = m.mergeKey || mi;
-                  const currentTarget = mergeTarget || m.groups[0]?.email;
-                  const targetGroup = m.groups.find(g=>g.email===currentTarget)||m.groups[0];
-                  const conformGroups = m.groups.filter(g=>g.email!==targetGroup.email);
-                  const targetBkg = targetGroup.bkgs[0];
+                  // UI ("editing") target reflects user's pending pick; preview ("committed") target was snapshotted on last Preview/Recalculate.
+                  const editingTarget = mergeTarget || m.groups[0]?.email;
+                  const committedTargetEmail = committedTarget || m.groups[0]?.email;
+                  const targetGroup = m.groups.find(g=>g.email===committedTargetEmail)||m.groups[0];
+                  const editingTargetGroup = m.groups.find(g=>g.email===editingTarget)||m.groups[0];
+                  const conformGroups = m.groups.filter(g=>g.email!==editingTargetGroup.email);
+                  const targetBkg = editingTargetGroup.bkgs[0];
                   const resKey = k => `${key}::${k}`;
                   const resolved = (field, targetVal) => mergeResolution[resKey(field)] ?? targetVal;
+                  const committedVal = (field, fallback) => committedResolution[resKey(field)] ?? fallback;
                   const DAYS = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
                   const getField = (b, field) => {
                     if(!b) return "";
@@ -2635,21 +2641,46 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
                   }, 0);
                   const groupCosts = m.groups.map(g=>({email:g.email, cost:getCost(g), count:g.bkgs.length}));
                   const totalCost = groupCosts.reduce((s,g)=>s+g.cost, 0);
-                  // After-merge schedule = target's schedule (target's session count × target's rate).
-                  // All bookers share that one schedule, so split the target's cost N ways.
-                  const targetCost = groupCosts.find(g=>g.email===targetGroup.email)?.cost ?? 0;
-                  const mergedTotal = targetCost;
+                  // After-merge schedule = committed target's schedule with committed overrides applied.
+                  const committedBkg = targetGroup.bkgs[0];
+                  const ovFacId = committedVal("facility_id", committedBkg?.facility_id);
+                  const ovStart = committedVal("start_hour", committedBkg?.start_hour);
+                  const ovDur = committedVal("duration", committedBkg?.duration);
+                  const ovRates = getFacRates(ovFacId);
+                  const targetCount = targetGroup.bkgs.length;
+                  const mergedTotal = (()=>{
+                    if(isPerBooking){
+                      const cat = ovStart >= EVENING_CUTOFF ? "evening" : "day";
+                      return targetCount * getApproxDuration(targetGroup.email) * ovRates[cat];
+                    }
+                    const end = ovStart + ovDur;
+                    const dayHrs = Math.max(0, Math.min(EVENING_CUTOFF, end) - Math.min(EVENING_CUTOFF, ovStart));
+                    const eveHrs = Math.max(0, end - Math.max(EVENING_CUTOFF, ovStart));
+                    return targetCount * (dayHrs*ovRates.day + eveHrs*ovRates.evening);
+                  })();
                   const sharePerBooker = mergedTotal / m.numBookers;
                   const si={border:"1px solid #e2e8f0",borderRadius:6,padding:"3px 7px",fontSize:12,fontFamily:"inherit",background:"#fff"};
                   const setRes = (field, val) => setMergeResolution(prev=>({...prev,[resKey(field)]:val}));
+                  // Stale = the editing values diverge from what's committed in the preview
+                  const stale = JSON.stringify(mergeResolution) !== JSON.stringify(committedResolution) || editingTarget !== committedTargetEmail;
                   return (
                     <div key={key} style={{background:"#f5f3ff",border:"1.5px solid #c4b5fd",borderRadius:10,padding:"12px 16px",marginBottom:12}}>
-                      <div style={{fontWeight:700,fontSize:13,color:"#5b21b6",marginBottom:8}}>🧪 Merge Preview — {m.label}</div>
+                      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8,flexWrap:"wrap"}}>
+                        <div style={{fontWeight:700,fontSize:13,color:"#5b21b6",flex:1}}>🧪 Merge Preview — {m.label}</div>
+                        {stale && (
+                          <span style={{fontSize:11,fontWeight:700,color:"#92400e",background:"#fef3c7",border:"1px solid #fde68a",borderRadius:6,padding:"2px 8px"}}>⚠ Stale — recalculate to apply changes</span>
+                        )}
+                        <button onClick={()=>{setCommittedResolution(mergeResolution);setCommittedTarget(mergeTarget);}}
+                          disabled={!stale}
+                          style={S.btn({background:stale?"#7c3aed":"#e2e8f0",color:stale?"#fff":"#94a3b8",fontSize:11,cursor:stale?"pointer":"not-allowed"})}>
+                          🔄 Recalculate
+                        </button>
+                      </div>
                       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10,flexWrap:"wrap"}}>
                         <span style={{fontSize:12,fontWeight:600,color:"#64748b"}}>Target (keeps their slot):</span>
                         {m.groups.map(g=>(
                           <button key={g.email} onClick={()=>setMergeTarget(g.email)}
-                            style={{background:currentTarget===g.email?"#5b21b6":"#f5f3ff",color:currentTarget===g.email?"#fff":"#5b21b6",border:"1px solid #c4b5fd",borderRadius:6,padding:"2px 8px",fontSize:11,cursor:"pointer",fontWeight:600,fontFamily:"inherit"}}>
+                            style={{background:editingTarget===g.email?"#5b21b6":"#f5f3ff",color:editingTarget===g.email?"#fff":"#5b21b6",border:"1px solid #c4b5fd",borderRadius:6,padding:"2px 8px",fontSize:11,cursor:"pointer",fontWeight:600,fontFamily:"inherit"}}>
                             {g.email.split("@")[0]}
                           </button>
                         ))}
@@ -2664,7 +2695,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
                             return (
                               <div key={f.field} style={{display:"flex",alignItems:"center",gap:8,marginBottom:6,fontSize:12,flexWrap:"wrap"}}>
                                 <span style={{fontWeight:600,color:"#4c1d95",width:72}}>{label}</span>
-                                <span style={{color:"#16a34a"}}>✓ {disp(f.targetVal)} ({targetGroup.email.split("@")[0]})</span>
+                                <span style={{color:"#16a34a"}}>✓ {disp(f.targetVal)} ({editingTargetGroup.email.split("@")[0]})</span>
                                 {f.conflicts.map(c=>(
                                   <span key={c.email} style={{color:"#9f1239"}}>≠ {disp(c.val)} ({c.email.split("@")[0]})</span>
                                 ))}
@@ -2715,7 +2746,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
                           <span>Total</span><span>{fmtCost(totalCost)}</span>
                         </div>
                         <div style={{marginTop:8,fontSize:12,fontWeight:600,color:"#064e3b"}}>
-                          After merge — shared schedule = {targetGroup.email.split("@")[0]}'s slot ({groupCosts.find(g=>g.email===targetGroup.email)?.count} sessions, {fmtCost(targetCost)} ÷ {m.numBookers}):
+                          After merge — shared schedule = {targetGroup.email.split("@")[0]}'s slot ({targetCount} sessions, {fmtCost(mergedTotal)} ÷ {m.numBookers}):
                         </div>
                         {groupCosts.map(g=>{
                           const diff = g.cost - sharePerBooker;
