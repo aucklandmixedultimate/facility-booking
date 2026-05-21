@@ -1550,7 +1550,36 @@ function AboutTab() {
   );
 }
 
-function PatternModal({ email, name, pk, bkgs, isAdmin, facilityRates, pricingMode, approxDurations, onClose, onBulkApply }) {
+function buildOverlapPatternMap(active, facSensitive) {
+  function dayName(d){return["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][new Date(d+"T12:00").getDay()];}
+  function timesOverlap(b1,b2){return b1.start_hour<b2.start_hour+b2.duration&&b2.start_hour<b1.start_hour+b1.duration;}
+  const patternMap={};
+  active.forEach(b=>{
+    const email=b.email.toLowerCase();
+    const dn=dayName(b.date);
+    if(!patternMap[email]) patternMap[email]={};
+    const emailPats=patternMap[email];
+    let matchedPk=null;
+    for(const [pk,bkgs] of Object.entries(emailPats)){
+      const parts=pk.split("_");
+      const pkDn=facSensitive?parts[1]:parts[0];
+      const pkFac=facSensitive?parts[0]:null;
+      if(pkDn!==dn) continue;
+      if(facSensitive&&pkFac!==b.facility_id) continue;
+      if(bkgs.some(eb=>timesOverlap(eb,b))){matchedPk=pk;break;}
+    }
+    if(matchedPk){emailPats[matchedPk].push(b);}
+    else{
+      const pk=facSensitive?`${b.facility_id}_${dn}_${b.start_hour}`:`${dn}_${b.start_hour}`;
+      if(!emailPats[pk]) emailPats[pk]=[];
+      emailPats[pk].push(b);
+    }
+  });
+  return patternMap;
+}
+
+function PatternModal({ email, name, pk, bkgs, isAdmin, canEdit: canEditProp, facilityRates, pricingMode, approxDurations, onClose, onBulkApply }) {
+  const canEdit = canEditProp !== undefined ? canEditProp : isAdmin;
   const parts = pk.split("_");
   const startH = parseFloat(parts[parts.length-1]);
   const dn = parts[parts.length-2]||"";
@@ -1602,7 +1631,7 @@ function PatternModal({ email, name, pk, bkgs, isAdmin, facilityRates, pricingMo
         </table>
       </div>
 
-      {isAdmin && (
+      {(isAdmin || canEdit) && (
         <div style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:"10px 12px"}}>
           <div style={{fontWeight:700,fontSize:13,color:"#0f172a",marginBottom:8}}>Bulk Edit (apply to all in pattern)</div>
           <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center",marginBottom:8}}>
@@ -1641,7 +1670,7 @@ function PatternModal({ email, name, pk, bkgs, isAdmin, facilityRates, pricingMo
           </div>
         </div>
       )}
-      {!isAdmin && (
+      {!(isAdmin || canEdit) && (
         <button onClick={onClose} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#64748b",fontSize:12})}>Close</button>
       )}
     </Modal>
@@ -1688,21 +1717,14 @@ function OneOffModal({ email, name, bkgs, isAdmin, onClose }) {
   );
 }
 
-function ScheduleSummaryModal({ bookings, onClose }) {
+function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkApply, onClose }) {
   const [facSensitive, setFacSensitive] = useState(false);
+  const [splitPatterns, setSplitPatterns] = useState(new Set());
+  const [patternModal, setPatternModal] = useState(null);
+  const [oneOffModalData, setOneOffModalData] = useState(null);
+
   const active = bookings.filter(b=>["approved","pending_cpsa","queued_cpsa","pending_amua","amua_submit","pending"].includes(b.status)&&!isAdminBooking(b));
-
-  function dayName(d){return["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][new Date(d+"T12:00").getDay()];}
-
-  const patternMap = {};
-  active.forEach(b=>{
-    const email=b.email.toLowerCase();
-    const dn=dayName(b.date);
-    const pk=facSensitive?`${b.facility_id}_${dn}_${b.start_hour}`:`${dn}_${b.start_hour}`;
-    if(!patternMap[email]) patternMap[email]={};
-    if(!patternMap[email][pk]) patternMap[email][pk]=[];
-    patternMap[email][pk].push(b);
-  });
+  const patternMap = buildOverlapPatternMap(active, facSensitive);
 
   const rows = Object.entries(patternMap).map(([email,pats])=>{
     const nameDisplay=(Object.values(pats)[0]||[])[0]?.name||email;
@@ -1715,66 +1737,118 @@ function ScheduleSummaryModal({ bookings, onClose }) {
   const thS2={textAlign:"left",padding:"6px 8px",fontWeight:600,color:"#64748b",fontSize:12,borderBottom:"1px solid #e2e8f0"};
   const tdS2={padding:"6px 8px",verticalAlign:"top",fontSize:13};
 
+  function renderChips(email, nameDisplay, recurring) {
+    const ec = emailColor(email);
+    const canEdit = isAdmin || email.toLowerCase() === loggedInEmail?.toLowerCase();
+    const chips = [];
+    for (const [pk, bkgs] of recurring) {
+      const splitKey = `${email}::${pk}`;
+      const isSplit = splitPatterns.has(splitKey);
+      const startHours = [...new Set(bkgs.map(b=>b.start_hour))];
+      const isMixed = startHours.length > 1;
+      if (isSplit && isMixed) {
+        for (const sh of startHours.sort((a,b)=>a-b)) {
+          const subBkgs = bkgs.filter(b=>b.start_hour===sh);
+          const parts=pk.split("_"); const dn=parts[parts.length-2]||"";
+          const durs=[...new Set(subBkgs.map(b=>b.duration))];
+          const durLabel=durs.length===1?`${durs[0]}h`:`~${Math.round(durs.reduce((s,d)=>s+d,0)/durs.length*2)/2}h`;
+          const facIds=[...new Set(subBkgs.map(b=>b.facility_id))];
+          const facLabel=facIds.map(fid=>{const f=FACILITIES.find(x=>x.id===fid);return f?(f.name.includes("Field")?f.name.replace("Field ","Fld "):f.name.split("–")[0].trim().slice(0,6)):fid;}).join(", ");
+          chips.push(
+            <span key={`${pk}::${sh}`} onClick={()=>setPatternModal({email,name:nameDisplay,pk:`${dn}_${sh}`,bkgs:subBkgs,canEdit})}
+              style={{display:"inline-flex",alignItems:"center",gap:3,background:ec+"22",color:ec,border:`1px solid ${ec}55`,borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:600,whiteSpace:"nowrap",cursor:"pointer"}}>
+              {dn} {fmtTime(sh)} · {durLabel} · {facLabel} ×{subBkgs.length}
+            </span>
+          );
+        }
+        chips.push(
+          <button key={`merge-${pk}`} onClick={()=>setSplitPatterns(prev=>{const ns=new Set(prev);ns.delete(splitKey);return ns;})}
+            title="Re-merge sub-patterns"
+            style={{fontSize:10,padding:"1px 6px",borderRadius:4,border:"1px solid #e2e8f0",background:"#fff",color:"#64748b",cursor:"pointer"}}>↩ merge</button>
+        );
+      } else {
+        const parts=pk.split("_");
+        const startH=parseFloat(parts[parts.length-1]);
+        const dn=parts[parts.length-2]||"";
+        const durs=[...new Set(bkgs.map(b=>b.duration))];
+        const durLabel=durs.length===1?`${durs[0]}h`:`~${Math.round(durs.reduce((s,d)=>s+d,0)/durs.length*2)/2}h`;
+        const facIds=[...new Set(bkgs.map(b=>b.facility_id))];
+        const facLabel=facIds.map(fid=>{const f=FACILITIES.find(x=>x.id===fid);return f?(f.name.includes("Field")?f.name.replace("Field ","Fld "):f.name.split("–")[0].trim().slice(0,6)):fid;}).join(", ");
+        chips.push(
+          <span key={pk} onClick={()=>setPatternModal({email,name:nameDisplay,pk,bkgs,canEdit})}
+            style={{display:"inline-flex",alignItems:"center",gap:3,background:ec+"22",color:ec,border:`1px solid ${ec}55`,borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:600,whiteSpace:"nowrap",cursor:"pointer"}}>
+            {dn} {fmtTime(startH)} · {durLabel} · {facLabel} ×{bkgs.length}
+            {isMixed&&<span title="Mixed start times — click ↕ to split"
+              onClick={e=>{e.stopPropagation();setSplitPatterns(prev=>{const ns=new Set(prev);ns.add(splitKey);return ns;});}}
+              style={{fontSize:10,opacity:0.7,cursor:"pointer"}}>↕</span>}
+          </span>
+        );
+      }
+    }
+    return chips;
+  }
+
   return (
-    <Modal title="📅 Schedule Summary" onClose={onClose}>
-      <div style={{marginBottom:10}}>
-        <label style={{display:"flex",alignItems:"center",gap:6,fontSize:12,cursor:"pointer"}}>
-          <input type="checkbox" checked={facSensitive} onChange={e=>setFacSensitive(e.target.checked)}/>
-          Facility-sensitive patterns
-        </label>
-      </div>
-      <div style={{overflowY:"auto",maxHeight:"60vh",overflowX:"auto"}}>
-        <table style={{width:"100%",borderCollapse:"collapse",minWidth:480}}>
-          <thead>
-            <tr style={{background:"#f8fafc"}}>
-              <th style={thS2}>Booker</th>
-              <th style={thS2}>Recurring Patterns</th>
-              <th style={{...thS2,textAlign:"right"}}>One-offs</th>
-              <th style={{...thS2,textAlign:"right"}}>Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map(row=>{
-              const ec=emailColor(row.email);
-              return (
+    <>
+      <Modal title="📅 Schedule Summary" onClose={onClose}>
+        <div style={{marginBottom:10}}>
+          <label style={{display:"flex",alignItems:"center",gap:6,fontSize:12,cursor:"pointer"}}>
+            <input type="checkbox" checked={facSensitive} onChange={e=>setFacSensitive(e.target.checked)}/>
+            Facility-sensitive patterns
+          </label>
+        </div>
+        <div style={{overflowY:"auto",maxHeight:"60vh",overflowX:"auto"}}>
+          <table style={{width:"100%",borderCollapse:"collapse",minWidth:480}}>
+            <thead>
+              <tr style={{background:"#f8fafc"}}>
+                <th style={thS2}>Booker</th>
+                <th style={thS2}>Recurring Patterns <span style={{fontWeight:400,fontSize:11,color:"#94a3b8"}}>(click to edit)</span></th>
+                <th style={{...thS2,textAlign:"right"}}>One-offs</th>
+                <th style={{...thS2,textAlign:"right"}}>Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(row=>(
                 <tr key={row.email} style={{borderBottom:"1px solid #f1f5f9"}}>
                   <td style={tdS2}>
                     <div style={{fontWeight:700,color:"#0f172a",fontSize:13}}>{row.nameDisplay}</div>
                     <div style={{fontSize:11,color:"#94a3b8"}}>{row.email}</div>
                   </td>
                   <td style={tdS2}>
-                    <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
+                    <div style={{display:"flex",flexWrap:"wrap",gap:4,alignItems:"center"}}>
                       {row.recurring.length===0&&<span style={{fontSize:12,color:"#94a3b8"}}>—</span>}
-                      {row.recurring.map(([pk,bkgs])=>{
-                        const parts=pk.split("_");
-                        const startH=parseFloat(parts[parts.length-1]);
-                        const dn=parts[parts.length-2]||"";
-                        const durs=[...new Set(bkgs.map(b=>b.duration))];
-                        const durLabel=durs.length===1?`${durs[0]}h`:`~${Math.round(durs.reduce((s,d)=>s+d,0)/durs.length*2)/2}h`;
-                        const facIds=[...new Set(bkgs.map(b=>b.facility_id))];
-                        const facLabel=facIds.map(fid=>{const f=FACILITIES.find(x=>x.id===fid);return f?(f.name.includes("Field")?f.name.replace("Field ","Fld "):f.name.split("–")[0].trim().slice(0,6)):fid;}).join(", ");
-                        return (
-                          <span key={pk} style={{display:"inline-block",background:ec+"22",color:ec,border:`1px solid ${ec}55`,borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:600,whiteSpace:"nowrap"}}>
-                            {dn} {fmtTime(startH)} · {durLabel} · {facLabel} ×{bkgs.length}
-                          </span>
-                        );
-                      })}
+                      {renderChips(row.email, row.nameDisplay, row.recurring)}
                     </div>
                   </td>
-                  <td style={{...tdS2,textAlign:"right",color:"#94a3b8"}}>{row.oneOffs.length||"—"}</td>
+                  <td style={{...tdS2,textAlign:"right"}}>
+                    {row.oneOffs.length>0
+                      ? <span style={{cursor:"pointer",color:"#6366f1",textDecoration:"underline dotted",fontSize:13}}
+                          onClick={()=>setOneOffModalData({email:row.email,name:row.nameDisplay,bkgs:row.oneOffs,isAdmin})}>
+                          {row.oneOffs.length}
+                        </span>
+                      : <span style={{color:"#94a3b8"}}>—</span>}
+                  </td>
                   <td style={{...tdS2,textAlign:"right",fontWeight:700}}>{row.totalBkgs}</td>
                 </tr>
-              );
-            })}
-            {rows.length===0&&<tr><td colSpan={4} style={{...tdS2,textAlign:"center",color:"#94a3b8"}}>No active bookings.</td></tr>}
-          </tbody>
-        </table>
-      </div>
-    </Modal>
+              ))}
+              {rows.length===0&&<tr><td colSpan={4} style={{...tdS2,textAlign:"center",color:"#94a3b8"}}>No active bookings.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </Modal>
+      {patternModal&&(
+        <PatternModal {...patternModal} isAdmin={isAdmin}
+          onClose={()=>setPatternModal(null)}
+          onBulkApply={args=>{onBulkApply&&onBulkApply(args);setPatternModal(null);}}/>
+      )}
+      {oneOffModalData&&(
+        <OneOffModal {...oneOffModalData} onClose={()=>setOneOffModalData(null)}/>
+      )}
+    </>
   );
 }
 
-function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = false, approxPlayers = {}, onUpdateApproxPlayers, approxDurations = {}, onUpdateApproxDuration, onUpdateFacilityRate, pricingMode = "hourly", onSetPricingMode, onProposeMerge }) {
+function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = false, approxPlayers = {}, onUpdateApproxPlayers, approxDurations = {}, onUpdateApproxDuration, onUpdateFacilityRate, pricingMode = "hourly", onSetPricingMode, onProposeMerge, onBulkApply }) {
   const now = new Date();
   const thisYear = now.getFullYear();
 
@@ -2526,18 +2600,8 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
         </div>
         {showSchedule&&(()=>{
           function dayName(d){return["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][new Date(d+"T12:00").getDay()];}
-          // Build pattern groups per email
-          const patternMap = {}; // { email -> { patternKey -> [booking,...] } }
-          active.forEach(b=>{
-            const email = b.email.toLowerCase();
-            const dn = dayName(b.date);
-            const pk = scheduleFacSensitive
-              ? `${b.facility_id}_${dn}_${b.start_hour}`
-              : `${dn}_${b.start_hour}`;
-            if(!patternMap[email]) patternMap[email]={};
-            if(!patternMap[email][pk]) patternMap[email][pk]=[];
-            patternMap[email][pk].push(b);
-          });
+          // Build pattern groups per email using overlap-aware grouping
+          const patternMap = buildOverlapPatternMap(active, scheduleFacSensitive);
 
           // Build rows: one per email with recurring + one-off lists
           const scheduleRows = Object.entries(patternMap).map(([email,pats])=>{
@@ -2940,9 +3004,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
           pricingMode={pricingMode}
           approxDurations={approxDurations}
           onClose={()=>setPatternModal(null)}
-          onBulkApply={({email,pk,bkgs,bulkTime,bulkDur,bulkFac,cancelFrom})=>{
-            alert(`Bulk edit applied to ${bkgs.filter(b=>!cancelFrom||b.date>=cancelFrom).length} bookings (save not yet wired to DB)`);
-          }}
+          onBulkApply={args=>{onBulkApply&&onBulkApply(args);}}
         />
       )}
       {oneOffModal && (
@@ -3041,7 +3103,7 @@ function AdminLogin({onLogin}) {
 }
 
 // ─── Admin Panel with action queue, bulk approve, facility rates ──────────────
-function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[],deleteIds=new Set(),facilityRates={},onUpdateFacilityRate,onClearOldUnapproved,silentMode=false,approxPlayers={},onUpdateApproxPlayers,approxDurations={},onUpdateApproxDuration,onSyncDB}) {
+function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[],deleteIds=new Set(),facilityRates={},onUpdateFacilityRate,onClearOldUnapproved,silentMode=false,approxPlayers={},onUpdateApproxPlayers,approxDurations={},onUpdateApproxDuration,onSyncDB,onShowSchedule,onBulkApply}) {
   const [sf,setSf]=useState("all"), [ff,setFf]=useState("all"), [q,setQ]=useState("");
   const [sortCol,setSortCol]=useState("date"), [sortDir,setSortDir]=useState("desc");
   const [selected,setSelected]=useState(new Set());
@@ -3065,6 +3127,8 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[]
   const [showPlayers,setShowPlayers]=useState(false);
   const [defaultFieldDay,setDefaultFieldDay]=useState(0);
   const [defaultFieldEvening,setDefaultFieldEvening]=useState(0);
+  const [clashGrouped,setClashGrouped]=useState(true);
+  const [clashPatternModal,setClashPatternModal]=useState(null);
 
   const si={padding:"7px 12px",borderRadius:8,border:"1.5px solid #e2e8f0",fontSize:13,fontFamily:"inherit",color:"#0f172a",background:"#f8fafc",outline:"none"};
   const today=todayKey();
@@ -3213,6 +3277,9 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[]
         </button>
         {onSyncDB&&<button onClick={onSyncDB} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#475569",fontSize:12})}>
           🔄 Sync DB
+        </button>}
+        {onShowSchedule&&<button onClick={onShowSchedule} style={S.btn({background:"#f0f9ff",color:"#0369a1",border:"1.5px solid #bae6fd",fontSize:12,fontWeight:700})}>
+          📅 Schedule
         </button>}
       </div>
 
@@ -3391,35 +3458,83 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[]
       )}
 
       {/* Clash notification panel */}
-      {clashes.length>0&&(
-        <div style={{background:"#fff1f2",border:"1.5px solid #fda4af",borderRadius:12,padding:16,display:"flex",flexDirection:"column",gap:10}}>
-          <div style={{display:"flex",alignItems:"center",gap:8,justifyContent:"space-between",flexWrap:"wrap"}}>
-            <div>
-              <span style={{fontWeight:700,fontSize:14,color:"#9f1239"}}>⚠️ {clashes.length} scheduling clash{clashes.length>1?"es":""} detected</span>
-              <div style={{fontSize:12,color:"#be123c",marginTop:2}}>Future field bookings overlap with user bookings. Select a user to notify.</div>
+      {clashes.length>0&&(()=>{
+        function clashDayName(d){return["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][new Date(d+"T12:00").getDay()];}
+        const filtered=clashes.filter(c=>matchesQ(c.user)||matchesQ(c.admin));
+        // Group by (userEmail + facilityId + dayOfWeek)
+        const groupMap={};
+        filtered.forEach(c=>{
+          const dn=clashDayName(c.admin.date);
+          const key=`${c.user.email}||${c.admin.facility_id}||${dn}`;
+          if(!groupMap[key]) groupMap[key]={user:c.user,admin:c.admin,dn,instances:[],userBkgs:[]};
+          groupMap[key].instances.push(c);
+          if(!groupMap[key].userBkgs.find(b=>b.id===c.user.id)) groupMap[key].userBkgs.push(c.user);
+        });
+        const groups=Object.values(groupMap);
+        const recurringGroups=groups.filter(g=>g.instances.length>=2);
+        return (
+          <div style={{background:"#fff1f2",border:"1.5px solid #fda4af",borderRadius:12,padding:16,display:"flex",flexDirection:"column",gap:10}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,justifyContent:"space-between",flexWrap:"wrap"}}>
+              <div>
+                <span style={{fontWeight:700,fontSize:14,color:"#9f1239"}}>⚠️ {clashes.length} scheduling clash{clashes.length>1?"es":""} detected</span>
+                {recurringGroups.length>0&&<span style={{marginLeft:8,fontSize:12,fontWeight:600,background:"#fda4af",color:"#9f1239",borderRadius:6,padding:"1px 7px"}}>{recurringGroups.length} recurring</span>}
+                <div style={{fontSize:12,color:"#be123c",marginTop:2}}>Future field bookings overlap with user bookings.</div>
+              </div>
+              <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                <label style={{display:"flex",alignItems:"center",gap:5,fontSize:12,cursor:"pointer",color:"#9f1239"}}>
+                  <input type="checkbox" checked={clashGrouped} onChange={e=>setClashGrouped(e.target.checked)} style={{accentColor:"#f43f5e"}}/>
+                  Group recurring
+                </label>
+                <button onClick={()=>setShowClashNotify(true)} disabled={clashSending}
+                  style={S.btn({background:"#f43f5e",color:"#fff",fontWeight:700,opacity:clashSending?0.7:1})}>
+                  📧 Notify affected users
+                </button>
+              </div>
             </div>
-            <button onClick={()=>setShowClashNotify(true)} disabled={clashSending}
-              style={S.btn({background:"#f43f5e",color:"#fff",fontWeight:700,opacity:clashSending?0.7:1})}>
-              📧 Notify affected users
-            </button>
+            <div style={{display:"flex",flexDirection:"column",gap:6,maxHeight:260,overflowY:"auto"}}>
+              {clashGrouped
+                ? groups.map((g,i)=>{
+                    const fa=FACILITIES.find(x=>x.id===g.admin.facility_id);
+                    const isRecurring=g.instances.length>=2;
+                    return (
+                      <div key={i} style={{background:"#fff",border:`1px solid ${isRecurring?"#f43f5e44":"#fecdd3"}`,borderRadius:8,padding:"8px 12px",fontSize:12,color:"#0f172a",display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                        {isRecurring&&<span style={{fontWeight:700,color:"#f43f5e",fontSize:11,background:"#fff1f2",borderRadius:4,padding:"1px 6px",whiteSpace:"nowrap"}}>×{g.instances.length} recurring</span>}
+                        <span style={{fontWeight:700,color:"#9f1239"}}>🔒 {g.admin.purpose||"Admin booking"}</span>
+                        <span style={{color:"#94a3b8"}}>vs</span>
+                        <EmailChip email={g.user.email}/>
+                        <span style={{color:"#475569"}}>{g.user.purpose||"User booking"}</span>
+                        <span style={{color:"#94a3b8",marginLeft:"auto",fontSize:11}}>{fa?.name} · {g.dn} ~{fmtTime(g.admin.start_hour)}</span>
+                        {isRecurring&&(
+                          <button onClick={()=>setClashPatternModal({email:g.user.email,name:g.user.name||g.user.email,pk:`${g.dn}_${g.admin.start_hour}`,bkgs:g.userBkgs,canEdit:true})}
+                            style={S.btn({background:"#f43f5e",color:"#fff",fontSize:11,padding:"3px 8px"})}>
+                            Resolve recurring
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })
+                : filtered.map((c,i)=>{
+                    const fa=FACILITIES.find(x=>x.id===c.admin.facility_id);
+                    return(
+                      <div key={i} style={{background:"#fff",border:"1px solid #fecdd3",borderRadius:8,padding:"8px 12px",fontSize:12,color:"#0f172a",display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                        <span style={{fontWeight:700,color:"#9f1239"}}>🔒 {c.admin.purpose||"Admin booking"}</span>
+                        <span style={{color:"#94a3b8"}}>vs</span>
+                        <EmailChip email={c.user.email}/>
+                        <span style={{color:"#475569"}}>{c.user.purpose||"User booking"}</span>
+                        <span style={{color:"#94a3b8",marginLeft:"auto"}}>{fa?.name} · {fmtDate(c.admin.date)} {fmtTime(c.admin.start_hour)}–{fmtTime(c.admin.start_hour+c.admin.duration)}</span>
+                      </div>
+                    );
+                  })
+              }
+            </div>
+            {clashPatternModal&&(
+              <PatternModal {...clashPatternModal} isAdmin={true}
+                onClose={()=>setClashPatternModal(null)}
+                onBulkApply={args=>{onBulkApply&&onBulkApply(args);setClashPatternModal(null);}}/>
+            )}
           </div>
-          {/* Filterable clash list */}
-          <div style={{display:"flex",flexDirection:"column",gap:6,maxHeight:220,overflowY:"auto"}}>
-            {clashes.filter(c=>matchesQ(c.user)||matchesQ(c.admin)).map((c,i)=>{
-              const fa=FACILITIES.find(x=>x.id===c.admin.facility_id);
-              return(
-                <div key={i} style={{background:"#fff",border:"1px solid #fecdd3",borderRadius:8,padding:"8px 12px",fontSize:12,color:"#0f172a",display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-                  <span style={{fontWeight:700,color:"#9f1239"}}>🔒 {c.admin.purpose||"Admin booking"}</span>
-                  <span style={{color:"#94a3b8"}}>vs</span>
-                  <EmailChip email={c.user.email}/>
-                  <span style={{color:"#475569"}}>{c.user.purpose||"User booking"}</span>
-                  <span style={{color:"#94a3b8",marginLeft:"auto"}}>{fa?.name} · {fmtDate(c.admin.date)} {fmtTime(c.admin.start_hour)}–{fmtTime(c.admin.start_hour+c.admin.duration)}</span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Bookings table */}
       {list.length===0
@@ -3715,9 +3830,10 @@ export default function App() {
   const [facilityRates, setFacilityRates] = useState(()=>{
     try{return JSON.parse(localStorage.getItem("fb_facility_rates")||"{}");}catch{return {};}
   });
-  const [listBookerFilter, setListBookerFilter] = useState("all");
+  const [listBookerFilter, setListBookerFilter] = useState(savedEmail||"all");
   const [listShowClashes, setListShowClashes]   = useState(false);
   const [showScheduleModal, setShowScheduleModal] = useState(false);
+  const [showAdminScheduleModal, setShowAdminScheduleModal] = useState(false);
   const [approxPlayers, setApproxPlayers] = useState(()=>{
     try{return JSON.parse(localStorage.getItem("fb_approx_players")||"{}");}catch{return {};}
   });
@@ -3725,7 +3841,9 @@ export default function App() {
     try{return JSON.parse(localStorage.getItem("fb_approx_durations")||"{}");}catch{return {};}
   });
   const [pricingMode, setPricingModeState] = useState(()=>localStorage.getItem("fb_pricing_mode")||"hourly");
-  const [listSearch,      setListSearch]        = useState("");
+  const [listNameSearch,  setListNameSearch]    = useState("");
+  const [listDateFrom,    setListDateFrom]      = useState("");
+  const [listDateTo,      setListDateTo]        = useState("");
   const [listStatusFilter,setListStatusFilter]  = useState("all");
   const [listSortCol,     setListSortCol]       = useState("date");
   const [listSortDir,     setListSortDir]       = useState("asc");
@@ -3792,11 +3910,13 @@ export default function App() {
         }
       }
 
-      // Remove admin bookings in this month that are no longer in the feed
+      // Remove admin bookings in this month that are no longer in the feed (only future dates)
       const monthStr = `${year}-${String(month).padStart(2,"0")}`;
+      const syncToday = todayKey();
       const staleAdminBks = currentBookings.filter(b =>
         isAdminBooking(b) &&
         b.date.startsWith(monthStr) &&
+        b.date >= syncToday &&
         !feedKeys.has(`${b.date}|${b.facility_id}|${b.start_hour}|${b.purpose}`)
       );
       for (const sb_bk of staleAdminBks) {
@@ -3974,6 +4094,26 @@ export default function App() {
     await persistSetting("approx_players", approxPlayers);
     await persistSetting("approx_durations", approxDurations);
     showToast("Synced with database.");
+  }
+
+  async function handleBulkApply({email, bkgs, bulkTime, bulkDur, bulkFac, cancelFrom}) {
+    const toCancel = cancelFrom ? bkgs.filter(b=>b.date>=cancelFrom) : [];
+    const toUpdate = bkgs.filter(b=>!cancelFrom||b.date<cancelFrom);
+    if(configured){
+      try{
+        for(const b of toUpdate) await sb.update("bookings",b.id,{start_hour:bulkTime,duration:bulkDur,facility_id:bulkFac,updated_at:new Date().toISOString()});
+        for(const b of toCancel) await sb.remove("bookings",b.id);
+        await loadBookings();
+      }catch(e){showToast("Bulk apply failed: "+e.message,"error");return;}
+    } else {
+      setBookings(prev=>{
+        const cancelIds=new Set(toCancel.map(b=>b.id));
+        const updateIds=new Set(toUpdate.map(b=>b.id));
+        return prev.filter(b=>!cancelIds.has(b.id)).map(b=>updateIds.has(b.id)?{...b,start_hour:bulkTime,duration:bulkDur,facility_id:bulkFac}:b);
+      });
+    }
+    const parts=[toUpdate.length>0&&`${toUpdate.length} updated`,toCancel.length>0&&`${toCancel.length} cancelled`].filter(Boolean);
+    showToast(parts.join(", ")||"Applied.");
   }
 
   function handleProposeMerge(mergeLines) {
@@ -4288,7 +4428,7 @@ export default function App() {
               const clashAdminIds = new Set(allClashes.map(c=>c.admin.id));
               const clashUserIds  = new Set(allClashes.map(c=>c.user.id));
               const allClashIds   = new Set([...clashAdminIds,...clashUserIds]);
-              const lq = listSearch.toLowerCase();
+              const lnq = listNameSearch.toLowerCase();
 
               const listDir = listSortDir==="asc"?1:-1;
               let visible = [...bookings]
@@ -4297,7 +4437,9 @@ export default function App() {
                 .filter(b => listBookerFilter==="all" || b.email?.toLowerCase()===listBookerFilter)
                 .filter(b => listStatusFilter==="all" || b.status===listStatusFilter)
                 .filter(b => !listShowClashes || allClashIds.has(b.id))
-                .filter(b => !lq || `${b.name} ${b.email} ${b.purpose} ${FACILITIES.find(x=>x.id===b.facility_id)?.name||""}`.toLowerCase().includes(lq))
+                .filter(b => !listDateFrom || b.date>=listDateFrom)
+                .filter(b => !listDateTo   || b.date<=listDateTo)
+                .filter(b => !lnq || `${b.name} ${b.email} ${b.purpose}`.toLowerCase().includes(lnq))
                 .sort((a,b)=>{
                   if(listSortCol==="date") return listDir*(a.date.localeCompare(b.date)||a.start_hour-b.start_hour);
                   if(listSortCol==="booker") return listDir*(a.name||"").localeCompare(b.name||"");
@@ -4315,9 +4457,17 @@ export default function App() {
 
               return (
                 <>
-                  {/* Filter / search bar */}
-                  <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12,alignItems:"center"}}>
-                    <input style={{...si2,flex:"1 1 160px"}} placeholder="Search name, email, purpose, facility…" value={listSearch} onChange={e=>setListSearch(e.target.value)}/>
+                  {/* Filter bar */}
+                  <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:8,alignItems:"center"}}>
+                    <input style={{...si2,flex:"1 1 140px"}} placeholder="Search name, email, purpose…" value={listNameSearch} onChange={e=>setListNameSearch(e.target.value)}/>
+                    <div style={{display:"flex",alignItems:"center",gap:4}}>
+                      <span style={{fontSize:11,color:"#94a3b8",whiteSpace:"nowrap"}}>From</span>
+                      <input type="date" style={{...si2,width:120,padding:"5px 8px"}} value={listDateFrom} onChange={e=>setListDateFrom(e.target.value)}/>
+                    </div>
+                    <div style={{display:"flex",alignItems:"center",gap:4}}>
+                      <span style={{fontSize:11,color:"#94a3b8",whiteSpace:"nowrap"}}>To</span>
+                      <input type="date" style={{...si2,width:120,padding:"5px 8px"}} value={listDateTo} onChange={e=>setListDateTo(e.target.value)}/>
+                    </div>
                     <select style={si2} value={listStatusFilter} onChange={e=>setListStatusFilter(e.target.value)}>
                       <option value="all">All statuses</option>
                       {Object.entries(STATUS_META).filter(([k])=>!["pending","amua_submit"].includes(k)).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
@@ -4332,6 +4482,10 @@ export default function App() {
                       style={S.btn({background:"#f0f9ff",color:"#0369a1",border:"1.5px solid #bae6fd",fontSize:12,fontWeight:700})}>
                       📅 Summarise
                     </button>
+                    {(listNameSearch||listDateFrom||listDateTo)&&(
+                      <button onClick={()=>{setListNameSearch("");setListDateFrom("");setListDateTo("");}}
+                        style={S.btn({background:"#fff",color:"#94a3b8",border:"1.5px solid #e2e8f0",fontSize:11})}>✕ Clear</button>
+                    )}
                   </div>
                   {/* Booker filter chips */}
                   <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12,alignItems:"center"}}>
@@ -4405,7 +4559,7 @@ export default function App() {
           </div>
         )}
 
-        {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<SummaryTab bookings={bookings} loggedInEmail={loggedInEmail} facilityRates={facilityRates} isAdmin={isAdmin} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onUpdateFacilityRate={updateFacilityRate} pricingMode={pricingMode} onSetPricingMode={setPricingMode} onProposeMerge={handleProposeMerge}/>}</div>}
+        {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<SummaryTab bookings={bookings} loggedInEmail={loggedInEmail} facilityRates={facilityRates} isAdmin={isAdmin} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onUpdateFacilityRate={updateFacilityRate} pricingMode={pricingMode} onSetPricingMode={setPricingMode} onProposeMerge={handleProposeMerge} onBulkApply={handleBulkApply}/>}</div>}
         {tab==="about"&&<div style={{padding:"8px 0"}}><AboutTab/></div>}
         {tab==="admin"&&isAdmin&&<div style={S.card}>
           {/* Silent mode banner */}
@@ -4421,12 +4575,13 @@ export default function App() {
             </label>
             {silentMode&&<span style={{fontSize:12,color:"#92400e"}}>All status changes, approvals, deletions and edits will be processed without notifying bookers.</span>}
           </div>
-          {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onQueueDelete={queueForRemovalSilent} clashes={allClashes} deleteIds={new Set(deleteQueue.map(b=>b.id))} facilityRates={facilityRates} onUpdateFacilityRate={updateFacilityRate} onClearOldUnapproved={handleClearOldUnapproved} silentMode={silentMode} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onSyncDB={handleSyncDB}/>}
+          {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onQueueDelete={queueForRemovalSilent} clashes={allClashes} deleteIds={new Set(deleteQueue.map(b=>b.id))} facilityRates={facilityRates} onUpdateFacilityRate={updateFacilityRate} onClearOldUnapproved={handleClearOldUnapproved} silentMode={silentMode} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onSyncDB={handleSyncDB} onShowSchedule={()=>setShowAdminScheduleModal(true)} onBulkApply={handleBulkApply}/>}
         </div>}
       </div>
 
       {/* Modals */}
-      {showScheduleModal && <ScheduleSummaryModal bookings={bookings} onClose={()=>setShowScheduleModal(false)}/>}
+      {showScheduleModal && <ScheduleSummaryModal bookings={bookings} isAdmin={isAdmin} loggedInEmail={loggedInEmail} onBulkApply={handleBulkApply} onClose={()=>setShowScheduleModal(false)}/>}
+      {showAdminScheduleModal && <ScheduleSummaryModal bookings={bookings} isAdmin={true} loggedInEmail={loggedInEmail} onBulkApply={handleBulkApply} onClose={()=>setShowAdminScheduleModal(false)}/>}
       {showLogin&&<Modal title="Admin Access" onClose={()=>setShowLogin(false)}><AdminLogin onLogin={()=>{setIsAdmin(true);setShowLogin(false);setTab(prev=>prev==="about"?"admin":prev);}}/></Modal>}
 
       {showForm&&(
