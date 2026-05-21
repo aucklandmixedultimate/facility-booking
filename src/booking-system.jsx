@@ -1265,8 +1265,9 @@ function WeekCalendar({ bookings, onNewBooking, onBookingClick, selectedFacility
                       const stk=getStackStyle(b,dayBkgs);
                       const ec=emailColor(b.email);
                       const isAdmin_bk = isAdminBooking(b);
-                      const bkBg = isAdmin_bk ? "#94a3b8" : (fac?.color||"#4a90d9");
-                      const bkBorderLeft = isAdmin_bk ? undefined : (deleteIds.has(b.id)||cartSourceIds.has(b.id) ? undefined : `4px solid ${ec}`);
+                      const isCpsaConfirmed = b.status==="cpsa_confirmed"||b.status==="cpsa_review_needed";
+                      const bkBg = isAdmin_bk ? "#94a3b8" : isCpsaConfirmed ? "#78909c" : (fac?.color||"#4a90d9");
+                      const bkBorderLeft = isAdmin_bk ? undefined : isCpsaConfirmed ? "4px solid #0891b2" : (deleteIds.has(b.id)||cartSourceIds.has(b.id) ? undefined : `4px solid ${ec}`);
                       return (
                         <div key={b.id}
                           onClick={e=>{ e.stopPropagation(); onBookingClick(b); }}
@@ -1343,17 +1344,19 @@ function MonthCalendar({ bookings, onBookingClick, onNewBooking, selectedFacilit
 
   function StatusDot({status}) {
     const cfg={
-      approved:     {c:"#22c55e",l:"✓"},
-      rejected:     {c:"#f43f5e",l:"✗"},
-      cancelled:    {c:"#94a3b8",l:"—"},
-      clash:        {c:"#d97706",l:"!"},
-      pending_amua: {c:"#f59e0b",l:"⏳"},
-      queued_cpsa:  {c:"#3b82f6",l:"→"},
-      amua_submit:  {c:"#3b82f6",l:"→"},
-      pending_cpsa: {c:"#0ea5e9",l:"⏳"},
-      pending:      {c:"#f59e0b",l:"⏳"},
+      approved:           {c:"#22c55e",l:"✓"},
+      cpsa_confirmed:     {c:"#0891b2",l:"✓"},
+      cpsa_review_needed: {c:"#ca8a04",l:"?"},
+      rejected:           {c:"#f43f5e",l:"✗"},
+      cancelled:          {c:"#94a3b8",l:"—"},
+      clash:              {c:"#d97706",l:"!"},
+      pending_amua:       {c:"#f59e0b",l:"⏳"},
+      queued_cpsa:        {c:"#3b82f6",l:"→"},
+      amua_submit:        {c:"#3b82f6",l:"→"},
+      pending_cpsa:       {c:"#0ea5e9",l:"⏳"},
+      pending:            {c:"#f59e0b",l:"⏳"},
     };
-    const {c,l}=cfg[status]||cfg.pending_amua;
+    const {c,l}=cfg[status]||{c:"#94a3b8",l:"?"};
     return <span style={{fontSize:8,fontWeight:800,background:c,color:"#fff",borderRadius:3,padding:"1px 3px",lineHeight:"14px",flexShrink:0}}>{l}</span>;
   }
 
@@ -1424,9 +1427,10 @@ function MonthCalendar({ bookings, onBookingClick, onNewBooking, selectedFacilit
                   const inDelete = deleteIds.has(b.id);
                   const inCart   = cartSourceIds.has(b.id);
                   const isAdmin_bk = isAdminBooking(b);
-                  const chipBg = isSel?"#6366f1": isAdmin_bk?"#94a3b8" : (fac?.color||"#4a90d9");
+                  const isCpsaConfirmed = b.status==="cpsa_confirmed"||b.status==="cpsa_review_needed";
+                  const chipBg = isSel?"#6366f1": isAdmin_bk?"#94a3b8" : isCpsaConfirmed?"#78909c" : (fac?.color||"#4a90d9");
                   const chipOutline = inDelete?"2.5px solid #ef4444":inCart?"2.5px solid #f59e0b":isSel?"2px solid #4f46e5":"none";
-                  const chipLeft = inDelete||inCart||isAdmin_bk?"none":"3px solid "+ec;
+                  const chipLeft = inDelete||inCart||isAdmin_bk?"none": isCpsaConfirmed?"3px solid #0891b2" :"3px solid "+ec;
                   return (
                     <div key={b.id}
                       onClick={e=>{ e.stopPropagation(); if(selMode) toggleSel(b.id); else onBookingClick(b); }}
