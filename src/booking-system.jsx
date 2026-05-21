@@ -4216,18 +4216,17 @@ export default function App() {
                   {visible.length===0
                     ? <div style={{textAlign:"center",padding:"40px 0",color:"#94a3b8",fontSize:14}}>No bookings match the current filters.</div>
                     : <div style={{overflowX:"auto",borderRadius:10,border:"1px solid #f1f5f9"}}>
-                        <table style={{width:"100%",borderCollapse:"collapse",background:"#fff",fontSize:13}}>
+                        <table style={{width:"100%",borderCollapse:"collapse",background:"#fff",fontSize:12}}>
                           <thead>
                             <tr style={{background:"#f8fafc"}}>
                               {[["date","Date"],["booker","Booker"],["facility","Facility"],["status","Status"]].map(([col,label])=>(
                                 <th key={col} onClick={()=>lToggleSort(col)}
-                                  style={{padding:"8px 10px",textAlign:"left",cursor:"pointer",userSelect:"none",fontWeight:700,color:"#475569",whiteSpace:"nowrap",borderBottom:"1px solid #f1f5f9"}}>
+                                  style={{padding:"5px 8px",textAlign:"left",cursor:"pointer",userSelect:"none",fontWeight:600,color:"#64748b",whiteSpace:"nowrap",borderBottom:"1px solid #e2e8f0",fontSize:11}}>
                                   {label}{lArrow(col)}
                                 </th>
                               ))}
-                              <th style={{padding:"8px 10px",textAlign:"left",fontWeight:700,color:"#475569",borderBottom:"1px solid #f1f5f9"}}>Time</th>
-                              <th style={{padding:"8px 10px",textAlign:"left",fontWeight:700,color:"#475569",borderBottom:"1px solid #f1f5f9"}}>Purpose</th>
-                              <th style={{padding:"8px 10px",fontWeight:700,color:"#475569",borderBottom:"1px solid #f1f5f9"}}></th>
+                              <th style={{padding:"5px 8px",textAlign:"left",fontWeight:600,color:"#64748b",borderBottom:"1px solid #e2e8f0",fontSize:11}}>Time · Dur</th>
+                              <th style={{padding:"5px 8px",textAlign:"left",fontWeight:600,color:"#64748b",borderBottom:"1px solid #e2e8f0",fontSize:11}}>Purpose</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -4235,30 +4234,30 @@ export default function App() {
                               const f=FACILITIES.find(x=>x.id===b.facility_id);
                               const isAdmin_bk=isAdminBooking(b);
                               const isClash=allClashIds.has(b.id);
+                              const facShort = f ? (f.name.includes("Field") ? f.name.replace("Field ","Fld ") : f.name.split("–")[0].trim()) : "—";
+                              const d = new Date(b.date+"T12:00");
+                              const dateShort = d.toLocaleDateString("en-NZ",{weekday:"short",day:"numeric",month:"short"});
                               return(
                                 <tr key={b.id} onClick={()=>setViewing(b)} style={{background:isAdmin_bk?"#f8fafc":isClash?"#fff5f5":"#fff",borderTop:ri>0?"1px solid #f1f5f9":"none",cursor:"pointer"}}
                                   onMouseEnter={e=>e.currentTarget.style.background=isAdmin_bk?"#f1f5f9":"#f8fafc"}
                                   onMouseLeave={e=>e.currentTarget.style.background=isAdmin_bk?"#f8fafc":isClash?"#fff5f5":"#fff"}>
-                                  <td style={{padding:"8px 10px",whiteSpace:"nowrap",fontWeight:500}}>{fmtDate(b.date)}</td>
-                                  <td style={{padding:"8px 10px"}}>
+                                  <td style={{padding:"4px 8px",whiteSpace:"nowrap",color:"#475569",fontSize:11}}>{dateShort}</td>
+                                  <td style={{padding:"4px 8px"}}>
                                     {isAdmin_bk
-                                      ? <span style={{fontSize:11,fontWeight:700,color:"#94a3b8",background:"#f1f5f9",borderRadius:4,padding:"2px 7px"}}>🔒 admin</span>
-                                      : <><div style={{fontWeight:600,color:"#0f172a"}}>{b.name}</div><EmailChip email={b.email}/></>
+                                      ? <span style={{fontSize:10,fontWeight:700,color:"#94a3b8",background:"#f1f5f9",borderRadius:4,padding:"1px 5px"}}>🔒 admin</span>
+                                      : <><span style={{fontWeight:600,color:"#0f172a",fontSize:12}}>{b.name}</span><br/><span style={{fontSize:10,color:"#94a3b8"}}>{b.email}</span></>
                                     }
                                   </td>
-                                  <td style={{padding:"8px 10px"}}>
-                                    <span style={{width:8,height:8,borderRadius:"50%",background:f?.color,display:"inline-block",marginRight:5,verticalAlign:"middle"}}/>
-                                    {f?.name}
+                                  <td style={{padding:"4px 8px",whiteSpace:"nowrap"}}>
+                                    <span style={{width:7,height:7,borderRadius:"50%",background:f?.color,display:"inline-block",marginRight:4,verticalAlign:"middle",flexShrink:0}}/>
+                                    <span style={{fontSize:11,color:"#475569"}}>{facShort}</span>
                                   </td>
-                                  <td style={{padding:"8px 10px"}}>
+                                  <td style={{padding:"4px 8px"}}>
                                     <Badge status={b.status}/>
-                                    {isClash&&<span style={{display:"block",fontSize:10,fontWeight:700,color:"#ef4444",marginTop:2}}>⚠️ clash</span>}
+                                    {isClash&&<span style={{display:"block",fontSize:10,fontWeight:700,color:"#ef4444"}}>⚠️ clash</span>}
                                   </td>
-                                  <td style={{padding:"8px 10px",whiteSpace:"nowrap",color:"#475569"}}>{fmtTime(b.start_hour)}–{fmtTime(b.start_hour+b.duration)}</td>
-                                  <td style={{padding:"8px 10px",color:"#475569",maxWidth:220,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{b.purpose}</td>
-                                  <td style={{padding:"8px 10px",textAlign:"right"}}>
-                                    <span style={{fontSize:11,color:"#6366f1",fontWeight:600}}>View →</span>
-                                  </td>
+                                  <td style={{padding:"4px 8px",whiteSpace:"nowrap",color:"#475569",fontSize:11}}>{fmtTime(b.start_hour)}–{fmtTime(b.start_hour+b.duration)}<span style={{color:"#94a3b8",marginLeft:4}}>{b.duration}h</span></td>
+                                  <td style={{padding:"4px 8px",color:"#64748b",maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",fontSize:11}}>{b.purpose}</td>
                                 </tr>
                               );
                             })}
