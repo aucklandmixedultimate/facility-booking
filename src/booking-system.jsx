@@ -2635,7 +2635,11 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
                   }, 0);
                   const groupCosts = m.groups.map(g=>({email:g.email, cost:getCost(g), count:g.bkgs.length}));
                   const totalCost = groupCosts.reduce((s,g)=>s+g.cost, 0);
-                  const mergedPerBooker = totalCost / m.numBookers;
+                  // After-merge schedule = target's schedule (target's session count × target's rate).
+                  // All bookers share that one schedule, so split the target's cost N ways.
+                  const targetCost = groupCosts.find(g=>g.email===targetGroup.email)?.cost ?? 0;
+                  const mergedTotal = targetCost;
+                  const sharePerBooker = mergedTotal / m.numBookers;
                   const si={border:"1px solid #e2e8f0",borderRadius:6,padding:"3px 7px",fontSize:12,fontFamily:"inherit",background:"#fff"};
                   const setRes = (field, val) => setMergeResolution(prev=>({...prev,[resKey(field)]:val}));
                   return (
@@ -2710,16 +2714,21 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
                         <div style={{borderTop:"1px solid #c4b5fd",marginTop:4,paddingTop:4,display:"flex",justifyContent:"space-between",fontWeight:700,fontSize:12,color:"#5b21b6"}}>
                           <span>Total</span><span>{fmtCost(totalCost)}</span>
                         </div>
-                        <div style={{marginTop:8,fontSize:12,fontWeight:600,color:"#064e3b"}}>After merge (÷{m.numBookers}):</div>
+                        <div style={{marginTop:8,fontSize:12,fontWeight:600,color:"#064e3b"}}>
+                          After merge — shared schedule = {targetGroup.email.split("@")[0]}'s slot ({groupCosts.find(g=>g.email===targetGroup.email)?.count} sessions, {fmtCost(targetCost)} ÷ {m.numBookers}):
+                        </div>
                         {groupCosts.map(g=>{
-                          const share = totalCost/m.numBookers;
+                          const diff = g.cost - sharePerBooker;
                           return (
                             <div key={g.email} style={{fontSize:12,color:"#065f46",marginBottom:2,display:"flex",justifyContent:"space-between"}}>
                               <span>{g.email.split("@")[0]}</span>
-                              <span style={{fontWeight:700}}>{fmtCost(share)} <span style={{fontWeight:400,fontSize:11,color:"#16a34a"}}>(saves {fmtCost(g.cost-share)})</span></span>
+                              <span style={{fontWeight:700}}>{fmtCost(sharePerBooker)} <span style={{fontWeight:400,fontSize:11,color:diff>=0?"#16a34a":"#dc2626"}}>({diff>=0?"saves":"pays extra"} {fmtCost(Math.abs(diff))})</span></span>
                             </div>
                           );
                         })}
+                        <div style={{borderTop:"1px solid #c4b5fd",marginTop:4,paddingTop:4,display:"flex",justifyContent:"space-between",fontWeight:700,fontSize:12,color:"#5b21b6"}}>
+                          <span>Combined total</span><span>{fmtCost(mergedTotal)} <span style={{fontWeight:400,fontSize:11,color:"#16a34a"}}>(was {fmtCost(totalCost)}; saves {fmtCost(totalCost-mergedTotal)})</span></span>
+                        </div>
                       </div>
                       <button
                         onClick={()=>{
