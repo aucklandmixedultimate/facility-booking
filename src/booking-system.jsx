@@ -2546,35 +2546,48 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
             return {email,nameDisplay,recurring,oneOffCount,totalBkgs};
           }).sort((a,b)=>b.totalBkgs-a.totalBkgs);
 
-          // Sandbox: compute merged cost for selected patterns
+          // Sandbox: compute merged cost for selected patterns.
+          // Group loosely — by day-of-week (and facility if facility-sensitive)
+          // so different times/durations on the same day still form a mergeable
+          // group; differences are reconciled in the resolution UI below.
           let mergePreview = null;
           if(sandboxMode && sandboxSelected.size>0){
-            // Group selected by pattern key (day+time, ignoring email)
-            const mergeGroups = {}; // patternKey -> [{email,bkgs}]
+            const mergeGroups = {}; // mergeKey -> { email -> {email, bkgs, pks:[]} }
             sandboxSelected.forEach(key=>{
               const [email,...rest] = key.split("::");
               const pk = rest.join("::");
-              if(!mergeGroups[pk]) mergeGroups[pk]=[];
               const bkgs = patternMap[email]?.[pk]||[];
-              if(bkgs.length) mergeGroups[pk].push({email,bkgs});
+              if(!bkgs.length) return;
+              const parts = pk.split("_");
+              const dn = parts[parts.length-2]||"";
+              const facId = parts.length>2 ? parts[0] : null;
+              const mgKey = scheduleFacSensitive ? `${facId}_${dn}` : dn;
+              if(!mergeGroups[mgKey]) mergeGroups[mgKey]={};
+              if(!mergeGroups[mgKey][email]) mergeGroups[mgKey][email]={email,bkgs:[],pks:[]};
+              mergeGroups[mgKey][email].bkgs.push(...bkgs);
+              mergeGroups[mgKey][email].pks.push(pk);
             });
-            const mergeLines = Object.entries(mergeGroups).filter(([,groups])=>groups.length>=2).map(([pk,groups])=>{
-              const allBkgs = groups.flatMap(g=>g.bkgs);
-              const numBookers = groups.length;
-              // Compute average original cost per booking
-              const totalRate = allBkgs.reduce((s,b)=>{
-                const cat = categoryOf(b);
-                const r = getFacRates(b.facility_id);
-                const dur = getApproxDuration(b.email);
-                return s + (isPerBooking ? dur*r[cat] : (splitHours(b).day*r.day + splitHours(b).evening*r.evening));
-              },0);
-              const avgRate = totalRate / allBkgs.length;
-              const mergedRate = avgRate / numBookers;
-              const mergedTotalCost = mergedRate * allBkgs.length;
-              const [dn,startH] = pk.includes("_") ? pk.split("_").slice(-2) : [pk,""];
-              const label = scheduleFacSensitive ? pk : `${dn} ${fmtTime(parseFloat(startH))}`;
-              return {label,numBookers,mergedTotalCost,mergedRate,bookers:groups.map(g=>g.email),groups,pk,mergeKey:pk};
-            });
+            const mergeLines = Object.entries(mergeGroups)
+              .filter(([,byEmail])=>Object.keys(byEmail).length>=2)
+              .map(([mgKey,byEmail])=>{
+                const groups = Object.values(byEmail);
+                const allBkgs = groups.flatMap(g=>g.bkgs);
+                const numBookers = groups.length;
+                const totalRate = allBkgs.reduce((s,b)=>{
+                  const cat = categoryOf(b);
+                  const r = getFacRates(b.facility_id);
+                  const dur = getApproxDuration(b.email);
+                  return s + (isPerBooking ? dur*r[cat] : (splitHours(b).day*r.day + splitHours(b).evening*r.evening));
+                },0);
+                const avgRate = totalRate / allBkgs.length;
+                const mergedRate = avgRate / numBookers;
+                const mergedTotalCost = mergedRate * allBkgs.length;
+                const parts = mgKey.split("_");
+                const dn = parts[parts.length-1];
+                const facLabel = scheduleFacSensitive ? (FACILITIES.find(f=>f.id===parts[0])?.name||parts[0])+" · " : "";
+                const label = `${facLabel}${dn}`;
+                return {label,numBookers,mergedTotalCost,mergedRate,bookers:groups.map(g=>g.email),groups,pk:mgKey,mergeKey:mgKey};
+              });
             mergePreview = mergeLines;
           }
 
@@ -2584,7 +2597,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
             <div>
               {hasSelection && !hasMergeable && (
                 <div style={{background:"#fffbeb",border:"1.5px dashed #fde68a",borderRadius:10,padding:"10px 14px",marginBottom:12,fontSize:12,color:"#92400e"}}>
-                  Select the same pattern (day + time{scheduleFacSensitive?" + facility":""}) from at least 2 different bookers to preview a merge.
+                  Select patterns on the same day{scheduleFacSensitive?" + facility":""} from at least 2 different bookers to preview a merge. Times and durations don't need to match — you can reconcile differences in the preview.
                 </div>
               )}
               {hasMergeable && !previewMerge && (
