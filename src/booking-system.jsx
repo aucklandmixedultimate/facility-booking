@@ -1539,7 +1539,7 @@ function AboutTab() {
   );
 }
 
-function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = false, approxPlayers = {}, onUpdateApproxPlayers, onUpdateFacilityRate, pricingMode = "hourly", onSetPricingMode }) {
+function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = false, approxPlayers = {}, onUpdateApproxPlayers, approxDurations = {}, onUpdateApproxDuration, onUpdateFacilityRate, pricingMode = "hourly", onSetPricingMode }) {
   const now = new Date();
   const thisYear = now.getFullYear();
 
@@ -1553,8 +1553,11 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
   const [showInvoice, setShowInvoice] = useState(false);
   const [showRatesEdit, setShowRatesEdit] = useState(false);
   // Inline player-count editing: email being edited
-  const [editingPlayers, setEditingPlayers] = useState(null);
-  const [playersInput,   setPlayersInput]   = useState("");
+  const [editingPlayers,  setEditingPlayers]  = useState(null);
+  const [playersInput,    setPlayersInput]    = useState("");
+  // Inline duration editing
+  const [editingDuration, setEditingDuration] = useState(null);
+  const [durationInput,   setDurationInput]   = useState("");
   const [invDetail,   setInvDetail]   = useState("grouped");   // "grouped" | "individual"
   const [invGst,      setInvGst]      = useState("inclusive"); // "inclusive" | "exclusive" | "note"
   const [invScope,    setInvScope]    = useState("single");    // "single" | "combined" (admin only)
@@ -1622,14 +1625,18 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
 
   const isPerBooking = pricingMode === "per_booking";
 
-  // In per-booking mode the whole booking takes one rate based on its start time
-  // (before 5:30 pm = day rate, otherwise evening rate). In hourly mode the
-  // booking is split at the 5:30 pm cutoff.
+  function getApproxDuration(email) {
+    const v = approxDurations[email.toLowerCase()];
+    return (v && v > 0) ? v : 2;
+  }
+
+  // In per-booking mode cost = approxDuration × applicable hourly rate.
+  // In hourly mode the booking is split at 5:30 pm between day and evening rates.
   function getBookingCost(b) {
     const rates = getFacRates(b.facility_id);
     if (isPerBooking) {
       const rate = b.start_hour >= EVENING_CUTOFF ? rates.evening : rates.day;
-      return b.duration * rate;
+      return getApproxDuration(b.email) * rate;
     }
     const { day, evening } = splitHours(b);
     return day * rates.day + evening * rates.evening;
@@ -1639,7 +1646,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
   const byEmail = {};
   active.forEach(b => {
     const key = b.email.toLowerCase();
-    if (!byEmail[key]) byEmail[key] = { email:b.email, name:b.name, daytime:0, evening:0, total:0, bookings:0, cost:0, dayCost:0, eveCost:0 };
+    if (!byEmail[key]) byEmail[key] = { email:b.email, name:b.name, daytime:0, evening:0, total:0, bookings:0, dayBkgs:0, eveBkgs:0, cost:0, dayCost:0, eveCost:0 };
     const rec = byEmail[key];
     const { day, evening } = splitHours(b);
     const rates = getFacRates(b.facility_id);
@@ -1647,6 +1654,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
     rec.daytime  += day;
     rec.total    += b.duration;
     rec.bookings += 1;
+    if (b.start_hour >= EVENING_CUTOFF) rec.eveBkgs += 1; else rec.dayBkgs += 1;
     if (!isPerBooking) {
       rec.dayCost  += day * rates.day;
       rec.eveCost  += evening * rates.evening;
@@ -1655,35 +1663,43 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
   });
 
   const rows          = Object.values(byEmail).sort((a,b)=>b.total-a.total);
+  // In per-booking mode "displayed total" = bookings × approxDuration; in hourly mode = actual hours
+  const displayTotal  = r => isPerBooking ? r.bookings * getApproxDuration(r.email) : r.total;
+  const displayDaytime = r => isPerBooking ? r.dayBkgs : r.daytime;
+  const displayEvening = r => isPerBooking ? r.eveBkgs : r.evening;
   const totalEvening  = rows.reduce((s,r)=>s+r.evening,0);
   const totalDaytime  = rows.reduce((s,r)=>s+r.daytime,0);
   const totalHrs      = rows.reduce((s,r)=>s+r.total,0);
+  const totalDayBkgs  = rows.reduce((s,r)=>s+r.dayBkgs,0);
+  const totalEveBkgs  = rows.reduce((s,r)=>s+r.eveBkgs,0);
   const totalBookerCost = rows.reduce((s,r)=>s+r.cost,0);
   const totalDayCost    = rows.reduce((s,r)=>s+r.dayCost,0);
   const totalEveCost    = rows.reduce((s,r)=>s+r.eveCost,0);
 
-  // Per-facility cost (adapts to pricing mode)
+  // Per-facility cost (adapts to pricing mode) — always includes ALL facilities
   const byFacility = {};
+  FACILITIES.forEach(fac => { byFacility[fac.id] = { fac, dayHrs: 0, eveningHrs: 0, bkgCount: 0, cost: 0 }; });
   active.forEach(b => {
     const fac = FACILITIES.find(x => x.id === b.facility_id);
     if (!fac) return;
-    if (!byFacility[fac.id]) byFacility[fac.id] = { fac, dayHrs: 0, eveningHrs: 0, cost: 0 };
     const { day, evening } = splitHours(b);
     byFacility[fac.id].dayHrs     += day;
     byFacility[fac.id].eveningHrs += evening;
+    byFacility[fac.id].bkgCount   += 1;
     byFacility[fac.id].cost       += getBookingCost(b);
   });
-  const facCosts = Object.values(byFacility).map(({ fac, dayHrs, eveningHrs, cost }) => {
+  const facCosts = Object.values(byFacility).map(({ fac, dayHrs, eveningHrs, bkgCount, cost }) => {
     const rates = getFacRates(fac.id);
-    return { fac, dayHrs, eveningHrs, hours: dayHrs + eveningHrs, rates, cost };
+    return { fac, dayHrs, eveningHrs, hours: dayHrs + eveningHrs, bkgCount, rates, cost };
   });
   const totalCost = facCosts.reduce((s, c) => s + c.cost, 0);
-  const anyRates  = facCosts.some(c => c.rates.day > 0 || c.rates.evening > 0);
+  const anyRates  = FACILITIES.some(f => { const r = getFacRates(f.id); return r.day > 0 || r.evening > 0; });
 
   function fmtHrs(h) { return h===0?"0h" : h%1===0?`${h}h`:`${Math.floor(h)}h ${Math.round((h%1)*60)}m`; }
   function fmtCost(n) { return "$" + n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g,","); }
   function getPlayers(email) { return approxPlayers[email.toLowerCase()] || 0; }
   function canEditPlayers(email) { return isAdmin || (loggedInEmail && email.toLowerCase() === loggedInEmail.toLowerCase()); }
+  function canEditDuration(email) { return isAdmin || (loggedInEmail && email.toLowerCase() === loggedInEmail.toLowerCase()); }
 
   // ── Invoice helpers ──────────────────────────────────────────────────────
   function buildInvoiceLines(bkgs, detail) {
@@ -1954,7 +1970,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
       </div>
 
       {/* Cost by facility tiles */}
-      {facCosts.length > 0 && (
+      {(
         <div>
           <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10, flexWrap:"wrap" }}>
             <h3 style={{ margin:0, fontSize:15, fontWeight:700, color:"#0f172a", flex:1 }}>
@@ -1999,26 +2015,29 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
             </div>
           )}
           <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:10 }}>
-            {facCosts.map(({ fac, dayHrs, eveningHrs, hours, rates, cost }) => {
-              const hasRates = isPerBooking ? cost > 0 : (rates.day > 0 || rates.evening > 0);
+            {facCosts.map(({ fac, dayHrs, eveningHrs, hours, bkgCount, rates, cost }) => {
+              const hasRates = rates.day > 0 || rates.evening > 0;
+              const isEmpty  = bkgCount === 0;
               return (
-                <div key={fac.id} style={{ background:"#fff", border:"1px solid #f1f5f9", borderRadius:12, padding:"14px 16px", display:"flex", flexDirection:"column", gap:6, boxShadow:"0 1px 4px rgba(0,0,0,0.04)" }}>
+                <div key={fac.id} style={{ background: isEmpty?"#fafafa":"#fff", border:`1px solid ${isEmpty?"#f1f5f9":"#f1f5f9"}`, borderRadius:12, padding:"14px 16px", display:"flex", flexDirection:"column", gap:6, boxShadow:"0 1px 4px rgba(0,0,0,0.04)", opacity: isEmpty ? 0.6 : 1 }}>
                   <div style={{ display:"flex", alignItems:"center", gap:6 }}>
                     <span style={{ width:10, height:10, borderRadius:"50%", background:fac.color, flexShrink:0, display:"inline-block" }}/>
                     <span style={{ fontSize:12, fontWeight:700, color:"#0f172a" }}>{fac.name}</span>
                   </div>
-                  {isPerBooking
-                    ? <div style={{ fontSize:12, color:"#64748b" }}>{active.filter(b=>b.facility_id===fac.id).length} booking{active.filter(b=>b.facility_id===fac.id).length!==1?"s":""} · {fmtHrs(hours)}</div>
-                    : (<>
-                        {dayHrs > 0 && <div style={{ fontSize:12, color:"#64748b" }}>Day: {fmtHrs(dayHrs)} {rates.day > 0 ? `@ ${fmtCost(rates.day)}/hr` : ""}</div>}
-                        {eveningHrs > 0 && <div style={{ fontSize:12, color:"#64748b" }}>Eve: {fmtHrs(eveningHrs)} {rates.evening > 0 ? `@ ${fmtCost(rates.evening)}/hr` : ""}</div>}
-                        {dayHrs === 0 && eveningHrs === 0 && <div style={{ fontSize:12, color:"#94a3b8" }}>{fmtHrs(hours)} total</div>}
-                      </>)
+                  {isEmpty
+                    ? <div style={{ fontSize:12, color:"#94a3b8" }}>0 bookings</div>
+                    : isPerBooking
+                      ? <div style={{ fontSize:12, color:"#64748b" }}>{bkgCount} booking{bkgCount!==1?"s":""} · {fmtHrs(hours)}</div>
+                      : (<>
+                          {dayHrs > 0 && <div style={{ fontSize:12, color:"#64748b" }}>Day: {fmtHrs(dayHrs)} {rates.day > 0 ? `@ ${fmtCost(rates.day)}/hr` : ""}</div>}
+                          {eveningHrs > 0 && <div style={{ fontSize:12, color:"#64748b" }}>Eve: {fmtHrs(eveningHrs)} {rates.evening > 0 ? `@ ${fmtCost(rates.evening)}/hr` : ""}</div>}
+                          {dayHrs === 0 && eveningHrs === 0 && <div style={{ fontSize:12, color:"#94a3b8" }}>{fmtHrs(hours)} total</div>}
+                        </>)
                   }
-                  <div style={{ fontSize:18, fontWeight:800, color: hasRates ? "#15803d" : "#94a3b8" }}>
-                    {hasRates ? fmtCost(cost) : "—"}
+                  <div style={{ fontSize:18, fontWeight:800, color: isEmpty ? "#94a3b8" : hasRates && cost > 0 ? "#15803d" : "#94a3b8" }}>
+                    {isEmpty ? "—" : hasRates && cost > 0 ? fmtCost(cost) : "—"}
                   </div>
-                  {!hasRates && <div style={{ fontSize:11, color:"#94a3b8" }}>{isPerBooking ? "no prices set" : "no rates set"}</div>}
+                  {!isEmpty && !hasRates && <div style={{ fontSize:11, color:"#94a3b8" }}>no rates set</div>}
                 </div>
               );
             })}
@@ -2037,20 +2056,32 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
       <div>
         <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:12, gap:8, flexWrap:"wrap" }}>
           <h3 style={{ margin:0, fontSize:15, fontWeight:700, color:"#0f172a" }}>
-            Hours by Booker — {PRESETS.find(p=>p.key===preset)?.label}{dateFrom&&dateTo?` (${dateFrom} – ${dateTo})`:""}{emailFilter!=="all"?` · ${emailFilter}`:""}
+            {isPerBooking ? "Bookings" : "Hours"} by Booker — {PRESETS.find(p=>p.key===preset)?.label}{dateFrom&&dateTo?` (${dateFrom} – ${dateTo})`:""}{emailFilter!=="all"?` · ${emailFilter}`:""}
           </h3>
           {rows.length>0&&<button onClick={()=>{
             const esc = v => `"${String(v||"").replace(/"/g,'""')}"`;
-            const hdrs = ["Booker","Email","Bookings","Daytime Hrs","Evening Hrs","Total Hrs",
-              ...(anyRates&&!isPerBooking?["Day Cost","Eve Cost"]:[]),
-              ...(anyRates?["Total Cost"]:[]),
-              "Approx Players",
-              ...(anyRates?["Cost per Player"]:[])];
+            const hdrs = isPerBooking
+              ? ["Booker","Email","Bookings","Day Bookings","Eve Bookings","Total Hrs (approx)",
+                  ...(anyRates?["Total Cost"]:[]),
+                  "Approx Players","Approx Duration (hrs)",
+                  ...(anyRates?["Cost per Player"]:[])]
+              : ["Booker","Email","Bookings","Daytime Hrs","Evening Hrs","Total Hrs",
+                  ...(anyRates?["Day Cost","Eve Cost"]:[]),
+                  ...(anyRates?["Total Cost"]:[]),
+                  "Approx Players",
+                  ...(anyRates?["Cost per Player"]:[])];
             const dataRows = rows.map(r=>{
               const players = getPlayers(r.email);
+              const dur = getApproxDuration(r.email);
               const perPlayer = anyRates && players>0 && r.cost>0 ? r.cost/players : "";
+              if (isPerBooking) {
+                return [r.name,r.email,r.bookings,r.dayBkgs,r.eveBkgs,(r.bookings*dur).toFixed(2),
+                  ...(anyRates?[r.cost.toFixed(2)]:[]),
+                  players||"",dur,
+                  ...(anyRates?[perPlayer?perPlayer.toFixed(2):""]:[])].map(esc).join(",");
+              }
               return [r.name,r.email,r.bookings,r.daytime.toFixed(2),r.evening.toFixed(2),r.total.toFixed(2),
-                ...(anyRates&&!isPerBooking?[r.dayCost.toFixed(2),r.eveCost.toFixed(2)]:[]),
+                ...(anyRates?[r.dayCost.toFixed(2),r.eveCost.toFixed(2)]:[]),
                 ...(anyRates?[r.cost.toFixed(2)]:[]),
                 players||"",
                 ...(anyRates?[perPlayer?perPlayer.toFixed(2):""]:[])].map(esc).join(",");
@@ -2074,30 +2105,45 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
                     <th style={thS}>Booker</th>
                     <th style={thS}>Email</th>
                     <th style={{ ...thS, textAlign:"right" }}>Bookings</th>
-                    <th style={{ ...thS, textAlign:"right" }}>Daytime</th>
-                    <th style={{ ...thS, textAlign:"right" }}>Evening</th>
-                    <th style={{ ...thS, textAlign:"right" }}>Total</th>
+                    <th style={{ ...thS, textAlign:"right" }}>{isPerBooking ? "Day Bkgs" : "Daytime"}</th>
+                    <th style={{ ...thS, textAlign:"right" }}>{isPerBooking ? "Eve Bkgs" : "Evening"}</th>
+                    <th style={{ ...thS, textAlign:"right" }}>{isPerBooking ? "Total Hrs*" : "Total"}</th>
                     {anyRates&&!isPerBooking&&<th style={{ ...thS, textAlign:"right" }}>Day Cost</th>}
                     {anyRates&&!isPerBooking&&<th style={{ ...thS, textAlign:"right" }}>Eve Cost</th>}
                     {anyRates&&<th style={{ ...thS, textAlign:"right", color:"#15803d" }}>Total Cost</th>}
                     <th style={{ ...thS, textAlign:"right" }}>Players</th>
+                    {isPerBooking&&<th style={{ ...thS, textAlign:"right", color:"#0369a1" }}>~Duration</th>}
                     {anyRates&&<th style={{ ...thS, textAlign:"right", color:"#7c3aed" }}>$/Player</th>}
                   </tr>
                 </thead>
                 <tbody>
                   {rows.map(r=>{
                     const players = getPlayers(r.email);
-                    const canEdit = canEditPlayers(r.email);
+                    const dur = getApproxDuration(r.email);
+                    const durSaved = (approxDurations[r.email.toLowerCase()] || 0) > 0;
+                    const canEditP = canEditPlayers(r.email);
+                    const canEditD = canEditDuration(r.email);
                     const isEditingThis = editingPlayers === r.email.toLowerCase();
+                    const isEditingDur  = editingDuration === r.email.toLowerCase();
                     const perPlayer = anyRates && players > 0 && r.cost > 0 ? r.cost / players : 0;
                     return (
                     <tr key={r.email} onMouseEnter={e=>e.currentTarget.style.background="#f8fafc"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
                       <td style={tdS}><div style={{ fontWeight:600 }}>{r.name}</div></td>
                       <td style={tdS}><EmailChip email={r.email}/></td>
                       <td style={{ ...tdS, textAlign:"right", fontWeight:600 }}>{r.bookings}</td>
-                      <td style={{ ...tdS, textAlign:"right" }}><span style={{ background:"#fef9c3", color:"#854d0e", borderRadius:6, padding:"2px 8px", fontWeight:600, fontSize:12 }}>{fmtHrs(r.daytime)}</span></td>
-                      <td style={{ ...tdS, textAlign:"right" }}><span style={{ background:"#ede9fe", color:"#5b21b6", borderRadius:6, padding:"2px 8px", fontWeight:600, fontSize:12 }}>{fmtHrs(r.evening)}</span></td>
-                      <td style={{ ...tdS, textAlign:"right", fontWeight:700 }}>{fmtHrs(r.total)}</td>
+                      <td style={{ ...tdS, textAlign:"right" }}>
+                        {isPerBooking
+                          ? <span style={{ background:"#fef9c3", color:"#854d0e", borderRadius:6, padding:"2px 8px", fontWeight:600, fontSize:12 }}>{r.dayBkgs}</span>
+                          : <span style={{ background:"#fef9c3", color:"#854d0e", borderRadius:6, padding:"2px 8px", fontWeight:600, fontSize:12 }}>{fmtHrs(r.daytime)}</span>}
+                      </td>
+                      <td style={{ ...tdS, textAlign:"right" }}>
+                        {isPerBooking
+                          ? <span style={{ background:"#ede9fe", color:"#5b21b6", borderRadius:6, padding:"2px 8px", fontWeight:600, fontSize:12 }}>{r.eveBkgs}</span>
+                          : <span style={{ background:"#ede9fe", color:"#5b21b6", borderRadius:6, padding:"2px 8px", fontWeight:600, fontSize:12 }}>{fmtHrs(r.evening)}</span>}
+                      </td>
+                      <td style={{ ...tdS, textAlign:"right", fontWeight:700 }}>
+                        {isPerBooking ? fmtHrs(r.bookings * dur) : fmtHrs(r.total)}
+                      </td>
                       {anyRates&&!isPerBooking&&<td style={{ ...tdS, textAlign:"right", fontWeight:600, color:r.dayCost>0?"#15803d":"#94a3b8" }}>{r.dayCost>0?fmtCost(r.dayCost):"—"}</td>}
                       {anyRates&&!isPerBooking&&<td style={{ ...tdS, textAlign:"right", fontWeight:600, color:r.eveCost>0?"#15803d":"#94a3b8" }}>{r.eveCost>0?fmtCost(r.eveCost):"—"}</td>}
                       {anyRates&&<td style={{ ...tdS, textAlign:"right", fontWeight:700, color:r.cost>0?"#15803d":"#94a3b8" }}>{r.cost>0?fmtCost(r.cost):"—"}</td>}
@@ -2114,18 +2160,43 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
                           />
                         ) : (
                           <span
-                            onClick={canEdit ? ()=>{ setEditingPlayers(r.email.toLowerCase()); setPlayersInput(String(players||"")); } : undefined}
-                            title={canEdit ? "Click to edit" : undefined}
-                            style={{ cursor:canEdit?"pointer":"default", padding:"2px 8px", borderRadius:6,
+                            onClick={canEditP ? ()=>{ setEditingPlayers(r.email.toLowerCase()); setPlayersInput(String(players||"")); } : undefined}
+                            title={canEditP ? "Click to edit" : undefined}
+                            style={{ cursor:canEditP?"pointer":"default", padding:"2px 8px", borderRadius:6,
                               background: players>0?"#f0f9ff":"#f8fafc",
                               color: players>0?"#0369a1":"#94a3b8",
                               fontWeight:600, fontSize:12,
-                              border: canEdit?"1px dashed #cbd5e1":"none",
+                              border: canEditP?"1px dashed #cbd5e1":"none",
                               minWidth:28, display:"inline-block", textAlign:"right" }}>
-                            {players > 0 ? players : canEdit ? "+" : "—"}
+                            {players > 0 ? players : canEditP ? "+" : "—"}
                           </span>
                         )}
                       </td>
+                      {isPerBooking&&<td style={{ ...tdS, textAlign:"right" }}>
+                        {isEditingDur ? (
+                          <input
+                            type="number" min="0.5" step="0.5"
+                            value={durationInput}
+                            onChange={e=>setDurationInput(e.target.value)}
+                            onBlur={()=>{ onUpdateApproxDuration(r.email, durationInput); setEditingDuration(null); }}
+                            onKeyDown={e=>{ if(e.key==="Enter"||e.key==="Escape"){ onUpdateApproxDuration(r.email, durationInput); setEditingDuration(null); }}}
+                            autoFocus
+                            style={{ width:60, padding:"2px 6px", borderRadius:6, border:"1.5px solid #0369a1", fontSize:13, textAlign:"right", fontFamily:"inherit", outline:"none" }}
+                          />
+                        ) : (
+                          <span
+                            onClick={canEditD ? ()=>{ setEditingDuration(r.email.toLowerCase()); setDurationInput(String(dur)); } : undefined}
+                            title={canEditD ? "Click to edit approx duration" : undefined}
+                            style={{ cursor:canEditD?"pointer":"default", padding:"2px 8px", borderRadius:6,
+                              background: durSaved?"#e0f2fe":"#f8fafc",
+                              color: durSaved?"#0369a1":"#94a3b8",
+                              fontWeight:600, fontSize:12,
+                              border: canEditD?"1px dashed #cbd5e1":"none",
+                              minWidth:32, display:"inline-block", textAlign:"right" }}>
+                            {dur}h
+                          </span>
+                        )}
+                      </td>}
                       {anyRates&&<td style={{ ...tdS, textAlign:"right", fontWeight:700, color:perPlayer>0?"#7c3aed":"#94a3b8" }}>
                         {perPlayer>0 ? fmtCost(perPlayer) : "—"}
                       </td>}
@@ -2138,17 +2209,27 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
                     const totalPlayers = rows.reduce((s,r)=>s+getPlayers(r.email),0);
                     const totalCostAll = rows.reduce((s,r)=>s+r.cost,0);
                     const totalPerPlayer = anyRates && totalPlayers > 0 && totalCostAll > 0 ? totalCostAll / totalPlayers : 0;
+                    const totalApproxHrs = isPerBooking ? rows.reduce((s,r)=>s+r.bookings*getApproxDuration(r.email),0) : totalHrs;
                     return (
                     <tr style={{ background:"#f8fafc", borderTop:"2px solid #f1f5f9" }}>
                       <td style={{ ...tdS, fontWeight:700 }} colSpan={2}>Total</td>
                       <td style={{ ...tdS, textAlign:"right", fontWeight:700 }}>{active.length}</td>
-                      <td style={{ ...tdS, textAlign:"right" }}><span style={{ background:"#fef9c3", color:"#854d0e", borderRadius:6, padding:"2px 8px", fontWeight:700, fontSize:12 }}>{fmtHrs(totalDaytime)}</span></td>
-                      <td style={{ ...tdS, textAlign:"right" }}><span style={{ background:"#ede9fe", color:"#5b21b6", borderRadius:6, padding:"2px 8px", fontWeight:700, fontSize:12 }}>{fmtHrs(totalEvening)}</span></td>
-                      <td style={{ ...tdS, textAlign:"right", fontWeight:800 }}>{fmtHrs(totalHrs)}</td>
+                      <td style={{ ...tdS, textAlign:"right" }}>
+                        {isPerBooking
+                          ? <span style={{ background:"#fef9c3", color:"#854d0e", borderRadius:6, padding:"2px 8px", fontWeight:700, fontSize:12 }}>{totalDayBkgs}</span>
+                          : <span style={{ background:"#fef9c3", color:"#854d0e", borderRadius:6, padding:"2px 8px", fontWeight:700, fontSize:12 }}>{fmtHrs(totalDaytime)}</span>}
+                      </td>
+                      <td style={{ ...tdS, textAlign:"right" }}>
+                        {isPerBooking
+                          ? <span style={{ background:"#ede9fe", color:"#5b21b6", borderRadius:6, padding:"2px 8px", fontWeight:700, fontSize:12 }}>{totalEveBkgs}</span>
+                          : <span style={{ background:"#ede9fe", color:"#5b21b6", borderRadius:6, padding:"2px 8px", fontWeight:700, fontSize:12 }}>{fmtHrs(totalEvening)}</span>}
+                      </td>
+                      <td style={{ ...tdS, textAlign:"right", fontWeight:800 }}>{fmtHrs(totalApproxHrs)}</td>
                       {anyRates&&!isPerBooking&&<td style={{ ...tdS, textAlign:"right", fontWeight:800, color:"#15803d" }}>{fmtCost(totalDayCost)}</td>}
                       {anyRates&&!isPerBooking&&<td style={{ ...tdS, textAlign:"right", fontWeight:800, color:"#15803d" }}>{fmtCost(totalEveCost)}</td>}
                       {anyRates&&<td style={{ ...tdS, textAlign:"right", fontWeight:800, color:"#15803d" }}>{fmtCost(totalCostAll)}</td>}
                       <td style={{ ...tdS, textAlign:"right", fontWeight:700, color:totalPlayers>0?"#0369a1":"#94a3b8" }}>{totalPlayers > 0 ? totalPlayers : "—"}</td>
+                      {isPerBooking&&<td style={{ ...tdS }}/>}
                       {anyRates&&<td style={{ ...tdS, textAlign:"right", fontWeight:800, color:totalPerPlayer>0?"#7c3aed":"#94a3b8" }}>{totalPerPlayer>0?fmtCost(totalPerPlayer):"—"}</td>}
                     </tr>
                     );
@@ -2157,6 +2238,11 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
               </table>
             </div>
           )}
+        {isPerBooking && rows.length > 0 && (
+          <div style={{ fontSize:11, color:"#94a3b8", marginTop:6 }}>
+            * Total Hrs = bookings × approx duration per booker (default 2 h). Click the ~Duration cell to adjust.
+          </div>
+        )}
       </div>
 
       {/* Invoice modal */}
@@ -2248,7 +2334,7 @@ function AdminLogin({onLogin}) {
 }
 
 // ─── Admin Panel with action queue, bulk approve, facility rates ──────────────
-function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[],deleteIds=new Set(),facilityRates={},onUpdateFacilityRate,onClearOldUnapproved,silentMode=false,approxPlayers={},onUpdateApproxPlayers}) {
+function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[],deleteIds=new Set(),facilityRates={},onUpdateFacilityRate,onClearOldUnapproved,silentMode=false,approxPlayers={},onUpdateApproxPlayers,approxDurations={},onUpdateApproxDuration}) {
   const [sf,setSf]=useState("all"), [ff,setFf]=useState("all"), [q,setQ]=useState("");
   const [sortCol,setSortCol]=useState("date"), [sortDir,setSortDir]=useState("desc");
   const [selected,setSelected]=useState(new Set());
@@ -2455,7 +2541,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[]
         </div>
       )}
 
-      {/* Approx player counts panel */}
+      {/* Approx player counts + duration panel */}
       {showPlayers&&(()=>{
         const bookers = Object.values(
           bookings.filter(b=>["approved","pending_cpsa","queued_cpsa","pending_amua","amua_submit","pending"].includes(b.status))
@@ -2463,11 +2549,13 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[]
         ).sort((a,b)=>a.name.localeCompare(b.name));
         return (
           <div style={{background:"#f8fafc",border:"1.5px solid #e2e8f0",borderRadius:12,padding:16}}>
-            <div style={{fontWeight:700,fontSize:14,color:"#0f172a",marginBottom:4}}>Approximate Players per Booker</div>
-            <div style={{fontSize:12,color:"#64748b",marginBottom:12}}>Used in the Summary view to calculate per-player cost. Editable by each booker in their Summary tab too.</div>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:8}}>
+            <div style={{fontWeight:700,fontSize:14,color:"#0f172a",marginBottom:4}}>Approximate Players &amp; Duration per Booker</div>
+            <div style={{fontSize:12,color:"#64748b",marginBottom:12}}>Used in Summary to calculate per-player cost and per-booking mode hours. Duration defaults to 2 h if not set.</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(300px,1fr))",gap:8}}>
               {bookers.map(b=>{
                 const players = approxPlayers[b.email.toLowerCase()] || 0;
+                const durSaved = approxDurations[b.email.toLowerCase()];
+                const dur = (durSaved && durSaved > 0) ? durSaved : 2;
                 return (
                   <div key={b.email} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,padding:"8px 12px",display:"flex",alignItems:"center",gap:10}}>
                     <div style={{flex:1,minWidth:0}}>
@@ -2481,7 +2569,15 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[]
                         value={players||""}
                         onChange={e=>onUpdateApproxPlayers(b.email, e.target.value)}
                         placeholder="0"
-                        style={{...si,width:60,padding:"3px 6px",textAlign:"right",fontSize:13}}
+                        style={{...si,width:56,padding:"3px 6px",textAlign:"right",fontSize:13}}
+                      />
+                      <span style={{fontSize:11,color:"#64748b",marginLeft:6}}>~Dur (h):</span>
+                      <input
+                        type="number" min="0.5" step="0.5"
+                        value={dur||""}
+                        onChange={e=>onUpdateApproxDuration(b.email, e.target.value)}
+                        placeholder="2"
+                        style={{...si,width:56,padding:"3px 6px",textAlign:"right",fontSize:13}}
                       />
                     </div>
                   </div>
@@ -2881,6 +2977,9 @@ export default function App() {
   const [approxPlayers, setApproxPlayers] = useState(()=>{
     try{return JSON.parse(localStorage.getItem("fb_approx_players")||"{}");}catch{return {};}
   });
+  const [approxDurations, setApproxDurations] = useState(()=>{
+    try{return JSON.parse(localStorage.getItem("fb_approx_durations")||"{}");}catch{return {};}
+  });
   const [pricingMode, setPricingModeState] = useState(()=>localStorage.getItem("fb_pricing_mode")||"hourly");
   const [listSearch,      setListSearch]        = useState("");
   const [listStatusFilter,setListStatusFilter]  = useState("all");
@@ -3082,6 +3181,12 @@ export default function App() {
     const next = { ...approxPlayers, [email.toLowerCase()]: v };
     setApproxPlayers(next);
     try{localStorage.setItem("fb_approx_players",JSON.stringify(next));}catch{}
+  }
+  function updateApproxDuration(email, value) {
+    const v = Math.max(0, parseFloat(value) || 0);
+    const next = { ...approxDurations, [email.toLowerCase()]: v };
+    setApproxDurations(next);
+    try{localStorage.setItem("fb_approx_durations",JSON.stringify(next));}catch{}
   }
 
   // Bulk approve/reject — groups by email and sends one summary per person
@@ -3506,7 +3611,7 @@ export default function App() {
           </div>
         )}
 
-        {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<SummaryTab bookings={bookings} loggedInEmail={loggedInEmail} facilityRates={facilityRates} isAdmin={isAdmin} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} onUpdateFacilityRate={updateFacilityRate} pricingMode={pricingMode} onSetPricingMode={setPricingMode}/>}</div>}
+        {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<SummaryTab bookings={bookings} loggedInEmail={loggedInEmail} facilityRates={facilityRates} isAdmin={isAdmin} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onUpdateFacilityRate={updateFacilityRate} pricingMode={pricingMode} onSetPricingMode={setPricingMode}/>}</div>}
         {tab==="about"&&<div style={{padding:"8px 0"}}><AboutTab/></div>}
         {tab==="admin"&&isAdmin&&<div style={S.card}>
           {/* Silent mode banner */}
@@ -3522,7 +3627,7 @@ export default function App() {
             </label>
             {silentMode&&<span style={{fontSize:12,color:"#92400e"}}>All status changes, approvals, deletions and edits will be processed without notifying bookers.</span>}
           </div>
-          {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onQueueDelete={queueForRemovalSilent} clashes={allClashes} deleteIds={new Set(deleteQueue.map(b=>b.id))} facilityRates={facilityRates} onUpdateFacilityRate={updateFacilityRate} onClearOldUnapproved={handleClearOldUnapproved} silentMode={silentMode} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers}/>}
+          {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onQueueDelete={queueForRemovalSilent} clashes={allClashes} deleteIds={new Set(deleteQueue.map(b=>b.id))} facilityRates={facilityRates} onUpdateFacilityRate={updateFacilityRate} onClearOldUnapproved={handleClearOldUnapproved} silentMode={silentMode} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration}/>}
         </div>}
       </div>
 
