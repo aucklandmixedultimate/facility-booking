@@ -2557,7 +2557,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
               const bkgs = patternMap[email]?.[pk]||[];
               if(bkgs.length) mergeGroups[pk].push({email,bkgs});
             });
-            const mergeLines = Object.entries(mergeGroups).map(([pk,groups])=>{
+            const mergeLines = Object.entries(mergeGroups).filter(([,groups])=>groups.length>=2).map(([pk,groups])=>{
               const allBkgs = groups.flatMap(g=>g.bkgs);
               const numBookers = groups.length;
               // Compute average original cost per booking
@@ -2577,9 +2577,16 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
             mergePreview = mergeLines;
           }
 
+          const hasSelection = sandboxMode && sandboxSelected.size>0;
+          const hasMergeable = mergePreview && mergePreview.length>0;
           return (
             <div>
-              {sandboxMode && mergePreview && mergePreview.length>0 && (()=>{
+              {hasSelection && !hasMergeable && (
+                <div style={{background:"#fffbeb",border:"1.5px dashed #fde68a",borderRadius:10,padding:"10px 14px",marginBottom:12,fontSize:12,color:"#92400e"}}>
+                  Select the same pattern (day + time{scheduleFacSensitive?" + facility":""}) from at least 2 different bookers to preview a merge.
+                </div>
+              )}
+              {hasMergeable && (()=>{
                 return mergePreview.map((m,mi)=>{
                   const key = m.mergeKey || mi;
                   const currentTarget = mergeTarget || m.groups[0]?.email;
