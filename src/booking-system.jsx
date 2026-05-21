@@ -29,6 +29,17 @@ const sb = {
       headers:{ apikey:SUPABASE_ANON, Authorization:`Bearer ${SUPABASE_ANON}` } });
     if (!r.ok) throw new Error(await r.text());
   },
+  async upsert(table, data, onConflict="key") {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}?on_conflict=${onConflict}`, { method:"POST",
+      headers:{ apikey:SUPABASE_ANON, Authorization:`Bearer ${SUPABASE_ANON}`, "Content-Type":"application/json", Prefer:"return=representation,resolution=merge-duplicates" },
+      body:JSON.stringify(data) });
+    if (!r.ok) throw new Error(await r.text()); return r.json();
+  },
+  async selectAll(table) {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}?select=*`,
+      { headers:{ apikey:SUPABASE_ANON, Authorization:`Bearer ${SUPABASE_ANON}` } });
+    if (!r.ok) throw new Error(await r.text()); return r.json();
+  },
 };
 
 // ─── Facilities ───────────────────────────────────────────────────────────────
@@ -1630,12 +1641,20 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
     return (v && v > 0) ? v : 2;
   }
 
-  // In per-booking mode cost = approxDuration × applicable hourly rate.
-  // In hourly mode the booking is split at 5:30 pm between day and evening rates.
+  // Categorize a booking as "day" or "evening" by which side of 5:30 pm has
+  // the larger portion. Evening wins on ties.
+  function categoryOf(b) {
+    const { day, evening } = splitHours(b);
+    return evening >= day ? "evening" : "day";
+  }
+
+  // In per-booking mode cost = approxDuration × the rate for the booking's
+  // category (day/evening, decided by majority split). In hourly mode the
+  // booking is split at 5:30 pm between day and evening rates.
   function getBookingCost(b) {
     const rates = getFacRates(b.facility_id);
     if (isPerBooking) {
-      const rate = b.start_hour >= EVENING_CUTOFF ? rates.evening : rates.day;
+      const rate = categoryOf(b) === "evening" ? rates.evening : rates.day;
       return getApproxDuration(b.email) * rate;
     }
     const { day, evening } = splitHours(b);
@@ -1654,7 +1673,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
     rec.daytime  += day;
     rec.total    += b.duration;
     rec.bookings += 1;
-    if (b.start_hour >= EVENING_CUTOFF) rec.eveBkgs += 1; else rec.dayBkgs += 1;
+    if (categoryOf(b) === "evening") rec.eveBkgs += 1; else rec.dayBkgs += 1;
     if (!isPerBooking) {
       rec.dayCost  += day * rates.day;
       rec.eveCost  += evening * rates.evening;
@@ -2998,6 +3017,36 @@ export default function App() {
     finally{setLoading(false);}
   }
 
+  async function loadSettings() {
+    if(!configured) return;
+    try {
+      const rows = await sb.selectAll("settings");
+      const map = {};
+      rows.forEach(r => { map[r.key] = r.value; });
+      if (map.facility_rates && typeof map.facility_rates === "object") {
+        setFacilityRates(map.facility_rates);
+        try{localStorage.setItem("fb_facility_rates",JSON.stringify(map.facility_rates));}catch{}
+      }
+      if (map.approx_players && typeof map.approx_players === "object") {
+        setApproxPlayers(map.approx_players);
+        try{localStorage.setItem("fb_approx_players",JSON.stringify(map.approx_players));}catch{}
+      }
+      if (map.approx_durations && typeof map.approx_durations === "object") {
+        setApproxDurations(map.approx_durations);
+        try{localStorage.setItem("fb_approx_durations",JSON.stringify(map.approx_durations));}catch{}
+      }
+    } catch(e) {
+      // settings table may not yet exist; silent fallback to localStorage
+      console.warn("loadSettings:", e.message);
+    }
+  }
+
+  async function persistSetting(key, value) {
+    if(!configured) return;
+    try { await sb.upsert("settings", { key, value, updated_at: new Date().toISOString() }, "key"); }
+    catch(e) { console.warn("persistSetting "+key+":", e.message); }
+  }
+
   async function handleSyncMonth(year, month) {
     setSyncingMonth(true);
     try {
@@ -3102,6 +3151,7 @@ export default function App() {
 
   // All hooks before any conditional return
   useEffect(()=>{if(loggedInEmail)loadBookings();},[loggedInEmail]);
+  useEffect(()=>{ loadSettings(); /* eslint-disable-next-line */ },[]);
 
   const openNew=useCallback((date,startHour,duration=1)=>{setEditing(null);setPrefill({date,startHour,duration});setShowForm(true);},[]);
   const openEdit=useCallback((b)=>{setEditing({...b});setViewing(null);setShowForm(true);},[]);
@@ -3170,6 +3220,7 @@ export default function App() {
     const newRates = { ...facilityRates, [facilityId]: { ...existing, [type]: parseFloat(value) || 0 } };
     setFacilityRates(newRates);
     try{localStorage.setItem("fb_facility_rates",JSON.stringify(newRates));}catch{}
+    persistSetting("facility_rates", newRates);
   }
 
   function setPricingMode(mode) {
@@ -3181,12 +3232,14 @@ export default function App() {
     const next = { ...approxPlayers, [email.toLowerCase()]: v };
     setApproxPlayers(next);
     try{localStorage.setItem("fb_approx_players",JSON.stringify(next));}catch{}
+    persistSetting("approx_players", next);
   }
   function updateApproxDuration(email, value) {
     const v = Math.max(0, parseFloat(value) || 0);
     const next = { ...approxDurations, [email.toLowerCase()]: v };
     setApproxDurations(next);
     try{localStorage.setItem("fb_approx_durations",JSON.stringify(next));}catch{}
+    persistSetting("approx_durations", next);
   }
 
   // Bulk approve/reject — groups by email and sends one summary per person
