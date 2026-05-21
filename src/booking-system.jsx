@@ -4030,7 +4030,7 @@ export default function App() {
       }
 
       // Remove admin bookings in this month that are no longer in the feed (only future dates)
-      const monthStr = `${year}-${String(month).padStart(2,"0")}`;
+      const monthStr = `${year}-${String(month+1).padStart(2,"0")}`;
       const syncToday = todayKey();
       const staleAdminBks = currentBookings.filter(b =>
         isAdminBooking(b) &&
