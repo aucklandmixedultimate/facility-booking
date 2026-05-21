@@ -2641,24 +2641,47 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
                   }, 0);
                   const groupCosts = m.groups.map(g=>({email:g.email, cost:getCost(g), count:g.bkgs.length}));
                   const totalCost = groupCosts.reduce((s,g)=>s+g.cost, 0);
-                  // After-merge schedule = committed target's schedule with committed overrides applied.
+                  // After-merge schedule = committed target's schedule with committed overrides applied,
+                  // restricted to the overlap window across all bookers' date ranges. Sessions outside
+                  // the overlap stay with their original booker at full original cost.
                   const committedBkg = targetGroup.bkgs[0];
                   const ovFacId = committedVal("facility_id", committedBkg?.facility_id);
                   const ovStart = committedVal("start_hour", committedBkg?.start_hour);
                   const ovDur = committedVal("duration", committedBkg?.duration);
                   const ovRates = getFacRates(ovFacId);
-                  const targetCount = targetGroup.bkgs.length;
-                  const mergedTotal = (()=>{
+                  const ranges = m.groups.map(g=>{
+                    const sorted = g.bkgs.map(b=>b.date).sort();
+                    return {email:g.email, start:sorted[0], end:sorted[sorted.length-1]};
+                  });
+                  const overlapStart = ranges.reduce((a,r)=>r.start>a?r.start:a, ranges[0].start);
+                  const overlapEnd = ranges.reduce((a,r)=>r.end<a?r.end:a, ranges[0].end);
+                  const hasOverlap = overlapStart <= overlapEnd;
+                  const targetInOverlap = targetGroup.bkgs.filter(b=>hasOverlap && b.date>=overlapStart && b.date<=overlapEnd);
+                  const sharedCount = targetInOverlap.length;
+                  const ratePerSession = (()=>{
                     if(isPerBooking){
                       const cat = ovStart >= EVENING_CUTOFF ? "evening" : "day";
-                      return targetCount * getApproxDuration(targetGroup.email) * ovRates[cat];
+                      return getApproxDuration(targetGroup.email) * ovRates[cat];
                     }
                     const end = ovStart + ovDur;
                     const dayHrs = Math.max(0, Math.min(EVENING_CUTOFF, end) - Math.min(EVENING_CUTOFF, ovStart));
                     const eveHrs = Math.max(0, end - Math.max(EVENING_CUTOFF, ovStart));
-                    return targetCount * (dayHrs*ovRates.day + eveHrs*ovRates.evening);
+                    return dayHrs*ovRates.day + eveHrs*ovRates.evening;
                   })();
-                  const sharePerBooker = mergedTotal / m.numBookers;
+                  const sharedTotal = sharedCount * ratePerSession;
+                  const sharePerBooker = sharedTotal / m.numBookers;
+                  // Per-booker individual cost = bookings OUTSIDE the overlap window
+                  const individualCostByEmail = {};
+                  m.groups.forEach(g=>{
+                    const outside = g.bkgs.filter(b=>!hasOverlap || b.date<overlapStart || b.date>overlapEnd);
+                    individualCostByEmail[g.email] = outside.reduce((s,b)=>{
+                      const cat = categoryOf(b);
+                      const r = getFacRates(b.facility_id);
+                      const dur = getApproxDuration(b.email);
+                      return s + (isPerBooking ? dur*r[cat] : (splitHours(b).day*r.day+splitHours(b).evening*r.evening));
+                    }, 0);
+                  });
+                  const mergedTotal = sharedTotal + Object.values(individualCostByEmail).reduce((s,v)=>s+v,0);
                   const si={border:"1px solid #e2e8f0",borderRadius:6,padding:"3px 7px",fontSize:12,fontFamily:"inherit",background:"#fff"};
                   const setRes = (field, val) => setMergeResolution(prev=>({...prev,[resKey(field)]:val}));
                   // Stale = the editing values diverge from what's committed in the preview
@@ -2746,27 +2769,31 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
                           <span>Total</span><span>{fmtCost(totalCost)}</span>
                         </div>
                         <div style={{marginTop:8,fontSize:12,fontWeight:600,color:"#064e3b"}}>
-                          After merge — shared schedule = {targetGroup.email.split("@")[0]}'s slot ({targetCount} sessions, {fmtCost(mergedTotal)} ÷ {m.numBookers}):
+                          After merge — shared slot = {targetGroup.email.split("@")[0]}'s schedule, overlap window {hasOverlap?`${fmtDate(overlapStart)} → ${fmtDate(overlapEnd)}`:"(none)"} · {sharedCount} shared session{sharedCount!==1?"s":""} ({fmtCost(sharedTotal)} ÷ {m.numBookers}). Sessions outside the overlap stay individual at original cost.
                         </div>
                         {groupCosts.map(g=>{
-                          const diff = g.cost - sharePerBooker;
+                          const indiv = individualCostByEmail[g.email] || 0;
+                          const finalCost = sharePerBooker + indiv;
+                          const diff = g.cost - finalCost;
                           const players = getPlayers(g.email);
+                          const perPlayer = players>0 ? finalCost/players : null;
                           const perPlayerSave = players>0 ? Math.abs(diff)/players : null;
                           return (
                             <div key={g.email} style={{fontSize:12,color:"#065f46",marginBottom:2,display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:6}}>
-                              <span>{g.email.split("@")[0]}{players>0&&<span style={{color:"#64748b",fontWeight:400}}> · {players} players</span>}</span>
-                              <span style={{fontWeight:700}}>{fmtCost(sharePerBooker)} <span style={{fontWeight:400,fontSize:11,color:diff>=0?"#16a34a":"#dc2626"}}>({diff>=0?"saves":"pays extra"} {fmtCost(Math.abs(diff))}{perPlayerSave!==null?` · ${fmtCost(perPlayerSave)}/player`:""})</span></span>
+                              <span>{g.email.split("@")[0]}{players>0&&<span style={{color:"#64748b",fontWeight:400}}> · {players} players</span>}{indiv>0&&<span style={{color:"#64748b",fontWeight:400}}> · incl. {fmtCost(indiv)} individual</span>}</span>
+                              <span style={{fontWeight:700}}>{fmtCost(finalCost)}{perPlayer!==null&&<span style={{fontWeight:400,fontSize:11,color:"#064e3b"}}> · {fmtCost(perPlayer)}/player</span>} <span style={{fontWeight:400,fontSize:11,color:diff>=0?"#16a34a":"#dc2626"}}>({diff>=0?"saves":"pays extra"} {fmtCost(Math.abs(diff))}{perPlayerSave!==null?` · ${fmtCost(perPlayerSave)}/player`:""})</span></span>
                             </div>
                           );
                         })}
                         {(()=>{
                           const totalPlayers = groupCosts.reduce((s,g)=>s+getPlayers(g.email),0);
                           const totalSaved = totalCost-mergedTotal;
-                          const perPlayer = totalPlayers>0 ? totalSaved/totalPlayers : null;
+                          const perPlayerCost = totalPlayers>0 ? mergedTotal/totalPlayers : null;
+                          const perPlayerSave = totalPlayers>0 ? totalSaved/totalPlayers : null;
                           return (
                             <div style={{borderTop:"1px solid #c4b5fd",marginTop:4,paddingTop:4,display:"flex",justifyContent:"space-between",fontWeight:700,fontSize:12,color:"#5b21b6",flexWrap:"wrap",gap:6}}>
                               <span>Combined total{totalPlayers>0&&<span style={{fontWeight:400,color:"#64748b"}}> · {totalPlayers} players</span>}</span>
-                              <span>{fmtCost(mergedTotal)} <span style={{fontWeight:400,fontSize:11,color:"#16a34a"}}>(was {fmtCost(totalCost)}; saves {fmtCost(totalSaved)}{perPlayer!==null?` · ${fmtCost(perPlayer)}/player`:""})</span></span>
+                              <span>{fmtCost(mergedTotal)}{perPlayerCost!==null&&<span style={{fontWeight:400,fontSize:11,color:"#5b21b6"}}> · {fmtCost(perPlayerCost)}/player</span>} <span style={{fontWeight:400,fontSize:11,color:"#16a34a"}}>(was {fmtCost(totalCost)}; saves {fmtCost(totalSaved)}{perPlayerSave!==null?` · ${fmtCost(perPlayerSave)}/player`:""})</span></span>
                             </div>
                           );
                         })()}
