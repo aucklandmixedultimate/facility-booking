@@ -4149,6 +4149,14 @@ export default function App() {
   // All hooks before any conditional return
   useEffect(()=>{if(loggedInEmail)loadBookings();},[loggedInEmail]);
   useEffect(()=>{ loadSettings(); /* eslint-disable-next-line */ },[]);
+  useEffect(()=>{
+    if(!loggedInEmail||!configured) return;
+    const now=new Date();
+    const y=now.getFullYear(), m=now.getMonth()+1;
+    const nextM=m===12?1:m+1, nextY=m===12?y+1:y;
+    handleSyncMonth(y,m).then(()=>handleSyncMonth(nextY,nextM));
+  // eslint-disable-next-line
+  },[loggedInEmail]);
 
   const openNew=useCallback((date,startHour,duration=1)=>{setEditing(null);setPrefill({date,startHour,duration});setShowForm(true);},[]);
   const openEdit=useCallback((b)=>{setEditing({...b});setViewing(null);setShowForm(true);},[]);
