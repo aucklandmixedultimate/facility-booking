@@ -70,14 +70,16 @@ const STATUS_META = {
   pending_amua: {bg:"#fff8e1",border:"#f59e0b",text:"#92400e",dot:"#f59e0b",label:"(1/4) Pending AMUA Review"},
   queued_cpsa:  {bg:"#dbeafe",border:"#93c5fd",text:"#1e40af",dot:"#3b82f6",label:"(2/4) Queued for CPSA"},
   pending_cpsa: {bg:"#e0f2fe",border:"#7dd3fc",text:"#075985",dot:"#0ea5e9",label:"(3/4) Pending CPSA Review"},
-  approved:     {bg:"#f0fdf4",border:"#22c55e",text:"#14532d",dot:"#22c55e",label:"(4/4) Approved"},
+  approved:      {bg:"#f0fdf4",border:"#22c55e",text:"#14532d",dot:"#22c55e",label:"(4/4) Approved"},
+  cpsa_confirmed:{bg:"#ecfeff",border:"#0891b2",text:"#155e75",dot:"#0891b2",label:"🌐 CPSA Confirmed"},
+  cpsa_review_needed: {bg:"#fef9c3",border:"#ca8a04",text:"#713f12",dot:"#ca8a04",label:"⚠ CPSA Mismatch — AMUA Review"},
   rejected:     {bg:"#fff1f2",border:"#f43f5e",text:"#881337",dot:"#f43f5e",label:"Rejected"},
   cancelled:    {bg:"#f8f8f8",border:"#94a3b8",text:"#475569",dot:"#94a3b8",label:"Cancelled"},
   clash:        {bg:"#fef3c7",border:"#d97706",text:"#92400e",dot:"#d97706",label:"Clash"},
   amua_submit:  {bg:"#dbeafe",border:"#93c5fd",text:"#1e40af",dot:"#3b82f6",label:"(2/4) Queued for CPSA"},
   pending:      {bg:"#fff8e1",border:"#f59e0b",text:"#92400e",dot:"#f59e0b",label:"(1/4) Pending AMUA Review"},
 };
-const REVIEW_STATUSES = new Set(["pending_amua","queued_cpsa","amua_submit","pending_cpsa","pending"]);
+const REVIEW_STATUSES = new Set(["pending_amua","queued_cpsa","amua_submit","pending_cpsa","pending","cpsa_review_needed"]);
 const AMUA_INFO = {
   name:      "Auckland Mixed Ultimate Association (AMUA)",
   address:   "",
@@ -1723,7 +1725,7 @@ function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkApply, o
   const [patternModal, setPatternModal] = useState(null);
   const [oneOffModalData, setOneOffModalData] = useState(null);
 
-  const active = bookings.filter(b=>["approved","pending_cpsa","queued_cpsa","pending_amua","amua_submit","pending"].includes(b.status)&&!isAdminBooking(b));
+  const active = bookings.filter(b=>["approved","cpsa_confirmed","cpsa_review_needed","pending_cpsa","queued_cpsa","pending_amua","amua_submit","pending"].includes(b.status)&&!isAdminBooking(b));
   const patternMap = buildOverlapPatternMap(active, facSensitive);
 
   const rows = Object.entries(patternMap).map(([email,pats])=>{
@@ -3354,7 +3356,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[]
       {/* Approx player counts + duration panel */}
       {showPlayers&&(()=>{
         const bookers = Object.values(
-          bookings.filter(b=>["approved","pending_cpsa","queued_cpsa","pending_amua","amua_submit","pending"].includes(b.status))
+          bookings.filter(b=>["approved","cpsa_confirmed","cpsa_review_needed","pending_cpsa","queued_cpsa","pending_amua","amua_submit","pending"].includes(b.status))
             .reduce((m,b)=>{ const k=b.email.toLowerCase(); if(!m[k]) m[k]={name:b.name,email:b.email}; return m; },{})
         ).sort((a,b)=>a.name.localeCompare(b.name));
         return (
@@ -3750,6 +3752,61 @@ function Banner({type,msg}) {
 const CJR_ORG_ID = "14520";
 const CJR_ICAL   = "https://ics.teamup.com/feed/ksooqhdi7ua5ucp58j/15068031.ics";
 
+// Extract team identifier from CPSA EventName ("AU Ultimate Club (Field 3)" → "AU Ultimate Club")
+function extractCPSATeam(eventName) {
+  const m = (eventName||"").match(/^(.+?)\s*\(/);
+  return (m ? m[1] : eventName||"").trim();
+}
+
+function normalizeId(s) { return (s||"").toLowerCase().replace(/[^a-z0-9]/g,""); }
+
+// Find a user booking that this CJR event likely represents.
+// Returns { booking, exact } where exact=true means tight match (auto-confirm),
+// exact=false means fuzzy match (flag for AMUA review).
+function findMatchingUserBooking(allBookings, ev, facilityIds) {
+  const date = parseCJRDate(ev.EventStartDate);
+  if (!date) return null;
+  const { start_hour, duration } = parseCJRDateTime(ev.EventDateTime);
+  const team = extractCPSATeam(ev.EventName);
+  const teamNorm = normalizeId(team);
+  if (!teamNorm) return null;
+
+  // Eligible bookings: same date, time-overlap, facility within the mapped set, non-admin, in an approvable state
+  const candidates = allBookings.filter(b => {
+    if (b.email === "admin") return false;
+    if (!["approved","cpsa_confirmed","cpsa_review_needed"].includes(b.status)) return false;
+    if (b.date !== date) return false;
+    if (!facilityIds.includes(b.facility_id)) return false;
+    if (b.start_hour + b.duration <= start_hour) return false;
+    if (start_hour + duration <= b.start_hour) return false;
+    return true;
+  });
+  if (!candidates.length) return null;
+
+  // Score each candidate: identity (4) + time-exact (2) + duration-exact (1) + facility unambiguous (1)
+  const scored = candidates.map(b => {
+    const emailPrefix = normalizeId((b.email||"").split("@")[0]);
+    const nameNorm = normalizeId(b.name);
+    const purposeNorm = normalizeId(b.purpose);
+    let identityScore = 0;
+    if (emailPrefix === teamNorm || nameNorm === teamNorm) identityScore = 4;
+    else if (emailPrefix && (emailPrefix.includes(teamNorm) || teamNorm.includes(emailPrefix))) identityScore = 3;
+    else if (nameNorm && (nameNorm.includes(teamNorm) || teamNorm.includes(nameNorm))) identityScore = 2;
+    else if (purposeNorm && (purposeNorm.includes(teamNorm) || teamNorm.includes(purposeNorm))) identityScore = 1;
+    const timeExact = b.start_hour === start_hour ? 2 : 0;
+    const durExact  = b.duration === duration ? 1 : 0;
+    const facExact  = facilityIds.length === 1 ? 1 : 0;
+    return { booking: b, score: identityScore + timeExact + durExact + facExact, identityScore };
+  }).sort((a,b)=>b.score-a.score);
+
+  const best = scored[0];
+  if (best.identityScore === 0) return null; // no name link at all → not a match
+  // Exact: strong identity (>=3) AND time+duration align
+  const exact = best.identityScore >= 3 && best.score >= 7;
+  // Fuzzy: at least some identity link but missing precision
+  return { booking: best.booking, exact };
+}
+
 // Maps facility mentions in EventName to internal facility IDs
 function mapCJRFacility(eventName) {
   const n = eventName || "";
@@ -3902,8 +3959,9 @@ export default function App() {
     setSyncingMonth(true);
     try {
       const events = await fetchCJREvents(year, month);
-      let added = 0, skipped = 0, removed = 0;
+      let added = 0, skipped = 0, removed = 0, cpsaConfirmed = 0, cpsaReviewNeeded = 0;
       const currentBookings = configured ? (await sb.select("bookings")) : bookings;
+      const matchedUserIds = new Set();
 
       // Build set of canonical keys for this month's feed
       const feedKeys = new Set();
@@ -3942,6 +4000,23 @@ export default function App() {
         const { start_hour, duration } = parseCJRDateTime(ev.EventDateTime);
         const purpose = ev.EventName || "External Booking";
         const facilityIds = mapCJRFacility(purpose);
+
+        // Check if this CPSA event matches an existing approved user booking
+        const match = findMatchingUserBooking(currentBookings, ev, facilityIds);
+        if (match) {
+          const targetStatus = match.exact ? "cpsa_confirmed" : "cpsa_review_needed";
+          matchedUserIds.add(match.booking.id);
+          if (match.booking.status !== targetStatus) {
+            if (configured) {
+              await sb.update("bookings", match.booking.id, { status: targetStatus, updated_at: new Date().toISOString() });
+            } else {
+              setBookings(prev => prev.map(b => b.id === match.booking.id ? { ...b, status: targetStatus } : b));
+            }
+            if (match.exact) cpsaConfirmed++; else cpsaReviewNeeded++;
+          }
+          continue;
+        }
+
         for (const facility_id of facilityIds) {
           const dup = currentBookings.find(b =>
             b.date === date &&
@@ -3994,7 +4069,9 @@ export default function App() {
 
       const clashMsg = clashUpdates > 0 ? `, ${clashUpdates} clash${clashUpdates>1?"es":""} flagged` : "";
       const removedMsg = removed > 0 ? `, ${removed} stale removed` : "";
-      showToast(`Sync complete: ${added} added, ${skipped} already existed${removedMsg}${clashMsg}.`);
+      const cpsaMsg = cpsaConfirmed > 0 ? `, ${cpsaConfirmed} CPSA-confirmed` : "";
+      const cpsaRevMsg = cpsaReviewNeeded > 0 ? `, ${cpsaReviewNeeded} need AMUA review` : "";
+      showToast(`Sync complete: ${added} added, ${skipped} already existed${cpsaMsg}${cpsaRevMsg}${removedMsg}${clashMsg}.`);
     } catch(e) {
       showToast("Sync failed: " + e.message, "error");
     } finally {
