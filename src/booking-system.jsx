@@ -2546,49 +2546,37 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
             return {email,nameDisplay,recurring,oneOffCount,totalBkgs};
           }).sort((a,b)=>b.totalBkgs-a.totalBkgs);
 
-          // Sandbox: compute merged cost for selected patterns.
-          // Group loosely — by day-of-week (and facility if facility-sensitive)
-          // so different times/durations on the same day still form a mergeable
-          // group; differences are reconciled in the resolution UI below.
+          // Sandbox merge: combine ALL selected patterns into a single merge
+          // group as long as 2+ unique bookers are involved. Day, time,
+          // duration and facility differences are reconciled in the preview.
           let mergePreview = null;
           if(sandboxMode && sandboxSelected.size>0){
-            const mergeGroups = {}; // mergeKey -> { email -> {email, bkgs, pks:[]} }
+            const byEmail = {}; // email -> {email, bkgs, pks}
             sandboxSelected.forEach(key=>{
               const [email,...rest] = key.split("::");
               const pk = rest.join("::");
               const bkgs = patternMap[email]?.[pk]||[];
               if(!bkgs.length) return;
-              const parts = pk.split("_");
-              const dn = parts[parts.length-2]||"";
-              const facId = parts.length>2 ? parts[0] : null;
-              const mgKey = scheduleFacSensitive ? `${facId}_${dn}` : dn;
-              if(!mergeGroups[mgKey]) mergeGroups[mgKey]={};
-              if(!mergeGroups[mgKey][email]) mergeGroups[mgKey][email]={email,bkgs:[],pks:[]};
-              mergeGroups[mgKey][email].bkgs.push(...bkgs);
-              mergeGroups[mgKey][email].pks.push(pk);
+              if(!byEmail[email]) byEmail[email]={email,bkgs:[],pks:[]};
+              byEmail[email].bkgs.push(...bkgs);
+              byEmail[email].pks.push(pk);
             });
-            const mergeLines = Object.entries(mergeGroups)
-              .filter(([,byEmail])=>Object.keys(byEmail).length>=2)
-              .map(([mgKey,byEmail])=>{
-                const groups = Object.values(byEmail);
-                const allBkgs = groups.flatMap(g=>g.bkgs);
-                const numBookers = groups.length;
-                const totalRate = allBkgs.reduce((s,b)=>{
-                  const cat = categoryOf(b);
-                  const r = getFacRates(b.facility_id);
-                  const dur = getApproxDuration(b.email);
-                  return s + (isPerBooking ? dur*r[cat] : (splitHours(b).day*r.day + splitHours(b).evening*r.evening));
-                },0);
-                const avgRate = totalRate / allBkgs.length;
-                const mergedRate = avgRate / numBookers;
-                const mergedTotalCost = mergedRate * allBkgs.length;
-                const parts = mgKey.split("_");
-                const dn = parts[parts.length-1];
-                const facLabel = scheduleFacSensitive ? (FACILITIES.find(f=>f.id===parts[0])?.name||parts[0])+" · " : "";
-                const label = `${facLabel}${dn}`;
-                return {label,numBookers,mergedTotalCost,mergedRate,bookers:groups.map(g=>g.email),groups,pk:mgKey,mergeKey:mgKey};
-              });
-            mergePreview = mergeLines;
+            const groups = Object.values(byEmail);
+            if(groups.length >= 2){
+              const allBkgs = groups.flatMap(g=>g.bkgs);
+              const numBookers = groups.length;
+              const totalRate = allBkgs.reduce((s,b)=>{
+                const cat = categoryOf(b);
+                const r = getFacRates(b.facility_id);
+                const dur = getApproxDuration(b.email);
+                return s + (isPerBooking ? dur*r[cat] : (splitHours(b).day*r.day + splitHours(b).evening*r.evening));
+              },0);
+              const avgRate = totalRate / allBkgs.length;
+              const mergedRate = avgRate / numBookers;
+              const mergedTotalCost = mergedRate * allBkgs.length;
+              const label = `${groups.length} bookers · ${allBkgs.length} sessions`;
+              mergePreview = [{label,numBookers,mergedTotalCost,mergedRate,bookers:groups.map(g=>g.email),groups,pk:"merge",mergeKey:"merge"}];
+            }
           }
 
           const hasSelection = sandboxMode && sandboxSelected.size>0;
@@ -2597,7 +2585,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
             <div>
               {hasSelection && !hasMergeable && (
                 <div style={{background:"#fffbeb",border:"1.5px dashed #fde68a",borderRadius:10,padding:"10px 14px",marginBottom:12,fontSize:12,color:"#92400e"}}>
-                  Select patterns on the same day{scheduleFacSensitive?" + facility":""} from at least 2 different bookers to preview a merge. Times and durations don't need to match — you can reconcile differences in the preview.
+                  Select patterns from at least 2 different bookers to preview a merge. Days, times, durations and facilities don't need to match — you can reconcile any differences in the preview.
                 </div>
               )}
               {hasMergeable && !previewMerge && (
@@ -2624,9 +2612,15 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
                   const targetBkg = targetGroup.bkgs[0];
                   const resKey = k => `${key}::${k}`;
                   const resolved = (field, targetVal) => mergeResolution[resKey(field)] ?? targetVal;
-                  const fields = ["start_hour","duration","facility_id"].map(field=>{
-                    const targetVal = targetBkg?.[field] ?? "";
-                    const conflicts = conformGroups.map(g=>({email:g.email,val:g.bkgs[0]?.[field]??""})).filter(x=>x.val!==targetVal);
+                  const DAYS = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+                  const getField = (b, field) => {
+                    if(!b) return "";
+                    if(field === "day") return new Date(b.date+"T12:00").getDay();
+                    return b[field];
+                  };
+                  const fields = ["day","start_hour","duration","facility_id"].map(field=>{
+                    const targetVal = getField(targetBkg, field);
+                    const conflicts = conformGroups.map(g=>({email:g.email,val:getField(g.bkgs[0], field)})).filter(x=>x.val!==targetVal);
                     return {field, targetVal, conflicts, resolvedVal: resolved(field, targetVal)};
                   });
                   const allGroups = m.groups.map(g=>{
@@ -2661,17 +2655,21 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
                           <div style={{fontWeight:600,fontSize:12,color:"#64748b",marginBottom:4}}>Resolve differences</div>
                           {fields.map(f=>{
                             if(f.conflicts.length===0) return null;
-                            const label = f.field==="start_hour"?"Start time":f.field==="duration"?"Duration":"Facility";
-                            const targetDisp = f.field==="start_hour" ? fmtTime(f.targetVal) : f.field==="facility_id" ? FACILITIES.find(x=>x.id===f.targetVal)?.name||f.targetVal : `${f.targetVal}h`;
+                            const label = f.field==="day"?"Day":f.field==="start_hour"?"Start time":f.field==="duration"?"Duration":"Facility";
+                            const disp = v => f.field==="day"?DAYS[v]:f.field==="start_hour"?fmtTime(v):f.field==="facility_id"?(FACILITIES.find(x=>x.id===v)?.name||v):`${v}h`;
                             return (
                               <div key={f.field} style={{display:"flex",alignItems:"center",gap:8,marginBottom:6,fontSize:12,flexWrap:"wrap"}}>
                                 <span style={{fontWeight:600,color:"#4c1d95",width:72}}>{label}</span>
-                                <span style={{color:"#16a34a"}}>✓ {targetDisp} ({targetGroup.email.split("@")[0]})</span>
-                                {f.conflicts.map(c=>{
-                                  const disp=f.field==="start_hour"?fmtTime(c.val):f.field==="facility_id"?FACILITIES.find(x=>x.id===c.val)?.name||c.val:`${c.val}h`;
-                                  return <span key={c.email} style={{color:"#9f1239"}}>≠ {disp} ({c.email.split("@")[0]})</span>;
-                                })}
+                                <span style={{color:"#16a34a"}}>✓ {disp(f.targetVal)} ({targetGroup.email.split("@")[0]})</span>
+                                {f.conflicts.map(c=>(
+                                  <span key={c.email} style={{color:"#9f1239"}}>≠ {disp(c.val)} ({c.email.split("@")[0]})</span>
+                                ))}
                                 <span style={{color:"#64748b",marginLeft:4}}>→ override:</span>
+                                {f.field==="day" && (
+                                  <select value={f.resolvedVal} onChange={e=>setRes(f.field,parseInt(e.target.value))} style={si}>
+                                    {DAYS.map((d,i)=><option key={i} value={i}>{d}</option>)}
+                                  </select>
+                                )}
                                 {f.field==="start_hour" && (
                                   <input type="number" min="0" max="23" step="0.5" value={f.resolvedVal}
                                     onChange={e=>setRes(f.field,parseFloat(e.target.value)||0)}
