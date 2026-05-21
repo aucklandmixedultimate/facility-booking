@@ -2572,32 +2572,133 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
               const mergedTotalCost = mergedRate * allBkgs.length;
               const [dn,startH] = pk.includes("_") ? pk.split("_").slice(-2) : [pk,""];
               const label = scheduleFacSensitive ? pk : `${dn} ${fmtTime(parseFloat(startH))}`;
-              return {label,numBookers,mergedTotalCost,bookers:groups.map(g=>g.email)};
+              return {label,numBookers,mergedTotalCost,mergedRate,bookers:groups.map(g=>g.email),groups,pk,mergeKey:pk};
             });
             mergePreview = mergeLines;
           }
 
           return (
             <div>
-              {sandboxMode && mergePreview && mergePreview.length>0 && (
-                <div style={{background:"#f5f3ff",border:"1.5px solid #c4b5fd",borderRadius:10,padding:"12px 16px",marginBottom:12}}>
-                  <div style={{fontWeight:700,fontSize:13,color:"#5b21b6",marginBottom:8}}>🧪 Merge Preview</div>
-                  {mergePreview.map((m,i)=>(
-                    <div key={i} style={{fontSize:12,color:"#4c1d95",marginBottom:4}}>
-                      <strong>{m.label}</strong> — {m.numBookers} booker{m.numBookers!==1?"s":""} merged — shared cost: <strong>{fmtCost(m.mergedTotalCost)}</strong>
-                      <span style={{color:"#7c3aed",marginLeft:8}}>({m.bookers.join(", ")})</span>
+              {sandboxMode && mergePreview && mergePreview.length>0 && (()=>{
+                return mergePreview.map((m,mi)=>{
+                  const key = m.mergeKey || mi;
+                  const currentTarget = mergeTarget || m.groups[0]?.email;
+                  const targetGroup = m.groups.find(g=>g.email===currentTarget)||m.groups[0];
+                  const conformGroups = m.groups.filter(g=>g.email!==targetGroup.email);
+                  const targetBkg = targetGroup.bkgs[0];
+                  const resKey = k => `${key}::${k}`;
+                  const resolved = (field, targetVal) => mergeResolution[resKey(field)] ?? targetVal;
+                  const fields = ["start_hour","duration","facility_id"].map(field=>{
+                    const targetVal = targetBkg?.[field] ?? "";
+                    const conflicts = conformGroups.map(g=>({email:g.email,val:g.bkgs[0]?.[field]??""})).filter(x=>x.val!==targetVal);
+                    return {field, targetVal, conflicts, resolvedVal: resolved(field, targetVal)};
+                  });
+                  const allGroups = m.groups.map(g=>{
+                    const dates = g.bkgs.map(b=>b.date).sort();
+                    return {email:g.email, start:dates[0], end:dates[dates.length-1], count:g.bkgs.length};
+                  });
+                  const getCost = (g) => g.bkgs.reduce((s,b)=>{
+                    const cat = categoryOf(b);
+                    const r = getFacRates(b.facility_id);
+                    const dur = getApproxDuration(b.email);
+                    return s + (isPerBooking ? dur*r[cat] : (splitHours(b).day*r.day+splitHours(b).evening*r.evening));
+                  }, 0);
+                  const groupCosts = m.groups.map(g=>({email:g.email, cost:getCost(g), count:g.bkgs.length}));
+                  const totalCost = groupCosts.reduce((s,g)=>s+g.cost, 0);
+                  const mergedPerBooker = totalCost / m.numBookers;
+                  const si={border:"1px solid #e2e8f0",borderRadius:6,padding:"3px 7px",fontSize:12,fontFamily:"inherit",background:"#fff"};
+                  const setRes = (field, val) => setMergeResolution(prev=>({...prev,[resKey(field)]:val}));
+                  return (
+                    <div key={key} style={{background:"#f5f3ff",border:"1.5px solid #c4b5fd",borderRadius:10,padding:"12px 16px",marginBottom:12}}>
+                      <div style={{fontWeight:700,fontSize:13,color:"#5b21b6",marginBottom:8}}>🧪 Merge Preview — {m.label}</div>
+                      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10,flexWrap:"wrap"}}>
+                        <span style={{fontSize:12,fontWeight:600,color:"#64748b"}}>Target (keeps their slot):</span>
+                        {m.groups.map(g=>(
+                          <button key={g.email} onClick={()=>setMergeTarget(g.email)}
+                            style={{background:currentTarget===g.email?"#5b21b6":"#f5f3ff",color:currentTarget===g.email?"#fff":"#5b21b6",border:"1px solid #c4b5fd",borderRadius:6,padding:"2px 8px",fontSize:11,cursor:"pointer",fontWeight:600,fontFamily:"inherit"}}>
+                            {g.email.split("@")[0]}
+                          </button>
+                        ))}
+                      </div>
+                      {fields.some(f=>f.conflicts.length>0) && (
+                        <div style={{marginBottom:10}}>
+                          <div style={{fontWeight:600,fontSize:12,color:"#64748b",marginBottom:4}}>Resolve differences</div>
+                          {fields.map(f=>{
+                            if(f.conflicts.length===0) return null;
+                            const label = f.field==="start_hour"?"Start time":f.field==="duration"?"Duration":"Facility";
+                            const targetDisp = f.field==="start_hour" ? fmtTime(f.targetVal) : f.field==="facility_id" ? FACILITIES.find(x=>x.id===f.targetVal)?.name||f.targetVal : `${f.targetVal}h`;
+                            return (
+                              <div key={f.field} style={{display:"flex",alignItems:"center",gap:8,marginBottom:6,fontSize:12,flexWrap:"wrap"}}>
+                                <span style={{fontWeight:600,color:"#4c1d95",width:72}}>{label}</span>
+                                <span style={{color:"#16a34a"}}>✓ {targetDisp} ({targetGroup.email.split("@")[0]})</span>
+                                {f.conflicts.map(c=>{
+                                  const disp=f.field==="start_hour"?fmtTime(c.val):f.field==="facility_id"?FACILITIES.find(x=>x.id===c.val)?.name||c.val:`${c.val}h`;
+                                  return <span key={c.email} style={{color:"#9f1239"}}>≠ {disp} ({c.email.split("@")[0]})</span>;
+                                })}
+                                <span style={{color:"#64748b",marginLeft:4}}>→ override:</span>
+                                {f.field==="start_hour" && (
+                                  <input type="number" min="0" max="23" step="0.5" value={f.resolvedVal}
+                                    onChange={e=>setRes(f.field,parseFloat(e.target.value)||0)}
+                                    style={{...si,width:64}}/>
+                                )}
+                                {f.field==="duration" && (
+                                  <select value={f.resolvedVal} onChange={e=>setRes(f.field,parseFloat(e.target.value))} style={si}>
+                                    {DURATIONS.map(d=><option key={d.value} value={d.value}>{d.label}</option>)}
+                                  </select>
+                                )}
+                                {f.field==="facility_id" && (
+                                  <select value={f.resolvedVal} onChange={e=>setRes(f.field,e.target.value)} style={si}>
+                                    {FACILITIES.map(f2=><option key={f2.id} value={f2.id}>{f2.name}</option>)}
+                                  </select>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                      <div style={{marginBottom:10}}>
+                        <div style={{fontWeight:600,fontSize:12,color:"#64748b",marginBottom:4}}>Date ranges</div>
+                        {allGroups.map(g=>(
+                          <div key={g.email} style={{fontSize:12,color:"#4c1d95",marginBottom:2}}>
+                            <span style={{fontWeight:600}}>{g.email.split("@")[0]}</span>: {fmtDate(g.start)} → {fmtDate(g.end)} ({g.count} sessions)
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{background:"#ede9fe",borderRadius:8,padding:"8px 12px",marginBottom:10}}>
+                        <div style={{fontWeight:700,fontSize:12,color:"#5b21b6",marginBottom:6}}>Cost breakdown</div>
+                        <div style={{fontSize:12,color:"#4c1d95",marginBottom:4,fontWeight:600}}>Before merge:</div>
+                        {groupCosts.map(g=>(
+                          <div key={g.email} style={{fontSize:12,color:"#4c1d95",marginBottom:2,display:"flex",justifyContent:"space-between"}}>
+                            <span>{g.email.split("@")[0]} ({g.count} sessions)</span>
+                            <span style={{fontWeight:700}}>{fmtCost(g.cost)}</span>
+                          </div>
+                        ))}
+                        <div style={{borderTop:"1px solid #c4b5fd",marginTop:4,paddingTop:4,display:"flex",justifyContent:"space-between",fontWeight:700,fontSize:12,color:"#5b21b6"}}>
+                          <span>Total</span><span>{fmtCost(totalCost)}</span>
+                        </div>
+                        <div style={{marginTop:8,fontSize:12,fontWeight:600,color:"#064e3b"}}>After merge (÷{m.numBookers}):</div>
+                        {groupCosts.map(g=>{
+                          const share = totalCost/m.numBookers;
+                          return (
+                            <div key={g.email} style={{fontSize:12,color:"#065f46",marginBottom:2,display:"flex",justifyContent:"space-between"}}>
+                              <span>{g.email.split("@")[0]}</span>
+                              <span style={{fontWeight:700}}>{fmtCost(share)} <span style={{fontWeight:400,fontSize:11,color:"#16a34a"}}>(saves {fmtCost(g.cost-share)})</span></span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <button
+                        onClick={()=>{
+                          if(onProposeMerge) onProposeMerge([m]);
+                          else alert("Merge proposal added — commit your cart to notify bookers.");
+                        }}
+                        style={S.btn({background:"#7c3aed",color:"#fff",fontSize:12})}>
+                        Propose Merge
+                      </button>
                     </div>
-                  ))}
-                  <button
-                    onClick={()=>{
-                      if(onProposeMerge) onProposeMerge(mergePreview);
-                      else alert("Merge proposal added — commit your cart to notify bookers.");
-                    }}
-                    style={S.btn({background:"#7c3aed",color:"#fff",fontSize:12,marginTop:8})}>
-                    Propose Merge
-                  </button>
-                </div>
-              )}
+                  );
+                });
+              })()}
               <div style={{overflowX:"auto"}}>
                 <table style={{width:"100%",borderCollapse:"collapse",minWidth:480}}>
                   <thead>
@@ -2623,11 +2724,24 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
                               {row.recurring.map(([pk,bkgs])=>{
                                 const selKey = `${row.email}::${pk}`;
                                 const isSel = sandboxSelected.has(selKey);
-                                // derive label from pk
                                 const parts = pk.split("_");
                                 const startH = parseFloat(parts[parts.length-1]);
                                 const dn = parts[parts.length-2]||"";
-                                const label = `${dn} ${fmtTime(startH)} ×${bkgs.length}`;
+                                const durs = [...new Set(bkgs.map(b=>b.duration))];
+                                const durLabel = durs.length===1 ? `${durs[0]}h` : `~${Math.round(durs.reduce((s,d)=>s+d,0)/durs.length*2)/2}h`;
+                                let facLabel;
+                                if(scheduleFacSensitive){
+                                  const facId = pk.split("_")[0];
+                                  const fac = FACILITIES.find(f=>f.id===facId);
+                                  facLabel = fac ? fac.name.split("–")[0].split("#")[0].trim().replace("Field","Fld") : facId;
+                                } else {
+                                  const facIds = [...new Set(bkgs.map(b=>b.facility_id))];
+                                  facLabel = facIds.map(fid=>{
+                                    const f=FACILITIES.find(x=>x.id===fid);
+                                    return f ? (f.name.includes("Field") ? f.name.replace("Field ","Fld ") : f.name.split("–")[0].trim().slice(0,6)) : fid;
+                                  }).join(", ");
+                                }
+                                const label = `${dn} ${fmtTime(startH)} · ${durLabel} · ${facLabel} ×${bkgs.length}`;
                                 return (
                                   <div key={pk} style={{display:"flex",alignItems:"center",gap:4}}>
                                     {sandboxMode&&(
@@ -2641,7 +2755,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
                                         }}
                                         style={{cursor:"pointer"}}/>
                                     )}
-                                    <span style={{
+                                    <span onClick={()=>setPatternModal({email:row.email, name:row.nameDisplay, pk, bkgs})} style={{
                                       display:"inline-block",
                                       background:isSel?"#7c3aed":ec+"22",
                                       color:isSel?"#fff":ec,
@@ -2650,7 +2764,8 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
                                       padding:"2px 8px",
                                       fontSize:11,
                                       fontWeight:600,
-                                      whiteSpace:"nowrap"
+                                      whiteSpace:"nowrap",
+                                      cursor:"pointer"
                                     }}>
                                       {label}
                                     </span>
@@ -2659,7 +2774,16 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
                               })}
                             </div>
                           </td>
-                          <td style={{...tdS,textAlign:"right",color:"#94a3b8"}}>{row.oneOffCount||"—"}</td>
+                          <td style={{...tdS,textAlign:"right"}}>
+                            {row.oneOffCount>0 ? (
+                              <button onClick={()=>{
+                                const oneOffBkgs = Object.values(patternMap[row.email]||{}).filter(bs=>bs.length===1).flat();
+                                setOneOffModal({email:row.email, name:row.nameDisplay, bkgs:oneOffBkgs});
+                              }} style={{background:"none",border:"1px solid #e2e8f0",borderRadius:6,padding:"2px 8px",cursor:"pointer",fontSize:12,color:"#475569",fontWeight:600}}>
+                                {row.oneOffCount}
+                              </button>
+                            ) : <span style={{color:"#94a3b8"}}>—</span>}
+                          </td>
                           <td style={{...tdS,textAlign:"right",fontWeight:700}}>{row.totalBkgs}</td>
                         </tr>
                       );
@@ -2675,6 +2799,26 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
         })()}
       </div>
 
+      {patternModal && (
+        <PatternModal
+          {...patternModal}
+          isAdmin={isAdmin}
+          facilityRates={facilityRates}
+          pricingMode={pricingMode}
+          approxDurations={approxDurations}
+          onClose={()=>setPatternModal(null)}
+          onBulkApply={({email,pk,bkgs,bulkTime,bulkDur,bulkFac,cancelFrom})=>{
+            alert(`Bulk edit applied to ${bkgs.filter(b=>!cancelFrom||b.date>=cancelFrom).length} bookings (save not yet wired to DB)`);
+          }}
+        />
+      )}
+      {oneOffModal && (
+        <OneOffModal
+          {...oneOffModal}
+          isAdmin={isAdmin}
+          onClose={()=>setOneOffModal(null)}
+        />
+      )}
       {/* Invoice modal */}
       {showInvoice && (()=>{
         const scopes = getInvoiceScopes();
@@ -3440,6 +3584,7 @@ export default function App() {
   });
   const [listBookerFilter, setListBookerFilter] = useState("all");
   const [listShowClashes, setListShowClashes]   = useState(false);
+  const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [approxPlayers, setApproxPlayers] = useState(()=>{
     try{return JSON.parse(localStorage.getItem("fb_approx_players")||"{}");}catch{return {};}
   });
@@ -4050,6 +4195,10 @@ export default function App() {
                         ⚠️ {listShowClashes?"All":"Clashes only"} ({allClashes.length})
                       </button>
                     )}
+                    <button onClick={()=>setShowScheduleModal(true)}
+                      style={S.btn({background:"#f0f9ff",color:"#0369a1",border:"1.5px solid #bae6fd",fontSize:12,fontWeight:700})}>
+                      📅 Summarise
+                    </button>
                   </div>
                   {/* Booker filter chips */}
                   <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12,alignItems:"center"}}>
@@ -4145,6 +4294,7 @@ export default function App() {
       </div>
 
       {/* Modals */}
+      {showScheduleModal && <ScheduleSummaryModal bookings={bookings} onClose={()=>setShowScheduleModal(false)}/>}
       {showLogin&&<Modal title="Admin Access" onClose={()=>setShowLogin(false)}><AdminLogin onLogin={()=>{setIsAdmin(true);setShowLogin(false);setTab(prev=>prev==="about"?"admin":prev);}}/></Modal>}
 
       {showForm&&(
