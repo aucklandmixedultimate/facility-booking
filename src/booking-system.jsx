@@ -1550,6 +1550,230 @@ function AboutTab() {
   );
 }
 
+function PatternModal({ email, name, pk, bkgs, isAdmin, facilityRates, pricingMode, approxDurations, onClose, onBulkApply }) {
+  const parts = pk.split("_");
+  const startH = parseFloat(parts[parts.length-1]);
+  const dn = parts[parts.length-2]||"";
+  const facId = parts.length>2 ? parts[0] : null;
+  const fac = facId ? FACILITIES.find(f=>f.id===facId) : null;
+
+  const [bulkTime, setBulkTime] = React.useState(startH);
+  const [bulkDur, setBulkDur] = React.useState(bkgs[0]?.duration ?? 2);
+  const [bulkFac, setBulkFac] = React.useState(bkgs[0]?.facility_id ?? "");
+  const [cancelFrom, setCancelFrom] = React.useState("");
+
+  const sorted = [...bkgs].sort((a,b)=>a.date.localeCompare(b.date));
+
+  const si = {border:"1px solid #e2e8f0",borderRadius:6,padding:"4px 8px",fontSize:13,fontFamily:"inherit",background:"#fff"};
+
+  return (
+    <Modal title={`Pattern: ${dn} ${fmtTime(startH)} — ${name}`} onClose={onClose}>
+      <div style={{fontSize:12,color:"#64748b",marginBottom:12}}>
+        {bkgs.length} booking{bkgs.length!==1?"s":""} · {email}
+        {fac && <span> · {fac.name}</span>}
+      </div>
+
+      <div style={{overflowY:"auto",maxHeight:280,marginBottom:16}}>
+        <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+          <thead>
+            <tr style={{background:"#f8fafc",borderBottom:"1px solid #e2e8f0"}}>
+              <th style={{textAlign:"left",padding:"6px 8px",fontWeight:600,color:"#64748b"}}>Date</th>
+              <th style={{textAlign:"left",padding:"6px 8px",fontWeight:600,color:"#64748b"}}>Facility</th>
+              <th style={{textAlign:"right",padding:"6px 8px",fontWeight:600,color:"#64748b"}}>Time</th>
+              <th style={{textAlign:"right",padding:"6px 8px",fontWeight:600,color:"#64748b"}}>Dur</th>
+              <th style={{textAlign:"left",padding:"6px 8px",fontWeight:600,color:"#64748b"}}>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map(b=>{
+              const f=FACILITIES.find(x=>x.id===b.facility_id);
+              const sm=STATUS_META[b.status];
+              return (
+                <tr key={b.id} style={{borderBottom:"1px solid #f1f5f9"}}>
+                  <td style={{padding:"5px 8px"}}>{fmtDate(b.date)}</td>
+                  <td style={{padding:"5px 8px"}}><span style={{fontSize:11,background:f?.color+"22",color:f?.color,borderRadius:4,padding:"1px 5px"}}>{f?.name.split("–")[0].trim()}</span></td>
+                  <td style={{padding:"5px 8px",textAlign:"right"}}>{fmtTime(b.start_hour)}</td>
+                  <td style={{padding:"5px 8px",textAlign:"right"}}>{b.duration}h</td>
+                  <td style={{padding:"5px 8px"}}><span style={{fontSize:11,background:sm?.bg,color:sm?.text,border:`1px solid ${sm?.border}`,borderRadius:4,padding:"1px 5px"}}>{sm?.label||b.status}</span></td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {isAdmin && (
+        <div style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:"10px 12px"}}>
+          <div style={{fontWeight:700,fontSize:13,color:"#0f172a",marginBottom:8}}>Bulk Edit (apply to all in pattern)</div>
+          <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center",marginBottom:8}}>
+            <div style={{display:"flex",alignItems:"center",gap:5}}>
+              <span style={{fontSize:12,color:"#64748b"}}>Start time</span>
+              <input type="number" min="0" max="23" step="0.5" value={bulkTime}
+                onChange={e=>setBulkTime(parseFloat(e.target.value)||0)}
+                style={{...si,width:64}}/>
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:5}}>
+              <span style={{fontSize:12,color:"#64748b"}}>Duration</span>
+              <select value={bulkDur} onChange={e=>setBulkDur(parseFloat(e.target.value))} style={si}>
+                {DURATIONS.map(d=><option key={d.value} value={d.value}>{d.label}</option>)}
+              </select>
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:5}}>
+              <span style={{fontSize:12,color:"#64748b"}}>Facility</span>
+              <select value={bulkFac} onChange={e=>setBulkFac(e.target.value)} style={si}>
+                {FACILITIES.map(f=><option key={f.id} value={f.id}>{f.name}</option>)}
+              </select>
+            </div>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+            <span style={{fontSize:12,color:"#e11d48"}}>Cancel from date</span>
+            <input type="date" value={cancelFrom} onChange={e=>setCancelFrom(e.target.value)} style={{...si,width:140}}/>
+            <span style={{fontSize:11,color:"#94a3b8"}}>(leave blank to skip)</span>
+          </div>
+          <div style={{display:"flex",gap:8}}>
+            <button onClick={()=>{
+              onBulkApply({email,pk,bkgs:sorted,bulkTime,bulkDur,bulkFac,cancelFrom});
+              onClose();
+            }} style={S.btn({background:"#0f172a",color:"#fff",fontSize:12})}>
+              Apply to all ({sorted.filter(b=>!cancelFrom||b.date>=cancelFrom).length} bookings)
+            </button>
+            <button onClick={onClose} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#64748b",fontSize:12})}>Close</button>
+          </div>
+        </div>
+      )}
+      {!isAdmin && (
+        <button onClick={onClose} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#64748b",fontSize:12})}>Close</button>
+      )}
+    </Modal>
+  );
+}
+
+function OneOffModal({ email, name, bkgs, isAdmin, onClose }) {
+  const sorted = [...bkgs].sort((a,b)=>a.date.localeCompare(b.date));
+  return (
+    <Modal title={`One-off Bookings — ${name}`} onClose={onClose}>
+      <div style={{fontSize:12,color:"#64748b",marginBottom:10}}>{sorted.length} one-off booking{sorted.length!==1?"s":""} · {email}</div>
+      <div style={{overflowY:"auto",maxHeight:360}}>
+        <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+          <thead>
+            <tr style={{background:"#f8fafc",borderBottom:"1px solid #e2e8f0"}}>
+              <th style={{textAlign:"left",padding:"6px 8px",fontWeight:600,color:"#64748b"}}>Date</th>
+              <th style={{textAlign:"left",padding:"6px 8px",fontWeight:600,color:"#64748b"}}>Facility</th>
+              <th style={{textAlign:"right",padding:"6px 8px",fontWeight:600,color:"#64748b"}}>Time</th>
+              <th style={{textAlign:"right",padding:"6px 8px",fontWeight:600,color:"#64748b"}}>Dur</th>
+              <th style={{textAlign:"left",padding:"6px 8px",fontWeight:600,color:"#64748b"}}>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map(b=>{
+              const f=FACILITIES.find(x=>x.id===b.facility_id);
+              const sm=STATUS_META[b.status];
+              return (
+                <tr key={b.id} style={{borderBottom:"1px solid #f1f5f9"}}>
+                  <td style={{padding:"5px 8px"}}>{fmtDate(b.date)}</td>
+                  <td style={{padding:"5px 8px"}}><span style={{fontSize:11,background:f?.color+"22",color:f?.color,borderRadius:4,padding:"1px 5px"}}>{f?.name.split("–")[0].trim()}</span></td>
+                  <td style={{padding:"5px 8px",textAlign:"right"}}>{fmtTime(b.start_hour)}</td>
+                  <td style={{padding:"5px 8px",textAlign:"right"}}>{b.duration}h</td>
+                  <td style={{padding:"5px 8px"}}><span style={{fontSize:11,background:sm?.bg,color:sm?.text,border:`1px solid ${sm?.border}`,borderRadius:4,padding:"1px 5px"}}>{sm?.label||b.status}</span></td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <div style={{marginTop:12}}>
+        <button onClick={onClose} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#64748b",fontSize:12})}>Close</button>
+      </div>
+    </Modal>
+  );
+}
+
+function ScheduleSummaryModal({ bookings, onClose }) {
+  const [facSensitive, setFacSensitive] = React.useState(false);
+  const active = bookings.filter(b=>["approved","pending_cpsa","queued_cpsa","pending_amua","amua_submit","pending"].includes(b.status)&&!isAdminBooking(b));
+
+  function dayName(d){return["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][new Date(d+"T12:00").getDay()];}
+
+  const patternMap = {};
+  active.forEach(b=>{
+    const email=b.email.toLowerCase();
+    const dn=dayName(b.date);
+    const pk=facSensitive?`${b.facility_id}_${dn}_${b.start_hour}`:`${dn}_${b.start_hour}`;
+    if(!patternMap[email]) patternMap[email]={};
+    if(!patternMap[email][pk]) patternMap[email][pk]=[];
+    patternMap[email][pk].push(b);
+  });
+
+  const rows = Object.entries(patternMap).map(([email,pats])=>{
+    const nameDisplay=(Object.values(pats)[0]||[])[0]?.name||email;
+    const recurring=Object.entries(pats).filter(([,bs])=>bs.length>=2);
+    const oneOffs=Object.values(pats).filter(bs=>bs.length===1).flat();
+    const totalBkgs=Object.values(pats).reduce((s,bs)=>s+bs.length,0);
+    return {email,nameDisplay,recurring,oneOffs,totalBkgs};
+  }).sort((a,b)=>b.totalBkgs-a.totalBkgs);
+
+  const thS2={textAlign:"left",padding:"6px 8px",fontWeight:600,color:"#64748b",fontSize:12,borderBottom:"1px solid #e2e8f0"};
+  const tdS2={padding:"6px 8px",verticalAlign:"top",fontSize:13};
+
+  return (
+    <Modal title="📅 Schedule Summary" onClose={onClose}>
+      <div style={{marginBottom:10}}>
+        <label style={{display:"flex",alignItems:"center",gap:6,fontSize:12,cursor:"pointer"}}>
+          <input type="checkbox" checked={facSensitive} onChange={e=>setFacSensitive(e.target.checked)}/>
+          Facility-sensitive patterns
+        </label>
+      </div>
+      <div style={{overflowY:"auto",maxHeight:"60vh",overflowX:"auto"}}>
+        <table style={{width:"100%",borderCollapse:"collapse",minWidth:480}}>
+          <thead>
+            <tr style={{background:"#f8fafc"}}>
+              <th style={thS2}>Booker</th>
+              <th style={thS2}>Recurring Patterns</th>
+              <th style={{...thS2,textAlign:"right"}}>One-offs</th>
+              <th style={{...thS2,textAlign:"right"}}>Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(row=>{
+              const ec=emailColor(row.email);
+              return (
+                <tr key={row.email} style={{borderBottom:"1px solid #f1f5f9"}}>
+                  <td style={tdS2}>
+                    <div style={{fontWeight:700,color:"#0f172a",fontSize:13}}>{row.nameDisplay}</div>
+                    <div style={{fontSize:11,color:"#94a3b8"}}>{row.email}</div>
+                  </td>
+                  <td style={tdS2}>
+                    <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
+                      {row.recurring.length===0&&<span style={{fontSize:12,color:"#94a3b8"}}>—</span>}
+                      {row.recurring.map(([pk,bkgs])=>{
+                        const parts=pk.split("_");
+                        const startH=parseFloat(parts[parts.length-1]);
+                        const dn=parts[parts.length-2]||"";
+                        const durs=[...new Set(bkgs.map(b=>b.duration))];
+                        const durLabel=durs.length===1?`${durs[0]}h`:`~${Math.round(durs.reduce((s,d)=>s+d,0)/durs.length*2)/2}h`;
+                        const facIds=[...new Set(bkgs.map(b=>b.facility_id))];
+                        const facLabel=facIds.map(fid=>{const f=FACILITIES.find(x=>x.id===fid);return f?(f.name.includes("Field")?f.name.replace("Field ","Fld "):f.name.split("–")[0].trim().slice(0,6)):fid;}).join(", ");
+                        return (
+                          <span key={pk} style={{display:"inline-block",background:ec+"22",color:ec,border:`1px solid ${ec}55`,borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:600,whiteSpace:"nowrap"}}>
+                            {dn} {fmtTime(startH)} · {durLabel} · {facLabel} ×{bkgs.length}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  </td>
+                  <td style={{...tdS2,textAlign:"right",color:"#94a3b8"}}>{row.oneOffs.length||"—"}</td>
+                  <td style={{...tdS2,textAlign:"right",fontWeight:700}}>{row.totalBkgs}</td>
+                </tr>
+              );
+            })}
+            {rows.length===0&&<tr><td colSpan={4} style={{...tdS2,textAlign:"center",color:"#94a3b8"}}>No active bookings.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </Modal>
+  );
+}
+
 function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = false, approxPlayers = {}, onUpdateApproxPlayers, approxDurations = {}, onUpdateApproxDuration, onUpdateFacilityRate, pricingMode = "hourly", onSetPricingMode, onProposeMerge }) {
   const now = new Date();
   const thisYear = now.getFullYear();
@@ -1577,6 +1801,10 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
   const [scheduleFacSensitive,setScheduleFacSensitive]= useState(false);
   const [sandboxMode,         setSandboxMode]         = useState(false);
   const [sandboxSelected,     setSandboxSelected]     = useState(new Set());
+  const [patternModal, setPatternModal] = useState(null);
+  const [oneOffModal, setOneOffModal] = useState(null);
+  const [mergeTarget, setMergeTarget] = useState(null);
+  const [mergeResolution, setMergeResolution] = useState({});
 
   function presetRange(key) {
     const y = thisYear;
