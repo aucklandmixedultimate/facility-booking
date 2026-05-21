@@ -2719,16 +2719,26 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
                         </div>
                         {groupCosts.map(g=>{
                           const diff = g.cost - sharePerBooker;
+                          const players = getPlayers(g.email);
+                          const perPlayerSave = players>0 ? Math.abs(diff)/players : null;
                           return (
-                            <div key={g.email} style={{fontSize:12,color:"#065f46",marginBottom:2,display:"flex",justifyContent:"space-between"}}>
-                              <span>{g.email.split("@")[0]}</span>
-                              <span style={{fontWeight:700}}>{fmtCost(sharePerBooker)} <span style={{fontWeight:400,fontSize:11,color:diff>=0?"#16a34a":"#dc2626"}}>({diff>=0?"saves":"pays extra"} {fmtCost(Math.abs(diff))})</span></span>
+                            <div key={g.email} style={{fontSize:12,color:"#065f46",marginBottom:2,display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:6}}>
+                              <span>{g.email.split("@")[0]}{players>0&&<span style={{color:"#64748b",fontWeight:400}}> · {players} players</span>}</span>
+                              <span style={{fontWeight:700}}>{fmtCost(sharePerBooker)} <span style={{fontWeight:400,fontSize:11,color:diff>=0?"#16a34a":"#dc2626"}}>({diff>=0?"saves":"pays extra"} {fmtCost(Math.abs(diff))}{perPlayerSave!==null?` · ${fmtCost(perPlayerSave)}/player`:""})</span></span>
                             </div>
                           );
                         })}
-                        <div style={{borderTop:"1px solid #c4b5fd",marginTop:4,paddingTop:4,display:"flex",justifyContent:"space-between",fontWeight:700,fontSize:12,color:"#5b21b6"}}>
-                          <span>Combined total</span><span>{fmtCost(mergedTotal)} <span style={{fontWeight:400,fontSize:11,color:"#16a34a"}}>(was {fmtCost(totalCost)}; saves {fmtCost(totalCost-mergedTotal)})</span></span>
-                        </div>
+                        {(()=>{
+                          const totalPlayers = groupCosts.reduce((s,g)=>s+getPlayers(g.email),0);
+                          const totalSaved = totalCost-mergedTotal;
+                          const perPlayer = totalPlayers>0 ? totalSaved/totalPlayers : null;
+                          return (
+                            <div style={{borderTop:"1px solid #c4b5fd",marginTop:4,paddingTop:4,display:"flex",justifyContent:"space-between",fontWeight:700,fontSize:12,color:"#5b21b6",flexWrap:"wrap",gap:6}}>
+                              <span>Combined total{totalPlayers>0&&<span style={{fontWeight:400,color:"#64748b"}}> · {totalPlayers} players</span>}</span>
+                              <span>{fmtCost(mergedTotal)} <span style={{fontWeight:400,fontSize:11,color:"#16a34a"}}>(was {fmtCost(totalCost)}; saves {fmtCost(totalSaved)}{perPlayer!==null?` · ${fmtCost(perPlayer)}/player`:""})</span></span>
+                            </div>
+                          );
+                        })()}
                       </div>
                       <button
                         onClick={()=>{
