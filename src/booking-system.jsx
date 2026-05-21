@@ -4146,6 +4146,23 @@ export default function App() {
     }
   }
 
+  async function handleSyncAll() {
+    const today = todayKey();
+    const future = bookings.filter(b => b.date >= today);
+    const months = new Set();
+    // Always include current month
+    const now = new Date();
+    months.add(`${now.getFullYear()}-${now.getMonth()}`);
+    for (const b of future) {
+      const [y,m] = b.date.split("-");
+      months.add(`${parseInt(y)}-${parseInt(m)-1}`); // store as 0-based month to match handleSyncMonth contract
+    }
+    const sorted = [...months].map(k=>k.split("-").map(Number)).sort((a,b)=>a[0]-b[0]||a[1]-b[1]);
+    for (const [y,m] of sorted) {
+      await handleSyncMonth(y, m);
+    }
+  }
+
   // All hooks before any conditional return
   useEffect(()=>{if(loggedInEmail)loadBookings();},[loggedInEmail]);
   useEffect(()=>{ loadSettings(); /* eslint-disable-next-line */ },[]);
@@ -4534,6 +4551,12 @@ export default function App() {
                 <button onClick={()=>setShowDeleteCart(true)} style={S.btn({background:"#7f1d1d",color:"#fff",display:"flex",alignItems:"center",gap:4,padding:"7px 10px"})}>
                   🗑{!isMobile&&" Removal"}
                   <span style={{background:"#fff",color:"#7f1d1d",borderRadius:999,fontSize:11,fontWeight:800,padding:"1px 6px",minWidth:18,textAlign:"center"}}>{deleteQueue.length}</span>
+                </button>
+              )}
+              {isAdmin&&(
+                <button onClick={handleSyncAll} disabled={syncingMonth} title="Sync all months with bookings from today forward"
+                  style={S.btn({background:syncingMonth?"#e2e8f0":"#0ea5e9",color:syncingMonth?"#94a3b8":"#fff",fontSize:11,padding:"7px 10px",cursor:syncingMonth?"wait":"pointer",opacity:syncingMonth?0.7:1})}>
+                  {syncingMonth?"⏳":"🔄"}{!isMobile&&(syncingMonth?" Syncing…":" Sync All")}
                 </button>
               )}
               {isAdmin
