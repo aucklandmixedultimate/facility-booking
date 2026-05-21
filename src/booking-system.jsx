@@ -1921,6 +1921,12 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
 
   const allEmails = [...new Set(bookings.filter(b=>!isAdminBooking(b)).map(b=>b.email).filter(Boolean))].sort();
 
+  // Fall back to "all" if the current filter doesn't match any booker
+  useEffect(()=>{
+    if(emailFilter==="all"||!allEmails.length) return;
+    if(!allEmails.find(e=>e.toLowerCase()===emailFilter.toLowerCase())) setEmailFilter("all");
+  },[allEmails,emailFilter]);
+
   const active = bookings.filter(b => {
     if (isAdminBooking(b)) return false;
     if (["cancelled","rejected"].includes(b.status)) return false;
@@ -4165,6 +4171,12 @@ export default function App() {
 
   // All hooks before any conditional return
   useEffect(()=>{if(loggedInEmail)loadBookings();},[loggedInEmail]);
+  // If the booker filter points at an email with no bookings, fall back to "all"
+  useEffect(()=>{
+    if(listBookerFilter==="all"||loading) return;
+    const hasMatch = bookings.some(b=>!isAdminBooking(b)&&b.email?.toLowerCase()===listBookerFilter);
+    if(!hasMatch) setListBookerFilter("all");
+  },[bookings,loading,listBookerFilter]);
   useEffect(()=>{ loadSettings(); /* eslint-disable-next-line */ },[]);
 
   const openNew=useCallback((date,startHour,duration=1)=>{setEditing(null);setPrefill({date,startHour,duration});setShowForm(true);},[]);
