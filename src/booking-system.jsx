@@ -1539,7 +1539,7 @@ function AboutTab() {
   );
 }
 
-function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = false, approxPlayers = {}, onUpdateApproxPlayers, onUpdateFacilityRate, pricingMode = "hourly", onSetPricingMode, perBookingTiers = {}, onUpdatePerBookingTier }) {
+function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = false, approxPlayers = {}, onUpdateApproxPlayers, onUpdateFacilityRate, pricingMode = "hourly", onSetPricingMode }) {
   const now = new Date();
   const thisYear = now.getFullYear();
 
@@ -1552,7 +1552,6 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
   // Invoice modal state
   const [showInvoice, setShowInvoice] = useState(false);
   const [showRatesEdit, setShowRatesEdit] = useState(false);
-  const [showTierEditor, setShowTierEditor] = useState(false);
   // Inline player-count editing: email being edited
   const [editingPlayers, setEditingPlayers] = useState(null);
   const [playersInput,   setPlayersInput]   = useState("");
@@ -1623,10 +1622,16 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
 
   const isPerBooking = pricingMode === "per_booking";
 
+  // In per-booking mode the whole booking takes one rate based on its start time
+  // (before 5:30 pm = day rate, otherwise evening rate). In hourly mode the
+  // booking is split at the 5:30 pm cutoff.
   function getBookingCost(b) {
-    if (isPerBooking) return Number(perBookingTiers[String(b.duration)]) || 0;
-    const { day, evening } = splitHours(b);
     const rates = getFacRates(b.facility_id);
+    if (isPerBooking) {
+      const rate = b.start_hour >= EVENING_CUTOFF ? rates.evening : rates.day;
+      return b.duration * rate;
+    }
+    const { day, evening } = splitHours(b);
     return day * rates.day + evening * rates.evening;
   }
 
@@ -1673,9 +1678,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
     return { fac, dayHrs, eveningHrs, hours: dayHrs + eveningHrs, rates, cost };
   });
   const totalCost = facCosts.reduce((s, c) => s + c.cost, 0);
-  const anyRates  = isPerBooking
-    ? Object.values(perBookingTiers).some(v => v > 0)
-    : facCosts.some(c => c.rates.day > 0 || c.rates.evening > 0);
+  const anyRates  = facCosts.some(c => c.rates.day > 0 || c.rates.evening > 0);
 
   function fmtHrs(h) { return h===0?"0h" : h%1===0?`${h}h`:`${Math.floor(h)}h ${Math.round((h%1)*60)}m`; }
   function fmtCost(n) { return "$" + n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g,","); }
@@ -1909,56 +1912,26 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
         </div>
       </div>
 
-      {/* Pricing mode toggle + per-booking tier editor */}
-      <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-        <div style={{ display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
-          <span style={{ fontSize:12, fontWeight:600, color:"#64748b" }}>Pricing:</span>
-          {[
-            { key:"hourly",      label:"⏱ Per Hour" },
-            { key:"per_booking", label:"🎟 Per Booking" },
-          ].map(opt=>(
-            <button key={opt.key} onClick={()=>{ onSetPricingMode(opt.key); if(opt.key==="per_booking") setShowTierEditor(true); }}
-              style={{ padding:"5px 14px", borderRadius:8, fontWeight:600, fontSize:12, cursor:"pointer", fontFamily:"inherit",
-                border: pricingMode===opt.key ? "1.5px solid #0f172a" : "1.5px solid #e2e8f0",
-                background: pricingMode===opt.key ? "#0f172a" : "#f8fafc",
-                color: pricingMode===opt.key ? "#fff" : "#475569" }}>
-              {opt.label}
-            </button>
-          ))}
-          {isPerBooking && isAdmin && onUpdatePerBookingTier && (
-            <button onClick={()=>setShowTierEditor(v=>!v)}
-              style={S.btn({ border:`1.5px solid ${showTierEditor?"#6366f1":"#e2e8f0"}`, background:showTierEditor?"#eef2ff":"#fff", color:showTierEditor?"#4338ca":"#475569", fontSize:12 })}>
-              ✏ {showTierEditor ? "Hide Prices" : "Set Prices"}
-            </button>
-          )}
-          {isPerBooking && !anyRates && (
-            <span style={{ fontSize:12, color:"#94a3b8" }}>
-              {isAdmin ? "— set per-booking prices below" : "— prices not yet configured"}
-            </span>
-          )}
-        </div>
-
-        {isPerBooking && showTierEditor && isAdmin && onUpdatePerBookingTier && (
-          <div style={{ background:"#f8fafc", border:"1.5px solid #e0e7ff", borderRadius:12, padding:14 }}>
-            <div style={{ fontWeight:700, fontSize:13, color:"#0f172a", marginBottom:6 }}>Price per Booking by Duration</div>
-            <div style={{ fontSize:12, color:"#64748b", marginBottom:10 }}>Set a flat price for each booking length. Bookings with no price set will show as $0.</div>
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))", gap:8 }}>
-              {DURATIONS.map(d => (
-                <div key={d.value} style={{ background:"#fff", border:"1px solid #e2e8f0", borderRadius:8, padding:"8px 12px", display:"flex", alignItems:"center", gap:8 }}>
-                  <span style={{ fontSize:12, fontWeight:600, color:"#0f172a", flex:1 }}>{d.label}</span>
-                  <span style={{ fontSize:12, color:"#64748b" }}>$</span>
-                  <input
-                    type="number" min="0" step="0.5"
-                    value={perBookingTiers[String(d.value)] || ""}
-                    placeholder="0"
-                    onChange={e=>onUpdatePerBookingTier(d.value, e.target.value)}
-                    style={{ width:64, padding:"3px 6px", borderRadius:6, border:"1.5px solid #e2e8f0", fontSize:13, textAlign:"right", fontFamily:"inherit", outline:"none" }}
-                  />
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+      {/* Pricing mode toggle */}
+      <div style={{ display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
+        <span style={{ fontSize:12, fontWeight:600, color:"#64748b" }}>Pricing:</span>
+        {[
+          { key:"hourly",      label:"⏱ Per Hour" },
+          { key:"per_booking", label:"🎟 Per Booking" },
+        ].map(opt=>(
+          <button key={opt.key} onClick={()=>onSetPricingMode(opt.key)}
+            style={{ padding:"5px 14px", borderRadius:8, fontWeight:600, fontSize:12, cursor:"pointer", fontFamily:"inherit",
+              border: pricingMode===opt.key ? "1.5px solid #0f172a" : "1.5px solid #e2e8f0",
+              background: pricingMode===opt.key ? "#0f172a" : "#f8fafc",
+              color: pricingMode===opt.key ? "#fff" : "#475569" }}>
+            {opt.label}
+          </button>
+        ))}
+        <span style={{ fontSize:12, color:"#94a3b8" }}>
+          {isPerBooking
+            ? "Each booking = duration × the applicable hourly rate (day before 5:30 pm, evening after)"
+            : "Hours are split at 5:30 pm between day and evening rates"}
+        </span>
       </div>
 
       {/* KPI cards */}
@@ -1987,7 +1960,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
             <h3 style={{ margin:0, fontSize:15, fontWeight:700, color:"#0f172a", flex:1 }}>
               Cost by Facility — {PRESETS.find(p=>p.key===preset)?.label}{dateFrom&&dateTo?` (${dateFrom} – ${dateTo})`:""}{emailFilter!=="all"?` · ${emailFilter}`:""}
             </h3>
-            {isAdmin && onUpdateFacilityRate && !isPerBooking && (
+            {isAdmin && onUpdateFacilityRate && (
               <button onClick={()=>setShowRatesEdit(v=>!v)}
                 style={S.btn({border:`1.5px solid ${showRatesEdit?"#6366f1":"#e2e8f0"}`,background:showRatesEdit?"#eef2ff":"#fff",color:showRatesEdit?"#4338ca":"#475569",fontSize:12})}>
                 ✏ {showRatesEdit ? "Done" : "Edit Rates"}
@@ -2909,9 +2882,6 @@ export default function App() {
     try{return JSON.parse(localStorage.getItem("fb_approx_players")||"{}");}catch{return {};}
   });
   const [pricingMode, setPricingModeState] = useState(()=>localStorage.getItem("fb_pricing_mode")||"hourly");
-  const [perBookingTiers, setPerBookingTiers] = useState(()=>{
-    try{return JSON.parse(localStorage.getItem("fb_per_booking_tiers")||"{}");}catch{return {};}
-  });
   const [listSearch,      setListSearch]        = useState("");
   const [listStatusFilter,setListStatusFilter]  = useState("all");
   const [listSortCol,     setListSortCol]       = useState("date");
@@ -3106,11 +3076,6 @@ export default function App() {
   function setPricingMode(mode) {
     setPricingModeState(mode);
     try{localStorage.setItem("fb_pricing_mode", mode);}catch{}
-  }
-  function updatePerBookingTier(duration, value) {
-    const next = { ...perBookingTiers, [String(duration)]: parseFloat(value) || 0 };
-    setPerBookingTiers(next);
-    try{localStorage.setItem("fb_per_booking_tiers", JSON.stringify(next));}catch{}
   }
   function updateApproxPlayers(email, value) {
     const v = Math.max(0, parseInt(value) || 0);
@@ -3541,7 +3506,7 @@ export default function App() {
           </div>
         )}
 
-        {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<SummaryTab bookings={bookings} loggedInEmail={loggedInEmail} facilityRates={facilityRates} isAdmin={isAdmin} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} onUpdateFacilityRate={updateFacilityRate} pricingMode={pricingMode} onSetPricingMode={setPricingMode} perBookingTiers={perBookingTiers} onUpdatePerBookingTier={updatePerBookingTier}/>}</div>}
+        {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<SummaryTab bookings={bookings} loggedInEmail={loggedInEmail} facilityRates={facilityRates} isAdmin={isAdmin} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} onUpdateFacilityRate={updateFacilityRate} pricingMode={pricingMode} onSetPricingMode={setPricingMode}/>}</div>}
         {tab==="about"&&<div style={{padding:"8px 0"}}><AboutTab/></div>}
         {tab==="admin"&&isAdmin&&<div style={S.card}>
           {/* Silent mode banner */}
