@@ -1858,7 +1858,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
   const [preset,      setPreset]      = useState("this_year");
   const [customFrom,  setCustomFrom]  = useState("");
   const [customTo,    setCustomTo]    = useState("");
-  const [emailFilter, setEmailFilter] = useState("all");
+  const [emailFilter, setEmailFilter] = useState(loggedInEmail||"all");
 
   // Invoice modal state
   const [showInvoice, setShowInvoice] = useState(false);
@@ -2228,34 +2228,32 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
               style={{ padding:"5px 10px", borderRadius:8, border:"1.5px solid #e2e8f0", fontSize:13, fontFamily:"inherit", background:"#f8fafc", color:"#0f172a", outline:"none" }}/>
           </div>
         )}
-        <div style={{ display:"flex", alignItems:"center", gap:12, flexWrap:"wrap" }}>
-        {/* Email filter */}
-        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-          <span style={{ fontSize:12, fontWeight:600, color:"#64748b" }}>Filter by email:</span>
-          <select
-            value={emailFilter}
-            onChange={e=>setEmailFilter(e.target.value)}
-            style={{ padding:"6px 10px", borderRadius:8, border:"1.5px solid #e2e8f0", fontSize:13, fontFamily:"inherit", color:"#0f172a", background:"#f8fafc", outline:"none" }}
-          >
-            <option value="all">All bookers</option>
-            {allEmails.map(e=><option key={e} value={e}>{e}</option>)}
-          </select>
-        </div>
-
-        {loggedInEmail && emailFilter !== loggedInEmail && (
-          <button onClick={()=>setEmailFilter(loggedInEmail)} style={S.btn({ border:"1.5px solid #e2e8f0", background:"#fff", color:"#475569", padding:"6px 12px", fontSize:12 })}>
-            Show my bookings only
+        {/* Booker filter chips */}
+        <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+          <button onClick={()=>setEmailFilter("all")}
+            style={{padding:"5px 12px",borderRadius:20,border:"1.5px solid",cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",flexShrink:0,borderColor:emailFilter==="all"?"#0f172a":"#e2e8f0",background:emailFilter==="all"?"#0f172a":"#fff",color:emailFilter==="all"?"#fff":"#475569"}}>
+            All
           </button>
-        )}
-
-          <button onClick={exportCSV} style={S.btn({ background:"#0f172a", color:"#fff", display:"flex", alignItems:"center", gap:6, marginLeft:"auto" })}>
-            ⬇ Export All Data (CSV)
-          </button>
-          {anyRates && (
-            <button onClick={()=>setShowInvoice(true)} style={S.btn({ background:"#15803d", color:"#fff", display:"flex", alignItems:"center", gap:6 })}>
-              🧾 Export Invoice
+          {allEmails.map(e=>{
+            const active=emailFilter.toLowerCase()===e.toLowerCase();
+            const c=emailColor(e);
+            return(
+              <button key={e} onClick={()=>setEmailFilter(p=>p.toLowerCase()===e.toLowerCase()?"all":e)}
+                style={{padding:"5px 12px",borderRadius:20,border:`1.5px solid ${active?c:"#e2e8f0"}`,cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",flexShrink:0,background:active?c:"#fff",color:active?"#fff":"#475569"}}>
+                {e.split("@")[0]}
+              </button>
+            );
+          })}
+          <div style={{marginLeft:"auto",display:"flex",gap:6}}>
+            <button onClick={exportCSV} style={S.btn({ background:"#0f172a", color:"#fff", display:"flex", alignItems:"center", gap:6 })}>
+              ⬇ Export All Data (CSV)
             </button>
-          )}
+            {anyRates && (
+              <button onClick={()=>setShowInvoice(true)} style={S.btn({ background:"#15803d", color:"#fff", display:"flex", alignItems:"center", gap:6 })}>
+                🧾 Export Invoice
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
