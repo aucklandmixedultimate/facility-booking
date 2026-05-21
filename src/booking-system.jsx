@@ -3619,6 +3619,14 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[]
                               background:queued?.newStatus==="rejected"?"#be123c":"#f43f5e",color:"#fff",
                               outline:queued?.newStatus==="rejected"?"2px solid #be123c":"none"})}>✗</button>
                         </>}
+                        {b.status==="clash"&&!isDeleteQueued&&(
+                          <button onClick={()=>queueAction(b.id,"approved")} title="Resolve clash — approve booking"
+                            style={S.btn({padding:"4px 8px",fontSize:11,
+                              background:queued?.newStatus==="approved"?"#15803d":"#22c55e",color:"#fff",
+                              outline:queued?.newStatus==="approved"?"2px solid #15803d":"none"})}>
+                            ✓ Resolve
+                          </button>
+                        )}
                         <button onClick={()=>onEdit(b)} style={S.btn({padding:"4px 8px",fontSize:11,border:"1.5px solid #e2e8f0",background:"#fff",color:"#475569"})}>Edit</button>
                         <button onClick={()=>!isDeleteQueued&&onQueueDelete(b.id)}
                           style={S.btn({padding:"4px 8px",fontSize:11,
