@@ -2661,7 +2661,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
                   const ratePerSession = (()=>{
                     if(isPerBooking){
                       const cat = ovStart >= EVENING_CUTOFF ? "evening" : "day";
-                      return getApproxDuration(targetGroup.email) * ovRates[cat];
+                      return ovDur * ovRates[cat];
                     }
                     const end = ovStart + ovDur;
                     const dayHrs = Math.max(0, Math.min(EVENING_CUTOFF, end) - Math.min(EVENING_CUTOFF, ovStart));
@@ -2687,113 +2687,134 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
                   // Stale = the editing values diverge from what's committed in the preview
                   const stale = JSON.stringify(mergeResolution) !== JSON.stringify(committedResolution) || editingTarget !== committedTargetEmail;
                   return (
-                    <div key={key} style={{background:"#f5f3ff",border:"1.5px solid #c4b5fd",borderRadius:10,padding:"12px 16px",marginBottom:12}}>
-                      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8,flexWrap:"wrap"}}>
+                    <div key={key} style={{background:"#f5f3ff",border:"1.5px solid #c4b5fd",borderRadius:10,padding:"14px 16px",marginBottom:12}}>
+
+                      {/* Header */}
+                      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10,flexWrap:"wrap"}}>
                         <div style={{fontWeight:700,fontSize:13,color:"#5b21b6",flex:1}}>🧪 Merge Preview — {m.label}</div>
-                        {stale && (
-                          <span style={{fontSize:11,fontWeight:700,color:"#92400e",background:"#fef3c7",border:"1px solid #fde68a",borderRadius:6,padding:"2px 8px"}}>⚠ Stale — recalculate to apply changes</span>
-                        )}
-                        <button onClick={()=>{setCommittedResolution(mergeResolution);setCommittedTarget(mergeTarget);}}
-                          disabled={!stale}
-                          style={S.btn({background:stale?"#7c3aed":"#e2e8f0",color:stale?"#fff":"#94a3b8",fontSize:11,cursor:stale?"pointer":"not-allowed"})}>
+                        {stale
+                          ? <span style={{fontSize:11,fontWeight:700,color:"#92400e",background:"#fef3c7",border:"1px solid #fde68a",borderRadius:6,padding:"2px 7px"}}>⚠ Pending changes</span>
+                          : <span style={{fontSize:11,fontWeight:600,color:"#16a34a",background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:6,padding:"2px 7px"}}>✓ Up to date</span>
+                        }
+                        <button onClick={()=>{setCommittedResolution({...mergeResolution});setCommittedTarget(mergeTarget);}}
+                          style={S.btn({background:"#7c3aed",color:"#fff",fontSize:11,opacity:stale?1:0.5})}>
                           🔄 Recalculate
                         </button>
                       </div>
-                      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10,flexWrap:"wrap"}}>
-                        <span style={{fontSize:12,fontWeight:600,color:"#64748b"}}>Target (keeps their slot):</span>
-                        {m.groups.map(g=>(
-                          <button key={g.email} onClick={()=>setMergeTarget(g.email)}
-                            style={{background:editingTarget===g.email?"#5b21b6":"#f5f3ff",color:editingTarget===g.email?"#fff":"#5b21b6",border:"1px solid #c4b5fd",borderRadius:6,padding:"2px 8px",fontSize:11,cursor:"pointer",fontWeight:600,fontFamily:"inherit"}}>
-                            {g.email.split("@")[0]}
-                          </button>
-                        ))}
+
+                      {/* Target + merged slot */}
+                      <div style={{background:"#ede9fe",borderRadius:8,padding:"8px 12px",marginBottom:10}}>
+                        <div style={{fontSize:12,fontWeight:600,color:"#64748b",marginBottom:5}}>Target (others conform to their slot):</div>
+                        <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:6}}>
+                          {m.groups.map(g=>(
+                            <button key={g.email} onClick={()=>setMergeTarget(g.email)}
+                              style={{background:editingTarget===g.email?"#5b21b6":"#f5f3ff",color:editingTarget===g.email?"#fff":"#5b21b6",border:"1px solid #c4b5fd",borderRadius:6,padding:"2px 8px",fontSize:11,cursor:"pointer",fontWeight:600,fontFamily:"inherit"}}>
+                              {g.email.split("@")[0]}
+                            </button>
+                          ))}
+                        </div>
+                        <div style={{fontSize:12,color:"#4c1d95"}}>
+                          📌 Merged slot: <strong>{DAYS[committedVal("day",new Date((targetGroup.bkgs[0]?.date||"2000-01-01")+"T12:00").getDay())] } {fmtTime(ovStart)} · {ovDur}h · {FACILITIES.find(f=>f.id===ovFacId)?.name||ovFacId}</strong>
+                          {stale&&<span style={{color:"#92400e",marginLeft:6,fontSize:11}}>(pending recalculate)</span>}
+                        </div>
                       </div>
-                      {fields.some(f=>f.conflicts.length>0) && (
-                        <div style={{marginBottom:10}}>
-                          <div style={{fontWeight:600,fontSize:12,color:"#64748b",marginBottom:4}}>Resolve differences</div>
+
+                      {/* Resolve differences */}
+                      {fields.some(f=>f.conflicts.length>0)&&(
+                        <div style={{marginBottom:10,background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,padding:"8px 12px"}}>
+                          <div style={{fontWeight:600,fontSize:12,color:"#64748b",marginBottom:6}}>Resolve differences</div>
                           {fields.map(f=>{
                             if(f.conflicts.length===0) return null;
                             const label = f.field==="day"?"Day":f.field==="start_hour"?"Start time":f.field==="duration"?"Duration":"Facility";
                             const disp = v => f.field==="day"?DAYS[v]:f.field==="start_hour"?fmtTime(v):f.field==="facility_id"?(FACILITIES.find(x=>x.id===v)?.name||v):`${v}h`;
                             return (
-                              <div key={f.field} style={{display:"flex",alignItems:"center",gap:8,marginBottom:6,fontSize:12,flexWrap:"wrap"}}>
-                                <span style={{fontWeight:600,color:"#4c1d95",width:72}}>{label}</span>
-                                <span style={{color:"#16a34a"}}>✓ {disp(f.targetVal)} ({editingTargetGroup.email.split("@")[0]})</span>
-                                {f.conflicts.map(c=>(
-                                  <span key={c.email} style={{color:"#9f1239"}}>≠ {disp(c.val)} ({c.email.split("@")[0]})</span>
-                                ))}
-                                <span style={{color:"#64748b",marginLeft:4}}>→ override:</span>
-                                {f.field==="day" && (
-                                  <select value={f.resolvedVal} onChange={e=>setRes(f.field,parseInt(e.target.value))} style={si}>
-                                    {DAYS.map((d,i)=><option key={i} value={i}>{d}</option>)}
-                                  </select>
-                                )}
-                                {f.field==="start_hour" && (
-                                  <input type="number" min="0" max="23" step="0.5" value={f.resolvedVal}
-                                    onChange={e=>setRes(f.field,parseFloat(e.target.value)||0)}
-                                    style={{...si,width:64}}/>
-                                )}
-                                {f.field==="duration" && (
-                                  <select value={f.resolvedVal} onChange={e=>setRes(f.field,parseFloat(e.target.value))} style={si}>
-                                    {DURATIONS.map(d=><option key={d.value} value={d.value}>{d.label}</option>)}
-                                  </select>
-                                )}
-                                {f.field==="facility_id" && (
-                                  <select value={f.resolvedVal} onChange={e=>setRes(f.field,e.target.value)} style={si}>
-                                    {FACILITIES.map(f2=><option key={f2.id} value={f2.id}>{f2.name}</option>)}
-                                  </select>
-                                )}
+                              <div key={f.field} style={{display:"grid",gridTemplateColumns:"70px 1fr auto",gap:8,alignItems:"center",marginBottom:5,fontSize:12}}>
+                                <span style={{fontWeight:600,color:"#4c1d95"}}>{label}</span>
+                                <span style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+                                  <span style={{color:"#16a34a"}}>✓ {disp(f.targetVal)} <span style={{color:"#94a3b8",fontSize:11}}>({editingTargetGroup.email.split("@")[0]})</span></span>
+                                  {f.conflicts.map(c=>(
+                                    <span key={c.email} style={{color:"#9f1239"}}>≠ {disp(c.val)} <span style={{color:"#94a3b8",fontSize:11}}>({c.email.split("@")[0]})</span></span>
+                                  ))}
+                                </span>
+                                <span style={{display:"flex",alignItems:"center",gap:5}}>
+                                  <span style={{fontSize:11,color:"#64748b"}}>→</span>
+                                  {f.field==="day"&&<select value={f.resolvedVal} onChange={e=>setRes(f.field,parseInt(e.target.value))} style={si}>{DAYS.map((d,i)=><option key={i} value={i}>{d}</option>)}</select>}
+                                  {f.field==="start_hour"&&<input type="number" min="0" max="23" step="0.5" value={f.resolvedVal} onChange={e=>setRes(f.field,parseFloat(e.target.value)||0)} style={{...si,width:60}}/>}
+                                  {f.field==="duration"&&<select value={f.resolvedVal} onChange={e=>setRes(f.field,parseFloat(e.target.value))} style={si}>{DURATIONS.map(d=><option key={d.value} value={d.value}>{d.label}</option>)}</select>}
+                                  {f.field==="facility_id"&&<select value={f.resolvedVal} onChange={e=>setRes(f.field,e.target.value)} style={si}>{FACILITIES.map(f2=><option key={f2.id} value={f2.id}>{f2.name}</option>)}</select>}
+                                </span>
                               </div>
                             );
                           })}
                         </div>
                       )}
-                      <div style={{marginBottom:10}}>
-                        <div style={{fontWeight:600,fontSize:12,color:"#64748b",marginBottom:4}}>Date ranges</div>
+
+                      {/* Date ranges */}
+                      <div style={{marginBottom:10,background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,padding:"8px 12px"}}>
+                        <div style={{fontWeight:600,fontSize:12,color:"#64748b",marginBottom:5}}>Date ranges &amp; overlap</div>
                         {allGroups.map(g=>(
-                          <div key={g.email} style={{fontSize:12,color:"#4c1d95",marginBottom:2}}>
-                            <span style={{fontWeight:600}}>{g.email.split("@")[0]}</span>: {fmtDate(g.start)} → {fmtDate(g.end)} ({g.count} sessions)
+                          <div key={g.email} style={{fontSize:12,color:"#4c1d95",marginBottom:2,display:"flex",justifyContent:"space-between",flexWrap:"wrap"}}>
+                            <span style={{fontWeight:600}}>{g.email.split("@")[0]}</span>
+                            <span>{fmtDate(g.start)} → {fmtDate(g.end)} · {g.count} sessions</span>
                           </div>
                         ))}
+                        {hasOverlap?(
+                          <div style={{marginTop:5,paddingTop:5,borderTop:"1px dashed #c4b5fd",fontSize:11,color:"#5b21b6",display:"flex",justifyContent:"space-between"}}>
+                            <span style={{fontWeight:600}}>Overlap window</span>
+                            <span>{fmtDate(overlapStart)} → {fmtDate(overlapEnd)} · {sharedCount} shared session{sharedCount!==1?"s":""}</span>
+                          </div>
+                        ):<div style={{fontSize:11,color:"#ef4444",marginTop:4}}>⚠ No overlap — no sessions to merge</div>}
                       </div>
+
+                      {/* Cost breakdown */}
                       <div style={{background:"#ede9fe",borderRadius:8,padding:"8px 12px",marginBottom:10}}>
-                        <div style={{fontWeight:700,fontSize:12,color:"#5b21b6",marginBottom:6}}>Cost breakdown</div>
-                        <div style={{fontSize:12,color:"#4c1d95",marginBottom:4,fontWeight:600}}>Before merge:</div>
-                        {groupCosts.map(g=>(
-                          <div key={g.email} style={{fontSize:12,color:"#4c1d95",marginBottom:2,display:"flex",justifyContent:"space-between"}}>
-                            <span>{g.email.split("@")[0]} ({g.count} sessions)</span>
-                            <span style={{fontWeight:700}}>{fmtCost(g.cost)}</span>
-                          </div>
-                        ))}
-                        <div style={{borderTop:"1px solid #c4b5fd",marginTop:4,paddingTop:4,display:"flex",justifyContent:"space-between",fontWeight:700,fontSize:12,color:"#5b21b6"}}>
-                          <span>Total</span><span>{fmtCost(totalCost)}</span>
-                        </div>
-                        <div style={{marginTop:8,fontSize:12,fontWeight:600,color:"#064e3b"}}>
-                          After merge — shared slot = {targetGroup.email.split("@")[0]}'s schedule, overlap window {hasOverlap?`${fmtDate(overlapStart)} → ${fmtDate(overlapEnd)}`:"(none)"} · {sharedCount} shared session{sharedCount!==1?"s":""} ({fmtCost(sharedTotal)} ÷ {m.numBookers}). Sessions outside the overlap stay individual at original cost.
-                        </div>
+                        <div style={{fontWeight:700,fontSize:12,color:"#5b21b6",marginBottom:8}}>Cost breakdown <span style={{fontWeight:400,fontSize:11,color:"#94a3b8"}}>(Before → After)</span></div>
                         {groupCosts.map(g=>{
-                          const indiv = individualCostByEmail[g.email] || 0;
-                          const finalCost = sharePerBooker + indiv;
-                          const diff = g.cost - finalCost;
+                          const indiv = individualCostByEmail[g.email]||0;
+                          const finalCost = sharePerBooker+indiv;
+                          const diff = g.cost-finalCost;
                           const players = getPlayers(g.email);
-                          const perPlayer = players>0 ? finalCost/players : null;
-                          const perPlayerSave = players>0 ? Math.abs(diff)/players : null;
+                          const insideCount = g.bkgs.filter(b=>hasOverlap&&b.date>=overlapStart&&b.date<=overlapEnd).length;
+                          const outsideCount = g.bkgs.length-insideCount;
                           return (
-                            <div key={g.email} style={{fontSize:12,color:"#065f46",marginBottom:2,display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:6}}>
-                              <span>{g.email.split("@")[0]}{players>0&&<span style={{color:"#64748b",fontWeight:400}}> · {players} players</span>}{indiv>0&&<span style={{color:"#64748b",fontWeight:400}}> · incl. {fmtCost(indiv)} individual</span>}</span>
-                              <span style={{fontWeight:700}}>{fmtCost(finalCost)}{perPlayer!==null&&<span style={{fontWeight:400,fontSize:11,color:"#064e3b"}}> · {fmtCost(perPlayer)}/player</span>} <span style={{fontWeight:400,fontSize:11,color:diff>=0?"#16a34a":"#dc2626"}}>({diff>=0?"saves":"pays extra"} {fmtCost(Math.abs(diff))}{perPlayerSave!==null?` · ${fmtCost(perPlayerSave)}/player`:""})</span></span>
+                            <div key={g.email} style={{marginBottom:8,paddingBottom:8,borderBottom:"1px solid #c4b5fd"}}>
+                              <div style={{fontWeight:700,fontSize:12,color:"#4c1d95",marginBottom:4}}>
+                                {g.email.split("@")[0]}{players>0&&<span style={{fontWeight:400,color:"#64748b"}}> · {players} players</span>}
+                              </div>
+                              <div style={{display:"grid",gridTemplateColumns:"1fr auto auto",gap:"3px 12px",fontSize:11}}>
+                                {insideCount>0&&<><span style={{color:"#475569"}}>Shared ({insideCount} sessions)</span><span style={{textAlign:"right",color:"#9f1239",textDecoration:"line-through"}}>{fmtCost(getCost({bkgs:g.bkgs.filter(b=>b.date>=overlapStart&&b.date<=overlapEnd)}))}</span><span style={{textAlign:"right",color:"#16a34a",fontWeight:600}}>{fmtCost(sharePerBooker)}</span></>}
+                                {outsideCount>0&&<><span style={{color:"#94a3b8"}}>Unaffected ({outsideCount} sessions)</span><span style={{textAlign:"right",color:"#94a3b8"}}>{fmtCost(indiv)}</span><span style={{textAlign:"right",color:"#94a3b8"}}>{fmtCost(indiv)}</span></>}
+                                <span style={{fontWeight:700,color:"#4c1d95",paddingTop:3,borderTop:"1px solid #c4b5fd"}}>Total</span>
+                                <span style={{textAlign:"right",fontWeight:700,color:"#9f1239",paddingTop:3,borderTop:"1px solid #c4b5fd",textDecoration:"line-through"}}>{fmtCost(g.cost)}</span>
+                                <span style={{textAlign:"right",fontWeight:700,color:"#16a34a",paddingTop:3,borderTop:"1px solid #c4b5fd"}}>{fmtCost(finalCost)}</span>
+                                {players>0&&<><span style={{color:"#64748b"}}>Per player</span><span style={{textAlign:"right",color:"#9f1239",textDecoration:"line-through"}}>{fmtCost(g.cost/players)}</span><span style={{textAlign:"right",color:"#16a34a",fontWeight:600}}>{fmtCost(finalCost/players)}</span></>}
+                              </div>
+                              <div style={{fontSize:11,color:diff>=0?"#16a34a":"#dc2626",textAlign:"right",marginTop:2}}>
+                                {diff>=0?"Saves":"Pays extra"} {fmtCost(Math.abs(diff))}{players>0?` · ${fmtCost(Math.abs(diff)/players)}/player`:""}
+                              </div>
                             </div>
                           );
                         })}
                         {(()=>{
                           const totalPlayers = groupCosts.reduce((s,g)=>s+getPlayers(g.email),0);
                           const totalSaved = totalCost-mergedTotal;
-                          const perPlayerCost = totalPlayers>0 ? mergedTotal/totalPlayers : null;
-                          const perPlayerSave = totalPlayers>0 ? totalSaved/totalPlayers : null;
                           return (
-                            <div style={{borderTop:"1px solid #c4b5fd",marginTop:4,paddingTop:4,display:"flex",justifyContent:"space-between",fontWeight:700,fontSize:12,color:"#5b21b6",flexWrap:"wrap",gap:6}}>
-                              <span>Combined total{totalPlayers>0&&<span style={{fontWeight:400,color:"#64748b"}}> · {totalPlayers} players</span>}</span>
-                              <span>{fmtCost(mergedTotal)}{perPlayerCost!==null&&<span style={{fontWeight:400,fontSize:11,color:"#5b21b6"}}> · {fmtCost(perPlayerCost)}/player</span>} <span style={{fontWeight:400,fontSize:11,color:"#16a34a"}}>(was {fmtCost(totalCost)}; saves {fmtCost(totalSaved)}{perPlayerSave!==null?` · ${fmtCost(perPlayerSave)}/player`:""})</span></span>
+                            <div>
+                              <div style={{display:"grid",gridTemplateColumns:"1fr auto auto",gap:"3px 12px",fontSize:12,fontWeight:700,color:"#5b21b6"}}>
+                                <span>Combined{totalPlayers>0&&<span style={{fontWeight:400,color:"#64748b"}}> · {totalPlayers} players</span>}</span>
+                                <span style={{textAlign:"right",textDecoration:"line-through",color:"#9f1239"}}>{fmtCost(totalCost)}</span>
+                                <span style={{textAlign:"right",color:"#16a34a"}}>{fmtCost(mergedTotal)}</span>
+                              </div>
+                              {totalPlayers>0&&(
+                                <div style={{display:"grid",gridTemplateColumns:"1fr auto auto",gap:"3px 12px",fontSize:11,color:"#64748b",marginTop:2}}>
+                                  <span>Per player</span>
+                                  <span style={{textAlign:"right",textDecoration:"line-through",color:"#9f1239"}}>{fmtCost(totalCost/totalPlayers)}</span>
+                                  <span style={{textAlign:"right",color:"#16a34a",fontWeight:600}}>{fmtCost(mergedTotal/totalPlayers)}</span>
+                                </div>
+                              )}
+                              <div style={{fontSize:11,color:"#16a34a",textAlign:"right",marginTop:3,fontWeight:600}}>
+                                Total saves {fmtCost(totalSaved)}{totalPlayers>0?` · ${fmtCost(totalSaved/totalPlayers)}/player`:""}
+                              </div>
                             </div>
                           );
                         })()}
