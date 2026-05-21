@@ -1550,7 +1550,7 @@ function AboutTab() {
   );
 }
 
-function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = false, approxPlayers = {}, onUpdateApproxPlayers, approxDurations = {}, onUpdateApproxDuration, onUpdateFacilityRate, pricingMode = "hourly", onSetPricingMode }) {
+function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = false, approxPlayers = {}, onUpdateApproxPlayers, approxDurations = {}, onUpdateApproxDuration, onUpdateFacilityRate, pricingMode = "hourly", onSetPricingMode, onProposeMerge }) {
   const now = new Date();
   const thisYear = now.getFullYear();
 
@@ -1572,6 +1572,11 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
   const [invDetail,   setInvDetail]   = useState("grouped");   // "grouped" | "individual"
   const [invGst,      setInvGst]      = useState("inclusive"); // "inclusive" | "exclusive" | "note"
   const [invScope,    setInvScope]    = useState("single");    // "single" | "combined" (admin only)
+  // Schedule Summary state
+  const [showSchedule,        setShowSchedule]        = useState(false);
+  const [scheduleFacSensitive,setScheduleFacSensitive]= useState(false);
+  const [sandboxMode,         setSandboxMode]         = useState(false);
+  const [sandboxSelected,     setSandboxSelected]     = useState(new Set());
 
   function presetRange(key) {
     const y = thisYear;
@@ -2075,7 +2080,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
       <div>
         <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:12, gap:8, flexWrap:"wrap" }}>
           <h3 style={{ margin:0, fontSize:15, fontWeight:700, color:"#0f172a" }}>
-            {isPerBooking ? "Bookings" : "Hours"} by Booker — {PRESETS.find(p=>p.key===preset)?.label}{dateFrom&&dateTo?` (${dateFrom} – ${dateTo})`:""}{emailFilter!=="all"?` · ${emailFilter}`:""}
+            Hire Usage &amp; Cost by Booker — {PRESETS.find(p=>p.key===preset)?.label}{dateFrom&&dateTo?` (${dateFrom} – ${dateTo})`:""}{emailFilter!=="all"?` · ${emailFilter}`:""}
           </h3>
           {rows.length>0&&<button onClick={()=>{
             const esc = v => `"${String(v||"").replace(/"/g,'""')}"`;
@@ -2264,6 +2269,184 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
         )}
       </div>
 
+      {/* Schedule Summary */}
+      <div style={{marginTop:24}}>
+        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10,flexWrap:"wrap"}}>
+          <h3 style={{margin:0,fontSize:15,fontWeight:700,color:"#0f172a",flex:1}}>📅 Schedule Summary</h3>
+          <button onClick={()=>setShowSchedule(v=>!v)} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#475569",fontSize:12})}>
+            {showSchedule?"Hide":"Show"}
+          </button>
+          {showSchedule&&(
+            <label style={{display:"flex",alignItems:"center",gap:6,fontSize:12,cursor:"pointer",color:"#475569"}}>
+              <input type="checkbox" checked={scheduleFacSensitive} onChange={e=>setScheduleFacSensitive(e.target.checked)}/>
+              Facility-sensitive
+            </label>
+          )}
+          {showSchedule&&isAdmin&&(
+            <button onClick={()=>setSandboxMode(v=>!v)} style={S.btn({
+              background:sandboxMode?"#7c3aed":"#f8fafc",
+              color:sandboxMode?"#fff":"#475569",
+              border:`1.5px solid ${sandboxMode?"#7c3aed":"#e2e8f0"}`,
+              fontSize:12
+            })}>
+              🧪 {sandboxMode?"Exit Sandbox":"Sandbox Mode"}
+            </button>
+          )}
+        </div>
+        {showSchedule&&(()=>{
+          function dayName(d){return["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][new Date(d+"T12:00").getDay()];}
+          // Build pattern groups per email
+          const patternMap = {}; // { email -> { patternKey -> [booking,...] } }
+          active.forEach(b=>{
+            const email = b.email.toLowerCase();
+            const dn = dayName(b.date);
+            const pk = scheduleFacSensitive
+              ? `${b.facility_id}_${dn}_${b.start_hour}`
+              : `${dn}_${b.start_hour}`;
+            if(!patternMap[email]) patternMap[email]={};
+            if(!patternMap[email][pk]) patternMap[email][pk]=[];
+            patternMap[email][pk].push(b);
+          });
+
+          // Build rows: one per email with recurring + one-off lists
+          const scheduleRows = Object.entries(patternMap).map(([email,pats])=>{
+            const recurring = Object.entries(pats).filter(([,bkgs])=>bkgs.length>=2);
+            const oneOffCount = Object.values(pats).filter(bkgs=>bkgs.length===1).reduce((s,bkgs)=>s+bkgs.length,0);
+            const totalBkgs = Object.values(pats).reduce((s,bkgs)=>s+bkgs.length,0);
+            const nameDisplay = (pats[Object.keys(pats)[0]]||[])[0]?.name || email;
+            return {email,nameDisplay,recurring,oneOffCount,totalBkgs};
+          }).sort((a,b)=>b.totalBkgs-a.totalBkgs);
+
+          // Sandbox: compute merged cost for selected patterns
+          let mergePreview = null;
+          if(sandboxMode && sandboxSelected.size>0){
+            // Group selected by pattern key (day+time, ignoring email)
+            const mergeGroups = {}; // patternKey -> [{email,bkgs}]
+            sandboxSelected.forEach(key=>{
+              const [email,...rest] = key.split("::");
+              const pk = rest.join("::");
+              if(!mergeGroups[pk]) mergeGroups[pk]=[];
+              const bkgs = patternMap[email]?.[pk]||[];
+              if(bkgs.length) mergeGroups[pk].push({email,bkgs});
+            });
+            const mergeLines = Object.entries(mergeGroups).map(([pk,groups])=>{
+              const allBkgs = groups.flatMap(g=>g.bkgs);
+              const numBookers = groups.length;
+              // Compute average original cost per booking
+              const totalRate = allBkgs.reduce((s,b)=>{
+                const cat = categoryOf(b);
+                const r = getFacRates(b.facility_id);
+                const dur = getApproxDuration(b.email);
+                return s + (isPerBooking ? dur*r[cat] : (splitHours(b).day*r.day + splitHours(b).evening*r.evening));
+              },0);
+              const avgRate = totalRate / allBkgs.length;
+              const mergedRate = avgRate / numBookers;
+              const mergedTotalCost = mergedRate * allBkgs.length;
+              const [dn,startH] = pk.includes("_") ? pk.split("_").slice(-2) : [pk,""];
+              const label = scheduleFacSensitive ? pk : `${dn} ${fmtTime(parseFloat(startH))}`;
+              return {label,numBookers,mergedTotalCost,bookers:groups.map(g=>g.email)};
+            });
+            mergePreview = mergeLines;
+          }
+
+          return (
+            <div>
+              {sandboxMode && mergePreview && mergePreview.length>0 && (
+                <div style={{background:"#f5f3ff",border:"1.5px solid #c4b5fd",borderRadius:10,padding:"12px 16px",marginBottom:12}}>
+                  <div style={{fontWeight:700,fontSize:13,color:"#5b21b6",marginBottom:8}}>🧪 Merge Preview</div>
+                  {mergePreview.map((m,i)=>(
+                    <div key={i} style={{fontSize:12,color:"#4c1d95",marginBottom:4}}>
+                      <strong>{m.label}</strong> — {m.numBookers} booker{m.numBookers!==1?"s":""} merged — shared cost: <strong>{fmtCost(m.mergedTotalCost)}</strong>
+                      <span style={{color:"#7c3aed",marginLeft:8}}>({m.bookers.join(", ")})</span>
+                    </div>
+                  ))}
+                  <button
+                    onClick={()=>{
+                      if(onProposeMerge) onProposeMerge(mergePreview);
+                      else alert("Merge proposal added — commit your cart to notify bookers.");
+                    }}
+                    style={S.btn({background:"#7c3aed",color:"#fff",fontSize:12,marginTop:8})}>
+                    Propose Merge
+                  </button>
+                </div>
+              )}
+              <div style={{overflowX:"auto"}}>
+                <table style={{width:"100%",borderCollapse:"collapse",minWidth:480}}>
+                  <thead>
+                    <tr style={{background:"#f8fafc"}}>
+                      <th style={thS}>Booker</th>
+                      <th style={thS}>Recurring Patterns</th>
+                      <th style={{...thS,textAlign:"right"}}>One-offs</th>
+                      <th style={{...thS,textAlign:"right"}}>Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {scheduleRows.map(row=>{
+                      const ec = emailColor(row.email);
+                      return (
+                        <tr key={row.email} style={{borderBottom:"1px solid #f1f5f9"}}>
+                          <td style={tdS}>
+                            <div style={{fontWeight:700,color:"#0f172a",fontSize:13}}>{row.nameDisplay}</div>
+                            <div style={{fontSize:11,color:"#94a3b8"}}>{row.email}</div>
+                          </td>
+                          <td style={tdS}>
+                            <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                              {row.recurring.length===0&&<span style={{fontSize:12,color:"#94a3b8"}}>—</span>}
+                              {row.recurring.map(([pk,bkgs])=>{
+                                const selKey = `${row.email}::${pk}`;
+                                const isSel = sandboxSelected.has(selKey);
+                                // derive label from pk
+                                const parts = pk.split("_");
+                                const startH = parseFloat(parts[parts.length-1]);
+                                const dn = parts[parts.length-2]||"";
+                                const label = `${dn} ${fmtTime(startH)} ×${bkgs.length}`;
+                                return (
+                                  <div key={pk} style={{display:"flex",alignItems:"center",gap:4}}>
+                                    {sandboxMode&&(
+                                      <input type="checkbox" checked={isSel}
+                                        onChange={e=>{
+                                          setSandboxSelected(prev=>{
+                                            const next=new Set(prev);
+                                            if(e.target.checked) next.add(selKey); else next.delete(selKey);
+                                            return next;
+                                          });
+                                        }}
+                                        style={{cursor:"pointer"}}/>
+                                    )}
+                                    <span style={{
+                                      display:"inline-block",
+                                      background:isSel?"#7c3aed":ec+"22",
+                                      color:isSel?"#fff":ec,
+                                      border:`1px solid ${isSel?"#7c3aed":ec+"55"}`,
+                                      borderRadius:6,
+                                      padding:"2px 8px",
+                                      fontSize:11,
+                                      fontWeight:600,
+                                      whiteSpace:"nowrap"
+                                    }}>
+                                      {label}
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </td>
+                          <td style={{...tdS,textAlign:"right",color:"#94a3b8"}}>{row.oneOffCount||"—"}</td>
+                          <td style={{...tdS,textAlign:"right",fontWeight:700}}>{row.totalBkgs}</td>
+                        </tr>
+                      );
+                    })}
+                    {scheduleRows.length===0&&(
+                      <tr><td colSpan={4} style={{...tdS,textAlign:"center",color:"#94a3b8"}}>No bookings in current filter.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          );
+        })()}
+      </div>
+
       {/* Invoice modal */}
       {showInvoice && (()=>{
         const scopes = getInvoiceScopes();
@@ -2353,7 +2536,7 @@ function AdminLogin({onLogin}) {
 }
 
 // ─── Admin Panel with action queue, bulk approve, facility rates ──────────────
-function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[],deleteIds=new Set(),facilityRates={},onUpdateFacilityRate,onClearOldUnapproved,silentMode=false,approxPlayers={},onUpdateApproxPlayers,approxDurations={},onUpdateApproxDuration}) {
+function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[],deleteIds=new Set(),facilityRates={},onUpdateFacilityRate,onClearOldUnapproved,silentMode=false,approxPlayers={},onUpdateApproxPlayers,approxDurations={},onUpdateApproxDuration,onSyncDB}) {
   const [sf,setSf]=useState("all"), [ff,setFf]=useState("all"), [q,setQ]=useState("");
   const [sortCol,setSortCol]=useState("date"), [sortDir,setSortDir]=useState("desc");
   const [selected,setSelected]=useState(new Set());
@@ -2375,6 +2558,8 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[]
   // Facility rates section
   const [showRates,setShowRates]=useState(false);
   const [showPlayers,setShowPlayers]=useState(false);
+  const [defaultFieldDay,setDefaultFieldDay]=useState(0);
+  const [defaultFieldEvening,setDefaultFieldEvening]=useState(0);
 
   const si={padding:"7px 12px",borderRadius:8,border:"1.5px solid #e2e8f0",fontSize:13,fontFamily:"inherit",color:"#0f172a",background:"#f8fafc",outline:"none"};
   const today=todayKey();
@@ -2521,44 +2706,78 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[]
         <button onClick={()=>setShowPlayers(v=>!v)} style={S.btn({border:"1.5px solid #e2e8f0",background:showPlayers?"#f8fafc":"#fff",color:"#475569",fontSize:12})}>
           👥 Player Counts
         </button>
+        {onSyncDB&&<button onClick={onSyncDB} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#475569",fontSize:12})}>
+          🔄 Sync DB
+        </button>}
       </div>
 
       {/* Facility rates panel */}
-      {showRates&&(
-        <div style={{background:"#f8fafc",border:"1.5px solid #e2e8f0",borderRadius:12,padding:16}}>
-          <div style={{fontWeight:700,fontSize:14,color:"#0f172a",marginBottom:4}}>Hourly Rates (used in Summary cost calculations)</div>
-          <div style={{fontSize:12,color:"#64748b",marginBottom:12}}>Day = before 5:30pm · Evening = 5:30pm onwards</div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))",gap:10}}>
-            {FACILITIES.map(fac=>{
-              const rates = typeof facilityRates[fac.id]==="object" ? {day:facilityRates[fac.id].day??0,evening:facilityRates[fac.id].evening??50} : {day:facilityRates[fac.id]||0,evening:50};
-              return (
-                <div key={fac.id} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,padding:"10px 12px"}}>
-                  <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8}}>
-                    <span style={{width:10,height:10,borderRadius:"50%",background:fac.color,flexShrink:0,display:"inline-block"}}/>
-                    <span style={{fontSize:12,fontWeight:700,color:"#0f172a"}}>{fac.name}</span>
+      {showRates&&(()=>{
+        const fieldFacs = FACILITIES.filter(f=>f.name.includes("Field"));
+        const step = 2.5;
+        return (
+          <div style={{background:"#f8fafc",border:"1.5px solid #e2e8f0",borderRadius:12,padding:14}}>
+            <div style={{fontWeight:700,fontSize:14,color:"#0f172a",marginBottom:4}}>Hourly Rates</div>
+            <div style={{fontSize:12,color:"#64748b",marginBottom:10}}>Day = before 5:30pm · Evening = 5:30pm onwards · Step: $2.50</div>
+            {fieldFacs.length>0&&(
+              <div style={{background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:8,padding:"8px 12px",marginBottom:10,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                <span style={{fontSize:12,fontWeight:700,color:"#0369a1",minWidth:80}}>🏟 Fields default</span>
+                <span style={{fontSize:11,color:"#64748b"}}>Day $</span>
+                <input type="number" min="0" step={step} value={defaultFieldDay||""} placeholder="0"
+                  onChange={e=>setDefaultFieldDay(parseFloat(e.target.value)||0)}
+                  style={{...si,width:64,padding:"3px 6px",textAlign:"right",fontSize:13}}/>
+                <span style={{fontSize:11,color:"#64748b"}}>/hr</span>
+                <span style={{fontSize:11,color:"#7c3aed"}}>Evening $</span>
+                <input type="number" min="0" step={step} value={defaultFieldEvening||""} placeholder="0"
+                  onChange={e=>setDefaultFieldEvening(parseFloat(e.target.value)||0)}
+                  style={{...si,width:64,padding:"3px 6px",textAlign:"right",fontSize:13}}/>
+                <span style={{fontSize:11,color:"#64748b"}}>/hr</span>
+                <button onClick={()=>fieldFacs.forEach(f=>{onUpdateFacilityRate(f.id,"day",defaultFieldDay);onUpdateFacilityRate(f.id,"evening",defaultFieldEvening);})}
+                  style={S.btn({background:"#0369a1",color:"#fff",fontSize:11,padding:"4px 10px"})}>Apply to all fields</button>
+              </div>
+            )}
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(240px,1fr))",gap:8}}>
+              {FACILITIES.map(fac=>{
+                const r = typeof facilityRates[fac.id]==="object" ? facilityRates[fac.id] : {day:facilityRates[fac.id]||0,evening:50};
+                const day=r.day??0, evening=r.evening??50;
+                const isField = fac.name.includes("Field");
+                const adj = (type, cur, delta) => onUpdateFacilityRate(fac.id, type, Math.max(0, (parseFloat(cur)||0)+delta));
+                return (
+                  <div key={fac.id} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,padding:"8px 10px"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6,justifyContent:"space-between"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:5}}>
+                        <span style={{width:8,height:8,borderRadius:"50%",background:fac.color,flexShrink:0,display:"inline-block"}}/>
+                        <span style={{fontSize:11,fontWeight:700,color:"#0f172a"}}>{fac.name}</span>
+                      </div>
+                      {isField&&(defaultFieldDay>0||defaultFieldEvening>0)&&(
+                        <button onClick={()=>{onUpdateFacilityRate(fac.id,"day",defaultFieldDay);onUpdateFacilityRate(fac.id,"evening",defaultFieldEvening);}}
+                          title="Reset to default field rate"
+                          style={{background:"none",border:"1px solid #bae6fd",borderRadius:5,cursor:"pointer",fontSize:10,color:"#0369a1",padding:"1px 5px"}}>↺ reset</button>
+                      )}
+                    </div>
+                    <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+                      <span style={{fontSize:10,color:"#64748b",width:24}}>Day</span>
+                      <button onClick={()=>adj("day",day,-step)} style={{background:"#f1f5f9",border:"none",borderRadius:4,width:20,height:20,cursor:"pointer",fontSize:13,lineHeight:1}}>−</button>
+                      <input type="number" min="0" step={step} value={day||""} placeholder="0"
+                        onChange={e=>onUpdateFacilityRate(fac.id,"day",e.target.value)}
+                        style={{...si,width:58,padding:"2px 5px",textAlign:"right",fontSize:12}}/>
+                      <button onClick={()=>adj("day",day,+step)} style={{background:"#f1f5f9",border:"none",borderRadius:4,width:20,height:20,cursor:"pointer",fontSize:13,lineHeight:1}}>+</button>
+                      <span style={{fontSize:10,color:"#64748b"}}>/hr</span>
+                      <span style={{fontSize:10,color:"#7c3aed",width:28,marginLeft:4}}>Eve</span>
+                      <button onClick={()=>adj("evening",evening,-step)} style={{background:"#f1f5f9",border:"none",borderRadius:4,width:20,height:20,cursor:"pointer",fontSize:13,lineHeight:1}}>−</button>
+                      <input type="number" min="0" step={step} value={evening||""} placeholder="0"
+                        onChange={e=>onUpdateFacilityRate(fac.id,"evening",e.target.value)}
+                        style={{...si,width:58,padding:"2px 5px",textAlign:"right",fontSize:12}}/>
+                      <button onClick={()=>adj("evening",evening,+step)} style={{background:"#f1f5f9",border:"none",borderRadius:4,width:20,height:20,cursor:"pointer",fontSize:13,lineHeight:1}}>+</button>
+                      <span style={{fontSize:10,color:"#64748b"}}>/hr</span>
+                    </div>
                   </div>
-                  <div style={{display:"flex",gap:8,alignItems:"center"}}>
-                    <span style={{fontSize:11,color:"#64748b",width:52}}>Day $</span>
-                    <input type="number" min="0" step="0.5"
-                      value={rates.day||""}
-                      onChange={e=>onUpdateFacilityRate(fac.id,"day",e.target.value)}
-                      placeholder="0"
-                      style={{...si,width:72,padding:"4px 8px",textAlign:"right"}}/>
-                    <span style={{fontSize:11,color:"#64748b"}}>/hr</span>
-                    <span style={{fontSize:11,color:"#7c3aed",width:64,marginLeft:8}}>Evening $</span>
-                    <input type="number" min="0" step="0.5"
-                      value={rates.evening||""}
-                      onChange={e=>onUpdateFacilityRate(fac.id,"evening",e.target.value)}
-                      placeholder="0"
-                      style={{...si,width:72,padding:"4px 8px",textAlign:"right"}}/>
-                    <span style={{fontSize:11,color:"#64748b"}}>/hr</span>
-                  </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Approx player counts + duration panel */}
       {showPlayers&&(()=>{
@@ -3242,6 +3461,19 @@ export default function App() {
     persistSetting("approx_durations", next);
   }
 
+  async function handleSyncDB() {
+    await loadBookings();
+    await loadSettings();
+    await persistSetting("facility_rates", facilityRates);
+    await persistSetting("approx_players", approxPlayers);
+    await persistSetting("approx_durations", approxDurations);
+    showToast("Synced with database.");
+  }
+
+  function handleProposeMerge(mergeLines) {
+    showToast("Merge proposal added — commit your cart to notify bookers.");
+  }
+
   // Bulk approve/reject — groups by email and sends one summary per person
   async function handleBulkStatusChange(ids, newStatus, adminNote, skipEmail=false) {
     const affected=bookings.filter(b=>ids.includes(b.id));
@@ -3664,7 +3896,7 @@ export default function App() {
           </div>
         )}
 
-        {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<SummaryTab bookings={bookings} loggedInEmail={loggedInEmail} facilityRates={facilityRates} isAdmin={isAdmin} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onUpdateFacilityRate={updateFacilityRate} pricingMode={pricingMode} onSetPricingMode={setPricingMode}/>}</div>}
+        {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<SummaryTab bookings={bookings} loggedInEmail={loggedInEmail} facilityRates={facilityRates} isAdmin={isAdmin} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onUpdateFacilityRate={updateFacilityRate} pricingMode={pricingMode} onSetPricingMode={setPricingMode} onProposeMerge={handleProposeMerge}/>}</div>}
         {tab==="about"&&<div style={{padding:"8px 0"}}><AboutTab/></div>}
         {tab==="admin"&&isAdmin&&<div style={S.card}>
           {/* Silent mode banner */}
@@ -3680,12 +3912,12 @@ export default function App() {
             </label>
             {silentMode&&<span style={{fontSize:12,color:"#92400e"}}>All status changes, approvals, deletions and edits will be processed without notifying bookers.</span>}
           </div>
-          {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onQueueDelete={queueForRemovalSilent} clashes={allClashes} deleteIds={new Set(deleteQueue.map(b=>b.id))} facilityRates={facilityRates} onUpdateFacilityRate={updateFacilityRate} onClearOldUnapproved={handleClearOldUnapproved} silentMode={silentMode} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration}/>}
+          {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onQueueDelete={queueForRemovalSilent} clashes={allClashes} deleteIds={new Set(deleteQueue.map(b=>b.id))} facilityRates={facilityRates} onUpdateFacilityRate={updateFacilityRate} onClearOldUnapproved={handleClearOldUnapproved} silentMode={silentMode} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onSyncDB={handleSyncDB}/>}
         </div>}
       </div>
 
       {/* Modals */}
-      {showLogin&&<Modal title="Admin Access" onClose={()=>setShowLogin(false)}><AdminLogin onLogin={()=>{setIsAdmin(true);setShowLogin(false);setTab("admin");}}/></Modal>}
+      {showLogin&&<Modal title="Admin Access" onClose={()=>setShowLogin(false)}><AdminLogin onLogin={()=>{setIsAdmin(true);setShowLogin(false);setTab(prev=>prev==="about"?"admin":prev);}}/></Modal>}
 
       {showForm&&(
         <Modal title={editing?"Edit Booking":"New Booking Request"} onClose={()=>{setShowForm(false);setEditing(null);}} width={620}>
