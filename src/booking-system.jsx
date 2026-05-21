@@ -3107,6 +3107,8 @@ function AdminLogin({onLogin}) {
 // ─── Admin Panel with action queue, bulk approve, facility rates ──────────────
 function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[],deleteIds=new Set(),facilityRates={},onUpdateFacilityRate,onClearOldUnapproved,silentMode=false,approxPlayers={},onUpdateApproxPlayers,approxDurations={},onUpdateApproxDuration,onSyncDB,onShowSchedule,onBulkApply}) {
   const [sf,setSf]=useState("all"), [ff,setFf]=useState("all"), [q,setQ]=useState("");
+  const [adminDateFrom,setAdminDateFrom]=useState(""), [adminDateTo,setAdminDateTo]=useState("");
+  const [adminColPurpose,setAdminColPurpose]=useState("");
   const [sortCol,setSortCol]=useState("date"), [sortDir,setSortDir]=useState("desc");
   const [selected,setSelected]=useState(new Set());
   const [bulkNote,setBulkNote]=useState("");
@@ -3148,6 +3150,9 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[]
     if(sf!=="all"&&b.status!==sf) return false;
     if(ff!=="all"&&b.facility_id!==ff) return false;
     if(!matchesQ(b)) return false;
+    if(adminDateFrom&&b.date<adminDateFrom) return false;
+    if(adminDateTo&&b.date>adminDateTo) return false;
+    if(adminColPurpose&&!(b.purpose||"").toLowerCase().includes(adminColPurpose.toLowerCase())) return false;
     return true;
   }).sort((a,b)=>{
     const dir=sortDir==="asc"?1:-1;
@@ -3257,15 +3262,6 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[]
     <div style={{display:"flex",flexDirection:"column",gap:16}}>
       {/* Top action bar */}
       <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
-        <input style={{...si,flex:1,minWidth:160}} placeholder="Search name, email, purpose…" value={q} onChange={e=>setQ(e.target.value)}/>
-        <select style={si} value={sf} onChange={e=>setSf(e.target.value)}>
-          <option value="all">All statuses</option>
-          {Object.entries(STATUS_META).filter(([k])=>k!=="pending").map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
-        </select>
-        <select style={si} value={ff} onChange={e=>setFf(e.target.value)}>
-          <option value="all">All facilities</option>
-          {FACILITIES.map(f=><option key={f.id} value={f.id}>{f.name}</option>)}
-        </select>
         {oldUnapproved.length>0&&(
           <button onClick={()=>setShowClearModal(true)} style={S.btn({background:"#7c3aed",color:"#fff",fontWeight:700,fontSize:12})}>
             🧹 Clear old unapproved ({oldUnapproved.length})
@@ -3556,6 +3552,48 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[]
                 ))}
                 <th style={{padding:"8px 10px",textAlign:"left",fontWeight:700,color:"#475569"}}>Time · Purpose</th>
                 <th style={{padding:"8px 10px",textAlign:"right",fontWeight:700,color:"#475569"}}>Actions</th>
+              </tr>
+              <tr style={{background:"#f1f5f9"}}>
+                <th style={{padding:"3px 4px"}}/>
+                <th style={{padding:"3px 4px"}}>
+                  <div style={{display:"flex",gap:2,alignItems:"center"}}>
+                    <input type="date" value={adminDateFrom} onChange={e=>setAdminDateFrom(e.target.value)} title="From date"
+                      style={{padding:"2px 4px",fontSize:10,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",width:"100%",minWidth:90}}/>
+                    <span style={{fontSize:9,color:"#94a3b8",flexShrink:0}}>–</span>
+                    <input type="date" value={adminDateTo} onChange={e=>setAdminDateTo(e.target.value)} title="To date"
+                      style={{padding:"2px 4px",fontSize:10,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",width:"100%",minWidth:90}}/>
+                  </div>
+                </th>
+                <th style={{padding:"3px 4px"}}>
+                  <input placeholder="Search booker…" value={q} onChange={e=>setQ(e.target.value)}
+                    style={{padding:"3px 6px",fontSize:11,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",width:"100%"}}/>
+                </th>
+                <th style={{padding:"3px 4px"}}>
+                  <select value={ff} onChange={e=>setFf(e.target.value)}
+                    style={{padding:"3px 4px",fontSize:11,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",width:"100%"}}>
+                    <option value="all">All facilities</option>
+                    {FACILITIES.map(f=><option key={f.id} value={f.id}>{f.name}</option>)}
+                  </select>
+                </th>
+                <th style={{padding:"3px 4px"}}>
+                  <select value={sf} onChange={e=>setSf(e.target.value)}
+                    style={{padding:"3px 4px",fontSize:11,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",width:"100%"}}>
+                    <option value="all">All statuses</option>
+                    {Object.entries(STATUS_META).filter(([k])=>k!=="pending").map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
+                  </select>
+                </th>
+                <th style={{padding:"3px 4px"}}>
+                  <input placeholder="Search purpose…" value={adminColPurpose} onChange={e=>setAdminColPurpose(e.target.value)}
+                    style={{padding:"3px 6px",fontSize:11,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",width:"100%"}}/>
+                </th>
+                <th style={{padding:"3px 4px"}}>
+                  {(q||sf!=="all"||ff!=="all"||adminDateFrom||adminDateTo||adminColPurpose)&&(
+                    <button onClick={()=>{setQ("");setSf("all");setFf("all");setAdminDateFrom("");setAdminDateTo("");setAdminColPurpose("");}}
+                      style={{padding:"2px 7px",fontSize:10,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",color:"#64748b",cursor:"pointer",whiteSpace:"nowrap"}}>
+                      ✕ Clear
+                    </button>
+                  )}
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -3910,6 +3948,8 @@ export default function App() {
   const [listDateFrom,    setListDateFrom]      = useState("");
   const [listDateTo,      setListDateTo]        = useState("");
   const [listStatusFilter,setListStatusFilter]  = useState("all");
+  const [listColPurpose,  setListColPurpose]    = useState("");
+  const [listColFacility, setListColFacility]   = useState("all");
   const [listSortCol,     setListSortCol]       = useState("date");
   const [listSortDir,     setListSortDir]       = useState("asc");
 
@@ -4006,6 +4046,17 @@ export default function App() {
         if (match) {
           const targetStatus = match.exact ? "cpsa_confirmed" : "cpsa_review_needed";
           matchedUserIds.add(match.booking.id);
+
+          // Remove any pre-existing admin bookings at this slot (from prior syncs)
+          for (const facility_id of facilityIds) {
+            const slotBk = { date, facility_id, start_hour, duration, id: "_sentinel_" };
+            const oldAdmin = currentBookings.find(b => isAdminBooking(b) && timeOverlaps(b, slotBk));
+            if (oldAdmin) {
+              if (configured) await sb.remove("bookings", oldAdmin.id);
+              else setBookings(prev => prev.filter(b => b.id !== oldAdmin.id));
+            }
+          }
+
           if (match.booking.status !== targetStatus) {
             if (configured) {
               await sb.update("bookings", match.booking.id, { status: targetStatus, updated_at: new Date().toISOString() });
@@ -4055,6 +4106,9 @@ export default function App() {
       const userBks  = freshBookings.filter(b => !isAdminBooking(b) && b.date >= today);
       let clashUpdates = 0;
       for (const ub of userBks) {
+        // Skip bookings already matched/confirmed via CPSA — their admin slot was removed above
+        if (matchedUserIds.has(ub.id)) continue;
+        if (ub.status === "cpsa_confirmed" || ub.status === "cpsa_review_needed") continue;
         const hasClash = adminBks.some(ab => ab.facility_id === ub.facility_id && timeOverlaps(ab, ub));
         if (hasClash && ub.status !== "clash") {
           if (configured) {
@@ -4519,12 +4573,14 @@ export default function App() {
               let visible = [...bookings]
                 .filter(b => !isAdminBooking(b))
                 .filter(b => selFac==="all" || b.facility_id===selFac)
+                .filter(b => listColFacility==="all" || b.facility_id===listColFacility)
                 .filter(b => listBookerFilter==="all" || b.email?.toLowerCase()===listBookerFilter)
                 .filter(b => listStatusFilter==="all" || b.status===listStatusFilter)
                 .filter(b => !listShowClashes || allClashIds.has(b.id))
                 .filter(b => !listDateFrom || b.date>=listDateFrom)
                 .filter(b => !listDateTo   || b.date<=listDateTo)
-                .filter(b => !lnq || `${b.name} ${b.email} ${b.purpose}`.toLowerCase().includes(lnq))
+                .filter(b => !lnq || `${b.name} ${b.email}`.toLowerCase().includes(lnq))
+                .filter(b => !listColPurpose || (b.purpose||"").toLowerCase().includes(listColPurpose.toLowerCase()))
                 .sort((a,b)=>{
                   if(listSortCol==="date") return listDir*(a.date.localeCompare(b.date)||a.start_hour-b.start_hour);
                   if(listSortCol==="booker") return listDir*(a.name||"").localeCompare(b.name||"");
@@ -4538,25 +4594,12 @@ export default function App() {
                 else { setListSortCol(col); setListSortDir("asc"); }
               }
               const lArrow = col => listSortCol===col?(listSortDir==="asc"?" ↑":" ↓"):"";
-              const si2={padding:"6px 10px",borderRadius:7,border:"1.5px solid #e2e8f0",fontSize:12,fontFamily:"inherit",color:"#0f172a",background:"#f8fafc",outline:"none"};
+              const anyListFilter = listNameSearch||listDateFrom||listDateTo||listStatusFilter!=="all"||listColPurpose||listColFacility!=="all";
 
               return (
                 <>
-                  {/* Filter bar */}
+                  {/* Top action bar */}
                   <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:8,alignItems:"center"}}>
-                    <input style={{...si2,flex:"1 1 140px"}} placeholder="Search name, email, purpose…" value={listNameSearch} onChange={e=>setListNameSearch(e.target.value)}/>
-                    <div style={{display:"flex",alignItems:"center",gap:4}}>
-                      <span style={{fontSize:11,color:"#94a3b8",whiteSpace:"nowrap"}}>From</span>
-                      <input type="date" style={{...si2,width:120,padding:"5px 8px"}} value={listDateFrom} onChange={e=>setListDateFrom(e.target.value)}/>
-                    </div>
-                    <div style={{display:"flex",alignItems:"center",gap:4}}>
-                      <span style={{fontSize:11,color:"#94a3b8",whiteSpace:"nowrap"}}>To</span>
-                      <input type="date" style={{...si2,width:120,padding:"5px 8px"}} value={listDateTo} onChange={e=>setListDateTo(e.target.value)}/>
-                    </div>
-                    <select style={si2} value={listStatusFilter} onChange={e=>setListStatusFilter(e.target.value)}>
-                      <option value="all">All statuses</option>
-                      {Object.entries(STATUS_META).filter(([k])=>!["pending","amua_submit"].includes(k)).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
-                    </select>
                     {allClashes.length>0&&(
                       <button onClick={()=>setListShowClashes(v=>!v)}
                         style={S.btn({background:listShowClashes?"#ef4444":"#fff",color:listShowClashes?"#fff":"#ef4444",border:"1.5px solid #ef4444",fontSize:12,fontWeight:700})}>
@@ -4567,13 +4610,9 @@ export default function App() {
                       style={S.btn({background:"#f0f9ff",color:"#0369a1",border:"1.5px solid #bae6fd",fontSize:12,fontWeight:700})}>
                       📅 Summarise
                     </button>
-                    {(listNameSearch||listDateFrom||listDateTo)&&(
-                      <button onClick={()=>{setListNameSearch("");setListDateFrom("");setListDateTo("");}}
-                        style={S.btn({background:"#fff",color:"#94a3b8",border:"1.5px solid #e2e8f0",fontSize:11})}>✕ Clear</button>
-                    )}
                   </div>
                   {/* Booker filter chips */}
-                  <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12,alignItems:"center"}}>
+                  <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10,alignItems:"center"}}>
                     <span style={{fontSize:11,fontWeight:600,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.05em"}}>Booker:</span>
                     <button onClick={()=>setListBookerFilter("all")}
                       style={S.btn({background:listBookerFilter==="all"?"#0f172a":"#f8fafc",color:listBookerFilter==="all"?"#fff":"#475569",border:"1.5px solid #e2e8f0",fontSize:11,padding:"3px 9px"})}>All</button>
@@ -4599,6 +4638,47 @@ export default function App() {
                               ))}
                               <th style={{padding:"5px 8px",textAlign:"left",fontWeight:600,color:"#64748b",borderBottom:"1px solid #e2e8f0",fontSize:11}}>Time · Dur</th>
                               <th style={{padding:"5px 8px",textAlign:"left",fontWeight:600,color:"#64748b",borderBottom:"1px solid #e2e8f0",fontSize:11}}>Purpose</th>
+                            </tr>
+                            <tr style={{background:"#f1f5f9"}}>
+                              <th style={{padding:"3px 4px"}}>
+                                <div style={{display:"flex",gap:2}}>
+                                  <input type="date" value={listDateFrom} onChange={e=>setListDateFrom(e.target.value)} title="From date"
+                                    style={{padding:"2px 3px",fontSize:10,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",width:"100%",minWidth:88}}/>
+                                  <span style={{fontSize:9,color:"#94a3b8",alignSelf:"center",flexShrink:0}}>–</span>
+                                  <input type="date" value={listDateTo} onChange={e=>setListDateTo(e.target.value)} title="To date"
+                                    style={{padding:"2px 3px",fontSize:10,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",width:"100%",minWidth:88}}/>
+                                </div>
+                              </th>
+                              <th style={{padding:"3px 4px"}}>
+                                <input placeholder="Search booker…" value={listNameSearch} onChange={e=>setListNameSearch(e.target.value)}
+                                  style={{padding:"3px 6px",fontSize:11,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",width:"100%"}}/>
+                              </th>
+                              <th style={{padding:"3px 4px"}}>
+                                <select value={listColFacility} onChange={e=>setListColFacility(e.target.value)}
+                                  style={{padding:"3px 4px",fontSize:11,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",width:"100%"}}>
+                                  <option value="all">All</option>
+                                  {FACILITIES.map(f=><option key={f.id} value={f.id}>{f.name}</option>)}
+                                </select>
+                              </th>
+                              <th style={{padding:"3px 4px"}}>
+                                <select value={listStatusFilter} onChange={e=>setListStatusFilter(e.target.value)}
+                                  style={{padding:"3px 4px",fontSize:11,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",width:"100%"}}>
+                                  <option value="all">All</option>
+                                  {Object.entries(STATUS_META).filter(([k])=>!["pending","amua_submit"].includes(k)).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
+                                </select>
+                              </th>
+                              <th style={{padding:"3px 4px"}}/>
+                              <th style={{padding:"3px 4px"}}>
+                                <div style={{display:"flex",gap:2,alignItems:"center"}}>
+                                  <input placeholder="Search purpose…" value={listColPurpose} onChange={e=>setListColPurpose(e.target.value)}
+                                    style={{padding:"3px 6px",fontSize:11,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",flex:1}}/>
+                                  {anyListFilter&&(
+                                    <button onClick={()=>{setListNameSearch("");setListDateFrom("");setListDateTo("");setListStatusFilter("all");setListColPurpose("");setListColFacility("all");}}
+                                      title="Clear all column filters"
+                                      style={{padding:"2px 5px",fontSize:10,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",color:"#64748b",cursor:"pointer",flexShrink:0}}>✕</button>
+                                  )}
+                                </div>
+                              </th>
                             </tr>
                           </thead>
                           <tbody>
