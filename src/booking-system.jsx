@@ -3577,7 +3577,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[]
                     {adminBookerEmails.map(em=>(
                       <button key={em} onClick={()=>setAdminBookerFilter(p=>p===em?"all":em)}
                         style={{padding:"1px 7px",fontSize:10,borderRadius:10,border:`1.5px solid ${adminBookerFilter===em?emailColor(em):"#e2e8f0"}`,background:adminBookerFilter===em?emailColor(em):"#fff",color:adminBookerFilter===em?"#fff":"#475569",cursor:"pointer",fontWeight:adminBookerFilter===em?700:400,lineHeight:1.6}}>
-                        {adminBookerMap[em]||em.split("@")[0]}
+                        {em.split("@")[0]}
                       </button>
                     ))}
                   </div>
@@ -3628,7 +3628,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[]
                     <td style={{padding:"8px 10px",whiteSpace:"nowrap"}}>{fmtDate(b.date)}</td>
                     <td style={{padding:"8px 10px"}} onClick={e=>{e.stopPropagation();setAdminBookerFilter(p=>p===b.email.toLowerCase()?"all":b.email.toLowerCase());}}>
                       <span style={{display:"inline-block",padding:"3px 10px",borderRadius:10,background:emailColor(b.email),color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer",outline:adminBookerFilter===b.email.toLowerCase()?"2px solid #0f172a":"none",outlineOffset:1}}>
-                        {b.name}
+                        {b.email.split("@")[0]}
                       </span>
                     </td>
                     <td style={{padding:"8px 10px"}}>
@@ -4657,7 +4657,7 @@ export default function App() {
                                   {bookerEmails.map(em=>(
                                     <button key={em} onClick={()=>setListBookerFilter(p=>p===em?"all":em)}
                                       style={{padding:"1px 7px",fontSize:10,borderRadius:10,border:`1.5px solid ${listBookerFilter===em?emailColor(em):"#e2e8f0"}`,background:listBookerFilter===em?emailColor(em):"#fff",color:listBookerFilter===em?"#fff":"#475569",cursor:"pointer",fontWeight:listBookerFilter===em?700:400,lineHeight:1.6}}>
-                                      {bookerMap[em]||em.split("@")[0]}
+                                      {em.split("@")[0]}
                                     </button>
                                   ))}
                                 </div>
@@ -4707,7 +4707,7 @@ export default function App() {
                                     {isAdmin_bk
                                       ? <span style={{fontSize:10,fontWeight:700,color:"#94a3b8",background:"#f1f5f9",borderRadius:10,padding:"2px 7px"}}>🔒 admin</span>
                                       : <span style={{display:"inline-block",padding:"2px 9px",borderRadius:10,background:emailColor(b.email),color:"#fff",fontSize:11,fontWeight:600,cursor:"pointer",outline:listBookerFilter===b.email.toLowerCase()?"2px solid #0f172a":"none",outlineOffset:1}}>
-                                          {b.name}
+                                          {b.email.split("@")[0]}
                                         </span>
                                     }
                                   </td>
