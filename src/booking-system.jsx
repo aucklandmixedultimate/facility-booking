@@ -1523,7 +1523,7 @@ function AboutTab() {
           Bookings at Cornwall Park are managed through CPSA (Cornwall Park Sport Association).
           AMUA (Auckland Mixed Ultimate Association) acts as a facilitating body and can submit booking requests on your behalf.
           You can also submit directly using the{" "}
-          <a href="https://www.cornwallpark.co.nz/sport/sport-field-hire" target="_blank" rel="noopener noreferrer" style={link}>CPSA field hire form</a>.
+          <a href="https://www.grammartec.co.nz/viewform/499414" target="_blank" rel="noopener noreferrer" style={link}>CPSA field hire form</a>.
         </p>
         <h3 style={{margin:"12px 0 8px",fontSize:14,fontWeight:700,color:"#0f172a"}}>Approval Process</h3>
         <div style={step}>
@@ -1547,7 +1547,7 @@ function AboutTab() {
           <div>
             <div style={{fontWeight:600,fontSize:14,color:"#0f172a"}}>AMUA submits to CPSA</div>
             <div style={{fontSize:13,color:"#475569",marginTop:2}}>AMUA lodges the request with CPSA using the{" "}
-              <a href="https://www.cornwallpark.co.nz/sport/sport-field-hire" target="_blank" rel="noopener noreferrer" style={link}>CPSA field hire form</a>.
+              <a href="https://www.grammartec.co.nz/viewform/499414" target="_blank" rel="noopener noreferrer" style={link}>CPSA field hire form</a>.
               Status becomes <Badge status="pending_cpsa"/>. You can also contact CPSA directly — AMUA can co-sign as the responsible party.
             </div>
           </div>
