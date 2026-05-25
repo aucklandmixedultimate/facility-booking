@@ -1919,9 +1919,11 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
   // Inline duration editing
   const [editingDuration, setEditingDuration] = useState(null);
   const [durationInput,   setDurationInput]   = useState("");
-  const [invDetail,   setInvDetail]   = useState("grouped");   // "grouped" | "individual"
-  const [invGst,      setInvGst]      = useState("inclusive"); // "inclusive" | "exclusive" | "note"
-  const [invScope,    setInvScope]    = useState("single");    // "single" | "combined" (admin only)
+  const [invDetail,   setInvDetail]   = useState("grouped");        // "grouped" | "individual"
+  const [invGst,      setInvGst]      = useState("inclusive");       // "inclusive" | "exclusive" | "note"
+  const [invScope,    setInvScope]    = useState("combined");         // "combined" | "per_booker"
+  const [invDocType,  setInvDocType]  = useState("invoice");          // "invoice" | "purchase_order"
+  const [invSelectedEmails, setInvSelectedEmails] = useState(new Set()); // empty = all
   // Schedule Summary state
   const [showSchedule,        setShowSchedule]        = useState(false);
   const [scheduleFacSensitive,setScheduleFacSensitive]= useState(false);
@@ -1985,6 +1987,18 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
     if (emailFilter !== "all" && b.email.toLowerCase() !== emailFilter.toLowerCase()) return false;
     return true;
   });
+
+  // Date-filtered pool for invoice (no email filter — multi-select picks users independently)
+  const activeForInvoice = bookings.filter(b => {
+    if (isAdminBooking(b)) return false;
+    if (["cancelled","rejected"].includes(b.status)) return false;
+    if (dateFrom && b.date < dateFrom) return false;
+    if (dateTo   && b.date > dateTo)   return false;
+    return true;
+  });
+  const bookerNameMap = {};
+  bookings.filter(b=>!isAdminBooking(b)&&b.email).forEach(b=>{ bookerNameMap[b.email.toLowerCase()]=b.name; });
+  const allInvoiceEmails = [...new Set(activeForInvoice.map(b=>b.email).filter(Boolean))].sort();
 
   const EVENING_CUTOFF = 17.5; // 5:30pm
 
@@ -2140,7 +2154,8 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
     return { pre: subtotal / 1.15, gst, total: subtotal };
   }
 
-  function buildInvoiceHtml({ bookerName, bookerEmail, lines, gstMode, dateRange, invNumber }) {
+  function buildInvoiceHtml({ bookerName, bookerEmail, lines, gstMode, dateRange, invNumber, docType="invoice" }) {
+    const docLabel = docType === "purchase_order" ? "PURCHASE ORDER" : "INVOICE";
     const subtotal = lines.reduce((s, l) => s + l.cost, 0);
     const { pre, gst, total } = gstAmounts(subtotal, gstMode);
     const gstLabel = gstMode === "note" ? "" : gstMode === "exclusive" ? "excl. GST" : "incl. GST";
@@ -2157,7 +2172,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
          <tr style="background:#f8fafc"><td colspan="2" style="padding:8px 16px;font-size:12px;color:#64748b;text-align:right">GST (15%)</td><td style="padding:8px 16px;font-size:13px;color:#0f172a;text-align:right">${fmtCost(gst)}</td></tr>
          <tr style="background:#f0fdf4"><td colspan="2" style="padding:10px 16px;font-size:14px;font-weight:700;color:#0f172a;text-align:right">Total</td><td style="padding:10px 16px;font-size:16px;font-weight:800;color:#15803d;text-align:right">${fmtCost(total)}</td></tr>`;
     const amuaLines = [AMUA_INFO.address, AMUA_INFO.gstNumber ? `GST No: ${AMUA_INFO.gstNumber}` : "", AMUA_INFO.bank].filter(Boolean).map(l=>`<div>${l}</div>`).join("");
-    return `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Invoice ${invNumber}</title><style>
+    return `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>${docLabel} ${invNumber}</title><style>
       @media print { body{margin:0} }
       body{font-family:'Segoe UI',sans-serif;background:#f8fafc;margin:0;padding:32px 16px}
       .page{max-width:700px;margin:0 auto;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 4px 32px rgba(0,0,0,0.08)}
@@ -2169,7 +2184,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
           <div style="font-size:13px;color:#94a3b8;margin-top:4px">${amuaLines||"<span style='color:#64748b'>Update AMUA_INFO in booking-system.jsx</span>"}</div>
         </div>
         <div style="text-align:right">
-          <div style="font-size:28px;font-weight:800;color:#fff">INVOICE</div>
+          <div style="font-size:28px;font-weight:800;color:#fff">${docLabel}</div>
           <div style="font-size:13px;color:#94a3b8;margin-top:4px">#${invNumber}</div>
           <div style="font-size:13px;color:#94a3b8">Date: ${todayKey()}</div>
         </div>
@@ -2203,8 +2218,9 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
   function exportInvoice(format, bkgsForInvoice, bookerName, bookerEmail) {
     const lines = buildInvoiceLines(bkgsForInvoice, invDetail);
     const dateRange = { from: dateFrom, to: dateTo };
+    const prefix = invDocType === "purchase_order" ? "po" : "invoice";
     const invNumber = `${todayKey().replace(/-/g,"")}-${bookerEmail.replace(/[^a-z0-9]/gi,"").slice(0,6).toUpperCase()}`;
-    const html = buildInvoiceHtml({ bookerName, bookerEmail, lines, gstMode: invGst, dateRange, invNumber });
+    const html = buildInvoiceHtml({ bookerName, bookerEmail, lines, gstMode: invGst, dateRange, invNumber, docType: invDocType });
     if (format === "html" || format === "print") {
       const win = window.open("", "_blank");
       if (win) {
@@ -2216,26 +2232,40 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
       const subtotal = lines.reduce((s, l) => s + l.cost, 0);
       const { pre, gst, total } = gstAmounts(subtotal, invGst);
       const esc = v => `"${String(v||"").replace(/"/g,'""')}"`;
+      const docLabel = invDocType === "purchase_order" ? "Purchase Order" : "Invoice";
       const csvRows = lines.map(l => [invNumber, bookerName, bookerEmail, l.desc, l.detail, l.cost.toFixed(2)].map(esc).join(","));
       csvRows.push(["","","","","Subtotal",pre.toFixed(2)].map(esc).join(","));
       csvRows.push(["","","","","GST (15%)",gst.toFixed(2)].map(esc).join(","));
       csvRows.push(["","","","","Total",total.toFixed(2)].map(esc).join(","));
-      const csv = [["Invoice","Name","Email","Description","Detail","Amount"].map(esc).join(","), ...csvRows].join("\n");
+      const csv = [[docLabel,"Name","Email","Description","Detail","Amount"].map(esc).join(","), ...csvRows].join("\n");
       const blob = new Blob([csv], { type:"text/csv" });
       const url = URL.createObjectURL(blob);
-      const a = document.createElement("a"); a.href=url; a.download=`invoice-${invNumber}.csv`; a.click();
+      const a = document.createElement("a"); a.href=url; a.download=`${prefix}-${invNumber}.csv`; a.click();
       URL.revokeObjectURL(url);
     }
   }
 
+  function openInvoice() {
+    setInvSelectedEmails(emailFilter !== "all" ? new Set([emailFilter.toLowerCase()]) : new Set());
+    setShowInvoice(true);
+  }
+
   // Groups active bookings by booker for combined/per-booker export
   function getInvoiceScopes() {
-    if (invScope === "combined" || emailFilter !== "all") {
-      const name = emailFilter !== "all" ? (rows.find(r=>r.email.toLowerCase()===emailFilter.toLowerCase())?.name||emailFilter) : "All Bookers";
-      const email = emailFilter !== "all" ? emailFilter : "combined";
-      return [{ name, email, bkgs: active }];
+    const sel = [...invSelectedEmails];
+    const pool = sel.length > 0
+      ? activeForInvoice.filter(b => sel.some(e => b.email.toLowerCase() === e.toLowerCase()))
+      : activeForInvoice;
+    if (invScope === "combined" || sel.length <= 1) {
+      const name = sel.length === 1 ? (bookerNameMap[sel[0].toLowerCase()] || sel[0]) : "All Bookers";
+      const email = sel.length === 1 ? sel[0] : "combined";
+      return [{ name, email, bkgs: pool }];
     }
-    return rows.map(r => ({ name:r.name, email:r.email, bkgs: active.filter(b=>b.email.toLowerCase()===r.email.toLowerCase()) }));
+    return sel.map(e => ({
+      name: bookerNameMap[e.toLowerCase()] || e,
+      email: e,
+      bkgs: pool.filter(b => b.email.toLowerCase() === e.toLowerCase()),
+    }));
   }
 
   // CSV export — all columns from every booking (not filtered)
@@ -2305,7 +2335,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
               ⬇ Export All Data (CSV)
             </button>
             {anyRates && (
-              <button onClick={()=>setShowInvoice(true)} style={S.btn({ background:"#15803d", color:"#fff", display:"flex", alignItems:"center", gap:6 })}>
+              <button onClick={openInvoice} style={S.btn({ background:"#15803d", color:"#fff", display:"flex", alignItems:"center", gap:6 })}>
                 🧾 Export Invoice
               </button>
             )}
@@ -3073,10 +3103,13 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
       {/* Invoice modal */}
       {showInvoice && (()=>{
         const scopes = getInvoiceScopes();
+        const docLabel = invDocType === "purchase_order" ? "Purchase Order" : "Invoice";
+        const allBkgs = scopes.flatMap(s => s.bkgs);
+        const totalCostInv = allBkgs.reduce((s,b)=>{const {day,evening}=splitHours(b);const r=getFacRates(b.facility_id);return s+day*r.day+evening*r.evening;},0);
         const OptionRow = ({label, children}) => (
-          <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
-            <span style={{fontSize:12,fontWeight:600,color:"#64748b",minWidth:90}}>{label}</span>
-            {children}
+          <div style={{display:"flex",alignItems:"flex-start",gap:10,flexWrap:"wrap"}}>
+            <span style={{fontSize:12,fontWeight:600,color:"#64748b",minWidth:90,paddingTop:5}}>{label}</span>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap",flex:1}}>{children}</div>
           </div>
         );
         const Pill = ({active, onClick, children}) => (
@@ -3086,19 +3119,45 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
         );
         return (
           <div style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.45)",zIndex:999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
-            <div style={{background:"#fff",borderRadius:16,padding:28,maxWidth:520,width:"100%",boxShadow:"0 8px 40px rgba(0,0,0,0.18)",display:"flex",flexDirection:"column",gap:18}}>
+            <div style={{background:"#fff",borderRadius:16,padding:28,maxWidth:560,width:"100%",boxShadow:"0 8px 40px rgba(0,0,0,0.18)",display:"flex",flexDirection:"column",gap:18,maxHeight:"90vh",overflowY:"auto"}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <h3 style={{margin:0,fontSize:18,fontWeight:800,color:"#0f172a"}}>🧾 Export Invoice</h3>
+                <h3 style={{margin:0,fontSize:18,fontWeight:800,color:"#0f172a"}}>🧾 Export {docLabel}</h3>
                 <button onClick={()=>setShowInvoice(false)} style={{background:"none",border:"none",cursor:"pointer",fontSize:20,color:"#94a3b8",lineHeight:1}}>✕</button>
               </div>
 
               <div style={{display:"flex",flexDirection:"column",gap:12}}>
-                {isAdmin && emailFilter==="all" && (
-                  <OptionRow label="Scope">
-                    <Pill active={invScope==="combined"} onClick={()=>setInvScope("combined")}>Combined invoice</Pill>
+                {/* Document type */}
+                <OptionRow label="Document">
+                  <Pill active={invDocType==="invoice"} onClick={()=>setInvDocType("invoice")}>Invoice</Pill>
+                  <Pill active={invDocType==="purchase_order"} onClick={()=>setInvDocType("purchase_order")}>Purchase Order</Pill>
+                </OptionRow>
+
+                {/* Booker multi-select */}
+                <OptionRow label="Bookers">
+                  <Pill active={invSelectedEmails.size===0} onClick={()=>setInvSelectedEmails(new Set())}>All</Pill>
+                  {allInvoiceEmails.map(e=>{
+                    const sel=invSelectedEmails.has(e.toLowerCase());
+                    const c=emailColor(e);
+                    return(
+                      <button key={e} onClick={()=>{
+                        const s=new Set(invSelectedEmails);
+                        if(s.has(e.toLowerCase())) s.delete(e.toLowerCase()); else s.add(e.toLowerCase());
+                        setInvSelectedEmails(s);
+                      }} style={{padding:"4px 12px",borderRadius:8,border:`1.5px solid ${sel?c:"#e2e8f0"}`,background:sel?c:"#f8fafc",color:sel?"#fff":"#475569",fontWeight:600,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>
+                        {e.split("@")[0]}
+                      </button>
+                    );
+                  })}
+                </OptionRow>
+
+                {/* Output scope — only relevant when multiple users */}
+                {invSelectedEmails.size !== 1 && allInvoiceEmails.length > 1 && (
+                  <OptionRow label="Output">
+                    <Pill active={invScope==="combined"} onClick={()=>setInvScope("combined")}>Combined {docLabel}</Pill>
                     <Pill active={invScope==="per_booker"} onClick={()=>setInvScope("per_booker")}>Per booker</Pill>
                   </OptionRow>
                 )}
+
                 <OptionRow label="Line items">
                   <Pill active={invDetail==="grouped"} onClick={()=>setInvDetail("grouped")}>Grouped</Pill>
                   <Pill active={invDetail==="individual"} onClick={()=>setInvDetail("individual")}>Individual</Pill>
@@ -3110,11 +3169,11 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
                 </OptionRow>
               </div>
 
-              {/* Summary of what will be invoiced */}
+              {/* Summary */}
               <div style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:10,padding:"12px 16px",fontSize:13,color:"#475569"}}>
-                {invScope==="per_booker" && emailFilter==="all"
-                  ? <span><strong>{scopes.length}</strong> separate invoices for {scopes.map(s=>s.name||s.email).join(", ")}</span>
-                  : <span>Invoice for <strong>{scopes[0]?.name||scopes[0]?.email}</strong> — <strong>{active.length}</strong> booking{active.length!==1?"s":""}, total <strong>{fmtCost(active.reduce((s,b)=>{const {day,evening}=splitHours(b);const r=getFacRates(b.facility_id);return s+day*r.day+evening*r.evening;},0))}</strong></span>
+                {invScope==="per_booker" && invSelectedEmails.size !== 1
+                  ? <span><strong>{scopes.length}</strong> separate {docLabel.toLowerCase()}s — {scopes.map(s=>s.name||s.email.split("@")[0]).join(", ")} — <strong>{allBkgs.length}</strong> booking{allBkgs.length!==1?"s":""} total, <strong>{fmtCost(totalCostInv)}</strong></span>
+                  : <span>{docLabel} for <strong>{scopes[0]?.name||scopes[0]?.email}</strong> — <strong>{allBkgs.length}</strong> booking{allBkgs.length!==1?"s":""}, total <strong>{fmtCost(totalCostInv)}</strong></span>
                 }
               </div>
 
