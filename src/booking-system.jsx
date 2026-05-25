@@ -1080,7 +1080,25 @@ function BookingDetail({booking,onEdit,onClose,onCancel,isAdmin,onStatusChange,l
   return (
     <div style={{display:"flex",flexDirection:"column",gap:16}}>
       <div style={{background:m.bg,border:`1px solid ${m.border}`,borderRadius:10,padding:"12px 16px"}}>
-        <Badge status={booking.status}/>{REVIEW_STATUSES.has(booking.status)&&<p style={{margin:"8px 0 0",fontSize:13,color:m.text}}>Awaiting admin review.</p>}
+        <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+          {isAdmin ? (
+            <label style={{display:"inline-flex",alignItems:"center",gap:8,margin:0}}>
+              <span style={{fontSize:12,fontWeight:600,color:m.text,textTransform:"uppercase",letterSpacing:"0.05em"}}>Status</span>
+              <select
+                value={booking.status}
+                onChange={e=>onStatusChange(e.target.value)}
+                style={{padding:"4px 10px",borderRadius:8,border:`1.5px solid ${m.border}`,background:m.bg,color:m.text,fontSize:13,fontWeight:600,cursor:"pointer",outline:"none"}}
+              >
+                {Object.entries(STATUS_META).map(([key,meta])=>(
+                  <option key={key} value={key}>{meta.label}</option>
+                ))}
+              </select>
+            </label>
+          ) : (
+            <Badge status={booking.status}/>
+          )}
+          {REVIEW_STATUSES.has(booking.status)&&<p style={{margin:0,fontSize:13,color:m.text}}>Awaiting admin review.</p>}
+        </div>
         {booking.status==="clash"&&clashingAdminBks.length>0&&(
           <div style={{marginTop:10}}>
             <div style={{fontSize:12,fontWeight:700,color:"#92400e",marginBottom:6}}>Overlapping reservations:</div>
@@ -1141,8 +1159,6 @@ function BookingDetail({booking,onEdit,onClose,onCancel,isAdmin,onStatusChange,l
       })()}
       <div style={{display:"flex",gap:8,flexWrap:"wrap",paddingTop:8,borderTop:"1px solid #f1f5f9"}}>
         {isAdmin&&<>
-          {booking.status!=="approved"&&<button onClick={()=>onStatusChange("approved")} style={S.btn({background:"#22c55e",color:"#fff"})}>✓ Approve</button>}
-          {booking.status!=="rejected"&&<button onClick={()=>onStatusChange("rejected")} style={S.btn({background:"#f43f5e",color:"#fff"})}>✗ Reject</button>}
           {!isPast&&<button onClick={onEdit} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#0f172a"})}>Edit</button>}
           <button onClick={onCancel} style={S.btn({border:"1.5px solid #f43f5e",background:"#fff",color:"#f43f5e"})}>🗑 Queue Removal</button>
         </>}
