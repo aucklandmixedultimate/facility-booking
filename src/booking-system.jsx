@@ -3140,9 +3140,11 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
                     const c=emailColor(e);
                     return(
                       <button key={e} onClick={()=>{
-                        const s=new Set(invSelectedEmails);
-                        if(s.has(e.toLowerCase())) s.delete(e.toLowerCase()); else s.add(e.toLowerCase());
-                        setInvSelectedEmails(s);
+                        setInvSelectedEmails(prev=>{
+                          const s=new Set(prev);
+                          if(s.has(e.toLowerCase())) s.delete(e.toLowerCase()); else s.add(e.toLowerCase());
+                          return s;
+                        });
                       }} style={{padding:"4px 12px",borderRadius:8,border:`1.5px solid ${sel?c:"#e2e8f0"}`,background:sel?c:"#f8fafc",color:sel?"#fff":"#475569",fontWeight:600,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>
                         {e.split("@")[0]}
                       </button>
