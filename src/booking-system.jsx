@@ -1102,13 +1102,43 @@ function BookingDetail({booking,onEdit,onClose,onCancel,isAdmin,onStatusChange,l
         ["Purpose",booking.purpose],
         ["Booked by",booking.name],
         ["Email",booking.email],
-        booking.notes&&["Notes",booking.notes],
-      ].filter(Boolean).map(([label,value])=>(
+        ].filter(Boolean).map(([label,value])=>(
         <div key={label} style={{display:"flex",gap:12}}>
           <span style={{minWidth:90,fontSize:12,fontWeight:600,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.05em",paddingTop:1}}>{label}</span>
           <span style={{fontSize:14,color:"#0f172a"}}>{value}</span>
         </div>
       ))}
+      {(()=>{
+        if(!booking.notes) return null;
+        // Parse CPSA submission lines: [CPSA <date>] Ref <ref> · <url>
+        const cpsaRe=/\[CPSA ([^\]]+)\]\s*Ref\s+(\S+)\s*·\s*(https?:\/\/\S+)/g;
+        const cpsaLines=[];
+        let m;
+        while((m=cpsaRe.exec(booking.notes))!==null) cpsaLines.push({date:m[1],ref:m[2],url:m[3]});
+        const remainingNotes=booking.notes.replace(/\[CPSA [^\]]+\]\s*Ref\s+\S+\s*·\s*https?:\/\/\S+/g,"").trim();
+        if(!cpsaLines.length&&!remainingNotes) return null;
+        return <>
+          {cpsaLines.map((c,i)=>(
+            <div key={i} style={{background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:8,padding:"10px 14px",display:"flex",flexDirection:"column",gap:6}}>
+              <div style={{fontSize:11,fontWeight:700,color:"#0369a1",textTransform:"uppercase",letterSpacing:"0.05em"}}>CPSA Submission</div>
+              <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                <span style={{fontSize:12,background:"#0891b2",color:"#fff",borderRadius:6,padding:"2px 8px",fontWeight:700}}>{c.ref}</span>
+                <span style={{fontSize:12,color:"#64748b"}}>{c.date}</span>
+                <a href={c.url} target="_blank" rel="noopener noreferrer"
+                  style={{fontSize:12,background:"#0ea5e9",color:"#fff",borderRadius:6,padding:"3px 10px",textDecoration:"none",fontWeight:600,marginLeft:"auto"}}>
+                  View / Edit on Sporty ↗
+                </a>
+              </div>
+            </div>
+          ))}
+          {remainingNotes&&(
+            <div style={{display:"flex",gap:12}}>
+              <span style={{minWidth:90,fontSize:12,fontWeight:600,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.05em",paddingTop:1}}>Notes</span>
+              <span style={{fontSize:14,color:"#0f172a",whiteSpace:"pre-wrap"}}>{remainingNotes}</span>
+            </div>
+          )}
+        </>;
+      })()}
       <div style={{display:"flex",gap:8,flexWrap:"wrap",paddingTop:8,borderTop:"1px solid #f1f5f9"}}>
         {isAdmin&&<>
           {booking.status!=="approved"&&<button onClick={()=>onStatusChange("approved")} style={S.btn({background:"#22c55e",color:"#fff"})}>✓ Approve</button>}
@@ -3952,7 +3982,7 @@ export default function App() {
   const [prefill,  setPrefill]  =useState({date:null,startHour:9,duration:1});
   const [toast,    setToast]    =useState(null);
   const [syncingMonth, setSyncingMonth] = useState(false);
-  const [silentMode, setSilentMode] = useState(false); // admin: suppress all outgoing emails
+  const [silentMode, setSilentMode] = useState(true); // admin: suppress all outgoing emails
   const [facilityRates, setFacilityRates] = useState(()=>{
     try{return JSON.parse(localStorage.getItem("fb_facility_rates")||"{}");}catch{return {};}
   });
@@ -3960,6 +3990,7 @@ export default function App() {
   const [listShowClashes, setListShowClashes]   = useState(false);
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [showAdminScheduleModal, setShowAdminScheduleModal] = useState(false);
+  const [showExtensionModal, setShowExtensionModal] = useState(false);
   const [approxPlayers, setApproxPlayers] = useState(()=>{
     try{return JSON.parse(localStorage.getItem("fb_approx_players")||"{}");}catch{return {};}
   });
@@ -4570,6 +4601,12 @@ export default function App() {
                 </button>
               )}
               {isAdmin&&(
+                <button onClick={()=>setShowExtensionModal(true)} title="Install the AMUA booking browser extension"
+                  style={S.btn({background:"#7c3aed",color:"#fff",fontSize:11,padding:"7px 10px"})}>
+                  🧩{!isMobile&&" Extension"}
+                </button>
+              )}
+              {isAdmin&&(
                 <button onClick={handleSyncAll} disabled={syncingMonth} title="Sync all months with bookings from today forward"
                   style={S.btn({background:syncingMonth?"#e2e8f0":"#0ea5e9",color:syncingMonth?"#94a3b8":"#fff",fontSize:11,padding:"7px 10px",cursor:syncingMonth?"wait":"pointer",opacity:syncingMonth?0.7:1})}>
                   {syncingMonth?"⏳":"🔄"}{!isMobile&&(syncingMonth?" Syncing…":" Sync All")}
@@ -4808,6 +4845,36 @@ export default function App() {
       {showScheduleModal && <ScheduleSummaryModal bookings={bookings} isAdmin={isAdmin} loggedInEmail={loggedInEmail} onBulkApply={handleBulkApply} onClose={()=>setShowScheduleModal(false)}/>}
       {showAdminScheduleModal && <ScheduleSummaryModal bookings={bookings} isAdmin={true} loggedInEmail={loggedInEmail} onBulkApply={handleBulkApply} onClose={()=>setShowAdminScheduleModal(false)}/>}
       {showLogin&&<Modal title="Admin Access" onClose={()=>setShowLogin(false)}><AdminLogin onLogin={()=>{setIsAdmin(true);setShowLogin(false);setTab(prev=>prev==="about"?"admin":prev);}}/></Modal>}
+
+      {showExtensionModal&&(
+        <Modal title="🧩 Install AMUA Booking Extension" onClose={()=>setShowExtensionModal(false)} width={560}>
+          <div style={{display:"flex",flexDirection:"column",gap:16,fontSize:14,color:"#0f172a"}}>
+            <div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:8,padding:"10px 14px",fontSize:13,color:"#166534"}}>
+              The browser extension lets you submit bookings to CPSA (Sporty) directly from this app and syncs confirmation links back automatically.
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:10}}>
+              {[
+                ["1","Download the extension", "Clone or download the amua-booking-extension repository from GitHub."],
+                ["2","Build it", <>Run <code style={{background:"#f1f5f9",padding:"1px 5px",borderRadius:4,fontSize:12}}>build.bat</code> (Windows) or <code style={{background:"#f1f5f9",padding:"1px 5px",borderRadius:4,fontSize:12}}>npm run build</code> in the repo folder. A <code style={{background:"#f1f5f9",padding:"1px 5px",borderRadius:4,fontSize:12}}>dist/</code> folder will be created.</>],
+                ["3","Open Chrome Extensions", <>Navigate to <code style={{background:"#f1f5f9",padding:"1px 5px",borderRadius:4,fontSize:12}}>chrome://extensions</code> and enable <strong>Developer mode</strong> (toggle top-right).</>],
+                ["4","Load unpacked", <>Click <strong>Load unpacked</strong> and select the <code style={{background:"#f1f5f9",padding:"1px 5px",borderRadius:4,fontSize:12}}>dist/</code> folder from step 2.</>],
+                ["5","Pin & use", "Pin the extension from the Chrome toolbar. Open a CPSA booking page on Sporty and the extension will detect it automatically."],
+              ].map(([num,title,desc])=>(
+                <div key={num} style={{display:"flex",gap:12,alignItems:"flex-start"}}>
+                  <span style={{minWidth:24,height:24,background:"#7c3aed",color:"#fff",borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:12,flexShrink:0}}>{num}</span>
+                  <div>
+                    <div style={{fontWeight:600,marginBottom:2}}>{title}</div>
+                    <div style={{fontSize:13,color:"#475569"}}>{desc}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div style={{borderTop:"1px solid #f1f5f9",paddingTop:12,display:"flex",gap:8,justifyContent:"flex-end"}}>
+              <button onClick={()=>setShowExtensionModal(false)} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#475569"})}>Close</button>
+            </div>
+          </div>
+        </Modal>
+      )}
 
       {showForm&&(
         <Modal title={editing?"Edit Booking":"New Booking Request"} onClose={()=>{setShowForm(false);setEditing(null);}} width={620}>
