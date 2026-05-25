@@ -29,6 +29,17 @@ const sb = {
       headers:{ apikey:SUPABASE_ANON, Authorization:`Bearer ${SUPABASE_ANON}` } });
     if (!r.ok) throw new Error(await r.text());
   },
+  async upsert(table, data, onConflict="key") {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}?on_conflict=${onConflict}`, { method:"POST",
+      headers:{ apikey:SUPABASE_ANON, Authorization:`Bearer ${SUPABASE_ANON}`, "Content-Type":"application/json", Prefer:"return=representation,resolution=merge-duplicates" },
+      body:JSON.stringify(data) });
+    if (!r.ok) throw new Error(await r.text()); return r.json();
+  },
+  async selectAll(table) {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}?select=*`,
+      { headers:{ apikey:SUPABASE_ANON, Authorization:`Bearer ${SUPABASE_ANON}` } });
+    if (!r.ok) throw new Error(await r.text()); return r.json();
+  },
 };
 
 // ─── Facilities ───────────────────────────────────────────────────────────────
@@ -56,10 +67,24 @@ const DURATIONS = [
   {label:"4 hrs",value:4},{label:"6 hrs",value:6},{label:"8 hrs",value:8},
 ];
 const STATUS_META = {
-  pending:  {bg:"#fff8e1",border:"#f59e0b",text:"#92400e",dot:"#f59e0b",label:"Pending"},
-  approved: {bg:"#f0fdf4",border:"#22c55e",text:"#14532d",dot:"#22c55e",label:"Approved"},
-  rejected: {bg:"#fff1f2",border:"#f43f5e",text:"#881337",dot:"#f43f5e",label:"Rejected"},
-  cancelled:{bg:"#f8f8f8",border:"#94a3b8",text:"#475569",dot:"#94a3b8",label:"Cancelled"},
+  pending_amua: {bg:"#fff8e1",border:"#f59e0b",text:"#92400e",dot:"#f59e0b",label:"(1/4) Pending AMUA Review"},
+  queued_cpsa:  {bg:"#dbeafe",border:"#93c5fd",text:"#1e40af",dot:"#3b82f6",label:"(2/4) Queued for CPSA"},
+  pending_cpsa: {bg:"#e0f2fe",border:"#7dd3fc",text:"#075985",dot:"#0ea5e9",label:"(3/4) Pending CPSA Review"},
+  approved:      {bg:"#f0fdf4",border:"#22c55e",text:"#14532d",dot:"#22c55e",label:"(4/4) Approved"},
+  cpsa_confirmed:{bg:"#ecfeff",border:"#0891b2",text:"#155e75",dot:"#0891b2",label:"🌐 CPSA Confirmed"},
+  cpsa_review_needed: {bg:"#fef9c3",border:"#ca8a04",text:"#713f12",dot:"#ca8a04",label:"⚠ CPSA Mismatch — AMUA Review"},
+  rejected:     {bg:"#fff1f2",border:"#f43f5e",text:"#881337",dot:"#f43f5e",label:"Rejected"},
+  cancelled:    {bg:"#f8f8f8",border:"#94a3b8",text:"#475569",dot:"#94a3b8",label:"Cancelled"},
+  clash:        {bg:"#fef3c7",border:"#d97706",text:"#92400e",dot:"#d97706",label:"Clash"},
+  amua_submit:  {bg:"#dbeafe",border:"#93c5fd",text:"#1e40af",dot:"#3b82f6",label:"(2/4) Queued for CPSA"},
+  pending:      {bg:"#fff8e1",border:"#f59e0b",text:"#92400e",dot:"#f59e0b",label:"(1/4) Pending AMUA Review"},
+};
+const REVIEW_STATUSES = new Set(["pending_amua","queued_cpsa","amua_submit","pending_cpsa","pending","cpsa_review_needed"]);
+const AMUA_INFO = {
+  name:      "Auckland Mixed Ultimate Association (AMUA)",
+  address:   "",
+  gstNumber: "",
+  bank:      "",
 };
 const MONTHS=["January","February","March","April","May","June","July","August","September","October","November","December"];
 
@@ -112,11 +137,18 @@ function timeOverlaps(a,b) {
   return a.start_hour<b.start_hour+b.duration && a.start_hour+a.duration>b.start_hour;
 }
 function isAdminBooking(b)  { return b.email === "admin"; }
+function getSameFacilityOverlaps(draft, others) {
+  return others.filter(o => o.facility_id === draft.facility_id && timeOverlaps(draft, o));
+}
+function getCrossFacilityOverlaps(draft, others) {
+  return others.filter(o => o.facility_id !== draft.facility_id && timeOverlaps(draft, o));
+}
 function getClashes(allBookings) {
-  // Returns pairs: admin booking overlapping a non-admin booking on same facility
+  // Returns pairs: admin booking overlapping a non-admin booking on same facility (future dates only)
+  const today = todayKey();
   const clashes = [];
-  const adminBks = allBookings.filter(isAdminBooking);
-  const userBks  = allBookings.filter(b => !isAdminBooking(b));
+  const adminBks = allBookings.filter(b => isAdminBooking(b) && b.date >= today);
+  const userBks  = allBookings.filter(b => !isAdminBooking(b) && b.date >= today);
   adminBks.forEach(ab => {
     userBks.forEach(ub => {
       if (ab.facility_id === ub.facility_id && timeOverlaps(ab, ub)) {
@@ -229,11 +261,17 @@ function buildOrderEmailHtml({ name, email, bookings: bkgs=[], deletedBookings=[
 </td></tr></table></body></html>`;
 }
 
-// Build HTML for approval/rejection notification
+// Build HTML for approval/rejection/status notification
 function buildApprovalEmailHtml({ name, email, bookings: bkgs, newStatus, adminNote }) {
   const isApproved = newStatus === "approved";
-  const color = isApproved ? "#22c55e" : "#f43f5e";
-  const label = isApproved ? "Approved ✓" : "Rejected ✗";
+  const isQueued = newStatus === "queued_cpsa" || newStatus === "amua_submit";
+  const color = isApproved ? "#22c55e" : isQueued ? "#3b82f6" : "#f43f5e";
+  const label = isApproved ? "Approved ✓" : isQueued ? "Queued for CPSA Review" : "Rejected ✗";
+  const bodyText = isApproved
+    ? "Great news — your booking request has been approved!"
+    : isQueued
+    ? "Your booking request has been reviewed by AMUA and is now queued to be submitted to CPSA for final approval. We'll notify you once a decision has been made."
+    : "We're sorry — your booking request could not be approved.";
   const rows = bkgs.map(b => {
     const f = FACILITIES.find(x=>x.id===b.facility_id);
     return `<tr>
@@ -251,7 +289,7 @@ function buildApprovalEmailHtml({ name, email, bookings: bkgs, newStatus, adminN
   </td></tr>
   <tr><td style="padding:28px 32px">
     <p style="margin:0 0 6px;font-size:15px;color:#0f172a">Hi <strong>${name}</strong>,</p>
-    <p style="margin:0 0 24px;font-size:14px;color:#475569;line-height:1.6">${isApproved?"Great news — your booking request has been approved!":"We're sorry — your booking request could not be approved."}</p>
+    <p style="margin:0 0 24px;font-size:14px;color:#475569;line-height:1.6">${bodyText}</p>
     <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #f1f5f9;border-radius:10px;overflow:hidden">
       <thead><tr style="background:#f8fafc">
         <th style="padding:10px 14px;text-align:left;font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em">Facility</th>
@@ -334,7 +372,7 @@ function EmailLoginScreen({ onLogin }) {
 
 // ─── Small UI atoms ───────────────────────────────────────────────────────────
 function Badge({status}) {
-  const m=STATUS_META[status]||STATUS_META.pending;
+  const m=STATUS_META[status]||STATUS_META.pending_amua;
   return <span style={{display:"inline-flex",alignItems:"center",gap:5,padding:"2px 10px",borderRadius:999,background:m.bg,border:`1px solid ${m.border}`,color:m.text,fontSize:12,fontWeight:600,whiteSpace:"nowrap"}}><span style={{width:6,height:6,borderRadius:"50%",background:m.dot,display:"inline-block"}}/>{m.label}</span>;
 }
 function EmailChip({email}) {
@@ -479,10 +517,65 @@ function BookingRow({ row, idx, onChange, onRemove, isOnly, isAdmin, isEditing, 
         <div>
           <label style={S.lbl}>Status</label>
           <select style={S.inp} value={row.status} onChange={e=>upd("status",e.target.value)}>
-            {Object.entries(STATUS_META).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
+            {Object.entries(STATUS_META).filter(([k])=>k!=="pending").map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
           </select>
         </div>
       )}
+
+      {/* Live availability indicator */}
+      {(()=>{
+        if (!row.date || !row.facility_id || !row.duration) return null;
+        const draft = { id: row.id || "__draft__", facility_id: row.facility_id, date: row.date, start_hour: row.start_hour, duration: row.duration, status: "pending_amua" };
+        const others = allBookings.filter(b => b.id !== draft.id && !["cancelled","rejected"].includes(b.status));
+        const sameClashes = getSameFacilityOverlaps(draft, others);
+        const adminClashes = sameClashes.filter(b => isAdminBooking(b));
+        const userClashes  = sameClashes.filter(b => !isAdminBooking(b));
+        const crossClashes = getCrossFacilityOverlaps(draft, others).filter(b => !isAdminBooking(b));
+        const facName = FACILITIES.find(f=>f.id===row.facility_id)?.name || row.facility_id;
+        return (
+          <div style={{display:"flex",flexDirection:"column",gap:6}}>
+            {adminClashes.length > 0 && (
+              <div style={{background:"#fef2f2",border:"1px solid #fca5a5",borderRadius:8,padding:"10px 12px"}}>
+                <div style={{fontWeight:700,fontSize:12,color:"#b91c1c",marginBottom:4}}>🚫 {facName} is blocked at this time</div>
+                {adminClashes.map(b=>(
+                  <div key={b.id} style={{fontSize:12,color:"#991b1b",padding:"1px 0"}}>
+                    {fmtTime(b.start_hour)}–{fmtTime(b.start_hour+b.duration)} · {b.purpose||"Facility block"}
+                  </div>
+                ))}
+              </div>
+            )}
+            {userClashes.length > 0 && (
+              <div style={{background:"#fff7ed",border:"1px solid #fed7aa",borderRadius:8,padding:"10px 12px"}}>
+                <div style={{fontWeight:700,fontSize:12,color:"#c2410c",marginBottom:4}}>⚠ {facName} has overlapping bookings</div>
+                {userClashes.map(b=>(
+                  <div key={b.id} style={{fontSize:12,color:"#9a3412",padding:"1px 0"}}>
+                    {fmtTime(b.start_hour)}–{fmtTime(b.start_hour+b.duration)} · {b.name||b.email} · {b.purpose}
+                  </div>
+                ))}
+              </div>
+            )}
+            {crossClashes.length > 0 && (
+              <div style={{background:"#fefce8",border:"1px solid #fde68a",borderRadius:8,padding:"10px 12px"}}>
+                <div style={{fontWeight:700,fontSize:12,color:"#854d0e",marginBottom:4}}>ℹ Other facilities also booked at this time</div>
+                {crossClashes.map(b=>{
+                  const cf=FACILITIES.find(f=>f.id===b.facility_id);
+                  return (
+                    <div key={b.id} style={{fontSize:12,color:"#713f12",padding:"1px 0"}}>
+                      {cf?.name||b.facility_id} · {fmtTime(b.start_hour)}–{fmtTime(b.start_hour+b.duration)} · {b.name||b.email}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {sameClashes.length === 0 && (
+              <div style={{fontSize:12,color:"#16a34a",display:"flex",alignItems:"center",gap:5}}>
+                <span style={{width:7,height:7,borderRadius:"50%",background:"#22c55e",display:"inline-block"}}/>
+                {facName} is available {fmtTime(row.start_hour)}–{fmtTime(row.start_hour+row.duration)} on {fmtDate(row.date)}
+              </div>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -494,7 +587,9 @@ function BookingRow({ row, idx, onChange, onRemove, isOnly, isAdmin, isEditing, 
 // ─── Cart Modal ───────────────────────────────────────────────────────────────
 function CartModal({ cart, setCart, onClose, onSubmit, openNew, cartIdsSet }) {
   const [editingDraft, setEditingDraft] = useState(null); // {gi, di, draft}
-  const totalCount = cart.reduce((s,i)=>s+i.drafts.length,0);
+  const totalNew  = cart.filter(i=>!i.isEdit&&!i.isMultiEdit).reduce((s,i)=>s+i.drafts.length,0);
+  const totalEdits = cart.filter(i=>i.isEdit||i.isMultiEdit).reduce((s,i)=>s+i.drafts.length,0);
+  const totalCount = totalNew + totalEdits;
 
   function removeDraft(gi, di) {
     setCart(prev => prev.map((item,i) => {
@@ -545,17 +640,22 @@ function CartModal({ cart, setCart, onClose, onSubmit, openNew, cartIdsSet }) {
         ? <div style={{textAlign:'center',padding:'40px 0',color:'#94a3b8',fontSize:14}}>Your cart is empty.</div>
         : (
           <>
-            <div style={{fontSize:13,color:'#64748b',marginBottom:12}}>{totalCount} booking{totalCount>1?'s':''} ready to submit.</div>
+            <div style={{fontSize:13,color:'#64748b',marginBottom:12}}>
+              {[totalNew>0&&`${totalNew} new booking${totalNew>1?'s':''}`, totalEdits>0&&`${totalEdits} edit${totalEdits>1?'s':''}`].filter(Boolean).join(' · ')} ready to submit.
+            </div>
             <div style={{flex:1,overflowY:'auto',maxHeight:'55vh',display:'flex',flexDirection:'column',gap:10,paddingRight:2}}>
               {cart.map((item,gi)=>{
                 const groups = groupDrafts(item.drafts);
                 return (
                   <div key={gi} style={{border:'1.5px solid #e2e8f0',borderRadius:12,overflow:'hidden'}}>
-                    <div style={{background:'#f8fafc',padding:'10px 14px',display:'flex',alignItems:'center',borderBottom:'1px solid #e2e8f0'}}>
-                      <div style={{display:'flex',alignItems:'center',gap:8,flex:1}}>
+                    <div style={{background:item.isEdit||item.isMultiEdit?'#eff6ff':'#f8fafc',padding:'10px 14px',display:'flex',alignItems:'center',borderBottom:'1px solid #e2e8f0'}}>
+                      <div style={{display:'flex',alignItems:'center',gap:8,flex:1,flexWrap:'wrap'}}>
                         <EmailChip email={item.email}/>
                         <span style={{fontSize:13,fontWeight:600,color:'#0f172a'}}>{item.name}</span>
-                        <span style={{fontSize:12,color:'#94a3b8'}}>· {item.drafts.length} booking{item.drafts.length>1?'s':''}</span>
+                        {(item.isEdit||item.isMultiEdit)
+                          ? <span style={{fontSize:11,fontWeight:700,color:'#1d4ed8',background:'#dbeafe',border:'1px solid #93c5fd',borderRadius:4,padding:'1px 7px'}}>✏ edit</span>
+                          : <span style={{fontSize:12,color:'#94a3b8'}}>· {item.drafts.length} booking{item.drafts.length>1?'s':''}</span>
+                        }
                       </div>
                     </div>
                     {groups.map((g,gi2)=>{
@@ -625,7 +725,9 @@ function CartModal({ cart, setCart, onClose, onSubmit, openNew, cartIdsSet }) {
               <button onClick={()=>setCart([])} style={S.btn({border:'1.5px solid #f43f5e',background:'#fff',color:'#f43f5e'})}>Clear All</button>
               <div style={{display:'flex',gap:10}}>
                 <button onClick={()=>{onClose();openNew(todayKey(),9,1);}} style={S.btn({border:'1.5px solid #e2e8f0',background:'#fff',color:'#475569'})}>+ Add More</button>
-                <button onClick={onSubmit} style={S.btn({background:'#2d4a1e',color:'#fff'})}>✓ Submit All Bookings</button>
+                <button onClick={onSubmit} style={S.btn({background:'#2d4a1e',color:'#fff'})}>
+                  ✓ {totalEdits>0&&totalNew===0 ? "Save All Edits" : totalEdits>0 ? "Submit All" : "Submit All Bookings"}
+                </button>
               </div>
             </div>
           </>
@@ -678,13 +780,14 @@ function InlineDraftEditor({ draft, onSave, onCancel }) {
   );
 }
 
-function DeleteCartModal({ deleteQueue, setDeleteQueue, onClose, onSubmit, isAdmin }) {
+function DeleteCartModal({ deleteQueue, setDeleteQueue, onClose, onSubmit, isAdmin, silentMode=false }) {
   const [adminNote, setAdminNote] = useState('');
+  const [skipEmail, setSkipEmail] = useState(false);
   return (
     <div style={{display:'flex',flexDirection:'column',gap:0,height:'100%'}}>
       <div style={{background:'#fef2f2',border:'1px solid #fecaca',borderRadius:10,padding:'12px 16px',marginBottom:14}}>
         <div style={{fontWeight:700,fontSize:14,color:'#7f1d1d',marginBottom:4}}>🗑 Removal Queue</div>
-        <div style={{fontSize:13,color:'#991b1b'}}>Review the bookings below before permanently removing them. A notification email will be sent to each booker.</div>
+        <div style={{fontSize:13,color:'#991b1b'}}>Review the bookings below before permanently removing them.</div>
       </div>
       <div style={{flex:1,overflowY:'auto',maxHeight:'45vh',display:'flex',flexDirection:'column',gap:6,paddingRight:2,marginBottom:12}}>
         {deleteQueue.map((b,i)=>{
@@ -703,16 +806,20 @@ function DeleteCartModal({ deleteQueue, setDeleteQueue, onClose, onSubmit, isAdm
         })}
       </div>
       {isAdmin && (
-        <div style={{marginBottom:12}}>
+        <div style={{marginBottom:12,display:'flex',flexDirection:'column',gap:8}}>
           <label style={S.lbl}>Admin Note (optional — included in email)</label>
           <textarea style={{...S.inp,resize:'vertical',minHeight:52,fontSize:13}} value={adminNote} onChange={e=>setAdminNote(e.target.value)} placeholder="Reason for removal..."/>
+          <label style={{display:'flex',alignItems:'center',gap:8,cursor:silentMode?'default':'pointer',fontSize:13,color:silentMode?'#94a3b8':'#475569'}}>
+            <input type="checkbox" checked={silentMode||skipEmail} onChange={e=>!silentMode&&setSkipEmail(e.target.checked)} disabled={silentMode} style={{width:15,height:15,accentColor:'#0f172a'}}/>
+            {silentMode?"Silent mode: no email will be sent":"Remove without notifying bookers by email"}
+          </label>
         </div>
       )}
       <div style={{display:'flex',gap:10,justifyContent:'space-between',paddingTop:10,borderTop:'1px solid #f1f5f9',flexShrink:0}}>
         <button onClick={()=>setDeleteQueue([])} style={S.btn({border:'1.5px solid #e2e8f0',background:'#fff',color:'#94a3b8'})}>Clear Queue</button>
         <div style={{display:'flex',gap:10}}>
           <button onClick={onClose} style={S.btn({border:'1.5px solid #e2e8f0',background:'#fff',color:'#475569'})}>Cancel</button>
-          <button onClick={()=>onSubmit(adminNote)} style={S.btn({background:'#7f1d1d',color:'#fff'})}>
+          <button onClick={()=>onSubmit(adminNote,silentMode||skipEmail)} style={S.btn({background:'#7f1d1d',color:'#fff'})}>
             🗑 Confirm Removal ({deleteQueue.length})
           </button>
         </div>
@@ -744,7 +851,7 @@ function MultiEditForm({ bookings: srcBookings, onAddToCart, onClose, allBooking
       start_hour:  newHour,
       duration:    newDuration,
       date:        shiftToNewDow(b.date, newDow),
-      status:      "pending", // re-submit for approval
+      status:      "pending_amua", // re-submit for approval
       updated_at:  new Date().toISOString(),
     }));
     // Basic overlap check
@@ -815,11 +922,7 @@ function BookingForm({ booking, allBookings, onSave, onAddToCart, onClose, isAdm
   const isEditing  = !!booking?.id && !booking?._multiEdit;
   const isMultiEdit = !!booking?._multiEdit;
 
-  // ── Multi-edit mode: simple time/weekday change across multiple bookings ──
-  if (isMultiEdit) {
-    return <MultiEditForm bookings={booking._bookings} onAddToCart={onAddToCart} onClose={onClose} allBookings={allBookings}/>;
-  }
-
+  // All hooks must be declared before any conditional return
   function makeBlankRow(overrides={}) {
     return {
       facility_id: FACILITIES[0].id,
@@ -828,17 +931,17 @@ function BookingForm({ booking, allBookings, onSave, onAddToCart, onClose, isAdm
       duration:    1,
       purpose:     "",
       notes:       "",
-      status:      "pending",
+      status:      "pending_amua",
       recur:       { mode:"none", weeks:4, until:"" },
       ...overrides,
     };
   }
 
   const initRows = isEditing
-    ? [{ facility_id:booking.facility_id, date:booking.date, start_hour:booking.start_hour,
+    ? [{ id:booking.id, facility_id:booking.facility_id, date:booking.date, start_hour:booking.start_hour,
          duration:booking.duration, purpose:booking.purpose, notes:booking.notes||"",
          status:booking.status, recur:booking.recur||{mode:"none",weeks:4,until:""} }]
-    : [makeBlankRow(booking ? { facility_id:booking.facility_id||FACILITIES[0].id,
+    : [makeBlankRow(booking && !isMultiEdit ? { facility_id:booking.facility_id||FACILITIES[0].id,
         date:booking.date||todayKey(), start_hour:booking.start_hour||9, duration:booking.duration||1 } : {})];
 
   const [name,  setName]  = useState(booking?.name  || "");
@@ -846,6 +949,11 @@ function BookingForm({ booking, allBookings, onSave, onAddToCart, onClose, isAdm
   const [rows,  setRows]  = useState(initRows);
   const [error, setError] = useState("");
   const [warn,  setWarn]  = useState(null);
+
+  // ── Multi-edit mode: simple time/weekday change across multiple bookings ──
+  if (isMultiEdit) {
+    return <MultiEditForm bookings={booking._bookings} onAddToCart={onAddToCart} onClose={onClose} allBookings={allBookings}/>;
+  }
 
   function updateRow(idx, upd) { setRows(rs=>rs.map((r,i)=>i===idx?upd:r)); }
   function addRow()   { setRows(rs=>[...rs, makeBlankRow()]); }
@@ -897,9 +1005,6 @@ function BookingForm({ booking, allBookings, onSave, onAddToCart, onClose, isAdm
     const cross   = drafts.flatMap(d=>getCrossFacilityOverlaps(d,others));
     if (cross.length > 0 && !warn?.crossDismissed) { setWarn({type:"cross",list:[...new Map(cross.map(x=>[x.id,x])).values()],drafts}); return; }
     setWarn(null);
-    // For edits: call onSave directly
-    if (isEditing) { onSave(drafts, name, email); return; }
-    // For new bookings: add to cart
     onAddToCart(drafts, name, email);
   }
 
@@ -909,12 +1014,12 @@ function BookingForm({ booking, allBookings, onSave, onAddToCart, onClose, isAdm
     const cross  = drafts.flatMap(d=>getCrossFacilityOverlaps(d,others));
     if (cross.length>0) { setWarn({type:"cross",list:[...new Map(cross.map(x=>[x.id,x])).values()],drafts,sameDismissed:true}); return; }
     setWarn(null);
-    isEditing ? onSave(drafts, name, email) : onAddToCart(drafts, name, email);
+    onAddToCart(drafts, name, email);
   }
   function proceedCross() {
     const drafts = warn?.drafts; if(!drafts) return;
     setWarn(null);
-    isEditing ? onSave(drafts, name, email) : onAddToCart(drafts, name, email);
+    onAddToCart(drafts, name, email);
   }
 
   // Overlap warnings
@@ -955,8 +1060,8 @@ function BookingForm({ booking, allBookings, onSave, onAddToCart, onClose, isAdm
 
       <div style={{display:"flex",gap:10,justifyContent:"flex-end",paddingTop:4}}>
         <button onClick={onClose} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#475569"})}>Cancel</button>
-        <button onClick={handleAddToCart} style={S.btn({background: isEditing?"#0f172a":"#2d4a1e",color:"#fff"})}>
-          {isEditing ? "Save Changes" : "➕ Add to Cart"}
+        <button onClick={handleAddToCart} style={S.btn({background:"#2d4a1e",color:"#fff"})}>
+          {isEditing ? "✏ Add Edit to Cart" : "➕ Add to Cart"}
         </button>
       </div>
     </div>
@@ -964,31 +1069,46 @@ function BookingForm({ booking, allBookings, onSave, onAddToCart, onClose, isAdm
 }
 
 // ─── Booking Detail ───────────────────────────────────────────────────────────
-function BookingDetail({booking,onEdit,onClose,onCancel,isAdmin,onStatusChange,loggedInEmail}) {
+function BookingDetail({booking,onEdit,onClose,onCancel,isAdmin,onStatusChange,loggedInEmail,allClashes=[]}) {
   const f=FACILITIES.find(x=>x.id===booking.facility_id);
   const m=STATUS_META[booking.status]||STATUS_META.pending;
   const isPast = booking.date < todayKey();
   const isOwn  = booking.email?.toLowerCase() === loggedInEmail?.toLowerCase();
+  const clashingAdminBks = booking.status==="clash"
+    ? allClashes.filter(c=>c.user.id===booking.id).map(c=>c.admin)
+    : [];
   return (
     <div style={{display:"flex",flexDirection:"column",gap:16}}>
-      <div style={{background:m.bg,border:`1px solid ${m.border}`,borderRadius:10,padding:"12px 16px",display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
-        {isAdmin ? (
-          <label style={{display:"inline-flex",alignItems:"center",gap:8,margin:0}}>
-            <span style={{fontSize:12,fontWeight:600,color:m.text,textTransform:"uppercase",letterSpacing:"0.05em"}}>Status</span>
-            <select
-              value={booking.status}
-              onChange={e=>onStatusChange(e.target.value)}
-              style={{padding:"4px 10px",borderRadius:8,border:`1.5px solid ${m.border}`,background:m.bg,color:m.text,fontSize:13,fontWeight:600,cursor:"pointer",outline:"none"}}
-            >
-              {Object.entries(STATUS_META).map(([key,meta])=>(
-                <option key={key} value={key}>{meta.label}</option>
-              ))}
-            </select>
-          </label>
-        ) : (
-          <Badge status={booking.status}/>
+      <div style={{background:m.bg,border:`1px solid ${m.border}`,borderRadius:10,padding:"12px 16px"}}>
+        <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+          {isAdmin ? (
+            <label style={{display:"inline-flex",alignItems:"center",gap:8,margin:0}}>
+              <span style={{fontSize:12,fontWeight:600,color:m.text,textTransform:"uppercase",letterSpacing:"0.05em"}}>Status</span>
+              <select
+                value={booking.status}
+                onChange={e=>onStatusChange(e.target.value)}
+                style={{padding:"4px 10px",borderRadius:8,border:`1.5px solid ${m.border}`,background:m.bg,color:m.text,fontSize:13,fontWeight:600,cursor:"pointer",outline:"none"}}
+              >
+                {Object.entries(STATUS_META).map(([key,meta])=>(
+                  <option key={key} value={key}>{meta.label}</option>
+                ))}
+              </select>
+            </label>
+          ) : (
+            <Badge status={booking.status}/>
+          )}
+          {REVIEW_STATUSES.has(booking.status)&&<p style={{margin:0,fontSize:13,color:m.text}}>Awaiting admin review.</p>}
+        </div>
+        {booking.status==="clash"&&clashingAdminBks.length>0&&(
+          <div style={{marginTop:10}}>
+            <div style={{fontSize:12,fontWeight:700,color:"#92400e",marginBottom:6}}>Overlapping reservations:</div>
+            {clashingAdminBks.map((ab,i)=>(
+              <div key={i} style={{fontSize:12,color:"#0f172a",padding:"5px 8px",background:"#fff8e1",borderRadius:6,marginBottom:4,border:"1px solid #fcd34d"}}>
+                <strong>{ab.purpose}</strong> — {fmtDate(ab.date)}, {fmtTime(ab.start_hour)}–{fmtTime(ab.start_hour+ab.duration)}
+              </div>
+            ))}
+          </div>
         )}
-        {booking.status==="pending"&&<p style={{margin:0,fontSize:13,color:m.text}}>Awaiting admin approval.</p>}
       </div>
       {isPast&&<div style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:"8px 12px",fontSize:12,color:"#64748b",display:"flex",alignItems:"center",gap:6}}>🔒 Past booking — {isAdmin?"admin can delete":"read-only"}</div>}
       <div><EmailChip email={booking.email}/></div>
@@ -1000,13 +1120,43 @@ function BookingDetail({booking,onEdit,onClose,onCancel,isAdmin,onStatusChange,l
         ["Purpose",booking.purpose],
         ["Booked by",booking.name],
         ["Email",booking.email],
-        booking.notes&&["Notes",booking.notes],
-      ].filter(Boolean).map(([label,value])=>(
+        ].filter(Boolean).map(([label,value])=>(
         <div key={label} style={{display:"flex",gap:12}}>
           <span style={{minWidth:90,fontSize:12,fontWeight:600,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.05em",paddingTop:1}}>{label}</span>
           <span style={{fontSize:14,color:"#0f172a"}}>{value}</span>
         </div>
       ))}
+      {(()=>{
+        if(!booking.notes) return null;
+        // Parse CPSA submission lines: [CPSA <date>] Ref <ref> · <url>
+        const cpsaRe=/\[CPSA ([^\]]+)\]\s*Ref\s+(\S+)\s*·\s*(https?:\/\/\S+)/g;
+        const cpsaLines=[];
+        let m;
+        while((m=cpsaRe.exec(booking.notes))!==null) cpsaLines.push({date:m[1],ref:m[2],url:m[3]});
+        const remainingNotes=booking.notes.replace(/\[CPSA [^\]]+\]\s*Ref\s+\S+\s*·\s*https?:\/\/\S+/g,"").trim();
+        if(!cpsaLines.length&&!remainingNotes) return null;
+        return <>
+          {cpsaLines.map((c,i)=>(
+            <div key={i} style={{background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:8,padding:"10px 14px",display:"flex",flexDirection:"column",gap:6}}>
+              <div style={{fontSize:11,fontWeight:700,color:"#0369a1",textTransform:"uppercase",letterSpacing:"0.05em"}}>CPSA Submission</div>
+              <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                <span style={{fontSize:12,background:"#0891b2",color:"#fff",borderRadius:6,padding:"2px 8px",fontWeight:700}}>{c.ref}</span>
+                <span style={{fontSize:12,color:"#64748b"}}>{c.date}</span>
+                <a href={c.url} target="_blank" rel="noopener noreferrer"
+                  style={{fontSize:12,background:"#0ea5e9",color:"#fff",borderRadius:6,padding:"3px 10px",textDecoration:"none",fontWeight:600,marginLeft:"auto"}}>
+                  View / Edit on Sporty ↗
+                </a>
+              </div>
+            </div>
+          ))}
+          {remainingNotes&&(
+            <div style={{display:"flex",gap:12}}>
+              <span style={{minWidth:90,fontSize:12,fontWeight:600,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.05em",paddingTop:1}}>Notes</span>
+              <span style={{fontSize:14,color:"#0f172a",whiteSpace:"pre-wrap"}}>{remainingNotes}</span>
+            </div>
+          )}
+        </>;
+      })()}
       <div style={{display:"flex",gap:8,flexWrap:"wrap",paddingTop:8,borderTop:"1px solid #f1f5f9"}}>
         {isAdmin&&<>
           {!isPast&&<button onClick={onEdit} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#0f172a"})}>Edit</button>}
@@ -1161,18 +1311,20 @@ function WeekCalendar({ bookings, onNewBooking, onBookingClick, selectedFacility
                       const stk=getStackStyle(b,dayBkgs);
                       const ec=emailColor(b.email);
                       const isAdmin_bk = isAdminBooking(b);
-                      const bkBg = isAdmin_bk ? "#94a3b8" : (fac?.color||"#4a90d9");
-                      const bkBorderLeft = isAdmin_bk ? undefined : (deleteIds.has(b.id)||cartSourceIds.has(b.id) ? undefined : `4px solid ${ec}`);
+                      const isCpsaConfirmed = b.status==="cpsa_confirmed"||b.status==="cpsa_review_needed";
+                      const bkBg = isAdmin_bk ? "#94a3b8" : isCpsaConfirmed ? "#78909c" : (fac?.color||"#4a90d9");
+                      const bkBorderLeft = isAdmin_bk ? undefined : isCpsaConfirmed ? "4px solid #0891b2" : (deleteIds.has(b.id)||cartSourceIds.has(b.id) ? undefined : `4px solid ${ec}`);
                       return (
                         <div key={b.id}
                           onClick={e=>{ e.stopPropagation(); onBookingClick(b); }}
                           onMouseDown={e=>e.stopPropagation()}
                           title={`${b.name} – ${fac?.name}`}
-                          style={{ position:"absolute", top:(b.start_hour-CAL_START)*HOUR_H, height:Math.max(b.duration*HOUR_H-2,20), background:bkBg, borderRadius:6, padding:"3px 6px", cursor:"pointer", overflow:"hidden", opacity:b.status==="pending"?0.75:1, border:deleteIds.has(b.id)?"2.5px solid #ef4444":cartSourceIds.has(b.id)?"2.5px solid #f59e0b":b.status==="pending"?"2px dashed rgba(255,255,255,0.6)":b.status==="rejected"?"2px solid rgba(244,63,94,0.8)":"none", boxShadow:deleteIds.has(b.id)?"0 0 0 3px rgba(239,68,68,0.25)":cartSourceIds.has(b.id)?"0 0 0 3px rgba(245,158,11,0.25)":"0 1px 4px rgba(0,0,0,0.15)", zIndex:2, borderLeft:bkBorderLeft, ...stk }}>
+                          style={{ position:"absolute", top:(b.start_hour-CAL_START)*HOUR_H, height:Math.max(b.duration*HOUR_H-2,20), background:bkBg, borderRadius:6, padding:"3px 6px", cursor:"pointer", overflow:"hidden", opacity:REVIEW_STATUSES.has(b.status)?0.75:1, border:deleteIds.has(b.id)?"2.5px solid #ef4444":cartSourceIds.has(b.id)?"2.5px solid #f59e0b":b.status==="clash"?"2px dashed #d97706":REVIEW_STATUSES.has(b.status)?"2px dashed rgba(255,255,255,0.6)":b.status==="rejected"?"2px solid rgba(244,63,94,0.8)":"none", boxShadow:deleteIds.has(b.id)?"0 0 0 3px rgba(239,68,68,0.25)":cartSourceIds.has(b.id)?"0 0 0 3px rgba(245,158,11,0.25)":"0 1px 4px rgba(0,0,0,0.15)", zIndex:2, borderLeft:bkBorderLeft, ...stk }}>
                           <div style={{ fontSize:11, fontWeight:700, color:"#fff", lineHeight:1.3, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{b.purpose||b.name}</div>
+                          {b.duration*HOUR_H>22&&!isAdmin_bk&&<div style={{ fontSize:9, color:"rgba(255,255,255,0.8)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{b.name}</div>}
                           {b.duration*HOUR_H>28&&<div style={{display:"flex",alignItems:"center",gap:3,marginTop:1}}>
                             <span style={{fontSize:9,fontWeight:700,color:"rgba(255,255,255,0.9)",background:"rgba(0,0,0,0.2)",borderRadius:3,padding:"1px 4px",whiteSpace:"nowrap"}}>
-                              {b.status==="approved"?"✓ Approved":b.status==="pending"?"⏳ Pending":b.status==="rejected"?"✗ Rejected":"Cancelled"}
+                              {STATUS_META[b.status]?.label || "Unknown"}
                             </span>
                           </div>}
                           {b.duration*HOUR_H>44&&<div style={{ fontSize:10, color:"rgba(255,255,255,0.85)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{fac?.name}</div>}
@@ -1237,8 +1389,20 @@ function MonthCalendar({ bookings, onBookingClick, onNewBooking, selectedFacilit
   const allSelDeletable = selIds.size > 0 && selectedBookings.every(canDelete);
 
   function StatusDot({status}) {
-    const cfg={approved:{c:"#22c55e",l:"✓"},rejected:{c:"#f43f5e",l:"✗"},cancelled:{c:"#94a3b8",l:"—"},pending:{c:"#f59e0b",l:"⏳"}};
-    const {c,l}=cfg[status]||cfg.pending;
+    const cfg={
+      approved:           {c:"#22c55e",l:"✓"},
+      cpsa_confirmed:     {c:"#0891b2",l:"✓"},
+      cpsa_review_needed: {c:"#ca8a04",l:"?"},
+      rejected:           {c:"#f43f5e",l:"✗"},
+      cancelled:          {c:"#94a3b8",l:"—"},
+      clash:              {c:"#d97706",l:"!"},
+      pending_amua:       {c:"#f59e0b",l:"⏳"},
+      queued_cpsa:        {c:"#3b82f6",l:"→"},
+      amua_submit:        {c:"#3b82f6",l:"→"},
+      pending_cpsa:       {c:"#0ea5e9",l:"⏳"},
+      pending:            {c:"#f59e0b",l:"⏳"},
+    };
+    const {c,l}=cfg[status]||{c:"#94a3b8",l:"?"};
     return <span style={{fontSize:8,fontWeight:800,background:c,color:"#fff",borderRadius:3,padding:"1px 3px",lineHeight:"14px",flexShrink:0}}>{l}</span>;
   }
 
@@ -1289,7 +1453,8 @@ function MonthCalendar({ bookings, onBookingClick, onNewBooking, selectedFacilit
         {cells.map((d,ci)=>{
           if (!d) return <div key={"p"+ci} style={{ minHeight:80, background:"#fafafa", borderRadius:6 }}/>;
           const dk=dateKey(d), isToday=dk===today, isPast=dk<today;
-          const dayBkgs=visible.filter(b=>b.date===dk);
+          const dayBkgs=visible.filter(b=>b.date===dk)
+            .sort((a,b)=>{ const ai=isAdminBooking(a)?1:0,bi=isAdminBooking(b)?1:0; return ai-bi||a.start_hour-b.start_hour; });
           const hasSelected=dayBkgs.some(b=>selIds.has(b.id));
           const cellBg = hasSelected?"#eef2ff":isToday?"#f0f9ff":"#fff";
           const cellBorder = hasSelected?"1.5px solid #6366f1":isToday?"1.5px solid #4a90d9":"1px solid #f1f5f9";
@@ -1308,13 +1473,14 @@ function MonthCalendar({ bookings, onBookingClick, onNewBooking, selectedFacilit
                   const inDelete = deleteIds.has(b.id);
                   const inCart   = cartSourceIds.has(b.id);
                   const isAdmin_bk = isAdminBooking(b);
-                  const chipBg = isSel?"#6366f1": isAdmin_bk?"#94a3b8" : (fac?.color||"#4a90d9");
+                  const isCpsaConfirmed = b.status==="cpsa_confirmed"||b.status==="cpsa_review_needed";
+                  const chipBg = isSel?"#6366f1": isAdmin_bk?"#94a3b8" : isCpsaConfirmed?"#78909c" : (fac?.color||"#4a90d9");
                   const chipOutline = inDelete?"2.5px solid #ef4444":inCart?"2.5px solid #f59e0b":isSel?"2px solid #4f46e5":"none";
-                  const chipLeft = inDelete||inCart||isAdmin_bk?"none":"3px solid "+ec;
+                  const chipLeft = inDelete||inCart||isAdmin_bk?"none": isCpsaConfirmed?"3px solid #0891b2" :"3px solid "+ec;
                   return (
                     <div key={b.id}
                       onClick={e=>{ e.stopPropagation(); if(selMode) toggleSel(b.id); else onBookingClick(b); }}
-                      style={{ background:chipBg, borderRadius:4, padding:"2px 4px", fontSize:10, fontWeight:700, color:"#fff", overflow:"hidden", whiteSpace:"nowrap", borderLeft:chipLeft, outline:chipOutline, opacity:b.status==="pending"?0.75:1, cursor:"pointer", display:"flex", alignItems:"center", gap:3 }}>
+                      style={{ background:chipBg, borderRadius:4, padding:"2px 4px", fontSize:10, fontWeight:700, color:"#fff", overflow:"hidden", whiteSpace:"nowrap", borderLeft:chipLeft, outline:chipOutline, opacity:REVIEW_STATUSES.has(b.status)?0.75:1, cursor:"pointer", display:"flex", alignItems:"center", gap:3 }}>
                       <StatusDot status={b.status}/>
                       <span style={{overflow:"hidden",textOverflow:"ellipsis",flex:1}}>{fmtTime(b.start_hour)} {b.purpose||b.name}</span>
                     </div>
@@ -1339,50 +1505,738 @@ function MonthCalendar({ bookings, onBookingClick, onNewBooking, selectedFacilit
   );
 }
 
-function SummaryTab({ bookings, loggedInEmail }) {
+function AboutTab() {
+  const card = { background:"#fff", border:"1px solid #e2e8f0", borderRadius:12, padding:"20px 24px", marginBottom:16 };
+  const h2 = { margin:"0 0 12px", fontSize:16, fontWeight:700, color:"#0f172a" };
+  const step = { display:"flex", gap:12, alignItems:"flex-start", marginBottom:12 };
+  const stepNum = (col) => ({
+    width:28, height:28, borderRadius:"50%", background:col, color:"#fff",
+    fontWeight:700, fontSize:13, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0
+  });
+  const arrow = { textAlign:"center", color:"#94a3b8", fontSize:18, margin:"4px 0 4px 14px" };
+  const link = { color:"#2563eb", textDecoration:"underline" };
+  return (
+    <div style={{maxWidth:720,margin:"0 auto"}}>
+      <div style={card}>
+        <h2 style={h2}>How to Book</h2>
+        <p style={{margin:"0 0 12px",fontSize:13,color:"#475569"}}>
+          Bookings at Cornwall Park are managed through CPSA (Cornwall Park Sport Association).
+          AMUA (Auckland Mixed Ultimate Association) acts as a facilitating body and can submit booking requests on your behalf.
+          You can also submit directly using the{" "}
+          <a href="https://www.cornwallpark.co.nz/sport/sport-field-hire" target="_blank" rel="noopener noreferrer" style={link}>CPSA field hire form</a>.
+        </p>
+        <h3 style={{margin:"12px 0 8px",fontSize:14,fontWeight:700,color:"#0f172a"}}>Approval Process</h3>
+        <div style={step}>
+          <div style={stepNum("#6366f1")}>1</div>
+          <div>
+            <div style={{fontWeight:600,fontSize:14,color:"#0f172a"}}>Submit booking request</div>
+            <div style={{fontSize:13,color:"#475569",marginTop:2}}>Fill in the booking form with your group name, facility, date, time, and purpose. Your request is saved with status <Badge status="pending_amua"/>.</div>
+          </div>
+        </div>
+        <div style={arrow}>↓</div>
+        <div style={step}>
+          <div style={stepNum("#f59e0b")}>2</div>
+          <div>
+            <div style={{fontWeight:600,fontSize:14,color:"#0f172a"}}>AMUA reviews your request</div>
+            <div style={{fontSize:13,color:"#475569",marginTop:2}}>AMUA checks availability and eligibility. If accepted, the booking is queued for submission to CPSA — status becomes <Badge status="queued_cpsa"/>. If there is a conflict or issue, AMUA may reject or request revision.</div>
+          </div>
+        </div>
+        <div style={arrow}>↓</div>
+        <div style={step}>
+          <div style={stepNum("#0ea5e9")}>3</div>
+          <div>
+            <div style={{fontWeight:600,fontSize:14,color:"#0f172a"}}>AMUA submits to CPSA</div>
+            <div style={{fontSize:13,color:"#475569",marginTop:2}}>AMUA lodges the request with CPSA using the{" "}
+              <a href="https://www.cornwallpark.co.nz/sport/sport-field-hire" target="_blank" rel="noopener noreferrer" style={link}>CPSA field hire form</a>.
+              Status becomes <Badge status="pending_cpsa"/>. You can also contact CPSA directly — AMUA can co-sign as the responsible party.
+            </div>
+          </div>
+        </div>
+        <div style={arrow}>↓</div>
+        <div style={step}>
+          <div style={stepNum("#22c55e")}>4</div>
+          <div>
+            <div style={{fontWeight:600,fontSize:14,color:"#0f172a"}}>CPSA decision</div>
+            <div style={{fontSize:13,color:"#475569",marginTop:2}}>CPSA reviews and either approves or rejects. An <Badge status="approved"/> booking is confirmed and you will be notified. A rejected booking will show as <Badge status="rejected"/>.</div>
+          </div>
+        </div>
+      </div>
+
+      <div style={card}>
+        <h2 style={h2}>About Admin Bookings</h2>
+        <p style={{margin:"0 0 8px",fontSize:13,color:"#475569"}}>
+          Bookings shown with a grey/admin tag are imported from the{" "}
+          <a href="https://www.carltonjuniorsrugby.co.nz/venue-hire-fields-1/field-calendar" target="_blank" rel="noopener noreferrer" style={link}>Carlton Juniors Rugby field calendar</a>.
+          These represent existing field bookings and block-outs that may affect availability.
+        </p>
+        <p style={{margin:0,fontSize:13,color:"#94a3b8"}}>
+          Note: the CJR calendar covers sports field bookings only. It does <strong>not</strong> include availability of function rooms or meeting rooms.
+        </p>
+      </div>
+
+      <div style={card}>
+        <h2 style={h2}>Hiring Rates</h2>
+        <p style={{margin:"0 0 12px",fontSize:13,color:"#475569"}}>Rates are set per facility and time of day. Contact AMUA for current rates.</p>
+        <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
+          {FACILITIES.map(f=>(
+            <div key={f.id} style={{display:"flex",alignItems:"center",gap:8,background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:"10px 14px",flex:"1 1 180px"}}>
+              <span style={{width:10,height:10,borderRadius:"50%",background:f.color,display:"inline-block",flexShrink:0}}/>
+              <span style={{fontWeight:600,fontSize:13,color:"#0f172a"}}>{f.name}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={card}>
+        <h2 style={h2}>Status Guide</h2>
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          {Object.entries(STATUS_META).filter(([k])=>!["pending","amua_submit"].includes(k)).map(([k,v])=>(
+            <div key={k} style={{display:"flex",alignItems:"center",gap:10,padding:"6px 10px",background:v.bg,border:`1px solid ${v.border}`,borderRadius:8}}>
+              <span style={{width:8,height:8,borderRadius:"50%",background:v.dot,flexShrink:0}}/>
+              <span style={{fontWeight:600,fontSize:13,color:v.text}}>{v.label}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function buildOverlapPatternMap(active, facSensitive) {
+  function dayName(d){return["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][new Date(d+"T12:00").getDay()];}
+  function timesOverlap(b1,b2){return b1.start_hour<b2.start_hour+b2.duration&&b2.start_hour<b1.start_hour+b1.duration;}
+  const patternMap={};
+  active.forEach(b=>{
+    const email=b.email.toLowerCase();
+    const dn=dayName(b.date);
+    if(!patternMap[email]) patternMap[email]={};
+    const emailPats=patternMap[email];
+    let matchedPk=null;
+    for(const [pk,bkgs] of Object.entries(emailPats)){
+      const parts=pk.split("_");
+      const pkDn=facSensitive?parts[1]:parts[0];
+      const pkFac=facSensitive?parts[0]:null;
+      if(pkDn!==dn) continue;
+      if(facSensitive&&pkFac!==b.facility_id) continue;
+      if(bkgs.some(eb=>timesOverlap(eb,b))){matchedPk=pk;break;}
+    }
+    if(matchedPk){emailPats[matchedPk].push(b);}
+    else{
+      const pk=facSensitive?`${b.facility_id}_${dn}_${b.start_hour}`:`${dn}_${b.start_hour}`;
+      if(!emailPats[pk]) emailPats[pk]=[];
+      emailPats[pk].push(b);
+    }
+  });
+  return patternMap;
+}
+
+function PatternModal({ email, name, pk, bkgs, isAdmin, canEdit: canEditProp, facilityRates, pricingMode, approxDurations, onClose, onBulkApply }) {
+  const canEdit = canEditProp !== undefined ? canEditProp : isAdmin;
+  const parts = pk.split("_");
+  const startH = parseFloat(parts[parts.length-1]);
+  const dn = parts[parts.length-2]||"";
+  const facId = parts.length>2 ? parts[0] : null;
+  const fac = facId ? FACILITIES.find(f=>f.id===facId) : null;
+
+  const [bulkTime, setBulkTime] = useState(startH);
+  const [bulkDur, setBulkDur] = useState(bkgs[0]?.duration ?? 2);
+  const [bulkFac, setBulkFac] = useState(bkgs[0]?.facility_id ?? "");
+  const [cancelFrom, setCancelFrom] = useState("");
+
+  const sorted = [...bkgs].sort((a,b)=>a.date.localeCompare(b.date));
+
+  const si = {border:"1px solid #e2e8f0",borderRadius:6,padding:"4px 8px",fontSize:13,fontFamily:"inherit",background:"#fff"};
+
+  return (
+    <Modal title={`Pattern: ${dn} ${fmtTime(startH)} — ${name}`} onClose={onClose}>
+      <div style={{fontSize:12,color:"#64748b",marginBottom:12}}>
+        {bkgs.length} booking{bkgs.length!==1?"s":""} · {email}
+        {fac && <span> · {fac.name}</span>}
+      </div>
+
+      <div style={{overflowY:"auto",maxHeight:280,marginBottom:16}}>
+        <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+          <thead>
+            <tr style={{background:"#f8fafc",borderBottom:"1px solid #e2e8f0"}}>
+              <th style={{textAlign:"left",padding:"6px 8px",fontWeight:600,color:"#64748b"}}>Date</th>
+              <th style={{textAlign:"left",padding:"6px 8px",fontWeight:600,color:"#64748b"}}>Facility</th>
+              <th style={{textAlign:"right",padding:"6px 8px",fontWeight:600,color:"#64748b"}}>Time</th>
+              <th style={{textAlign:"right",padding:"6px 8px",fontWeight:600,color:"#64748b"}}>Dur</th>
+              <th style={{textAlign:"left",padding:"6px 8px",fontWeight:600,color:"#64748b"}}>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map(b=>{
+              const f=FACILITIES.find(x=>x.id===b.facility_id);
+              const sm=STATUS_META[b.status];
+              return (
+                <tr key={b.id} style={{borderBottom:"1px solid #f1f5f9"}}>
+                  <td style={{padding:"5px 8px"}}>{fmtDate(b.date)}</td>
+                  <td style={{padding:"5px 8px"}}><span style={{fontSize:11,background:f?.color+"22",color:f?.color,borderRadius:4,padding:"1px 5px"}}>{f?.name.split("–")[0].trim()}</span></td>
+                  <td style={{padding:"5px 8px",textAlign:"right"}}>{fmtTime(b.start_hour)}</td>
+                  <td style={{padding:"5px 8px",textAlign:"right"}}>{b.duration}h</td>
+                  <td style={{padding:"5px 8px"}}><span style={{fontSize:11,background:sm?.bg,color:sm?.text,border:`1px solid ${sm?.border}`,borderRadius:4,padding:"1px 5px"}}>{sm?.label||b.status}</span></td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {(isAdmin || canEdit) && (
+        <div style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:"10px 12px"}}>
+          <div style={{fontWeight:700,fontSize:13,color:"#0f172a",marginBottom:8}}>Bulk Edit (apply to all in pattern)</div>
+          <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center",marginBottom:8}}>
+            <div style={{display:"flex",alignItems:"center",gap:5}}>
+              <span style={{fontSize:12,color:"#64748b"}}>Start time</span>
+              <input type="number" min="0" max="23" step="0.5" value={bulkTime}
+                onChange={e=>setBulkTime(parseFloat(e.target.value)||0)}
+                style={{...si,width:64}}/>
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:5}}>
+              <span style={{fontSize:12,color:"#64748b"}}>Duration</span>
+              <select value={bulkDur} onChange={e=>setBulkDur(parseFloat(e.target.value))} style={si}>
+                {DURATIONS.map(d=><option key={d.value} value={d.value}>{d.label}</option>)}
+              </select>
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:5}}>
+              <span style={{fontSize:12,color:"#64748b"}}>Facility</span>
+              <select value={bulkFac} onChange={e=>setBulkFac(e.target.value)} style={si}>
+                {FACILITIES.map(f=><option key={f.id} value={f.id}>{f.name}</option>)}
+              </select>
+            </div>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+            <span style={{fontSize:12,color:"#e11d48"}}>Cancel from date</span>
+            <input type="date" value={cancelFrom} onChange={e=>setCancelFrom(e.target.value)} style={{...si,width:140}}/>
+            <span style={{fontSize:11,color:"#94a3b8"}}>(leave blank to skip)</span>
+          </div>
+          <div style={{display:"flex",gap:8}}>
+            <button onClick={()=>{
+              onBulkApply({email,pk,bkgs:sorted,bulkTime,bulkDur,bulkFac,cancelFrom});
+              onClose();
+            }} style={S.btn({background:"#0f172a",color:"#fff",fontSize:12})}>
+              Apply to all ({sorted.filter(b=>!cancelFrom||b.date>=cancelFrom).length} bookings)
+            </button>
+            <button onClick={onClose} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#64748b",fontSize:12})}>Close</button>
+          </div>
+        </div>
+      )}
+      {!(isAdmin || canEdit) && (
+        <button onClick={onClose} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#64748b",fontSize:12})}>Close</button>
+      )}
+    </Modal>
+  );
+}
+
+function OneOffModal({ email, name, bkgs, isAdmin, onClose }) {
+  const sorted = [...bkgs].sort((a,b)=>a.date.localeCompare(b.date));
+  return (
+    <Modal title={`One-off Bookings — ${name}`} onClose={onClose}>
+      <div style={{fontSize:12,color:"#64748b",marginBottom:10}}>{sorted.length} one-off booking{sorted.length!==1?"s":""} · {email}</div>
+      <div style={{overflowY:"auto",maxHeight:360}}>
+        <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+          <thead>
+            <tr style={{background:"#f8fafc",borderBottom:"1px solid #e2e8f0"}}>
+              <th style={{textAlign:"left",padding:"6px 8px",fontWeight:600,color:"#64748b"}}>Date</th>
+              <th style={{textAlign:"left",padding:"6px 8px",fontWeight:600,color:"#64748b"}}>Facility</th>
+              <th style={{textAlign:"right",padding:"6px 8px",fontWeight:600,color:"#64748b"}}>Time</th>
+              <th style={{textAlign:"right",padding:"6px 8px",fontWeight:600,color:"#64748b"}}>Dur</th>
+              <th style={{textAlign:"left",padding:"6px 8px",fontWeight:600,color:"#64748b"}}>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map(b=>{
+              const f=FACILITIES.find(x=>x.id===b.facility_id);
+              const sm=STATUS_META[b.status];
+              return (
+                <tr key={b.id} style={{borderBottom:"1px solid #f1f5f9"}}>
+                  <td style={{padding:"5px 8px"}}>{fmtDate(b.date)}</td>
+                  <td style={{padding:"5px 8px"}}><span style={{fontSize:11,background:f?.color+"22",color:f?.color,borderRadius:4,padding:"1px 5px"}}>{f?.name.split("–")[0].trim()}</span></td>
+                  <td style={{padding:"5px 8px",textAlign:"right"}}>{fmtTime(b.start_hour)}</td>
+                  <td style={{padding:"5px 8px",textAlign:"right"}}>{b.duration}h</td>
+                  <td style={{padding:"5px 8px"}}><span style={{fontSize:11,background:sm?.bg,color:sm?.text,border:`1px solid ${sm?.border}`,borderRadius:4,padding:"1px 5px"}}>{sm?.label||b.status}</span></td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <div style={{marginTop:12}}>
+        <button onClick={onClose} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#64748b",fontSize:12})}>Close</button>
+      </div>
+    </Modal>
+  );
+}
+
+function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkApply, onClose }) {
+  const [facSensitive, setFacSensitive] = useState(false);
+  const [splitPatterns, setSplitPatterns] = useState(new Set());
+  const [patternModal, setPatternModal] = useState(null);
+  const [oneOffModalData, setOneOffModalData] = useState(null);
+
+  const active = bookings.filter(b=>["approved","cpsa_confirmed","cpsa_review_needed","pending_cpsa","queued_cpsa","pending_amua","amua_submit","pending"].includes(b.status)&&!isAdminBooking(b));
+  const patternMap = buildOverlapPatternMap(active, facSensitive);
+
+  const rows = Object.entries(patternMap).map(([email,pats])=>{
+    const nameDisplay=(Object.values(pats)[0]||[])[0]?.name||email;
+    const recurring=Object.entries(pats).filter(([,bs])=>bs.length>=2);
+    const oneOffs=Object.values(pats).filter(bs=>bs.length===1).flat();
+    const totalBkgs=Object.values(pats).reduce((s,bs)=>s+bs.length,0);
+    return {email,nameDisplay,recurring,oneOffs,totalBkgs};
+  }).sort((a,b)=>b.totalBkgs-a.totalBkgs);
+
+  const thS2={textAlign:"left",padding:"6px 8px",fontWeight:600,color:"#64748b",fontSize:12,borderBottom:"1px solid #e2e8f0"};
+  const tdS2={padding:"6px 8px",verticalAlign:"top",fontSize:13};
+
+  function renderChips(email, nameDisplay, recurring) {
+    const ec = emailColor(email);
+    const canEdit = isAdmin || email.toLowerCase() === loggedInEmail?.toLowerCase();
+    const chips = [];
+    for (const [pk, bkgs] of recurring) {
+      const splitKey = `${email}::${pk}`;
+      const isSplit = splitPatterns.has(splitKey);
+      const startHours = [...new Set(bkgs.map(b=>b.start_hour))];
+      const isMixed = startHours.length > 1;
+      if (isSplit && isMixed) {
+        for (const sh of startHours.sort((a,b)=>a-b)) {
+          const subBkgs = bkgs.filter(b=>b.start_hour===sh);
+          const parts=pk.split("_"); const dn=parts[parts.length-2]||"";
+          const durs=[...new Set(subBkgs.map(b=>b.duration))];
+          const durLabel=durs.length===1?`${durs[0]}h`:`~${Math.round(durs.reduce((s,d)=>s+d,0)/durs.length*2)/2}h`;
+          const facIds=[...new Set(subBkgs.map(b=>b.facility_id))];
+          const facLabel=facIds.map(fid=>{const f=FACILITIES.find(x=>x.id===fid);return f?(f.name.includes("Field")?f.name.replace("Field ","Fld "):f.name.split("–")[0].trim().slice(0,6)):fid;}).join(", ");
+          chips.push(
+            <span key={`${pk}::${sh}`} onClick={()=>setPatternModal({email,name:nameDisplay,pk:`${dn}_${sh}`,bkgs:subBkgs,canEdit})}
+              style={{display:"inline-flex",alignItems:"center",gap:3,background:ec+"22",color:ec,border:`1px solid ${ec}55`,borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:600,whiteSpace:"nowrap",cursor:"pointer"}}>
+              {dn} {fmtTime(sh)} · {durLabel} · {facLabel} ×{subBkgs.length}
+            </span>
+          );
+        }
+        chips.push(
+          <button key={`merge-${pk}`} onClick={()=>setSplitPatterns(prev=>{const ns=new Set(prev);ns.delete(splitKey);return ns;})}
+            title="Re-merge sub-patterns"
+            style={{fontSize:10,padding:"1px 6px",borderRadius:4,border:"1px solid #e2e8f0",background:"#fff",color:"#64748b",cursor:"pointer"}}>↩ merge</button>
+        );
+      } else {
+        const parts=pk.split("_");
+        const startH=parseFloat(parts[parts.length-1]);
+        const dn=parts[parts.length-2]||"";
+        const durs=[...new Set(bkgs.map(b=>b.duration))];
+        const durLabel=durs.length===1?`${durs[0]}h`:`~${Math.round(durs.reduce((s,d)=>s+d,0)/durs.length*2)/2}h`;
+        const facIds=[...new Set(bkgs.map(b=>b.facility_id))];
+        const facLabel=facIds.map(fid=>{const f=FACILITIES.find(x=>x.id===fid);return f?(f.name.includes("Field")?f.name.replace("Field ","Fld "):f.name.split("–")[0].trim().slice(0,6)):fid;}).join(", ");
+        chips.push(
+          <span key={pk} onClick={()=>setPatternModal({email,name:nameDisplay,pk,bkgs,canEdit})}
+            style={{display:"inline-flex",alignItems:"center",gap:3,background:ec+"22",color:ec,border:`1px solid ${ec}55`,borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:600,whiteSpace:"nowrap",cursor:"pointer"}}>
+            {dn} {fmtTime(startH)} · {durLabel} · {facLabel} ×{bkgs.length}
+            {isMixed&&<span title="Mixed start times — click ↕ to split"
+              onClick={e=>{e.stopPropagation();setSplitPatterns(prev=>{const ns=new Set(prev);ns.add(splitKey);return ns;});}}
+              style={{fontSize:10,opacity:0.7,cursor:"pointer"}}>↕</span>}
+          </span>
+        );
+      }
+    }
+    return chips;
+  }
+
+  return (
+    <>
+      <Modal title="📅 Schedule Summary" onClose={onClose}>
+        <div style={{marginBottom:10}}>
+          <label style={{display:"flex",alignItems:"center",gap:6,fontSize:12,cursor:"pointer"}}>
+            <input type="checkbox" checked={facSensitive} onChange={e=>setFacSensitive(e.target.checked)}/>
+            Facility-sensitive patterns
+          </label>
+        </div>
+        <div style={{overflowY:"auto",maxHeight:"60vh",overflowX:"auto"}}>
+          <table style={{width:"100%",borderCollapse:"collapse",minWidth:480}}>
+            <thead>
+              <tr style={{background:"#f8fafc"}}>
+                <th style={thS2}>Booker</th>
+                <th style={thS2}>Recurring Patterns <span style={{fontWeight:400,fontSize:11,color:"#94a3b8"}}>(click to edit)</span></th>
+                <th style={{...thS2,textAlign:"right"}}>One-offs</th>
+                <th style={{...thS2,textAlign:"right"}}>Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(row=>(
+                <tr key={row.email} style={{borderBottom:"1px solid #f1f5f9"}}>
+                  <td style={tdS2}>
+                    <div style={{fontWeight:700,color:"#0f172a",fontSize:13}}>{row.nameDisplay}</div>
+                    <div style={{fontSize:11,color:"#94a3b8"}}>{row.email}</div>
+                  </td>
+                  <td style={tdS2}>
+                    <div style={{display:"flex",flexWrap:"wrap",gap:4,alignItems:"center"}}>
+                      {row.recurring.length===0&&<span style={{fontSize:12,color:"#94a3b8"}}>—</span>}
+                      {renderChips(row.email, row.nameDisplay, row.recurring)}
+                    </div>
+                  </td>
+                  <td style={{...tdS2,textAlign:"right"}}>
+                    {row.oneOffs.length>0
+                      ? <span style={{cursor:"pointer",color:"#6366f1",textDecoration:"underline dotted",fontSize:13}}
+                          onClick={()=>setOneOffModalData({email:row.email,name:row.nameDisplay,bkgs:row.oneOffs,isAdmin})}>
+                          {row.oneOffs.length}
+                        </span>
+                      : <span style={{color:"#94a3b8"}}>—</span>}
+                  </td>
+                  <td style={{...tdS2,textAlign:"right",fontWeight:700}}>{row.totalBkgs}</td>
+                </tr>
+              ))}
+              {rows.length===0&&<tr><td colSpan={4} style={{...tdS2,textAlign:"center",color:"#94a3b8"}}>No active bookings.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </Modal>
+      {patternModal&&(
+        <PatternModal {...patternModal} isAdmin={isAdmin}
+          onClose={()=>setPatternModal(null)}
+          onBulkApply={args=>{onBulkApply&&onBulkApply(args);setPatternModal(null);}}/>
+      )}
+      {oneOffModalData&&(
+        <OneOffModal {...oneOffModalData} onClose={()=>setOneOffModalData(null)}/>
+      )}
+    </>
+  );
+}
+
+function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = false, approxPlayers = {}, onUpdateApproxPlayers, approxDurations = {}, onUpdateApproxDuration, onUpdateFacilityRate, pricingMode = "hourly", onSetPricingMode, onProposeMerge, onBulkApply }) {
   const now = new Date();
-  const [year,        setYear]        = useState(now.getFullYear());
-  const [emailFilter, setEmailFilter] = useState(loggedInEmail || "all");
+  const thisYear = now.getFullYear();
+
+  // Date range state: preset key + optional custom from/to
+  const [preset,      setPreset]      = useState("this_year");
+  const [customFrom,  setCustomFrom]  = useState("");
+  const [customTo,    setCustomTo]    = useState("");
+  const [emailFilter, setEmailFilter] = useState(loggedInEmail||"all");
+
+  // Invoice modal state
+  const [showInvoice, setShowInvoice] = useState(false);
+  const [showRatesEdit, setShowRatesEdit] = useState(false);
+  // Inline player-count editing: email being edited
+  const [editingPlayers,  setEditingPlayers]  = useState(null);
+  const [playersInput,    setPlayersInput]    = useState("");
+  // Inline duration editing
+  const [editingDuration, setEditingDuration] = useState(null);
+  const [durationInput,   setDurationInput]   = useState("");
+  const [invDetail,   setInvDetail]   = useState("grouped");   // "grouped" | "individual"
+  const [invGst,      setInvGst]      = useState("inclusive"); // "inclusive" | "exclusive" | "note"
+  const [invScope,    setInvScope]    = useState("single");    // "single" | "combined" (admin only)
+  // Schedule Summary state
+  const [showSchedule,        setShowSchedule]        = useState(false);
+  const [scheduleFacSensitive,setScheduleFacSensitive]= useState(false);
+  const [sandboxMode,         setSandboxMode]         = useState(false);
+  const [sandboxSelected,     setSandboxSelected]     = useState(new Set());
+  const [previewMerge,        setPreviewMerge]        = useState(false);
+  const [patternModal, setPatternModal] = useState(null);
+  const [oneOffModal, setOneOffModal] = useState(null);
+  const [mergeTarget, setMergeTarget] = useState(null);
+  const [mergeResolution, setMergeResolution] = useState({});
+  const [committedResolution, setCommittedResolution] = useState({});
+  const [committedTarget, setCommittedTarget] = useState(null);
+
+  function presetRange(key) {
+    const y = thisYear;
+    const pad = n => String(n).padStart(2,"0");
+    const ymd = (yr,m,d) => `${yr}-${pad(m)}-${pad(d)}`;
+    switch(key) {
+      case "this_year":   return { from: ymd(y,1,1),   to: ymd(y,12,31) };
+      case "last_year":   return { from: ymd(y-1,1,1), to: ymd(y-1,12,31) };
+      case "last_6mo": {
+        const d = new Date(now); d.setMonth(d.getMonth()-6);
+        return { from: d.toISOString().slice(0,10), to: now.toISOString().slice(0,10) };
+      }
+      case "last_3mo": {
+        const d = new Date(now); d.setMonth(d.getMonth()-3);
+        return { from: d.toISOString().slice(0,10), to: now.toISOString().slice(0,10) };
+      }
+      case "all":         return { from: "", to: "" };
+      default:            return { from: customFrom, to: customTo };
+    }
+  }
+
+  const { from: dateFrom, to: dateTo } = preset === "custom" ? { from: customFrom, to: customTo } : presetRange(preset);
+
+  const PRESETS = [
+    { key:"this_year", label:`${thisYear}` },
+    { key:"last_year", label:`${thisYear-1}` },
+    { key:"last_6mo",  label:"6 months" },
+    { key:"last_3mo",  label:"3 months" },
+    { key:"all",       label:"All time" },
+    { key:"custom",    label:"Custom" },
+  ];
 
   // Rebuild color cache for all emails in the dataset so chips render correctly
   bookings.forEach(b => emailColor(b.email));
 
-  const allEmails = [...new Set(bookings.map(b=>b.email).filter(Boolean))].sort();
+  const allEmails = [...new Set(bookings.filter(b=>!isAdminBooking(b)).map(b=>b.email).filter(Boolean))].sort();
+
+  // Fall back to "all" if the current filter doesn't match any booker
+  useEffect(()=>{
+    if(emailFilter==="all"||!allEmails.length) return;
+    if(!allEmails.find(e=>e.toLowerCase()===emailFilter.toLowerCase())) setEmailFilter("all");
+  },[allEmails,emailFilter]);
 
   const active = bookings.filter(b => {
+    if (isAdminBooking(b)) return false;
     if (["cancelled","rejected"].includes(b.status)) return false;
-    if (new Date(b.date+"T00:00:00").getFullYear() !== year) return false;
+    if (dateFrom && b.date < dateFrom) return false;
+    if (dateTo   && b.date > dateTo)   return false;
     if (emailFilter !== "all" && b.email.toLowerCase() !== emailFilter.toLowerCase()) return false;
     return true;
   });
+
+  const EVENING_CUTOFF = 17.5; // 5:30pm
+
+  function splitHours(b) {
+    const end = b.start_hour + b.duration;
+    if (b.start_hour >= EVENING_CUTOFF) return { day: 0, evening: b.duration };
+    if (end > EVENING_CUTOFF) return { day: EVENING_CUTOFF - b.start_hour, evening: end - EVENING_CUTOFF };
+    return { day: b.duration, evening: 0 };
+  }
+
+  function getFacRates(facId) {
+    const r = facilityRates[facId];
+    if (!r) return { day: 0, evening: 50 };
+    if (typeof r === "object") return { day: r.day ?? 0, evening: r.evening ?? 50 };
+    return { day: parseFloat(r) || 0, evening: 50 }; // backward compat
+  }
+
+  const isPerBooking = pricingMode === "per_booking";
+
+  function getApproxDuration(email) {
+    const v = approxDurations[email.toLowerCase()];
+    return (v && v > 0) ? v : 2;
+  }
+
+  // Categorize a booking as "day" or "evening" by which side of 5:30 pm has
+  // the larger portion. Evening wins on ties.
+  function categoryOf(b) {
+    const { day, evening } = splitHours(b);
+    return evening >= day ? "evening" : "day";
+  }
+
+  // In per-booking mode cost = approxDuration × the rate for the booking's
+  // category (day/evening, decided by majority split). In hourly mode the
+  // booking is split at 5:30 pm between day and evening rates.
+  function getBookingCost(b) {
+    const rates = getFacRates(b.facility_id);
+    if (isPerBooking) {
+      const rate = categoryOf(b) === "evening" ? rates.evening : rates.day;
+      return getApproxDuration(b.email) * rate;
+    }
+    const { day, evening } = splitHours(b);
+    return day * rates.day + evening * rates.evening;
+  }
 
   // Per-email aggregation (over filtered active bookings)
   const byEmail = {};
   active.forEach(b => {
     const key = b.email.toLowerCase();
-    if (!byEmail[key]) byEmail[key] = { email:b.email, name:b.name, daytime:0, evening:0, total:0, bookings:0 };
+    if (!byEmail[key]) byEmail[key] = { email:b.email, name:b.name, daytime:0, evening:0, total:0, bookings:0, dayBkgs:0, eveBkgs:0, cost:0, dayCost:0, eveCost:0 };
     const rec = byEmail[key];
-    let eveningHrs=0, daytimeHrs=0;
-    if (b.start_hour >= 18) {
-      eveningHrs = b.duration;
-    } else if (b.start_hour + b.duration > 18) {
-      eveningHrs = (b.start_hour + b.duration) - 18;
-      daytimeHrs = 18 - b.start_hour;
-    } else {
-      daytimeHrs = b.duration;
-    }
-    rec.evening  += eveningHrs;
-    rec.daytime  += daytimeHrs;
+    const { day, evening } = splitHours(b);
+    const rates = getFacRates(b.facility_id);
+    rec.evening  += evening;
+    rec.daytime  += day;
     rec.total    += b.duration;
     rec.bookings += 1;
+    if (categoryOf(b) === "evening") rec.eveBkgs += 1; else rec.dayBkgs += 1;
+    if (!isPerBooking) {
+      rec.dayCost  += day * rates.day;
+      rec.eveCost  += evening * rates.evening;
+    }
+    rec.cost += getBookingCost(b);
   });
 
-  const rows         = Object.values(byEmail).sort((a,b)=>b.total-a.total);
-  const totalEvening = rows.reduce((s,r)=>s+r.evening,0);
-  const totalDaytime = rows.reduce((s,r)=>s+r.daytime,0);
-  const totalHrs     = rows.reduce((s,r)=>s+r.total,0);
+  const rows          = Object.values(byEmail).sort((a,b)=>b.total-a.total);
+  // In per-booking mode "displayed total" = bookings × approxDuration; in hourly mode = actual hours
+  const displayTotal  = r => isPerBooking ? r.bookings * getApproxDuration(r.email) : r.total;
+  const displayDaytime = r => isPerBooking ? r.dayBkgs : r.daytime;
+  const displayEvening = r => isPerBooking ? r.eveBkgs : r.evening;
+  const totalEvening  = rows.reduce((s,r)=>s+r.evening,0);
+  const totalDaytime  = rows.reduce((s,r)=>s+r.daytime,0);
+  const totalHrs      = rows.reduce((s,r)=>s+r.total,0);
+  const totalDayBkgs  = rows.reduce((s,r)=>s+r.dayBkgs,0);
+  const totalEveBkgs  = rows.reduce((s,r)=>s+r.eveBkgs,0);
+  const totalBookerCost = rows.reduce((s,r)=>s+r.cost,0);
+  const totalDayCost    = rows.reduce((s,r)=>s+r.dayCost,0);
+  const totalEveCost    = rows.reduce((s,r)=>s+r.eveCost,0);
+
+  // Per-facility cost (adapts to pricing mode) — always includes ALL facilities
+  const byFacility = {};
+  FACILITIES.forEach(fac => { byFacility[fac.id] = { fac, dayHrs: 0, eveningHrs: 0, bkgCount: 0, cost: 0 }; });
+  active.forEach(b => {
+    const fac = FACILITIES.find(x => x.id === b.facility_id);
+    if (!fac) return;
+    const { day, evening } = splitHours(b);
+    byFacility[fac.id].dayHrs     += day;
+    byFacility[fac.id].eveningHrs += evening;
+    byFacility[fac.id].bkgCount   += 1;
+    byFacility[fac.id].cost       += getBookingCost(b);
+  });
+  const facCosts = Object.values(byFacility).map(({ fac, dayHrs, eveningHrs, bkgCount, cost }) => {
+    const rates = getFacRates(fac.id);
+    return { fac, dayHrs, eveningHrs, hours: dayHrs + eveningHrs, bkgCount, rates, cost };
+  });
+  const totalCost = facCosts.reduce((s, c) => s + c.cost, 0);
+  const anyRates  = FACILITIES.some(f => { const r = getFacRates(f.id); return r.day > 0 || r.evening > 0; });
 
   function fmtHrs(h) { return h===0?"0h" : h%1===0?`${h}h`:`${Math.floor(h)}h ${Math.round((h%1)*60)}m`; }
+  function fmtCost(n) { return "$" + n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g,","); }
+  function getPlayers(email) { return approxPlayers[email.toLowerCase()] || 0; }
+  function canEditPlayers(email) { return isAdmin || (loggedInEmail && email.toLowerCase() === loggedInEmail.toLowerCase()); }
+  function canEditDuration(email) { return isAdmin || (loggedInEmail && email.toLowerCase() === loggedInEmail.toLowerCase()); }
+
+  // ── Invoice helpers ──────────────────────────────────────────────────────
+  function buildInvoiceLines(bkgs, detail) {
+    if (detail === "grouped") {
+      const groups = {};
+      bkgs.forEach(b => {
+        const { day, evening } = splitHours(b);
+        const rates = getFacRates(b.facility_id);
+        const fac = FACILITIES.find(f => f.id === b.facility_id);
+        const facName = fac?.name || b.facility_id;
+        if (day > 0) {
+          const key = b.facility_id + ":day";
+          if (!groups[key]) groups[key] = { desc:`${facName} – Daytime`, hours:0, rate:rates.day, cost:0 };
+          groups[key].hours += day; groups[key].cost += day * rates.day;
+        }
+        if (evening > 0) {
+          const key = b.facility_id + ":evening";
+          if (!groups[key]) groups[key] = { desc:`${facName} – Evening`, hours:0, rate:rates.evening, cost:0 };
+          groups[key].hours += evening; groups[key].cost += evening * rates.evening;
+        }
+      });
+      return Object.values(groups).map(g => ({
+        desc:  g.desc,
+        detail:`${fmtHrs(g.hours)} @ ${fmtCost(g.rate)}/hr`,
+        cost:  g.cost,
+      }));
+    } else {
+      return bkgs.map(b => {
+        const { day, evening } = splitHours(b);
+        const rates = getFacRates(b.facility_id);
+        const fac = FACILITIES.find(f => f.id === b.facility_id);
+        const cost = day * rates.day + evening * rates.evening;
+        const timeStr = `${fmtTime(b.start_hour)}–${fmtTime(b.start_hour + b.duration)}`;
+        const splitNote = day>0&&evening>0 ? ` (${fmtHrs(day)} day + ${fmtHrs(evening)} eve)` : "";
+        return {
+          desc:   `${fmtDate(b.date)} · ${fac?.name||b.facility_id} · ${timeStr}`,
+          detail: `${b.purpose}${splitNote}`,
+          cost,
+        };
+      }).sort((a,b)=>a.desc.localeCompare(b.desc));
+    }
+  }
+
+  function gstAmounts(subtotal, gstMode) {
+    if (gstMode === "exclusive") {
+      const gst = subtotal * 0.15;
+      return { pre: subtotal, gst, total: subtotal + gst };
+    }
+    // inclusive: rates already include GST
+    const gst = subtotal - subtotal / 1.15;
+    return { pre: subtotal / 1.15, gst, total: subtotal };
+  }
+
+  function buildInvoiceHtml({ bookerName, bookerEmail, lines, gstMode, dateRange, invNumber }) {
+    const subtotal = lines.reduce((s, l) => s + l.cost, 0);
+    const { pre, gst, total } = gstAmounts(subtotal, gstMode);
+    const gstLabel = gstMode === "note" ? "" : gstMode === "exclusive" ? "excl. GST" : "incl. GST";
+    const periodStr = dateRange.from && dateRange.to ? `${fmtDate(dateRange.from)} – ${fmtDate(dateRange.to)}` : "All periods";
+    const rowsHtml = lines.map(l => `
+      <tr>
+        <td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;font-size:13px;color:#0f172a">${l.desc}</td>
+        <td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;font-size:12px;color:#64748b">${l.detail}</td>
+        <td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;font-size:13px;color:#0f172a;text-align:right;white-space:nowrap">${fmtCost(l.cost)}</td>
+      </tr>`).join("");
+    const gstRows = gstMode === "note"
+      ? `<tr><td colspan="2" style="padding:8px 16px;font-size:12px;color:#64748b;text-align:right">GST inclusive</td><td style="padding:8px 16px;font-size:13px;font-weight:700;color:#0f172a;text-align:right">${fmtCost(total)}</td></tr>`
+      : `<tr style="background:#f8fafc"><td colspan="2" style="padding:8px 16px;font-size:12px;color:#64748b;text-align:right">Subtotal (${gstLabel})</td><td style="padding:8px 16px;font-size:13px;color:#0f172a;text-align:right">${fmtCost(pre)}</td></tr>
+         <tr style="background:#f8fafc"><td colspan="2" style="padding:8px 16px;font-size:12px;color:#64748b;text-align:right">GST (15%)</td><td style="padding:8px 16px;font-size:13px;color:#0f172a;text-align:right">${fmtCost(gst)}</td></tr>
+         <tr style="background:#f0fdf4"><td colspan="2" style="padding:10px 16px;font-size:14px;font-weight:700;color:#0f172a;text-align:right">Total</td><td style="padding:10px 16px;font-size:16px;font-weight:800;color:#15803d;text-align:right">${fmtCost(total)}</td></tr>`;
+    const amuaLines = [AMUA_INFO.address, AMUA_INFO.gstNumber ? `GST No: ${AMUA_INFO.gstNumber}` : "", AMUA_INFO.bank].filter(Boolean).map(l=>`<div>${l}</div>`).join("");
+    return `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Invoice ${invNumber}</title><style>
+      @media print { body{margin:0} }
+      body{font-family:'Segoe UI',sans-serif;background:#f8fafc;margin:0;padding:32px 16px}
+      .page{max-width:700px;margin:0 auto;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 4px 32px rgba(0,0,0,0.08)}
+    </style></head><body>
+    <div class="page">
+      <div style="background:#0f172a;padding:32px 40px;display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:16px">
+        <div>
+          <div style="font-size:24px;font-weight:800;color:#fff;letter-spacing:-0.02em">${AMUA_INFO.name}</div>
+          <div style="font-size:13px;color:#94a3b8;margin-top:4px">${amuaLines||"<span style='color:#64748b'>Update AMUA_INFO in booking-system.jsx</span>"}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:28px;font-weight:800;color:#fff">INVOICE</div>
+          <div style="font-size:13px;color:#94a3b8;margin-top:4px">#${invNumber}</div>
+          <div style="font-size:13px;color:#94a3b8">Date: ${todayKey()}</div>
+        </div>
+      </div>
+      <div style="padding:28px 40px;display:grid;grid-template-columns:1fr 1fr;gap:24px;border-bottom:1px solid #f1f5f9">
+        <div>
+          <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px">Bill To</div>
+          <div style="font-size:15px;font-weight:700;color:#0f172a">${bookerName||"(see email)"}</div>
+          <div style="font-size:13px;color:#475569">${bookerEmail}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px">Period</div>
+          <div style="font-size:14px;font-weight:600;color:#0f172a">${periodStr}</div>
+        </div>
+      </div>
+      <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse">
+        <thead><tr style="background:#f8fafc">
+          <th style="padding:10px 16px;text-align:left;font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;border-bottom:2px solid #f1f5f9">Description</th>
+          <th style="padding:10px 16px;text-align:left;font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;border-bottom:2px solid #f1f5f9">Detail</th>
+          <th style="padding:10px 16px;text-align:right;font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;border-bottom:2px solid #f1f5f9">Amount</th>
+        </tr></thead>
+        <tbody>${rowsHtml}</tbody>
+        <tfoot>${gstRows}</tfoot>
+      </table>
+      <div style="padding:20px 40px 32px;font-size:12px;color:#94a3b8;text-align:center">
+        ${AMUA_INFO.bank ? `Bank: ${AMUA_INFO.bank} · ` : ""}Generated by FacilityBook
+      </div>
+    </div></body></html>`;
+  }
+
+  function exportInvoice(format, bkgsForInvoice, bookerName, bookerEmail) {
+    const lines = buildInvoiceLines(bkgsForInvoice, invDetail);
+    const dateRange = { from: dateFrom, to: dateTo };
+    const invNumber = `${todayKey().replace(/-/g,"")}-${bookerEmail.replace(/[^a-z0-9]/gi,"").slice(0,6).toUpperCase()}`;
+    const html = buildInvoiceHtml({ bookerName, bookerEmail, lines, gstMode: invGst, dateRange, invNumber });
+    if (format === "html" || format === "print") {
+      const win = window.open("", "_blank");
+      if (win) {
+        win.document.write(html);
+        win.document.close();
+        if (format === "print") { win.focus(); win.print(); }
+      }
+    } else if (format === "csv") {
+      const subtotal = lines.reduce((s, l) => s + l.cost, 0);
+      const { pre, gst, total } = gstAmounts(subtotal, invGst);
+      const esc = v => `"${String(v||"").replace(/"/g,'""')}"`;
+      const csvRows = lines.map(l => [invNumber, bookerName, bookerEmail, l.desc, l.detail, l.cost.toFixed(2)].map(esc).join(","));
+      csvRows.push(["","","","","Subtotal",pre.toFixed(2)].map(esc).join(","));
+      csvRows.push(["","","","","GST (15%)",gst.toFixed(2)].map(esc).join(","));
+      csvRows.push(["","","","","Total",total.toFixed(2)].map(esc).join(","));
+      const csv = [["Invoice","Name","Email","Description","Detail","Amount"].map(esc).join(","), ...csvRows].join("\n");
+      const blob = new Blob([csv], { type:"text/csv" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a"); a.href=url; a.download=`invoice-${invNumber}.csv`; a.click();
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  // Groups active bookings by booker for combined/per-booker export
+  function getInvoiceScopes() {
+    if (invScope === "combined" || emailFilter !== "all") {
+      const name = emailFilter !== "all" ? (rows.find(r=>r.email.toLowerCase()===emailFilter.toLowerCase())?.name||emailFilter) : "All Bookers";
+      const email = emailFilter !== "all" ? emailFilter : "combined";
+      return [{ name, email, bkgs: active }];
+    }
+    return rows.map(r => ({ name:r.name, email:r.email, bkgs: active.filter(b=>b.email.toLowerCase()===r.email.toLowerCase()) }));
+  }
 
   // CSV export — all columns from every booking (not filtered)
   function exportCSV() {
@@ -1406,36 +2260,79 @@ function SummaryTab({ bookings, loggedInEmail }) {
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:24 }}>
       {/* Controls */}
-      <div style={{ display:"flex", alignItems:"center", gap:12, flexWrap:"wrap" }}>
-        {/* Year picker */}
-        <div style={{ display:"flex", alignItems:"center", gap:8, background:"#f8fafc", border:"1px solid #e2e8f0", borderRadius:10, padding:"4px 10px" }}>
-          <button onClick={()=>setYear(y=>y-1)} style={{ background:"none", border:"none", cursor:"pointer", fontSize:16, color:"#475569", padding:"0 4px" }}>‹</button>
-          <span style={{ fontSize:15, fontWeight:700, color:"#0f172a", minWidth:48, textAlign:"center" }}>{year}</span>
-          <button onClick={()=>setYear(y=>y+1)} style={{ background:"none", border:"none", cursor:"pointer", fontSize:16, color:"#475569", padding:"0 4px" }}>›</button>
+      <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+        {/* Date range presets */}
+        <div style={{ display:"flex", alignItems:"center", gap:6, flexWrap:"wrap" }}>
+          <span style={{ fontSize:12, fontWeight:600, color:"#64748b", marginRight:2 }}>Period:</span>
+          {PRESETS.map(p=>(
+            <button key={p.key} onClick={()=>setPreset(p.key)}
+              style={{ padding:"5px 12px", borderRadius:8, border: preset===p.key?"1.5px solid #0f172a":"1.5px solid #e2e8f0",
+                background: preset===p.key?"#0f172a":"#f8fafc", color: preset===p.key?"#fff":"#475569",
+                fontWeight:600, fontSize:12, cursor:"pointer", fontFamily:"inherit" }}>
+              {p.label}
+            </button>
+          ))}
         </div>
-
-        {/* Email filter */}
-        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-          <span style={{ fontSize:12, fontWeight:600, color:"#64748b" }}>Filter by email:</span>
-          <select
-            value={emailFilter}
-            onChange={e=>setEmailFilter(e.target.value)}
-            style={{ padding:"6px 10px", borderRadius:8, border:"1.5px solid #e2e8f0", fontSize:13, fontFamily:"inherit", color:"#0f172a", background:"#f8fafc", outline:"none" }}
-          >
-            <option value="all">All bookers</option>
-            {allEmails.map(e=><option key={e} value={e}>{e}</option>)}
-          </select>
-        </div>
-
-        {loggedInEmail && emailFilter !== loggedInEmail && (
-          <button onClick={()=>setEmailFilter(loggedInEmail)} style={S.btn({ border:"1.5px solid #e2e8f0", background:"#fff", color:"#475569", padding:"6px 12px", fontSize:12 })}>
-            Show my bookings only
-          </button>
+        {/* Custom date range inputs */}
+        {preset==="custom" && (
+          <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
+            <span style={{ fontSize:12, fontWeight:600, color:"#64748b" }}>From:</span>
+            <input type="date" value={customFrom} onChange={e=>setCustomFrom(e.target.value)}
+              style={{ padding:"5px 10px", borderRadius:8, border:"1.5px solid #e2e8f0", fontSize:13, fontFamily:"inherit", background:"#f8fafc", color:"#0f172a", outline:"none" }}/>
+            <span style={{ fontSize:12, fontWeight:600, color:"#64748b" }}>To:</span>
+            <input type="date" value={customTo} onChange={e=>setCustomTo(e.target.value)}
+              style={{ padding:"5px 10px", borderRadius:8, border:"1.5px solid #e2e8f0", fontSize:13, fontFamily:"inherit", background:"#f8fafc", color:"#0f172a", outline:"none" }}/>
+          </div>
         )}
+        {/* Booker filter chips */}
+        <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+          <button onClick={()=>setEmailFilter("all")}
+            style={{padding:"5px 12px",borderRadius:20,border:"1.5px solid",cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",flexShrink:0,borderColor:emailFilter==="all"?"#0f172a":"#e2e8f0",background:emailFilter==="all"?"#0f172a":"#fff",color:emailFilter==="all"?"#fff":"#475569"}}>
+            All
+          </button>
+          {allEmails.map(e=>{
+            const active=emailFilter.toLowerCase()===e.toLowerCase();
+            const c=emailColor(e);
+            return(
+              <button key={e} onClick={()=>setEmailFilter(p=>p.toLowerCase()===e.toLowerCase()?"all":e)}
+                style={{padding:"5px 12px",borderRadius:20,border:`1.5px solid ${active?c:"#e2e8f0"}`,cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",flexShrink:0,background:active?c:"#fff",color:active?"#fff":"#475569"}}>
+                {e.split("@")[0]}
+              </button>
+            );
+          })}
+          <div style={{marginLeft:"auto",display:"flex",gap:6}}>
+            <button onClick={exportCSV} style={S.btn({ background:"#0f172a", color:"#fff", display:"flex", alignItems:"center", gap:6 })}>
+              ⬇ Export All Data (CSV)
+            </button>
+            {anyRates && (
+              <button onClick={()=>setShowInvoice(true)} style={S.btn({ background:"#15803d", color:"#fff", display:"flex", alignItems:"center", gap:6 })}>
+                🧾 Export Invoice
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
 
-        <button onClick={exportCSV} style={S.btn({ background:"#0f172a", color:"#fff", display:"flex", alignItems:"center", gap:6, marginLeft:"auto" })}>
-          ⬇ Export All Data (CSV)
-        </button>
+      {/* Pricing mode toggle */}
+      <div style={{ display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
+        <span style={{ fontSize:12, fontWeight:600, color:"#64748b" }}>Pricing:</span>
+        {[
+          { key:"hourly",      label:"⏱ Per Hour" },
+          { key:"per_booking", label:"🎟 Per Booking" },
+        ].map(opt=>(
+          <button key={opt.key} onClick={()=>onSetPricingMode(opt.key)}
+            style={{ padding:"5px 14px", borderRadius:8, fontWeight:600, fontSize:12, cursor:"pointer", fontFamily:"inherit",
+              border: pricingMode===opt.key ? "1.5px solid #0f172a" : "1.5px solid #e2e8f0",
+              background: pricingMode===opt.key ? "#0f172a" : "#f8fafc",
+              color: pricingMode===opt.key ? "#fff" : "#475569" }}>
+            {opt.label}
+          </button>
+        ))}
+        <span style={{ fontSize:12, color:"#94a3b8" }}>
+          {isPerBooking
+            ? "Each booking = duration × the applicable hourly rate (day before 5:30 pm, evening after)"
+            : "Hours are split at 5:30 pm between day and evening rates"}
+        </span>
       </div>
 
       {/* KPI cards */}
@@ -1443,24 +2340,146 @@ function SummaryTab({ bookings, loggedInEmail }) {
         {[
           { label:"Bookings",      value:active.length,         icon:"📋" },
           { label:"Total Hours",   value:fmtHrs(totalHrs),      icon:"⏱" },
-          { label:"Daytime Hrs",   value:fmtHrs(totalDaytime),  icon:"☀️",  sub:"before 6 PM" },
-          { label:"Evening Hrs",   value:fmtHrs(totalEvening),  icon:"🌙",  sub:"from 6 PM" },
+          { label:"Daytime Hrs",   value:fmtHrs(totalDaytime),  icon:"☀️",  sub:"before 5:30 PM" },
+          { label:"Evening Hrs",   value:fmtHrs(totalEvening),  icon:"🌙",  sub:"from 5:30 PM" },
           { label:"Unique Bookers",value:rows.length,           icon:"👥" },
+          ...(anyRates ? [{ label:"Total Cost", value:fmtCost(totalCost), icon:"💰", highlight:true }] : []),
         ].map(c=>(
-          <div key={c.label} style={{ background:"#fff", border:"1px solid #f1f5f9", borderRadius:12, padding:"16px 18px", boxShadow:"0 1px 4px rgba(0,0,0,0.04)" }}>
+          <div key={c.label} style={{ background: c.highlight?"#f0fdf4":"#fff", border:`1px solid ${c.highlight?"#bbf7d0":"#f1f5f9"}`, borderRadius:12, padding:"16px 18px", boxShadow:"0 1px 4px rgba(0,0,0,0.04)" }}>
             <div style={{ fontSize:22, marginBottom:6 }}>{c.icon}</div>
-            <div style={{ fontSize:22, fontWeight:800, color:"#0f172a", letterSpacing:"-0.03em" }}>{c.value}</div>
+            <div style={{ fontSize:22, fontWeight:800, color: c.highlight?"#15803d":"#0f172a", letterSpacing:"-0.03em" }}>{c.value}</div>
             <div style={{ fontSize:12, fontWeight:600, color:"#64748b", marginTop:2 }}>{c.label}</div>
             {c.sub&&<div style={{ fontSize:11, color:"#94a3b8" }}>{c.sub}</div>}
           </div>
         ))}
       </div>
 
+      {/* Cost by facility tiles */}
+      {(
+        <div>
+          <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10, flexWrap:"wrap" }}>
+            <h3 style={{ margin:0, fontSize:15, fontWeight:700, color:"#0f172a", flex:1 }}>
+              Cost by Facility — {PRESETS.find(p=>p.key===preset)?.label}{dateFrom&&dateTo?` (${dateFrom} – ${dateTo})`:""}{emailFilter!=="all"?` · ${emailFilter}`:""}
+            </h3>
+            {isAdmin && onUpdateFacilityRate && (
+              <button onClick={()=>setShowRatesEdit(v=>!v)}
+                style={S.btn({border:`1.5px solid ${showRatesEdit?"#6366f1":"#e2e8f0"}`,background:showRatesEdit?"#eef2ff":"#fff",color:showRatesEdit?"#4338ca":"#475569",fontSize:12})}>
+                ✏ {showRatesEdit ? "Done" : "Edit Rates"}
+              </button>
+            )}
+          </div>
+          {showRatesEdit && isAdmin && onUpdateFacilityRate && (
+            <div style={{ background:"#f8fafc", border:"1.5px solid #e0e7ff", borderRadius:12, padding:14, marginBottom:14 }}>
+              <div style={{ fontSize:12, color:"#64748b", marginBottom:10 }}>Day rate = before 5:30 pm · Evening rate = 5:30 pm onwards</div>
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))", gap:8 }}>
+                {FACILITIES.map(fac => {
+                  const r = typeof facilityRates[fac.id]==="object" ? facilityRates[fac.id] : { day: facilityRates[fac.id]||0, evening: 50 };
+                  const day = r.day ?? 0, evening = r.evening ?? 50;
+                  return (
+                    <div key={fac.id} style={{ background:"#fff", border:"1px solid #e2e8f0", borderRadius:8, padding:"8px 12px" }}>
+                      <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:7 }}>
+                        <span style={{ width:9, height:9, borderRadius:"50%", background:fac.color, flexShrink:0, display:"inline-block" }}/>
+                        <span style={{ fontSize:12, fontWeight:700, color:"#0f172a" }}>{fac.name}</span>
+                      </div>
+                      <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
+                        <span style={{ fontSize:11, color:"#64748b", width:46 }}>Day $</span>
+                        <input type="number" min="0" step="0.5" value={day||""} placeholder="0"
+                          onChange={e=>onUpdateFacilityRate(fac.id,"day",e.target.value)}
+                          style={{ width:68, padding:"3px 6px", borderRadius:6, border:"1.5px solid #e2e8f0", fontSize:13, textAlign:"right", fontFamily:"inherit", outline:"none" }}/>
+                        <span style={{ fontSize:11, color:"#64748b" }}>/hr</span>
+                        <span style={{ fontSize:11, color:"#7c3aed", width:60, marginLeft:4 }}>Evening $</span>
+                        <input type="number" min="0" step="0.5" value={evening||""} placeholder="0"
+                          onChange={e=>onUpdateFacilityRate(fac.id,"evening",e.target.value)}
+                          style={{ width:68, padding:"3px 6px", borderRadius:6, border:"1.5px solid #e2e8f0", fontSize:13, textAlign:"right", fontFamily:"inherit", outline:"none" }}/>
+                        <span style={{ fontSize:11, color:"#64748b" }}>/hr</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:10 }}>
+            {facCosts.map(({ fac, dayHrs, eveningHrs, hours, bkgCount, rates, cost }) => {
+              const hasRates = rates.day > 0 || rates.evening > 0;
+              const isEmpty  = bkgCount === 0;
+              return (
+                <div key={fac.id} style={{ background: isEmpty?"#fafafa":"#fff", border:`1px solid ${isEmpty?"#f1f5f9":"#f1f5f9"}`, borderRadius:12, padding:"14px 16px", display:"flex", flexDirection:"column", gap:6, boxShadow:"0 1px 4px rgba(0,0,0,0.04)", opacity: isEmpty ? 0.6 : 1 }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                    <span style={{ width:10, height:10, borderRadius:"50%", background:fac.color, flexShrink:0, display:"inline-block" }}/>
+                    <span style={{ fontSize:12, fontWeight:700, color:"#0f172a" }}>{fac.name}</span>
+                  </div>
+                  {isEmpty
+                    ? <div style={{ fontSize:12, color:"#94a3b8" }}>0 bookings</div>
+                    : isPerBooking
+                      ? <div style={{ fontSize:12, color:"#64748b" }}>{bkgCount} booking{bkgCount!==1?"s":""} · {fmtHrs(hours)}</div>
+                      : (<>
+                          {dayHrs > 0 && <div style={{ fontSize:12, color:"#64748b" }}>Day: {fmtHrs(dayHrs)} {rates.day > 0 ? `@ ${fmtCost(rates.day)}/hr` : ""}</div>}
+                          {eveningHrs > 0 && <div style={{ fontSize:12, color:"#64748b" }}>Eve: {fmtHrs(eveningHrs)} {rates.evening > 0 ? `@ ${fmtCost(rates.evening)}/hr` : ""}</div>}
+                          {dayHrs === 0 && eveningHrs === 0 && <div style={{ fontSize:12, color:"#94a3b8" }}>{fmtHrs(hours)} total</div>}
+                        </>)
+                  }
+                  <div style={{ fontSize:18, fontWeight:800, color: isEmpty ? "#94a3b8" : hasRates && cost > 0 ? "#15803d" : "#94a3b8" }}>
+                    {isEmpty ? "—" : hasRates && cost > 0 ? fmtCost(cost) : "—"}
+                  </div>
+                  {!isEmpty && !hasRates && <div style={{ fontSize:11, color:"#94a3b8" }}>no rates set</div>}
+                </div>
+              );
+            })}
+            {anyRates && (
+              <div style={{ background:"#f0fdf4", border:"1.5px solid #bbf7d0", borderRadius:12, padding:"14px 16px", display:"flex", flexDirection:"column", gap:6 }}>
+                <div style={{ fontSize:12, fontWeight:700, color:"#166534" }}>Total Cost</div>
+                <div style={{ fontSize:13, color:"#15803d" }}>{fmtHrs(totalHrs)} combined</div>
+                <div style={{ fontSize:18, fontWeight:800, color:"#15803d" }}>{fmtCost(totalCost)}</div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Table */}
       <div>
-        <h3 style={{ margin:"0 0 12px", fontSize:15, fontWeight:700, color:"#0f172a" }}>
-          Hours by Booker — {year}{emailFilter!=="all"?` · ${emailFilter}`:""}
-        </h3>
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:12, gap:8, flexWrap:"wrap" }}>
+          <h3 style={{ margin:0, fontSize:15, fontWeight:700, color:"#0f172a" }}>
+            Hire Usage &amp; Cost by Booker — {PRESETS.find(p=>p.key===preset)?.label}{dateFrom&&dateTo?` (${dateFrom} – ${dateTo})`:""}{emailFilter!=="all"?` · ${emailFilter}`:""}
+          </h3>
+          {rows.length>0&&<button onClick={()=>{
+            const esc = v => `"${String(v||"").replace(/"/g,'""')}"`;
+            const hdrs = isPerBooking
+              ? ["Booker","Email","Bookings","Day Bookings","Eve Bookings","Total Hrs (approx)",
+                  ...(anyRates?["Total Cost"]:[]),
+                  "Approx Players","Approx Duration (hrs)",
+                  ...(anyRates?["Cost per Player"]:[])]
+              : ["Booker","Email","Bookings","Daytime Hrs","Evening Hrs","Total Hrs",
+                  ...(anyRates?["Day Cost","Eve Cost"]:[]),
+                  ...(anyRates?["Total Cost"]:[]),
+                  "Approx Players",
+                  ...(anyRates?["Cost per Player"]:[])];
+            const dataRows = rows.map(r=>{
+              const players = getPlayers(r.email);
+              const dur = getApproxDuration(r.email);
+              const perPlayer = anyRates && players>0 && r.cost>0 ? r.cost/players : "";
+              if (isPerBooking) {
+                return [r.name,r.email,r.bookings,r.dayBkgs,r.eveBkgs,(r.bookings*dur).toFixed(2),
+                  ...(anyRates?[r.cost.toFixed(2)]:[]),
+                  players||"",dur,
+                  ...(anyRates?[perPlayer?perPlayer.toFixed(2):""]:[])].map(esc).join(",");
+              }
+              return [r.name,r.email,r.bookings,r.daytime.toFixed(2),r.evening.toFixed(2),r.total.toFixed(2),
+                ...(anyRates?[r.dayCost.toFixed(2),r.eveCost.toFixed(2)]:[]),
+                ...(anyRates?[r.cost.toFixed(2)]:[]),
+                players||"",
+                ...(anyRates?[perPlayer?perPlayer.toFixed(2):""]:[])].map(esc).join(",");
+            });
+            const csv = [hdrs.map(esc).join(","), ...dataRows].join("\n");
+            const blob = new Blob([csv],{type:"text/csv"});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a"); a.href=url; a.download=`summary-${dateFrom||"all"}.csv`; a.click();
+            URL.revokeObjectURL(url);
+          }} style={S.btn({background:"#0f172a",color:"#fff",fontSize:12,display:"flex",alignItems:"center",gap:5})}>
+            ⬇ Export Table (CSV)
+          </button>}
+        </div>
         {rows.length===0
           ? <div style={{ textAlign:"center", padding:"32px 0", color:"#94a3b8", fontSize:14 }}>No active bookings match the current filter.</div>
           : (
@@ -1471,36 +2490,654 @@ function SummaryTab({ bookings, loggedInEmail }) {
                     <th style={thS}>Booker</th>
                     <th style={thS}>Email</th>
                     <th style={{ ...thS, textAlign:"right" }}>Bookings</th>
-                    <th style={{ ...thS, textAlign:"right" }}>Daytime</th>
-                    <th style={{ ...thS, textAlign:"right" }}>Evening</th>
-                    <th style={{ ...thS, textAlign:"right" }}>Total</th>
+                    <th style={{ ...thS, textAlign:"right" }}>{isPerBooking ? "Day Bkgs" : "Daytime"}</th>
+                    <th style={{ ...thS, textAlign:"right" }}>{isPerBooking ? "Eve Bkgs" : "Evening"}</th>
+                    <th style={{ ...thS, textAlign:"right" }}>{isPerBooking ? "Total Hrs*" : "Total"}</th>
+                    {anyRates&&!isPerBooking&&<th style={{ ...thS, textAlign:"right" }}>Day Cost</th>}
+                    {anyRates&&!isPerBooking&&<th style={{ ...thS, textAlign:"right" }}>Eve Cost</th>}
+                    {anyRates&&<th style={{ ...thS, textAlign:"right", color:"#15803d" }}>Total Cost</th>}
+                    <th style={{ ...thS, textAlign:"right" }}>Players</th>
+                    {isPerBooking&&<th style={{ ...thS, textAlign:"right", color:"#0369a1" }}>~Duration</th>}
+                    {anyRates&&<th style={{ ...thS, textAlign:"right", color:"#7c3aed" }}>$/Player</th>}
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map(r=>(
+                  {rows.map(r=>{
+                    const players = getPlayers(r.email);
+                    const dur = getApproxDuration(r.email);
+                    const durSaved = (approxDurations[r.email.toLowerCase()] || 0) > 0;
+                    const canEditP = canEditPlayers(r.email);
+                    const canEditD = canEditDuration(r.email);
+                    const isEditingThis = editingPlayers === r.email.toLowerCase();
+                    const isEditingDur  = editingDuration === r.email.toLowerCase();
+                    const perPlayer = anyRates && players > 0 && r.cost > 0 ? r.cost / players : 0;
+                    return (
                     <tr key={r.email} onMouseEnter={e=>e.currentTarget.style.background="#f8fafc"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
                       <td style={tdS}><div style={{ fontWeight:600 }}>{r.name}</div></td>
                       <td style={tdS}><EmailChip email={r.email}/></td>
                       <td style={{ ...tdS, textAlign:"right", fontWeight:600 }}>{r.bookings}</td>
-                      <td style={{ ...tdS, textAlign:"right" }}><span style={{ background:"#fef9c3", color:"#854d0e", borderRadius:6, padding:"2px 8px", fontWeight:600, fontSize:12 }}>{fmtHrs(r.daytime)}</span></td>
-                      <td style={{ ...tdS, textAlign:"right" }}><span style={{ background:"#ede9fe", color:"#5b21b6", borderRadius:6, padding:"2px 8px", fontWeight:600, fontSize:12 }}>{fmtHrs(r.evening)}</span></td>
-                      <td style={{ ...tdS, textAlign:"right", fontWeight:700 }}>{fmtHrs(r.total)}</td>
+                      <td style={{ ...tdS, textAlign:"right" }}>
+                        {isPerBooking
+                          ? <span style={{ background:"#fef9c3", color:"#854d0e", borderRadius:6, padding:"2px 8px", fontWeight:600, fontSize:12 }}>{r.dayBkgs}</span>
+                          : <span style={{ background:"#fef9c3", color:"#854d0e", borderRadius:6, padding:"2px 8px", fontWeight:600, fontSize:12 }}>{fmtHrs(r.daytime)}</span>}
+                      </td>
+                      <td style={{ ...tdS, textAlign:"right" }}>
+                        {isPerBooking
+                          ? <span style={{ background:"#ede9fe", color:"#5b21b6", borderRadius:6, padding:"2px 8px", fontWeight:600, fontSize:12 }}>{r.eveBkgs}</span>
+                          : <span style={{ background:"#ede9fe", color:"#5b21b6", borderRadius:6, padding:"2px 8px", fontWeight:600, fontSize:12 }}>{fmtHrs(r.evening)}</span>}
+                      </td>
+                      <td style={{ ...tdS, textAlign:"right", fontWeight:700 }}>
+                        {isPerBooking ? fmtHrs(r.bookings * dur) : fmtHrs(r.total)}
+                      </td>
+                      {anyRates&&!isPerBooking&&<td style={{ ...tdS, textAlign:"right", fontWeight:600, color:r.dayCost>0?"#15803d":"#94a3b8" }}>{r.dayCost>0?fmtCost(r.dayCost):"—"}</td>}
+                      {anyRates&&!isPerBooking&&<td style={{ ...tdS, textAlign:"right", fontWeight:600, color:r.eveCost>0?"#15803d":"#94a3b8" }}>{r.eveCost>0?fmtCost(r.eveCost):"—"}</td>}
+                      {anyRates&&<td style={{ ...tdS, textAlign:"right", fontWeight:700, color:r.cost>0?"#15803d":"#94a3b8" }}>{r.cost>0?fmtCost(r.cost):"—"}</td>}
+                      <td style={{ ...tdS, textAlign:"right" }}>
+                        {isEditingThis ? (
+                          <input
+                            type="number" min="0" step="1"
+                            value={playersInput}
+                            onChange={e=>setPlayersInput(e.target.value)}
+                            onBlur={()=>{ onUpdateApproxPlayers(r.email, playersInput); setEditingPlayers(null); }}
+                            onKeyDown={e=>{ if(e.key==="Enter"||e.key==="Escape"){ onUpdateApproxPlayers(r.email, playersInput); setEditingPlayers(null); }}}
+                            autoFocus
+                            style={{ width:56, padding:"2px 6px", borderRadius:6, border:"1.5px solid #6366f1", fontSize:13, textAlign:"right", fontFamily:"inherit", outline:"none" }}
+                          />
+                        ) : (
+                          <span
+                            onClick={canEditP ? ()=>{ setEditingPlayers(r.email.toLowerCase()); setPlayersInput(String(players||"")); } : undefined}
+                            title={canEditP ? "Click to edit" : undefined}
+                            style={{ cursor:canEditP?"pointer":"default", padding:"2px 8px", borderRadius:6,
+                              background: players>0?"#f0f9ff":"#f8fafc",
+                              color: players>0?"#0369a1":"#94a3b8",
+                              fontWeight:600, fontSize:12,
+                              border: canEditP?"1px dashed #cbd5e1":"none",
+                              minWidth:28, display:"inline-block", textAlign:"right" }}>
+                            {players > 0 ? players : canEditP ? "+" : "—"}
+                          </span>
+                        )}
+                      </td>
+                      {isPerBooking&&<td style={{ ...tdS, textAlign:"right" }}>
+                        {isEditingDur ? (
+                          <input
+                            type="number" min="0.5" step="0.5"
+                            value={durationInput}
+                            onChange={e=>setDurationInput(e.target.value)}
+                            onBlur={()=>{ onUpdateApproxDuration(r.email, durationInput); setEditingDuration(null); }}
+                            onKeyDown={e=>{ if(e.key==="Enter"||e.key==="Escape"){ onUpdateApproxDuration(r.email, durationInput); setEditingDuration(null); }}}
+                            autoFocus
+                            style={{ width:60, padding:"2px 6px", borderRadius:6, border:"1.5px solid #0369a1", fontSize:13, textAlign:"right", fontFamily:"inherit", outline:"none" }}
+                          />
+                        ) : (
+                          <span
+                            onClick={canEditD ? ()=>{ setEditingDuration(r.email.toLowerCase()); setDurationInput(String(dur)); } : undefined}
+                            title={canEditD ? "Click to edit approx duration" : undefined}
+                            style={{ cursor:canEditD?"pointer":"default", padding:"2px 8px", borderRadius:6,
+                              background: durSaved?"#e0f2fe":"#f8fafc",
+                              color: durSaved?"#0369a1":"#94a3b8",
+                              fontWeight:600, fontSize:12,
+                              border: canEditD?"1px dashed #cbd5e1":"none",
+                              minWidth:32, display:"inline-block", textAlign:"right" }}>
+                            {dur}h
+                          </span>
+                        )}
+                      </td>}
+                      {anyRates&&<td style={{ ...tdS, textAlign:"right", fontWeight:700, color:perPlayer>0?"#7c3aed":"#94a3b8" }}>
+                        {perPlayer>0 ? fmtCost(perPlayer) : "—"}
+                      </td>}
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
                 <tfoot>
-                  <tr style={{ background:"#f8fafc", borderTop:"2px solid #f1f5f9" }}>
-                    <td style={{ ...tdS, fontWeight:700 }} colSpan={2}>Total</td>
-                    <td style={{ ...tdS, textAlign:"right", fontWeight:700 }}>{active.length}</td>
-                    <td style={{ ...tdS, textAlign:"right" }}><span style={{ background:"#fef9c3", color:"#854d0e", borderRadius:6, padding:"2px 8px", fontWeight:700, fontSize:12 }}>{fmtHrs(totalDaytime)}</span></td>
-                    <td style={{ ...tdS, textAlign:"right" }}><span style={{ background:"#ede9fe", color:"#5b21b6", borderRadius:6, padding:"2px 8px", fontWeight:700, fontSize:12 }}>{fmtHrs(totalEvening)}</span></td>
-                    <td style={{ ...tdS, textAlign:"right", fontWeight:800 }}>{fmtHrs(totalHrs)}</td>
-                  </tr>
+                  {(()=>{
+                    const totalPlayers = rows.reduce((s,r)=>s+getPlayers(r.email),0);
+                    const totalCostAll = rows.reduce((s,r)=>s+r.cost,0);
+                    const totalPerPlayer = anyRates && totalPlayers > 0 && totalCostAll > 0 ? totalCostAll / totalPlayers : 0;
+                    const totalApproxHrs = isPerBooking ? rows.reduce((s,r)=>s+r.bookings*getApproxDuration(r.email),0) : totalHrs;
+                    return (
+                    <tr style={{ background:"#f8fafc", borderTop:"2px solid #f1f5f9" }}>
+                      <td style={{ ...tdS, fontWeight:700 }} colSpan={2}>Total</td>
+                      <td style={{ ...tdS, textAlign:"right", fontWeight:700 }}>{active.length}</td>
+                      <td style={{ ...tdS, textAlign:"right" }}>
+                        {isPerBooking
+                          ? <span style={{ background:"#fef9c3", color:"#854d0e", borderRadius:6, padding:"2px 8px", fontWeight:700, fontSize:12 }}>{totalDayBkgs}</span>
+                          : <span style={{ background:"#fef9c3", color:"#854d0e", borderRadius:6, padding:"2px 8px", fontWeight:700, fontSize:12 }}>{fmtHrs(totalDaytime)}</span>}
+                      </td>
+                      <td style={{ ...tdS, textAlign:"right" }}>
+                        {isPerBooking
+                          ? <span style={{ background:"#ede9fe", color:"#5b21b6", borderRadius:6, padding:"2px 8px", fontWeight:700, fontSize:12 }}>{totalEveBkgs}</span>
+                          : <span style={{ background:"#ede9fe", color:"#5b21b6", borderRadius:6, padding:"2px 8px", fontWeight:700, fontSize:12 }}>{fmtHrs(totalEvening)}</span>}
+                      </td>
+                      <td style={{ ...tdS, textAlign:"right", fontWeight:800 }}>{fmtHrs(totalApproxHrs)}</td>
+                      {anyRates&&!isPerBooking&&<td style={{ ...tdS, textAlign:"right", fontWeight:800, color:"#15803d" }}>{fmtCost(totalDayCost)}</td>}
+                      {anyRates&&!isPerBooking&&<td style={{ ...tdS, textAlign:"right", fontWeight:800, color:"#15803d" }}>{fmtCost(totalEveCost)}</td>}
+                      {anyRates&&<td style={{ ...tdS, textAlign:"right", fontWeight:800, color:"#15803d" }}>{fmtCost(totalCostAll)}</td>}
+                      <td style={{ ...tdS, textAlign:"right", fontWeight:700, color:totalPlayers>0?"#0369a1":"#94a3b8" }}>{totalPlayers > 0 ? totalPlayers : "—"}</td>
+                      {isPerBooking&&<td style={{ ...tdS }}/>}
+                      {anyRates&&<td style={{ ...tdS, textAlign:"right", fontWeight:800, color:totalPerPlayer>0?"#7c3aed":"#94a3b8" }}>{totalPerPlayer>0?fmtCost(totalPerPlayer):"—"}</td>}
+                    </tr>
+                    );
+                  })()}
                 </tfoot>
               </table>
             </div>
           )}
+        {isPerBooking && rows.length > 0 && (
+          <div style={{ fontSize:11, color:"#94a3b8", marginTop:6 }}>
+            * Total Hrs = bookings × approx duration per booker (default 2 h). Click the ~Duration cell to adjust.
+          </div>
+        )}
       </div>
+
+      {/* Schedule Summary */}
+      <div style={{marginTop:24}}>
+        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10,flexWrap:"wrap"}}>
+          <h3 style={{margin:0,fontSize:15,fontWeight:700,color:"#0f172a",flex:1}}>📅 Schedule Summary</h3>
+          <button onClick={()=>setShowSchedule(v=>!v)} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#475569",fontSize:12})}>
+            {showSchedule?"Hide":"Show"}
+          </button>
+          {showSchedule&&(
+            <label style={{display:"flex",alignItems:"center",gap:6,fontSize:12,cursor:"pointer",color:"#475569"}}>
+              <input type="checkbox" checked={scheduleFacSensitive} onChange={e=>setScheduleFacSensitive(e.target.checked)}/>
+              Facility-sensitive
+            </label>
+          )}
+          {showSchedule&&isAdmin&&(
+            <button onClick={()=>{setSandboxMode(v=>!v);setPreviewMerge(false);setSandboxSelected(new Set());}} style={S.btn({
+              background:sandboxMode?"#7c3aed":"#f8fafc",
+              color:sandboxMode?"#fff":"#475569",
+              border:`1.5px solid ${sandboxMode?"#7c3aed":"#e2e8f0"}`,
+              fontSize:12
+            })}>
+              🧪 {sandboxMode?"Exit Sandbox":"Sandbox Mode"}
+            </button>
+          )}
+        </div>
+        {showSchedule&&(()=>{
+          function dayName(d){return["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][new Date(d+"T12:00").getDay()];}
+          // Build pattern groups per email using overlap-aware grouping
+          const patternMap = buildOverlapPatternMap(active, scheduleFacSensitive);
+
+          // Build rows: one per email with recurring + one-off lists
+          const scheduleRows = Object.entries(patternMap).map(([email,pats])=>{
+            const recurring = Object.entries(pats).filter(([,bkgs])=>bkgs.length>=2);
+            const oneOffCount = Object.values(pats).filter(bkgs=>bkgs.length===1).reduce((s,bkgs)=>s+bkgs.length,0);
+            const totalBkgs = Object.values(pats).reduce((s,bkgs)=>s+bkgs.length,0);
+            const nameDisplay = (pats[Object.keys(pats)[0]]||[])[0]?.name || email;
+            return {email,nameDisplay,recurring,oneOffCount,totalBkgs};
+          }).sort((a,b)=>b.totalBkgs-a.totalBkgs);
+
+          // Sandbox merge: combine ALL selected patterns into a single merge
+          // group as long as 2+ unique bookers are involved. Day, time,
+          // duration and facility differences are reconciled in the preview.
+          let mergePreview = null;
+          if(sandboxMode && sandboxSelected.size>0){
+            const byEmail = {}; // email -> {email, bkgs, pks}
+            sandboxSelected.forEach(key=>{
+              const [email,...rest] = key.split("::");
+              const pk = rest.join("::");
+              const bkgs = patternMap[email]?.[pk]||[];
+              if(!bkgs.length) return;
+              if(!byEmail[email]) byEmail[email]={email,bkgs:[],pks:[]};
+              byEmail[email].bkgs.push(...bkgs);
+              byEmail[email].pks.push(pk);
+            });
+            const groups = Object.values(byEmail);
+            if(groups.length >= 2){
+              const allBkgs = groups.flatMap(g=>g.bkgs);
+              const numBookers = groups.length;
+              const totalRate = allBkgs.reduce((s,b)=>{
+                const cat = categoryOf(b);
+                const r = getFacRates(b.facility_id);
+                const dur = getApproxDuration(b.email);
+                return s + (isPerBooking ? dur*r[cat] : (splitHours(b).day*r.day + splitHours(b).evening*r.evening));
+              },0);
+              const avgRate = totalRate / allBkgs.length;
+              const mergedRate = avgRate / numBookers;
+              const mergedTotalCost = mergedRate * allBkgs.length;
+              const label = `${groups.length} bookers · ${allBkgs.length} sessions`;
+              mergePreview = [{label,numBookers,mergedTotalCost,mergedRate,bookers:groups.map(g=>g.email),groups,pk:"merge",mergeKey:"merge"}];
+            }
+          }
+
+          const hasSelection = sandboxMode && sandboxSelected.size>0;
+          const hasMergeable = mergePreview && mergePreview.length>0;
+          return (
+            <div>
+              {hasSelection && !hasMergeable && (
+                <div style={{background:"#fffbeb",border:"1.5px dashed #fde68a",borderRadius:10,padding:"10px 14px",marginBottom:12,fontSize:12,color:"#92400e"}}>
+                  Select patterns from at least 2 different bookers to preview a merge. Days, times, durations and facilities don't need to match — you can reconcile any differences in the preview.
+                </div>
+              )}
+              {hasMergeable && !previewMerge && (
+                <div style={{display:"flex",alignItems:"center",gap:10,background:"#f5f3ff",border:"1.5px solid #c4b5fd",borderRadius:10,padding:"10px 14px",marginBottom:12,flexWrap:"wrap"}}>
+                  <span style={{fontSize:12,fontWeight:600,color:"#5b21b6",flex:1}}>
+                    Ready to merge {mergePreview.length} pattern{mergePreview.length!==1?"s":""} ({mergePreview.reduce((s,m)=>s+m.numBookers,0)} bookers selected). Add more selections or preview now.
+                  </span>
+                  <button onClick={()=>{setCommittedResolution(mergeResolution);setCommittedTarget(mergeTarget);setPreviewMerge(true);}}
+                    style={S.btn({background:"#7c3aed",color:"#fff",fontSize:12,fontWeight:700})}>
+                    👁 Preview Merge
+                  </button>
+                  <button onClick={()=>{setSandboxSelected(new Set());setPreviewMerge(false);}}
+                    style={S.btn({border:"1.5px solid #c4b5fd",background:"#fff",color:"#7c3aed",fontSize:12})}>
+                    Clear
+                  </button>
+                </div>
+              )}
+              {hasMergeable && previewMerge && (()=>{
+                return mergePreview.map((m,mi)=>{
+                  const key = m.mergeKey || mi;
+                  // UI ("editing") target reflects user's pending pick; preview ("committed") target was snapshotted on last Preview/Recalculate.
+                  const editingTarget = mergeTarget || m.groups[0]?.email;
+                  const committedTargetEmail = committedTarget || m.groups[0]?.email;
+                  const targetGroup = m.groups.find(g=>g.email===committedTargetEmail)||m.groups[0];
+                  const editingTargetGroup = m.groups.find(g=>g.email===editingTarget)||m.groups[0];
+                  const conformGroups = m.groups.filter(g=>g.email!==editingTargetGroup.email);
+                  const targetBkg = editingTargetGroup.bkgs[0];
+                  const resKey = k => `${key}::${k}`;
+                  const resolved = (field, targetVal) => mergeResolution[resKey(field)] ?? targetVal;
+                  const committedVal = (field, fallback) => committedResolution[resKey(field)] ?? fallback;
+                  const DAYS = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+                  const getField = (b, field) => {
+                    if(!b) return "";
+                    if(field === "day") return new Date(b.date+"T12:00").getDay();
+                    return b[field];
+                  };
+                  const fields = ["day","start_hour","duration","facility_id"].map(field=>{
+                    const targetVal = getField(targetBkg, field);
+                    const conflicts = conformGroups.map(g=>({email:g.email,val:getField(g.bkgs[0], field)})).filter(x=>x.val!==targetVal);
+                    return {field, targetVal, conflicts, resolvedVal: resolved(field, targetVal)};
+                  });
+                  const allGroups = m.groups.map(g=>{
+                    const dates = g.bkgs.map(b=>b.date).sort();
+                    return {email:g.email, start:dates[0], end:dates[dates.length-1], count:g.bkgs.length};
+                  });
+                  const getCost = (g) => g.bkgs.reduce((s,b)=>{
+                    const cat = categoryOf(b);
+                    const r = getFacRates(b.facility_id);
+                    const dur = getApproxDuration(b.email);
+                    return s + (isPerBooking ? dur*r[cat] : (splitHours(b).day*r.day+splitHours(b).evening*r.evening));
+                  }, 0);
+                  const groupCosts = m.groups.map(g=>({email:g.email, cost:getCost(g), count:g.bkgs.length, bkgs:g.bkgs}));
+                  const totalCost = groupCosts.reduce((s,g)=>s+g.cost, 0);
+                  // After-merge schedule = committed target's schedule with committed overrides applied,
+                  // restricted to the overlap window across all bookers' date ranges. Sessions outside
+                  // the overlap stay with their original booker at full original cost.
+                  const committedBkg = targetGroup.bkgs[0];
+                  const ovFacId = committedVal("facility_id", committedBkg?.facility_id);
+                  const ovStart = committedVal("start_hour", committedBkg?.start_hour);
+                  const ovDur = committedVal("duration", committedBkg?.duration);
+                  const ovRates = getFacRates(ovFacId);
+                  const ranges = m.groups.map(g=>{
+                    const sorted = g.bkgs.map(b=>b.date).sort();
+                    return {email:g.email, start:sorted[0], end:sorted[sorted.length-1]};
+                  });
+                  const overlapStart = ranges.reduce((a,r)=>r.start>a?r.start:a, ranges[0].start);
+                  const overlapEnd = ranges.reduce((a,r)=>r.end<a?r.end:a, ranges[0].end);
+                  const hasOverlap = overlapStart <= overlapEnd;
+                  const targetInOverlap = targetGroup.bkgs.filter(b=>hasOverlap && b.date>=overlapStart && b.date<=overlapEnd);
+                  const sharedCount = targetInOverlap.length;
+                  const ratePerSession = (()=>{
+                    if(isPerBooking){
+                      const cat = ovStart >= EVENING_CUTOFF ? "evening" : "day";
+                      return ovDur * ovRates[cat];
+                    }
+                    const end = ovStart + ovDur;
+                    const dayHrs = Math.max(0, Math.min(EVENING_CUTOFF, end) - Math.min(EVENING_CUTOFF, ovStart));
+                    const eveHrs = Math.max(0, end - Math.max(EVENING_CUTOFF, ovStart));
+                    return dayHrs*ovRates.day + eveHrs*ovRates.evening;
+                  })();
+                  const sharedTotal = sharedCount * ratePerSession;
+                  const sharePerBooker = sharedTotal / m.numBookers;
+                  // Per-booker individual cost = bookings OUTSIDE the overlap window
+                  const individualCostByEmail = {};
+                  m.groups.forEach(g=>{
+                    const outside = g.bkgs.filter(b=>!hasOverlap || b.date<overlapStart || b.date>overlapEnd);
+                    individualCostByEmail[g.email] = outside.reduce((s,b)=>{
+                      const cat = categoryOf(b);
+                      const r = getFacRates(b.facility_id);
+                      const dur = getApproxDuration(b.email);
+                      return s + (isPerBooking ? dur*r[cat] : (splitHours(b).day*r.day+splitHours(b).evening*r.evening));
+                    }, 0);
+                  });
+                  const mergedTotal = sharedTotal + Object.values(individualCostByEmail).reduce((s,v)=>s+v,0);
+                  const si={border:"1px solid #e2e8f0",borderRadius:6,padding:"3px 7px",fontSize:12,fontFamily:"inherit",background:"#fff"};
+                  const setRes = (field, val) => setMergeResolution(prev=>({...prev,[resKey(field)]:val}));
+                  // Stale = the editing values diverge from what's committed in the preview
+                  const stale = JSON.stringify(mergeResolution) !== JSON.stringify(committedResolution) || editingTarget !== committedTargetEmail;
+                  return (
+                    <div key={key} style={{background:"#f5f3ff",border:"1.5px solid #c4b5fd",borderRadius:10,padding:"14px 16px",marginBottom:12}}>
+
+                      {/* Header */}
+                      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10,flexWrap:"wrap"}}>
+                        <div style={{fontWeight:700,fontSize:13,color:"#5b21b6",flex:1}}>🧪 Merge Preview — {m.label}</div>
+                        {stale
+                          ? <span style={{fontSize:11,fontWeight:700,color:"#92400e",background:"#fef3c7",border:"1px solid #fde68a",borderRadius:6,padding:"2px 7px"}}>⚠ Pending changes</span>
+                          : <span style={{fontSize:11,fontWeight:600,color:"#16a34a",background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:6,padding:"2px 7px"}}>✓ Up to date</span>
+                        }
+                        <button onClick={()=>{setCommittedResolution({...mergeResolution});setCommittedTarget(mergeTarget);}}
+                          style={S.btn({background:"#7c3aed",color:"#fff",fontSize:11,opacity:stale?1:0.5})}>
+                          🔄 Recalculate
+                        </button>
+                      </div>
+
+                      {/* Target + merged slot */}
+                      <div style={{background:"#ede9fe",borderRadius:8,padding:"8px 12px",marginBottom:10}}>
+                        <div style={{fontSize:12,fontWeight:600,color:"#64748b",marginBottom:5}}>Target (others conform to their slot):</div>
+                        <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:6}}>
+                          {m.groups.map(g=>(
+                            <button key={g.email} onClick={()=>setMergeTarget(g.email)}
+                              style={{background:editingTarget===g.email?"#5b21b6":"#f5f3ff",color:editingTarget===g.email?"#fff":"#5b21b6",border:"1px solid #c4b5fd",borderRadius:6,padding:"2px 8px",fontSize:11,cursor:"pointer",fontWeight:600,fontFamily:"inherit"}}>
+                              {g.email.split("@")[0]}
+                            </button>
+                          ))}
+                        </div>
+                        <div style={{fontSize:12,color:"#4c1d95"}}>
+                          📌 Merged slot: <strong>{DAYS[committedVal("day",new Date((targetGroup.bkgs[0]?.date||"2000-01-01")+"T12:00").getDay())] } {fmtTime(ovStart)} · {ovDur}h · {FACILITIES.find(f=>f.id===ovFacId)?.name||ovFacId}</strong>
+                          {stale&&<span style={{color:"#92400e",marginLeft:6,fontSize:11}}>(pending recalculate)</span>}
+                        </div>
+                      </div>
+
+                      {/* Resolve differences */}
+                      {fields.some(f=>f.conflicts.length>0)&&(
+                        <div style={{marginBottom:10,background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,padding:"8px 12px"}}>
+                          <div style={{fontWeight:600,fontSize:12,color:"#64748b",marginBottom:6}}>Resolve differences</div>
+                          {fields.map(f=>{
+                            if(f.conflicts.length===0) return null;
+                            const label = f.field==="day"?"Day":f.field==="start_hour"?"Start time":f.field==="duration"?"Duration":"Facility";
+                            const disp = v => f.field==="day"?DAYS[v]:f.field==="start_hour"?fmtTime(v):f.field==="facility_id"?(FACILITIES.find(x=>x.id===v)?.name||v):`${v}h`;
+                            return (
+                              <div key={f.field} style={{display:"grid",gridTemplateColumns:"70px 1fr auto",gap:8,alignItems:"center",marginBottom:5,fontSize:12}}>
+                                <span style={{fontWeight:600,color:"#4c1d95"}}>{label}</span>
+                                <span style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+                                  <span style={{color:"#16a34a"}}>✓ {disp(f.targetVal)} <span style={{color:"#94a3b8",fontSize:11}}>({editingTargetGroup.email.split("@")[0]})</span></span>
+                                  {f.conflicts.map(c=>(
+                                    <span key={c.email} style={{color:"#9f1239"}}>≠ {disp(c.val)} <span style={{color:"#94a3b8",fontSize:11}}>({c.email.split("@")[0]})</span></span>
+                                  ))}
+                                </span>
+                                <span style={{display:"flex",alignItems:"center",gap:5}}>
+                                  <span style={{fontSize:11,color:"#64748b"}}>→</span>
+                                  {f.field==="day"&&<select value={f.resolvedVal} onChange={e=>setRes(f.field,parseInt(e.target.value))} style={si}>{DAYS.map((d,i)=><option key={i} value={i}>{d}</option>)}</select>}
+                                  {f.field==="start_hour"&&<input type="number" min="0" max="23" step="0.5" value={f.resolvedVal} onChange={e=>setRes(f.field,parseFloat(e.target.value)||0)} style={{...si,width:60}}/>}
+                                  {f.field==="duration"&&<select value={f.resolvedVal} onChange={e=>setRes(f.field,parseFloat(e.target.value))} style={si}>{DURATIONS.map(d=><option key={d.value} value={d.value}>{d.label}</option>)}</select>}
+                                  {f.field==="facility_id"&&<select value={f.resolvedVal} onChange={e=>setRes(f.field,e.target.value)} style={si}>{FACILITIES.map(f2=><option key={f2.id} value={f2.id}>{f2.name}</option>)}</select>}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {/* Date ranges */}
+                      <div style={{marginBottom:10,background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,padding:"8px 12px"}}>
+                        <div style={{fontWeight:600,fontSize:12,color:"#64748b",marginBottom:5}}>Date ranges &amp; overlap</div>
+                        {allGroups.map(g=>(
+                          <div key={g.email} style={{fontSize:12,color:"#4c1d95",marginBottom:2,display:"flex",justifyContent:"space-between",flexWrap:"wrap"}}>
+                            <span style={{fontWeight:600}}>{g.email.split("@")[0]}</span>
+                            <span>{fmtDate(g.start)} → {fmtDate(g.end)} · {g.count} sessions</span>
+                          </div>
+                        ))}
+                        {hasOverlap?(
+                          <div style={{marginTop:5,paddingTop:5,borderTop:"1px dashed #c4b5fd",fontSize:11,color:"#5b21b6",display:"flex",justifyContent:"space-between"}}>
+                            <span style={{fontWeight:600}}>Overlap window</span>
+                            <span>{fmtDate(overlapStart)} → {fmtDate(overlapEnd)} · {sharedCount} shared session{sharedCount!==1?"s":""}</span>
+                          </div>
+                        ):<div style={{fontSize:11,color:"#ef4444",marginTop:4}}>⚠ No overlap — no sessions to merge</div>}
+                      </div>
+
+                      {/* Cost breakdown */}
+                      <div style={{background:"#ede9fe",borderRadius:8,padding:"8px 12px",marginBottom:10}}>
+                        <div style={{fontWeight:700,fontSize:12,color:"#5b21b6",marginBottom:8}}>Cost breakdown <span style={{fontWeight:400,fontSize:11,color:"#94a3b8"}}>(Before → After)</span></div>
+                        {groupCosts.map(g=>{
+                          const indiv = individualCostByEmail[g.email]||0;
+                          const finalCost = sharePerBooker+indiv;
+                          const diff = g.cost-finalCost;
+                          const players = getPlayers(g.email);
+                          const insideCount = g.bkgs.filter(b=>hasOverlap&&b.date>=overlapStart&&b.date<=overlapEnd).length;
+                          const outsideCount = g.bkgs.length-insideCount;
+                          return (
+                            <div key={g.email} style={{marginBottom:8,paddingBottom:8,borderBottom:"1px solid #c4b5fd"}}>
+                              <div style={{fontWeight:700,fontSize:12,color:"#4c1d95",marginBottom:4}}>
+                                {g.email.split("@")[0]}{players>0&&<span style={{fontWeight:400,color:"#64748b"}}> · {players} players</span>}
+                              </div>
+                              <div style={{display:"grid",gridTemplateColumns:"1fr auto auto",gap:"3px 12px",fontSize:11}}>
+                                {insideCount>0&&<><span style={{color:"#475569"}}>Shared ({insideCount} sessions)</span><span style={{textAlign:"right",color:"#9f1239",textDecoration:"line-through"}}>{fmtCost(getCost({bkgs:g.bkgs.filter(b=>b.date>=overlapStart&&b.date<=overlapEnd)}))}</span><span style={{textAlign:"right",color:"#16a34a",fontWeight:600}}>{fmtCost(sharePerBooker)}</span></>}
+                                {outsideCount>0&&<><span style={{color:"#94a3b8"}}>Unaffected ({outsideCount} sessions)</span><span style={{textAlign:"right",color:"#94a3b8"}}>{fmtCost(indiv)}</span><span style={{textAlign:"right",color:"#94a3b8"}}>{fmtCost(indiv)}</span></>}
+                                <span style={{fontWeight:700,color:"#4c1d95",paddingTop:3,borderTop:"1px solid #c4b5fd"}}>Total</span>
+                                <span style={{textAlign:"right",fontWeight:700,color:"#9f1239",paddingTop:3,borderTop:"1px solid #c4b5fd",textDecoration:"line-through"}}>{fmtCost(g.cost)}</span>
+                                <span style={{textAlign:"right",fontWeight:700,color:"#16a34a",paddingTop:3,borderTop:"1px solid #c4b5fd"}}>{fmtCost(finalCost)}</span>
+                                {players>0&&<><span style={{color:"#64748b"}}>Per player</span><span style={{textAlign:"right",color:"#9f1239",textDecoration:"line-through"}}>{fmtCost(g.cost/players)}</span><span style={{textAlign:"right",color:"#16a34a",fontWeight:600}}>{fmtCost(finalCost/players)}</span></>}
+                              </div>
+                              <div style={{fontSize:11,color:diff>=0?"#16a34a":"#dc2626",textAlign:"right",marginTop:2}}>
+                                {diff>=0?"Saves":"Pays extra"} {fmtCost(Math.abs(diff))}{players>0?` · ${fmtCost(Math.abs(diff)/players)}/player`:""}
+                              </div>
+                            </div>
+                          );
+                        })}
+                        {(()=>{
+                          const totalPlayers = groupCosts.reduce((s,g)=>s+getPlayers(g.email),0);
+                          const totalSaved = totalCost-mergedTotal;
+                          return (
+                            <div>
+                              <div style={{display:"grid",gridTemplateColumns:"1fr auto auto",gap:"3px 12px",fontSize:12,fontWeight:700,color:"#5b21b6"}}>
+                                <span>Combined{totalPlayers>0&&<span style={{fontWeight:400,color:"#64748b"}}> · {totalPlayers} players</span>}</span>
+                                <span style={{textAlign:"right",textDecoration:"line-through",color:"#9f1239"}}>{fmtCost(totalCost)}</span>
+                                <span style={{textAlign:"right",color:"#16a34a"}}>{fmtCost(mergedTotal)}</span>
+                              </div>
+                              {totalPlayers>0&&(
+                                <div style={{display:"grid",gridTemplateColumns:"1fr auto auto",gap:"3px 12px",fontSize:11,color:"#64748b",marginTop:2}}>
+                                  <span>Per player</span>
+                                  <span style={{textAlign:"right",textDecoration:"line-through",color:"#9f1239"}}>{fmtCost(totalCost/totalPlayers)}</span>
+                                  <span style={{textAlign:"right",color:"#16a34a",fontWeight:600}}>{fmtCost(mergedTotal/totalPlayers)}</span>
+                                </div>
+                              )}
+                              <div style={{fontSize:11,color:"#16a34a",textAlign:"right",marginTop:3,fontWeight:600}}>
+                                Total saves {fmtCost(totalSaved)}{totalPlayers>0?` · ${fmtCost(totalSaved/totalPlayers)}/player`:""}
+                              </div>
+                            </div>
+                          );
+                        })()}
+                      </div>
+                      <button
+                        onClick={()=>{
+                          if(onProposeMerge) onProposeMerge([m]);
+                          else alert("Merge proposal added — commit your cart to notify bookers.");
+                        }}
+                        style={S.btn({background:"#7c3aed",color:"#fff",fontSize:12})}>
+                        Propose Merge
+                      </button>
+                    </div>
+                  );
+                });
+              })()}
+              <div style={{overflowX:"auto"}}>
+                <table style={{width:"100%",borderCollapse:"collapse",minWidth:480}}>
+                  <thead>
+                    <tr style={{background:"#f8fafc"}}>
+                      <th style={thS}>Booker</th>
+                      <th style={thS}>Recurring Patterns</th>
+                      <th style={{...thS,textAlign:"right"}}>One-offs</th>
+                      <th style={{...thS,textAlign:"right"}}>Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {scheduleRows.map(row=>{
+                      const ec = emailColor(row.email);
+                      return (
+                        <tr key={row.email} style={{borderBottom:"1px solid #f1f5f9"}}>
+                          <td style={tdS}>
+                            <div style={{fontWeight:700,color:"#0f172a",fontSize:13}}>{row.nameDisplay}</div>
+                            <div style={{fontSize:11,color:"#94a3b8"}}>{row.email}</div>
+                          </td>
+                          <td style={tdS}>
+                            <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                              {row.recurring.length===0&&<span style={{fontSize:12,color:"#94a3b8"}}>—</span>}
+                              {row.recurring.map(([pk,bkgs])=>{
+                                const selKey = `${row.email}::${pk}`;
+                                const isSel = sandboxSelected.has(selKey);
+                                const parts = pk.split("_");
+                                const startH = parseFloat(parts[parts.length-1]);
+                                const dn = parts[parts.length-2]||"";
+                                const durs = [...new Set(bkgs.map(b=>b.duration))];
+                                const durLabel = durs.length===1 ? `${durs[0]}h` : `~${Math.round(durs.reduce((s,d)=>s+d,0)/durs.length*2)/2}h`;
+                                let facLabel;
+                                if(scheduleFacSensitive){
+                                  const facId = pk.split("_")[0];
+                                  const fac = FACILITIES.find(f=>f.id===facId);
+                                  facLabel = fac ? fac.name.split("–")[0].split("#")[0].trim().replace("Field","Fld") : facId;
+                                } else {
+                                  const facIds = [...new Set(bkgs.map(b=>b.facility_id))];
+                                  facLabel = facIds.map(fid=>{
+                                    const f=FACILITIES.find(x=>x.id===fid);
+                                    return f ? (f.name.includes("Field") ? f.name.replace("Field ","Fld ") : f.name.split("–")[0].trim().slice(0,6)) : fid;
+                                  }).join(", ");
+                                }
+                                const label = `${dn} ${fmtTime(startH)} · ${durLabel} · ${facLabel} ×${bkgs.length}`;
+                                return (
+                                  <div key={pk} style={{display:"flex",alignItems:"center",gap:4}}>
+                                    {sandboxMode&&(
+                                      <input type="checkbox" checked={isSel}
+                                        onChange={e=>{
+                                          setSandboxSelected(prev=>{
+                                            const next=new Set(prev);
+                                            if(e.target.checked) next.add(selKey); else next.delete(selKey);
+                                            return next;
+                                          });
+                                          setPreviewMerge(false);
+                                        }}
+                                        style={{cursor:"pointer"}}/>
+                                    )}
+                                    <span onClick={()=>setPatternModal({email:row.email, name:row.nameDisplay, pk, bkgs})} style={{
+                                      display:"inline-block",
+                                      background:isSel?"#7c3aed":ec+"22",
+                                      color:isSel?"#fff":ec,
+                                      border:`1px solid ${isSel?"#7c3aed":ec+"55"}`,
+                                      borderRadius:6,
+                                      padding:"2px 8px",
+                                      fontSize:11,
+                                      fontWeight:600,
+                                      whiteSpace:"nowrap",
+                                      cursor:"pointer"
+                                    }}>
+                                      {label}
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </td>
+                          <td style={{...tdS,textAlign:"right"}}>
+                            {row.oneOffCount>0 ? (
+                              <button onClick={()=>{
+                                const oneOffBkgs = Object.values(patternMap[row.email]||{}).filter(bs=>bs.length===1).flat();
+                                setOneOffModal({email:row.email, name:row.nameDisplay, bkgs:oneOffBkgs});
+                              }} style={{background:"none",border:"1px solid #e2e8f0",borderRadius:6,padding:"2px 8px",cursor:"pointer",fontSize:12,color:"#475569",fontWeight:600}}>
+                                {row.oneOffCount}
+                              </button>
+                            ) : <span style={{color:"#94a3b8"}}>—</span>}
+                          </td>
+                          <td style={{...tdS,textAlign:"right",fontWeight:700}}>{row.totalBkgs}</td>
+                        </tr>
+                      );
+                    })}
+                    {scheduleRows.length===0&&(
+                      <tr><td colSpan={4} style={{...tdS,textAlign:"center",color:"#94a3b8"}}>No bookings in current filter.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          );
+        })()}
+      </div>
+
+      {patternModal && (
+        <PatternModal
+          {...patternModal}
+          isAdmin={isAdmin}
+          facilityRates={facilityRates}
+          pricingMode={pricingMode}
+          approxDurations={approxDurations}
+          onClose={()=>setPatternModal(null)}
+          onBulkApply={args=>{onBulkApply&&onBulkApply(args);}}
+        />
+      )}
+      {oneOffModal && (
+        <OneOffModal
+          {...oneOffModal}
+          isAdmin={isAdmin}
+          onClose={()=>setOneOffModal(null)}
+        />
+      )}
+      {/* Invoice modal */}
+      {showInvoice && (()=>{
+        const scopes = getInvoiceScopes();
+        const OptionRow = ({label, children}) => (
+          <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+            <span style={{fontSize:12,fontWeight:600,color:"#64748b",minWidth:90}}>{label}</span>
+            {children}
+          </div>
+        );
+        const Pill = ({active, onClick, children}) => (
+          <button onClick={onClick} style={{padding:"4px 12px",borderRadius:8,border:active?"1.5px solid #0f172a":"1.5px solid #e2e8f0",background:active?"#0f172a":"#f8fafc",color:active?"#fff":"#475569",fontWeight:600,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>
+            {children}
+          </button>
+        );
+        return (
+          <div style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.45)",zIndex:999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+            <div style={{background:"#fff",borderRadius:16,padding:28,maxWidth:520,width:"100%",boxShadow:"0 8px 40px rgba(0,0,0,0.18)",display:"flex",flexDirection:"column",gap:18}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <h3 style={{margin:0,fontSize:18,fontWeight:800,color:"#0f172a"}}>🧾 Export Invoice</h3>
+                <button onClick={()=>setShowInvoice(false)} style={{background:"none",border:"none",cursor:"pointer",fontSize:20,color:"#94a3b8",lineHeight:1}}>✕</button>
+              </div>
+
+              <div style={{display:"flex",flexDirection:"column",gap:12}}>
+                {isAdmin && emailFilter==="all" && (
+                  <OptionRow label="Scope">
+                    <Pill active={invScope==="combined"} onClick={()=>setInvScope("combined")}>Combined invoice</Pill>
+                    <Pill active={invScope==="per_booker"} onClick={()=>setInvScope("per_booker")}>Per booker</Pill>
+                  </OptionRow>
+                )}
+                <OptionRow label="Line items">
+                  <Pill active={invDetail==="grouped"} onClick={()=>setInvDetail("grouped")}>Grouped</Pill>
+                  <Pill active={invDetail==="individual"} onClick={()=>setInvDetail("individual")}>Individual</Pill>
+                </OptionRow>
+                <OptionRow label="GST">
+                  <Pill active={invGst==="inclusive"} onClick={()=>setInvGst("inclusive")}>Inclusive (extract)</Pill>
+                  <Pill active={invGst==="exclusive"} onClick={()=>setInvGst("exclusive")}>Exclusive (add on)</Pill>
+                  <Pill active={invGst==="note"} onClick={()=>setInvGst("note")}>Note only</Pill>
+                </OptionRow>
+              </div>
+
+              {/* Summary of what will be invoiced */}
+              <div style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:10,padding:"12px 16px",fontSize:13,color:"#475569"}}>
+                {invScope==="per_booker" && emailFilter==="all"
+                  ? <span><strong>{scopes.length}</strong> separate invoices for {scopes.map(s=>s.name||s.email).join(", ")}</span>
+                  : <span>Invoice for <strong>{scopes[0]?.name||scopes[0]?.email}</strong> — <strong>{active.length}</strong> booking{active.length!==1?"s":""}, total <strong>{fmtCost(active.reduce((s,b)=>{const {day,evening}=splitHours(b);const r=getFacRates(b.facility_id);return s+day*r.day+evening*r.evening;},0))}</strong></span>
+                }
+              </div>
+
+              <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                <div style={{fontSize:12,fontWeight:600,color:"#64748b",marginBottom:2}}>Export as:</div>
+                <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                  {[
+                    {fmt:"html",  label:"Open HTML", icon:"🌐"},
+                    {fmt:"print", label:"Print / Save PDF", icon:"🖨"},
+                    {fmt:"csv",   label:"CSV", icon:"📊"},
+                  ].map(({fmt,label,icon})=>(
+                    <button key={fmt} onClick={()=>{
+                      scopes.forEach(s => exportInvoice(fmt, s.bkgs, s.name, s.email));
+                    }} style={S.btn({background:"#0f172a",color:"#fff",gap:6,display:"flex",alignItems:"center"})}>
+                      {icon} {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -1521,26 +3158,78 @@ function AdminLogin({onLogin}) {
   );
 }
 
-// ─── Admin Panel with bulk approve + per-email email summaries ────────────────
-function AdminPanel({bookings,onBulkStatusChange,onEdit,onDelete,clashes=[]}) {
+// ─── Admin Panel with action queue, bulk approve, facility rates ──────────────
+function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[],deleteIds=new Set(),facilityRates={},onUpdateFacilityRate,onClearOldUnapproved,silentMode=false,approxPlayers={},onUpdateApproxPlayers,approxDurations={},onUpdateApproxDuration,onSyncDB,onShowSchedule,onBulkApply}) {
   const [sf,setSf]=useState("all"), [ff,setFf]=useState("all"), [q,setQ]=useState("");
+  const [adminBookerFilter,setAdminBookerFilter]=useState("all");
+  const [adminDateFrom,setAdminDateFrom]=useState(""), [adminDateTo,setAdminDateTo]=useState("");
+  const [adminColPurpose,setAdminColPurpose]=useState("");
+  const [sortCol,setSortCol]=useState("date"), [sortDir,setSortDir]=useState("desc");
   const [selected,setSelected]=useState(new Set());
   const [bulkNote,setBulkNote]=useState("");
   const [bulkSending,setBulkSending]=useState(false);
-  const [bulkStatus,setBulkStatus]=useState("approved");
+  const [bulkStatus,setBulkStatus]=useState("queued_cpsa");
+  const [bulkSkipEmail,setBulkSkipEmail]=useState(false);
   const [clashSending,setClashSending]=useState(false);
+  const [showClashNotify,setShowClashNotify]=useState(false);
+  const [clashNotifyUser,setClashNotifyUser]=useState(null);
+  // Per-row action queue: [{id, newStatus}]
+  const [actionQueue,setActionQueue]=useState([]);
+  const [actionNote,setActionNote]=useState("");
+  const [actionSkipEmail,setActionSkipEmail]=useState(false);
+  const [actionSending,setActionSending]=useState(false);
+  // Clear old unapproved modal
+  const [showClearModal,setShowClearModal]=useState(false);
+  const [clearSkipEmail,setClearSkipEmail]=useState(false);
+  // Facility rates section
+  const [showRates,setShowRates]=useState(false);
+  const [showPlayers,setShowPlayers]=useState(false);
+  const [defaultFieldDay,setDefaultFieldDay]=useState(0);
+  const [defaultFieldEvening,setDefaultFieldEvening]=useState(0);
+  const [clashGrouped,setClashGrouped]=useState(true);
+  const [clashPatternModal,setClashPatternModal]=useState(null);
 
   const si={padding:"7px 12px",borderRadius:8,border:"1.5px solid #e2e8f0",fontSize:13,fontFamily:"inherit",color:"#0f172a",background:"#f8fafc",outline:"none"};
+  const today=todayKey();
+
+  // Old unapproved = bookings in any review state with past dates
+  const oldUnapproved=bookings.filter(b=>REVIEW_STATUSES.has(b.status)&&b.date<today);
+
+  // Booker chip data
+  const adminBookerMap = {};
+  bookings.filter(b=>!isAdminBooking(b)&&b.email&&b.name).forEach(b=>{adminBookerMap[b.email.toLowerCase()]=b.name;});
+  const adminBookerEmails = Object.keys(adminBookerMap).sort();
+
+  function matchesQ(b) {
+    const t=q.toLowerCase();
+    return !t||`${b.name} ${b.email} ${b.purpose} ${b.notes||""}`.toLowerCase().includes(t);
+  }
 
   const list=bookings.filter(b=>{
+    if(isAdminBooking(b)) return false;
     if(sf!=="all"&&b.status!==sf) return false;
     if(ff!=="all"&&b.facility_id!==ff) return false;
-    const t=q.toLowerCase();
-    if(t&&!`${b.name} ${b.email} ${b.purpose}`.toLowerCase().includes(t)) return false;
+    if(adminBookerFilter!=="all"&&b.email?.toLowerCase()!==adminBookerFilter) return false;
+    if(adminDateFrom&&b.date<adminDateFrom) return false;
+    if(adminDateTo&&b.date>adminDateTo) return false;
+    if(adminColPurpose&&!(b.purpose||"").toLowerCase().includes(adminColPurpose.toLowerCase())) return false;
     return true;
-  }).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
+  }).sort((a,b)=>{
+    const dir=sortDir==="asc"?1:-1;
+    if(sortCol==="date") return dir*(a.date.localeCompare(b.date)||a.start_hour-b.start_hour);
+    if(sortCol==="name") return dir*(a.name||"").localeCompare(b.name||"");
+    if(sortCol==="facility") return dir*(a.facility_id||"").localeCompare(b.facility_id||"");
+    if(sortCol==="status") return dir*(a.status||"").localeCompare(b.status||"");
+    return dir*(new Date(b.created_at)-new Date(a.created_at));
+  });
 
-  const pendingList = list.filter(b=>b.status==="pending");
+  function toggleSort(col) {
+    if(sortCol===col) setSortDir(d=>d==="asc"?"desc":"asc");
+    else { setSortCol(col); setSortDir("asc"); }
+  }
+  const sortArrow = (col) => sortCol===col ? (sortDir==="asc"?" ↑":" ↓") : "";
+
+  const pendingList = list.filter(b=>REVIEW_STATUSES.has(b.status));
   const allSelected = pendingList.length>0 && pendingList.every(b=>selected.has(b.id));
 
   function toggleSelect(id) {
@@ -1551,10 +3240,48 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onDelete,clashes=[]}) {
     else setSelected(s=>{ const ns=new Set(s); pendingList.forEach(b=>ns.add(b.id)); return ns; });
   }
 
-  async function handleSendClashEmails() {
-    if (!clashes.length) return;
+  // Toggle a booking in/out of the per-row action queue
+  function queueAction(id, newStatus) {
+    setActionQueue(prev=>{
+      const existing=prev.find(a=>a.id===id);
+      if(existing && existing.newStatus===newStatus) return prev.filter(a=>a.id!==id); // toggle off
+      return [...prev.filter(a=>a.id!==id), {id, newStatus}];
+    });
+  }
+
+  async function submitActionQueue() {
+    if(!actionQueue.length) return;
+    setActionSending(true);
+    try{
+      const byStatus = {};
+      actionQueue.forEach(a => {
+        if(!byStatus[a.newStatus]) byStatus[a.newStatus] = [];
+        byStatus[a.newStatus].push(a.id);
+      });
+      for(const [status, ids] of Object.entries(byStatus)) {
+        await onBulkStatusChange(ids, status, actionNote, silentMode || actionSkipEmail);
+      }
+      setActionQueue([]); setActionNote("");
+    } finally { setActionSending(false); }
+  }
+
+  async function sendClashEmailToUser(email, name, userClashes) {
+    const rows = userClashes.map(c => {
+      const f = FACILITIES.find(x => x.id === c.admin.facility_id);
+      return "<tr><td style='padding:6px 8px'>" + (c.admin.purpose||"Admin booking") + "</td><td style='padding:6px 8px'>" + (f?.name||"") + "</td><td style='padding:6px 8px'>" + fmtDate(c.admin.date) + "</td><td style='padding:6px 8px'>" + fmtTime(c.admin.start_hour) + "–" + fmtTime(c.admin.start_hour+c.admin.duration) + "</td><td style='padding:6px 8px'>" + (c.user.purpose||"Your booking") + "</td></tr>";
+    }).join("");
+    const html = "<div style='font-family:sans-serif;max-width:600px'>"
+      + "<h2 style='color:#9f1239'>⚠️ Scheduling Clash Notice</h2>"
+      + "<p>Hi " + (name||email) + ",</p>"
+      + "<p>One or more of your bookings at Cornwall Park clash with scheduled field bookings on the same facility at the same time.</p>"
+      + "<table style='width:100%;border-collapse:collapse;font-size:13px;margin:16px 0;border:1px solid #f1f5f9'><thead><tr style='background:#f8fafc'><th style='padding:8px;text-align:left'>Field Booking</th><th style='padding:8px'>Facility</th><th style='padding:8px'>Date</th><th style='padding:8px'>Time</th><th style='padding:8px'>Your Booking</th></tr></thead><tbody>" + rows + "</tbody></table>"
+      + "<p>Please contact AMUA to discuss rescheduling.</p>"
+      + "<p style='color:#64748b;font-size:12px'>Automated notification from FacilityBook – AMUA.</p></div>";
+    await sendApprovalEmail({ to: email, subject: "⚠️ Scheduling Clash – Action Required", html });
+  }
+
+  async function handleSendClashEmails(targetEmail) {
     setClashSending(true);
-    // Group clashes by user email
     const byUser = {};
     clashes.forEach(c => {
       const email = c.user.email?.toLowerCase();
@@ -1563,23 +3290,19 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onDelete,clashes=[]}) {
       byUser[email].clashes.push(c);
     });
     try {
-      for (const [email, { name, clashes: uc }] of Object.entries(byUser)) {
-        const rows = uc.map(c => {
-          const f = FACILITIES.find(x => x.id === c.admin.facility_id);
-          return "<tr><td>" + (c.admin.purpose||"Admin booking") + "</td><td>" + (f?.name||"") + "</td><td>" + fmtDate(c.admin.date) + "</td><td>" + fmtTime(c.admin.start_hour) + "–" + fmtTime(c.admin.start_hour+c.admin.duration) + "</td><td>" + (c.user.purpose||"Your booking") + "</td></tr>";
-        }).join("");
-        const html = "<div style='font-family:sans-serif;max-width:600px'>"
-          + "<h2 style='color:#9f1239'>⚠️ Scheduling Clash Notice</h2>"
-          + "<p>Hi " + (name||email) + ",</p>"
-          + "<p>One or more of your bookings at Cornwall Park clash with scheduled admin/maintenance events on the same field at the same time.</p>"
-          + "<table style='width:100%;border-collapse:collapse;font-size:13px;margin:16px 0'><thead><tr style='background:#f8fafc'><th style='padding:8px;text-align:left'>Admin Event</th><th>Facility</th><th>Date</th><th>Time</th><th>Your Booking</th></tr></thead><tbody>" + rows + "</tbody></table>"
-          + "<p>Please contact us to discuss rescheduling.</p>"
-          + "<p style='color:#64748b;font-size:12px'>Automated notification from FacilityBook – AMUA.</p></div>";
-        await sendApprovalEmail({ to: email, subject: "⚠️ Scheduling Clash – Action Required", html });
+      if(targetEmail) {
+        const u = byUser[targetEmail];
+        if(u) await sendClashEmailToUser(targetEmail, u.name, u.clashes);
+        alert("Clash notification sent to " + targetEmail + ".");
+      } else {
+        for (const [email, { name, clashes: uc }] of Object.entries(byUser)) {
+          await sendClashEmailToUser(email, name, uc);
+        }
+        alert("Clash notifications sent to " + Object.keys(byUser).length + " user(s).");
       }
-      alert("Clash notifications sent to " + Object.keys(byUser).length + " user(s).");
+      setShowClashNotify(false); setClashNotifyUser(null);
     } catch(e) {
-      alert("Failed to send some emails: " + e.message);
+      alert("Failed to send email: " + e.message);
     } finally {
       setClashSending(false);
     }
@@ -1590,29 +3313,178 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onDelete,clashes=[]}) {
     if(ids.length===0) return;
     setBulkSending(true);
     try {
-      await onBulkStatusChange(ids, bulkStatus, bulkNote);
+      await onBulkStatusChange(ids, bulkStatus, bulkNote, silentMode || bulkSkipEmail);
       setSelected(new Set()); setBulkNote("");
     } finally { setBulkSending(false); }
   }
 
   return (
-    <div>
-      {/* Filters */}
-      <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:16}}>
-        <input style={{...si,flex:1,minWidth:160}} placeholder="Search name, email, purpose…" value={q} onChange={e=>setQ(e.target.value)}/>
-        <select style={si} value={sf} onChange={e=>setSf(e.target.value)}>
-          <option value="all">All statuses</option>
-          {Object.entries(STATUS_META).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
-        </select>
-        <select style={si} value={ff} onChange={e=>setFf(e.target.value)}>
-          <option value="all">All facilities</option>
-          {FACILITIES.map(f=><option key={f.id} value={f.id}>{f.name}</option>)}
-        </select>
+    <div style={{display:"flex",flexDirection:"column",gap:16}}>
+      {/* Top action bar */}
+      <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+        {oldUnapproved.length>0&&(
+          <button onClick={()=>setShowClearModal(true)} style={S.btn({background:"#7c3aed",color:"#fff",fontWeight:700,fontSize:12})}>
+            🧹 Clear old unapproved ({oldUnapproved.length})
+          </button>
+        )}
+        <button onClick={()=>setShowRates(v=>!v)} style={S.btn({border:"1.5px solid #e2e8f0",background:showRates?"#f8fafc":"#fff",color:"#475569",fontSize:12})}>
+          💲 Facility Rates
+        </button>
+        <button onClick={()=>setShowPlayers(v=>!v)} style={S.btn({border:"1.5px solid #e2e8f0",background:showPlayers?"#f8fafc":"#fff",color:"#475569",fontSize:12})}>
+          👥 Player Counts
+        </button>
+        {onSyncDB&&<button onClick={onSyncDB} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#475569",fontSize:12})}>
+          🔄 Sync DB
+        </button>}
+        {onShowSchedule&&<button onClick={onShowSchedule} style={S.btn({background:"#f0f9ff",color:"#0369a1",border:"1.5px solid #bae6fd",fontSize:12,fontWeight:700})}>
+          📅 Schedule
+        </button>}
       </div>
 
-      {/* Bulk action panel */}
+      {/* Facility rates panel */}
+      {showRates&&(()=>{
+        const fieldFacs = FACILITIES.filter(f=>f.name.includes("Field"));
+        const step = 2.5;
+        return (
+          <div style={{background:"#f8fafc",border:"1.5px solid #e2e8f0",borderRadius:12,padding:14}}>
+            <div style={{fontWeight:700,fontSize:14,color:"#0f172a",marginBottom:4}}>Hourly Rates</div>
+            <div style={{fontSize:12,color:"#64748b",marginBottom:10}}>Day = before 5:30pm · Evening = 5:30pm onwards · Step: $2.50</div>
+            {fieldFacs.length>0&&(
+              <div style={{background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:8,padding:"8px 12px",marginBottom:10,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                <span style={{fontSize:12,fontWeight:700,color:"#0369a1",minWidth:80}}>🏟 Fields default</span>
+                <span style={{fontSize:11,color:"#64748b"}}>Day $</span>
+                <input type="number" min="0" step={step} value={defaultFieldDay||""} placeholder="0"
+                  onChange={e=>setDefaultFieldDay(parseFloat(e.target.value)||0)}
+                  style={{...si,width:64,padding:"3px 6px",textAlign:"right",fontSize:13}}/>
+                <span style={{fontSize:11,color:"#64748b"}}>/hr</span>
+                <span style={{fontSize:11,color:"#7c3aed"}}>Evening $</span>
+                <input type="number" min="0" step={step} value={defaultFieldEvening||""} placeholder="0"
+                  onChange={e=>setDefaultFieldEvening(parseFloat(e.target.value)||0)}
+                  style={{...si,width:64,padding:"3px 6px",textAlign:"right",fontSize:13}}/>
+                <span style={{fontSize:11,color:"#64748b"}}>/hr</span>
+                <button onClick={()=>fieldFacs.forEach(f=>{onUpdateFacilityRate(f.id,"day",defaultFieldDay);onUpdateFacilityRate(f.id,"evening",defaultFieldEvening);})}
+                  style={S.btn({background:"#0369a1",color:"#fff",fontSize:11,padding:"4px 10px"})}>Apply to all fields</button>
+              </div>
+            )}
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(240px,1fr))",gap:8}}>
+              {FACILITIES.map(fac=>{
+                const r = typeof facilityRates[fac.id]==="object" ? facilityRates[fac.id] : {day:facilityRates[fac.id]||0,evening:50};
+                const day=r.day??0, evening=r.evening??50;
+                const isField = fac.name.includes("Field");
+                const adj = (type, cur, delta) => onUpdateFacilityRate(fac.id, type, Math.max(0, (parseFloat(cur)||0)+delta));
+                return (
+                  <div key={fac.id} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,padding:"8px 10px"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6,justifyContent:"space-between"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:5}}>
+                        <span style={{width:8,height:8,borderRadius:"50%",background:fac.color,flexShrink:0,display:"inline-block"}}/>
+                        <span style={{fontSize:11,fontWeight:700,color:"#0f172a"}}>{fac.name}</span>
+                      </div>
+                      {isField&&(defaultFieldDay>0||defaultFieldEvening>0)&&(
+                        <button onClick={()=>{onUpdateFacilityRate(fac.id,"day",defaultFieldDay);onUpdateFacilityRate(fac.id,"evening",defaultFieldEvening);}}
+                          title="Reset to default field rate"
+                          style={{background:"none",border:"1px solid #bae6fd",borderRadius:5,cursor:"pointer",fontSize:10,color:"#0369a1",padding:"1px 5px"}}>↺ reset</button>
+                      )}
+                    </div>
+                    <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+                      <span style={{fontSize:10,color:"#64748b",width:24}}>Day</span>
+                      <button onClick={()=>adj("day",day,-step)} style={{background:"#f1f5f9",border:"none",borderRadius:4,width:20,height:20,cursor:"pointer",fontSize:13,lineHeight:1}}>−</button>
+                      <input type="number" min="0" step={step} value={day||""} placeholder="0"
+                        onChange={e=>onUpdateFacilityRate(fac.id,"day",e.target.value)}
+                        style={{...si,width:58,padding:"2px 5px",textAlign:"right",fontSize:12}}/>
+                      <button onClick={()=>adj("day",day,+step)} style={{background:"#f1f5f9",border:"none",borderRadius:4,width:20,height:20,cursor:"pointer",fontSize:13,lineHeight:1}}>+</button>
+                      <span style={{fontSize:10,color:"#64748b"}}>/hr</span>
+                      <span style={{fontSize:10,color:"#7c3aed",width:28,marginLeft:4}}>Eve</span>
+                      <button onClick={()=>adj("evening",evening,-step)} style={{background:"#f1f5f9",border:"none",borderRadius:4,width:20,height:20,cursor:"pointer",fontSize:13,lineHeight:1}}>−</button>
+                      <input type="number" min="0" step={step} value={evening||""} placeholder="0"
+                        onChange={e=>onUpdateFacilityRate(fac.id,"evening",e.target.value)}
+                        style={{...si,width:58,padding:"2px 5px",textAlign:"right",fontSize:12}}/>
+                      <button onClick={()=>adj("evening",evening,+step)} style={{background:"#f1f5f9",border:"none",borderRadius:4,width:20,height:20,cursor:"pointer",fontSize:13,lineHeight:1}}>+</button>
+                      <span style={{fontSize:10,color:"#64748b"}}>/hr</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Approx player counts + duration panel */}
+      {showPlayers&&(()=>{
+        const bookers = Object.values(
+          bookings.filter(b=>["approved","cpsa_confirmed","cpsa_review_needed","pending_cpsa","queued_cpsa","pending_amua","amua_submit","pending"].includes(b.status))
+            .reduce((m,b)=>{ const k=b.email.toLowerCase(); if(!m[k]) m[k]={name:b.name,email:b.email}; return m; },{})
+        ).sort((a,b)=>a.name.localeCompare(b.name));
+        return (
+          <div style={{background:"#f8fafc",border:"1.5px solid #e2e8f0",borderRadius:12,padding:16}}>
+            <div style={{fontWeight:700,fontSize:14,color:"#0f172a",marginBottom:4}}>Approximate Players &amp; Duration per Booker</div>
+            <div style={{fontSize:12,color:"#64748b",marginBottom:12}}>Used in Summary to calculate per-player cost and per-booking mode hours. Duration defaults to 2 h if not set.</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(300px,1fr))",gap:8}}>
+              {bookers.map(b=>{
+                const players = approxPlayers[b.email.toLowerCase()] || 0;
+                const durSaved = approxDurations[b.email.toLowerCase()];
+                const dur = (durSaved && durSaved > 0) ? durSaved : 2;
+                return (
+                  <div key={b.email} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,padding:"8px 12px",display:"flex",alignItems:"center",gap:10}}>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:12,fontWeight:600,color:"#0f172a",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{b.name}</div>
+                      <div style={{fontSize:11,color:"#64748b",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{b.email}</div>
+                    </div>
+                    <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
+                      <span style={{fontSize:11,color:"#64748b"}}>Players:</span>
+                      <input
+                        type="number" min="0" step="1"
+                        value={players||""}
+                        onChange={e=>onUpdateApproxPlayers(b.email, e.target.value)}
+                        placeholder="0"
+                        style={{...si,width:56,padding:"3px 6px",textAlign:"right",fontSize:13}}
+                      />
+                      <span style={{fontSize:11,color:"#64748b",marginLeft:6}}>~Dur (h):</span>
+                      <input
+                        type="number" min="0.5" step="0.5"
+                        value={dur||""}
+                        onChange={e=>onUpdateApproxDuration(b.email, e.target.value)}
+                        placeholder="2"
+                        style={{...si,width:56,padding:"3px 6px",textAlign:"right",fontSize:13}}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+              {bookers.length===0&&<div style={{fontSize:13,color:"#94a3b8"}}>No active bookers found.</div>}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Per-row action queue submission panel */}
+      {actionQueue.length>0&&(
+        <div style={{background:"#f0fdf4",border:"1.5px solid #86efac",borderRadius:12,padding:16,display:"flex",flexDirection:"column",gap:10}}>
+          <div style={{fontWeight:700,fontSize:14,color:"#166534"}}>
+            📋 Action Queue — {[
+              actionQueue.filter(a=>a.newStatus==="queued_cpsa").length && `${actionQueue.filter(a=>a.newStatus==="queued_cpsa").length} queue for CPSA`,
+              actionQueue.filter(a=>a.newStatus==="approved").length && `${actionQueue.filter(a=>a.newStatus==="approved").length} CPSA approved`,
+              actionQueue.filter(a=>a.newStatus==="rejected").length && `${actionQueue.filter(a=>a.newStatus==="rejected").length} reject`,
+            ].filter(Boolean).join(", ") || "empty"}
+            <button onClick={()=>setActionQueue([])} style={{...S.btn({border:"1px solid #86efac",background:"transparent",color:"#166534",fontSize:11,padding:"2px 8px"}),marginLeft:12}}>Clear</button>
+          </div>
+          <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+            <input style={{...si,flex:1,minWidth:200}} placeholder="Optional note for emails…" value={actionNote} onChange={e=>setActionNote(e.target.value)}/>
+            <label style={{display:"flex",alignItems:"center",gap:6,cursor:silentMode?"default":"pointer",fontSize:12,color:silentMode?"#94a3b8":"#475569",flexShrink:0}}>
+              <input type="checkbox" checked={silentMode||actionSkipEmail} onChange={e=>!silentMode&&setActionSkipEmail(e.target.checked)} disabled={silentMode} style={{width:14,height:14,accentColor:"#0f172a"}}/>
+              {silentMode?"Silent mode active":"No email notifications"}
+            </label>
+            <button onClick={submitActionQueue} disabled={actionSending}
+              style={S.btn({background:"#166534",color:"#fff",fontWeight:700,opacity:actionSending?0.6:1})}>
+              {actionSending?"Processing…":`Submit ${actionQueue.length} action${actionQueue.length>1?"s":""}`}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk selection action panel */}
       {pendingList.length>0&&(
-        <div style={{background:"#f8fafc",border:"1.5px solid #e2e8f0",borderRadius:12,padding:16,marginBottom:16,display:"flex",flexDirection:"column",gap:12}}>
+        <div style={{background:"#f8fafc",border:"1.5px solid #e2e8f0",borderRadius:12,padding:16,display:"flex",flexDirection:"column",gap:12}}>
           <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
             <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:13,fontWeight:600,color:"#0f172a"}}>
               <input type="checkbox" checked={allSelected} onChange={toggleAll} style={{width:16,height:16,accentColor:"#0f172a"}}/>
@@ -1624,58 +3496,354 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onDelete,clashes=[]}) {
             <>
               <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
                 <select style={si} value={bulkStatus} onChange={e=>setBulkStatus(e.target.value)}>
-                  <option value="approved">Approve</option>
+                  <option value="queued_cpsa">Queue for CPSA</option>
+                  <option value="approved">CPSA Approved</option>
                   <option value="rejected">Reject</option>
                 </select>
                 <input style={{...si,flex:1,minWidth:200}} placeholder="Optional note to include in email…" value={bulkNote} onChange={e=>setBulkNote(e.target.value)}/>
                 <button onClick={handleBulkAction} disabled={bulkSending}
-                  style={S.btn({background:bulkStatus==="approved"?"#22c55e":"#f43f5e",color:"#fff",opacity:bulkSending?0.6:1})}>
-                  {bulkSending?"Sending…":`${bulkStatus==="approved"?"✓ Approve":"✗ Reject"} ${selected.size} booking${selected.size>1?"s":""} & Email`}
+                  style={S.btn({background:bulkStatus==="rejected"?"#f43f5e":bulkStatus==="approved"?"#22c55e":"#3b82f6",color:"#fff",opacity:bulkSending?0.6:1})}>
+                  {bulkSending?"Processing…":`Apply to ${selected.size}`}
                 </button>
               </div>
-              <div style={{fontSize:12,color:"#64748b"}}>Each booker will receive an email summary of their affected bookings.</div>
+              <label style={{display:"flex",alignItems:"center",gap:8,cursor:silentMode?"default":"pointer",fontSize:12,color:silentMode?"#94a3b8":"#64748b"}}>
+                <input type="checkbox" checked={silentMode||bulkSkipEmail} onChange={e=>!silentMode&&setBulkSkipEmail(e.target.checked)} disabled={silentMode} style={{width:14,height:14,accentColor:"#0f172a"}}/>
+                {silentMode?"Silent mode active":"Don't send email notifications to bookers"}
+              </label>
             </>
           )}
         </div>
       )}
 
       {/* Clash notification panel */}
-      {clashes.length>0&&(
-        <div style={{background:"#fff1f2",border:"1.5px solid #fda4af",borderRadius:12,padding:16,marginBottom:16,display:"flex",flexDirection:"column",gap:10}}>
-          <div style={{display:"flex",alignItems:"center",gap:8,justifyContent:"space-between",flexWrap:"wrap"}}>            <div>              <span style={{fontWeight:700,fontSize:14,color:"#9f1239"}}>⚠️ {clashes.length} scheduling clash{clashes.length>1?"es":""} detected</span>              <div style={{fontSize:12,color:"#be123c",marginTop:2}}>Admin bookings overlap with user bookings on the same field/time. Affected users can be notified below.</div>            </div>            <button onClick={handleSendClashEmails} disabled={clashSending}              style={S.btn({background:clashSending?"#e2e8f0":"#f43f5e",color:clashSending?"#94a3b8":"#fff",fontWeight:700,opacity:clashSending?0.7:1})}>              {clashSending?"Sending…":"📧 Notify affected users"}            </button>          </div>          <div style={{display:"flex",flexDirection:"column",gap:6,maxHeight:220,overflowY:"auto"}}>            {clashes.map((c,i)=>{              const fa=FACILITIES.find(x=>x.id===c.admin.facility_id);              return(                <div key={i} style={{background:"#fff",border:"1px solid #fecdd3",borderRadius:8,padding:"8px 12px",fontSize:12,color:"#0f172a",display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>                  <span style={{fontWeight:700,color:"#9f1239"}}>🔒 {c.admin.purpose||"Admin booking"}</span>                  <span style={{color:"#94a3b8"}}>vs</span>                  <EmailChip email={c.user.email}/>                  <span style={{color:"#475569"}}>{c.user.purpose||"User booking"}</span>                  <span style={{color:"#94a3b8",marginLeft:"auto"}}>{fa?.name} · {fmtDate(c.admin.date)} {fmtTime(c.admin.start_hour)}–{fmtTime(c.admin.start_hour+c.admin.duration)}</span>                </div>              );            })}          </div>        </div>      )}
-
-      {list.length===0&&<div style={{textAlign:"center",padding:"40px 0",color:"#94a3b8",fontSize:14}}>No bookings found.</div>}
-
-      <div style={{display:"flex",flexDirection:"column",gap:10}}>
-        {list.map(b=>{
-          const f=FACILITIES.find(x=>x.id===b.facility_id);
-          const isPending=b.status==="pending";
-          return (
-            <div key={b.id} style={{background:"#fff",border:`1.5px solid ${selected.has(b.id)?"#6366f1":"#f1f5f9"}`,borderRadius:12,padding:"14px 16px",display:"flex",gap:14,alignItems:"flex-start",transition:"border-color 0.15s"}}>
-              {isPending&&<input type="checkbox" checked={selected.has(b.id)} onChange={()=>toggleSelect(b.id)} style={{width:16,height:16,accentColor:"#6366f1",marginTop:2,flexShrink:0}}/>}
-              {!isPending&&<div style={{width:16,flexShrink:0}}/>}
-              <div style={{width:4,borderRadius:4,background:f?.color||"#e2e8f0",alignSelf:"stretch",flexShrink:0}}/>
-              <div style={{flex:1,minWidth:0}}>
-                <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:4}}>
-                  <span style={{fontWeight:700,fontSize:14,color:"#0f172a"}}>{b.name}</span>
-                  <Badge status={b.status}/>
-                  <EmailChip email={b.email}/>
-                  <span style={{fontSize:12,color:"#94a3b8",marginLeft:"auto"}}>{fmtDate(b.date)}</span>
-                </div>
-                <div style={{fontSize:13,color:"#475569"}}>{f?.name} · {fmtTime(b.start_hour)}–{fmtTime(b.start_hour+b.duration)} · {b.purpose}</div>
+      {clashes.length>0&&(()=>{
+        function clashDayName(d){return["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][new Date(d+"T12:00").getDay()];}
+        const filtered=clashes.filter(c=>matchesQ(c.user)||matchesQ(c.admin));
+        // Group by (userEmail + facilityId + dayOfWeek)
+        const groupMap={};
+        filtered.forEach(c=>{
+          const dn=clashDayName(c.admin.date);
+          const key=`${c.user.email}||${c.admin.facility_id}||${dn}`;
+          if(!groupMap[key]) groupMap[key]={user:c.user,admin:c.admin,dn,instances:[],userBkgs:[]};
+          groupMap[key].instances.push(c);
+          if(!groupMap[key].userBkgs.find(b=>b.id===c.user.id)) groupMap[key].userBkgs.push(c.user);
+        });
+        const groups=Object.values(groupMap);
+        const recurringGroups=groups.filter(g=>g.instances.length>=2);
+        return (
+          <div style={{background:"#fff1f2",border:"1.5px solid #fda4af",borderRadius:12,padding:16,display:"flex",flexDirection:"column",gap:10}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,justifyContent:"space-between",flexWrap:"wrap"}}>
+              <div>
+                <span style={{fontWeight:700,fontSize:14,color:"#9f1239"}}>⚠️ {clashes.length} scheduling clash{clashes.length>1?"es":""} detected</span>
+                {recurringGroups.length>0&&<span style={{marginLeft:8,fontSize:12,fontWeight:600,background:"#fda4af",color:"#9f1239",borderRadius:6,padding:"1px 7px"}}>{recurringGroups.length} recurring</span>}
+                <div style={{fontSize:12,color:"#be123c",marginTop:2}}>Future field bookings overlap with user bookings.</div>
               </div>
-              <div style={{display:"flex",gap:6,flexShrink:0}}>
-                {isPending&&<>
-                  <button onClick={()=>onBulkStatusChange([b.id],"approved","")} style={S.btn({padding:"5px 10px",fontSize:12,background:"#22c55e",color:"#fff"})}>✓</button>
-                  <button onClick={()=>onBulkStatusChange([b.id],"rejected","")} style={S.btn({padding:"5px 10px",fontSize:12,background:"#f43f5e",color:"#fff"})}>✗</button>
-                </>}
-                <button onClick={()=>onEdit(b)}      style={S.btn({padding:"5px 10px",fontSize:12,border:"1.5px solid #e2e8f0",background:"#fff",color:"#475569"})}>Edit</button>
-                <button onClick={()=>onDelete(b.id)} style={S.btn({padding:"5px 10px",fontSize:12,border:"1.5px solid #f43f5e",background:"#fff",color:"#f43f5e"})}>🗑</button>
+              <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                <label style={{display:"flex",alignItems:"center",gap:5,fontSize:12,cursor:"pointer",color:"#9f1239"}}>
+                  <input type="checkbox" checked={clashGrouped} onChange={e=>setClashGrouped(e.target.checked)} style={{accentColor:"#f43f5e"}}/>
+                  Group recurring
+                </label>
+                <button onClick={()=>setShowClashNotify(true)} disabled={clashSending}
+                  style={S.btn({background:"#f43f5e",color:"#fff",fontWeight:700,opacity:clashSending?0.7:1})}>
+                  📧 Notify affected users
+                </button>
               </div>
             </div>
-          );
-        })}
-      </div>
+            <div style={{display:"flex",flexDirection:"column",gap:6,maxHeight:260,overflowY:"auto"}}>
+              {clashGrouped
+                ? groups.map((g,i)=>{
+                    const fa=FACILITIES.find(x=>x.id===g.admin.facility_id);
+                    const isRecurring=g.instances.length>=2;
+                    return (
+                      <div key={i} style={{background:"#fff",border:`1px solid ${isRecurring?"#f43f5e44":"#fecdd3"}`,borderRadius:8,padding:"8px 12px",fontSize:12,color:"#0f172a",display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                        {isRecurring&&<span style={{fontWeight:700,color:"#f43f5e",fontSize:11,background:"#fff1f2",borderRadius:4,padding:"1px 6px",whiteSpace:"nowrap"}}>×{g.instances.length} recurring</span>}
+                        <span style={{fontWeight:700,color:"#9f1239"}}>🔒 {g.admin.purpose||"Admin booking"}</span>
+                        <span style={{color:"#94a3b8"}}>vs</span>
+                        <EmailChip email={g.user.email}/>
+                        <span style={{color:"#475569"}}>{g.user.purpose||"User booking"}</span>
+                        <span style={{color:"#94a3b8",marginLeft:"auto",fontSize:11}}>{fa?.name} · {g.dn} ~{fmtTime(g.admin.start_hour)}</span>
+                        {isRecurring&&(
+                          <button onClick={()=>setClashPatternModal({email:g.user.email,name:g.user.name||g.user.email,pk:`${g.dn}_${g.admin.start_hour}`,bkgs:g.userBkgs,canEdit:true})}
+                            style={S.btn({background:"#f43f5e",color:"#fff",fontSize:11,padding:"3px 8px"})}>
+                            Resolve recurring
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })
+                : filtered.map((c,i)=>{
+                    const fa=FACILITIES.find(x=>x.id===c.admin.facility_id);
+                    return(
+                      <div key={i} style={{background:"#fff",border:"1px solid #fecdd3",borderRadius:8,padding:"8px 12px",fontSize:12,color:"#0f172a",display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                        <span style={{fontWeight:700,color:"#9f1239"}}>🔒 {c.admin.purpose||"Admin booking"}</span>
+                        <span style={{color:"#94a3b8"}}>vs</span>
+                        <EmailChip email={c.user.email}/>
+                        <span style={{color:"#475569"}}>{c.user.purpose||"User booking"}</span>
+                        <span style={{color:"#94a3b8",marginLeft:"auto"}}>{fa?.name} · {fmtDate(c.admin.date)} {fmtTime(c.admin.start_hour)}–{fmtTime(c.admin.start_hour+c.admin.duration)}</span>
+                      </div>
+                    );
+                  })
+              }
+            </div>
+            {clashPatternModal&&(
+              <PatternModal {...clashPatternModal} isAdmin={true}
+                onClose={()=>setClashPatternModal(null)}
+                onBulkApply={args=>{onBulkApply&&onBulkApply(args);setClashPatternModal(null);}}/>
+            )}
+          </div>
+        );
+      })()}
+
+      {/* Bookings table */}
+      {list.length===0
+        ? <div style={{textAlign:"center",padding:"40px 0",color:"#94a3b8",fontSize:14}}>No bookings found.</div>
+        : (
+        <div style={{overflowX:"auto",borderRadius:12,border:"1px solid #f1f5f9"}}>
+          <table style={{width:"100%",borderCollapse:"collapse",background:"#fff",fontSize:13}}>
+            <thead>
+              <tr style={{background:"#f8fafc"}}>
+                <th style={{padding:"8px 10px",textAlign:"center",width:32}}>
+                  <input type="checkbox" checked={allSelected} onChange={toggleAll} style={{width:14,height:14,accentColor:"#6366f1"}}/>
+                </th>
+                {[["date","Date"],["name","Booker"],["facility","Facility"],["status","Status"]].map(([col,label])=>(
+                  <th key={col} onClick={()=>toggleSort(col)} style={{padding:"8px 10px",textAlign:"left",cursor:"pointer",userSelect:"none",fontWeight:700,color:"#475569",whiteSpace:"nowrap"}}>
+                    {label}{sortArrow(col)}
+                  </th>
+                ))}
+                <th style={{padding:"8px 10px",textAlign:"left",fontWeight:700,color:"#475569"}}>Time · Purpose</th>
+                <th style={{padding:"8px 10px",textAlign:"right",fontWeight:700,color:"#475569"}}>Actions</th>
+              </tr>
+              <tr style={{background:"#f1f5f9"}}>
+                <th style={{padding:"3px 4px"}}/>
+                <th style={{padding:"3px 4px"}}>
+                  <div style={{display:"flex",gap:2,alignItems:"center"}}>
+                    <input type="date" value={adminDateFrom} onChange={e=>setAdminDateFrom(e.target.value)} title="From date"
+                      style={{padding:"2px 4px",fontSize:10,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",width:"100%",minWidth:90}}/>
+                    <span style={{fontSize:9,color:"#94a3b8",flexShrink:0}}>–</span>
+                    <input type="date" value={adminDateTo} onChange={e=>setAdminDateTo(e.target.value)} title="To date"
+                      style={{padding:"2px 4px",fontSize:10,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",width:"100%",minWidth:90}}/>
+                  </div>
+                </th>
+                <th style={{padding:"3px 4px",whiteSpace:"normal"}}>
+                  <div style={{display:"flex",gap:3,flexWrap:"wrap",alignItems:"center"}}>
+                    <button onClick={()=>setAdminBookerFilter("all")}
+                      style={{padding:"1px 7px",fontSize:10,borderRadius:10,border:"1.5px solid #e2e8f0",background:adminBookerFilter==="all"?"#0f172a":"#fff",color:adminBookerFilter==="all"?"#fff":"#475569",cursor:"pointer",fontWeight:adminBookerFilter==="all"?700:400,lineHeight:1.6}}>All</button>
+                    {adminBookerEmails.map(em=>(
+                      <button key={em} onClick={()=>setAdminBookerFilter(p=>p===em?"all":em)}
+                        style={{padding:"1px 7px",fontSize:10,borderRadius:10,border:`1.5px solid ${adminBookerFilter===em?emailColor(em):"#e2e8f0"}`,background:adminBookerFilter===em?emailColor(em):"#fff",color:adminBookerFilter===em?"#fff":"#475569",cursor:"pointer",fontWeight:adminBookerFilter===em?700:400,lineHeight:1.6}}>
+                        {em.split("@")[0]}
+                      </button>
+                    ))}
+                  </div>
+                </th>
+                <th style={{padding:"3px 4px"}}>
+                  <select value={ff} onChange={e=>setFf(e.target.value)}
+                    style={{padding:"3px 4px",fontSize:11,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",width:"100%"}}>
+                    <option value="all">All facilities</option>
+                    {FACILITIES.map(f=><option key={f.id} value={f.id}>{f.name}</option>)}
+                  </select>
+                </th>
+                <th style={{padding:"3px 4px"}}>
+                  <select value={sf} onChange={e=>setSf(e.target.value)}
+                    style={{padding:"3px 4px",fontSize:11,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",width:"100%"}}>
+                    <option value="all">All statuses</option>
+                    {Object.entries(STATUS_META).filter(([k])=>k!=="pending").map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
+                  </select>
+                </th>
+                <th style={{padding:"3px 4px"}}>
+                  <input placeholder="Search purpose…" value={adminColPurpose} onChange={e=>setAdminColPurpose(e.target.value)}
+                    style={{padding:"3px 6px",fontSize:11,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",width:"100%"}}/>
+                </th>
+                <th style={{padding:"3px 4px"}}>
+                  {(adminBookerFilter!=="all"||sf!=="all"||ff!=="all"||adminDateFrom||adminDateTo||adminColPurpose)&&(
+                    <button onClick={()=>{setAdminBookerFilter("all");setSf("all");setFf("all");setAdminDateFrom("");setAdminDateTo("");setAdminColPurpose("");}}
+                      style={{padding:"2px 7px",fontSize:10,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",color:"#64748b",cursor:"pointer",whiteSpace:"nowrap"}}>
+                      ✕ Clear
+                    </button>
+                  )}
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {list.map((b,ri)=>{
+                const f=FACILITIES.find(x=>x.id===b.facility_id);
+                const isPending=REVIEW_STATUSES.has(b.status);
+                const isAmuaStage=b.status==="pending_amua"||b.status==="pending";
+                const isCpsaStage=b.status==="queued_cpsa"||b.status==="amua_submit"||b.status==="pending_cpsa";
+                const queued=actionQueue.find(a=>a.id===b.id);
+                const isDeleteQueued=deleteIds.has(b.id);
+                const rowBg=isDeleteQueued?"#fff1f2":queued?"#f0fdf4":selected.has(b.id)?"#f5f3ff":"#fff";
+                const queueLabel = queued ? {queued_cpsa:"→ Queue for CPSA",approved:"✓ CPSA Approved",rejected:"✗ Reject"}[queued.newStatus]||queued.newStatus : null;
+                return (
+                  <tr key={b.id} style={{background:rowBg,borderTop:ri>0?"1px solid #f1f5f9":"none",transition:"background 0.1s"}}>
+                    <td style={{padding:"8px 10px",textAlign:"center"}}>
+                      {isPending&&<input type="checkbox" checked={selected.has(b.id)} onChange={()=>toggleSelect(b.id)} style={{width:14,height:14,accentColor:"#6366f1"}}/>}
+                    </td>
+                    <td style={{padding:"8px 10px",whiteSpace:"nowrap"}}>{fmtDate(b.date)}</td>
+                    <td style={{padding:"8px 10px"}} onClick={e=>{e.stopPropagation();setAdminBookerFilter(p=>p===b.email.toLowerCase()?"all":b.email.toLowerCase());}}>
+                      <span style={{display:"inline-block",padding:"3px 10px",borderRadius:10,background:emailColor(b.email),color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer",outline:adminBookerFilter===b.email.toLowerCase()?"2px solid #0f172a":"none",outlineOffset:1}}>
+                        {b.email.split("@")[0]}
+                      </span>
+                    </td>
+                    <td style={{padding:"8px 10px"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:4}}>
+                        <span style={{width:8,height:8,borderRadius:"50%",background:f?.color,display:"inline-block",flexShrink:0}}/>
+                        <span style={{color:"#0f172a"}}>{f?.name}</span>
+                      </div>
+                    </td>
+                    <td style={{padding:"8px 10px"}}>
+                      <Badge status={b.status}/>
+                      {queueLabel&&<div style={{fontSize:10,fontWeight:700,color:queued.newStatus==="rejected"?"#991b1b":"#166534",marginTop:2}}>{queueLabel}</div>}
+                      {isDeleteQueued&&<div style={{fontSize:10,fontWeight:700,color:"#991b1b",marginTop:2}}>🗑 queued: delete</div>}
+                    </td>
+                    <td style={{padding:"8px 10px",color:"#475569"}}>
+                      {fmtTime(b.start_hour)}–{fmtTime(b.start_hour+b.duration)}
+                      <div style={{fontSize:12,color:"#94a3b8",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:200}}>{b.purpose}</div>
+                    </td>
+                    <td style={{padding:"8px 10px"}}>
+                      <div style={{display:"flex",gap:4,justifyContent:"flex-end",flexWrap:"wrap"}}>
+                        {isPending&&!isDeleteQueued&&<>
+                          {isAmuaStage&&<button
+                            onClick={()=>queueAction(b.id,"queued_cpsa")}
+                            title="Queue for CPSA"
+                            style={S.btn({padding:"4px 8px",fontSize:11,
+                              background:queued?.newStatus==="queued_cpsa"?"#1d4ed8":"#3b82f6",color:"#fff",
+                              outline:queued?.newStatus==="queued_cpsa"?"2px solid #1d4ed8":"none"})}>CPSA →</button>}
+                          {(b.status==="queued_cpsa"||b.status==="amua_submit")&&<button
+                            onClick={()=>queueAction(b.id,"pending_cpsa")}
+                            title="Mark as Pending CPSA Review (no email)"
+                            style={S.btn({padding:"4px 8px",fontSize:11,
+                              background:queued?.newStatus==="pending_cpsa"?"#0369a1":"#0ea5e9",color:"#fff",
+                              outline:queued?.newStatus==="pending_cpsa"?"2px solid #0369a1":"none"})}>⏳ CPSA</button>}
+                          {isCpsaStage&&<button
+                            onClick={()=>queueAction(b.id,"approved")}
+                            title="Mark CPSA Approved"
+                            style={S.btn({padding:"4px 8px",fontSize:11,
+                              background:queued?.newStatus==="approved"?"#15803d":"#22c55e",color:"#fff",
+                              outline:queued?.newStatus==="approved"?"2px solid #15803d":"none"})}>✓ Approved</button>}
+                          <button
+                            onClick={()=>queueAction(b.id,"rejected")}
+                            title="Reject"
+                            style={S.btn({padding:"4px 8px",fontSize:11,
+                              background:queued?.newStatus==="rejected"?"#be123c":"#f43f5e",color:"#fff",
+                              outline:queued?.newStatus==="rejected"?"2px solid #be123c":"none"})}>✗</button>
+                        </>}
+                        {b.status==="clash"&&!isDeleteQueued&&(
+                          <button onClick={()=>queueAction(b.id,"approved")} title="Resolve clash — approve booking"
+                            style={S.btn({padding:"4px 8px",fontSize:11,
+                              background:queued?.newStatus==="approved"?"#15803d":"#22c55e",color:"#fff",
+                              outline:queued?.newStatus==="approved"?"2px solid #15803d":"none"})}>
+                            ✓ Resolve
+                          </button>
+                        )}
+                        <button onClick={()=>onEdit(b)} style={S.btn({padding:"4px 8px",fontSize:11,border:"1.5px solid #e2e8f0",background:"#fff",color:"#475569"})}>Edit</button>
+                        <button onClick={()=>!isDeleteQueued&&onQueueDelete(b.id)}
+                          style={S.btn({padding:"4px 8px",fontSize:11,
+                            border:isDeleteQueued?"1.5px solid #dc2626":"1.5px solid #fca5a5",
+                            background:isDeleteQueued?"#fee2e2":"#fff",
+                            color:isDeleteQueued?"#dc2626":"#f43f5e"})}>🗑</button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Clear old unapproved confirmation modal */}
+      {showClearModal&&(
+        <div onClick={e=>e.target===e.currentTarget&&setShowClearModal(false)}
+          style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.55)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:2000,backdropFilter:"blur(2px)"}}>
+          <div style={{background:"#fff",borderRadius:16,padding:28,maxWidth:520,width:"90%",maxHeight:"85vh",overflowY:"auto",boxShadow:"0 8px 40px rgba(0,0,0,0.2)"}}>
+            <h2 style={{margin:"0 0 8px",fontSize:18,fontWeight:700,color:"#0f172a"}}>🧹 Clear Old Unapproved Bookings</h2>
+            <p style={{margin:"0 0 16px",fontSize:13,color:"#64748b"}}>The following past pending bookings will be permanently deleted:</p>
+            <div style={{display:"flex",flexDirection:"column",gap:6,maxHeight:"35vh",overflowY:"auto",marginBottom:16}}>
+              {oldUnapproved.map(b=>{
+                const f=FACILITIES.find(x=>x.id===b.facility_id);
+                return(
+                  <div key={b.id} style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:"8px 12px",fontSize:12}}>
+                    <div style={{fontWeight:600,color:"#0f172a"}}>{b.name} — {f?.name}</div>
+                    <div style={{color:"#64748b"}}>{fmtDate(b.date)} · {fmtTime(b.start_hour)}–{fmtTime(b.start_hour+b.duration)} · {b.purpose}</div>
+                    <div style={{color:"#94a3b8"}}>{b.email}</div>
+                  </div>
+                );
+              })}
+            </div>
+            <label style={{display:"flex",alignItems:"center",gap:8,cursor:silentMode?"default":"pointer",fontSize:13,color:silentMode?"#94a3b8":"#475569",marginBottom:16}}>
+              <input type="checkbox" checked={silentMode||clearSkipEmail} onChange={e=>!silentMode&&setClearSkipEmail(e.target.checked)} disabled={silentMode} style={{width:15,height:15,accentColor:"#0f172a"}}/>
+              {silentMode?"Silent mode active":"Remove without notifying bookers by email"}
+            </label>
+            <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
+              <button onClick={()=>setShowClearModal(false)} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#475569"})}>Cancel</button>
+              <button onClick={async()=>{await onClearOldUnapproved(oldUnapproved.map(b=>b.id),silentMode||clearSkipEmail); setShowClearModal(false);}}
+                style={S.btn({background:"#7c3aed",color:"#fff",fontWeight:700})}>
+                🧹 Delete {oldUnapproved.length} booking{oldUnapproved.length>1?"s":""}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Clash notify modal */}
+      {showClashNotify&&(()=>{
+        const byUser = {};
+        clashes.forEach(c => {
+          const em = c.user.email?.toLowerCase();
+          if(!em) return;
+          if(!byUser[em]) byUser[em] = { name:c.user.name, email:em, clashes:[] };
+          byUser[em].clashes.push(c);
+        });
+        const users = Object.values(byUser);
+        const selUser = clashNotifyUser ? byUser[clashNotifyUser] : null;
+        return (
+          <div onClick={e=>e.target===e.currentTarget&&(setShowClashNotify(false),setClashNotifyUser(null))}
+            style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.55)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:2000,backdropFilter:"blur(2px)"}}>
+            <div style={{background:"#fff",borderRadius:16,padding:28,maxWidth:600,width:"92%",maxHeight:"88vh",overflowY:"auto",boxShadow:"0 8px 40px rgba(0,0,0,0.2)"}}>
+              <h2 style={{margin:"0 0 4px",fontSize:18,fontWeight:700,color:"#9f1239"}}>📧 Notify Affected Users</h2>
+              <p style={{margin:"0 0 16px",fontSize:13,color:"#64748b"}}>Select a user to preview their clashes, then send. Or notify all at once.</p>
+              <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:16}}>
+                {users.map(u=>(
+                  <button key={u.email} onClick={()=>setClashNotifyUser(prev=>prev===u.email?null:u.email)}
+                    style={{...S.btn({background:clashNotifyUser===u.email?"#fff1f2":"#f8fafc",border:clashNotifyUser===u.email?"1.5px solid #f43f5e":"1.5px solid #e2e8f0",color:"#0f172a"}),textAlign:"left",display:"flex",alignItems:"center",gap:10,padding:"10px 14px"}}>
+                    <EmailChip email={u.email}/>
+                    <span style={{fontWeight:600,fontSize:13}}>{u.name}</span>
+                    <span style={{marginLeft:"auto",fontSize:12,color:"#94a3b8"}}>{u.clashes.length} clash{u.clashes.length>1?"es":""}</span>
+                  </button>
+                ))}
+              </div>
+              {selUser&&(
+                <div style={{background:"#fff1f2",border:"1px solid #fecdd3",borderRadius:10,padding:14,marginBottom:16}}>
+                  <div style={{fontWeight:700,fontSize:13,color:"#9f1239",marginBottom:8}}>Clashes for {selUser.name}:</div>
+                  {selUser.clashes.map((c,i)=>{
+                    const fa=FACILITIES.find(x=>x.id===c.admin.facility_id);
+                    return(
+                      <div key={i} style={{fontSize:12,color:"#0f172a",padding:"6px 0",borderBottom:i<selUser.clashes.length-1?"1px solid #fecdd3":"none"}}>
+                        <span style={{fontWeight:600}}>🔒 {c.admin.purpose||"Admin booking"}</span>
+                        {" vs "}
+                        <span>{c.user.purpose||"Your booking"}</span>
+                        <span style={{color:"#94a3b8",marginLeft:8}}>{fa?.name} · {fmtDate(c.admin.date)} {fmtTime(c.admin.start_hour)}–{fmtTime(c.admin.start_hour+c.admin.duration)}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              <div style={{display:"flex",gap:10,justifyContent:"flex-end",flexWrap:"wrap"}}>
+                <button onClick={()=>{setShowClashNotify(false);setClashNotifyUser(null);}} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#475569"})}>Cancel</button>
+                {selUser&&<button onClick={()=>handleSendClashEmails(selUser.email)} disabled={clashSending}
+                  style={S.btn({background:"#f43f5e",color:"#fff",fontWeight:700,opacity:clashSending?0.6:1})}>
+                  {clashSending?"Sending…":`Send to ${selUser.name}`}
+                </button>}
+                {!selUser&&<button onClick={()=>handleSendClashEmails(null)} disabled={clashSending}
+                  style={S.btn({background:"#9f1239",color:"#fff",fontWeight:700,opacity:clashSending?0.6:1})}>
+                  {clashSending?"Sending…":`Notify all ${users.length} user${users.length>1?"s":""}`}
+                </button>}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -1690,6 +3858,61 @@ function Banner({type,msg}) {
 // (sync bookings use empty email/name and are deduped by date+facility+time+purpose)
 const CJR_ORG_ID = "14520";
 const CJR_ICAL   = "https://ics.teamup.com/feed/ksooqhdi7ua5ucp58j/15068031.ics";
+
+// Extract team identifier from CPSA EventName ("AU Ultimate Club (Field 3)" → "AU Ultimate Club")
+function extractCPSATeam(eventName) {
+  const m = (eventName||"").match(/^(.+?)\s*\(/);
+  return (m ? m[1] : eventName||"").trim();
+}
+
+function normalizeId(s) { return (s||"").toLowerCase().replace(/[^a-z0-9]/g,""); }
+
+// Find a user booking that this CJR event likely represents.
+// Returns { booking, exact } where exact=true means tight match (auto-confirm),
+// exact=false means fuzzy match (flag for AMUA review).
+function findMatchingUserBooking(allBookings, ev, facilityIds) {
+  const date = parseCJRDate(ev.EventStartDate);
+  if (!date) return null;
+  const { start_hour, duration } = parseCJRDateTime(ev.EventDateTime);
+  const team = extractCPSATeam(ev.EventName);
+  const teamNorm = normalizeId(team);
+  if (!teamNorm) return null;
+
+  // Eligible bookings: same date, time-overlap, facility within the mapped set, non-admin, in an approvable state
+  const candidates = allBookings.filter(b => {
+    if (b.email === "admin") return false;
+    if (!["approved","cpsa_confirmed","cpsa_review_needed","clash"].includes(b.status)) return false;
+    if (b.date !== date) return false;
+    if (!facilityIds.includes(b.facility_id)) return false;
+    if (b.start_hour + b.duration <= start_hour) return false;
+    if (start_hour + duration <= b.start_hour) return false;
+    return true;
+  });
+  if (!candidates.length) return null;
+
+  // Score each candidate: identity (4) + time-exact (2) + duration-exact (1) + facility unambiguous (1)
+  const scored = candidates.map(b => {
+    const emailPrefix = normalizeId((b.email||"").split("@")[0]);
+    const nameNorm = normalizeId(b.name);
+    const purposeNorm = normalizeId(b.purpose);
+    let identityScore = 0;
+    if (emailPrefix === teamNorm || nameNorm === teamNorm) identityScore = 4;
+    else if (emailPrefix && (emailPrefix.includes(teamNorm) || teamNorm.includes(emailPrefix))) identityScore = 3;
+    else if (nameNorm && (nameNorm.includes(teamNorm) || teamNorm.includes(nameNorm))) identityScore = 2;
+    else if (purposeNorm && (purposeNorm.includes(teamNorm) || teamNorm.includes(purposeNorm))) identityScore = 1;
+    const timeExact = b.start_hour === start_hour ? 2 : 0;
+    const durExact  = b.duration === duration ? 1 : 0;
+    const facExact  = facilityIds.length === 1 ? 1 : 0;
+    return { booking: b, score: identityScore + timeExact + durExact + facExact, identityScore };
+  }).sort((a,b)=>b.score-a.score);
+
+  const best = scored[0];
+  if (best.identityScore === 0) return null; // no name link at all → not a match
+  // Exact: strong identity (>=3) AND time+duration align
+  const exact = best.identityScore >= 3 && best.score >= 7;
+  // Fuzzy: at least some identity link but missing precision
+  return { booking: best.booking, exact };
+}
 
 // Maps facility mentions in EventName to internal facility IDs
 function mapCJRFacility(eventName) {
@@ -1761,7 +3984,7 @@ export default function App() {
   const [bookings, setBookings] =useState([]);
   const [loading,  setLoading]  =useState(true);
   const [dbError,  setDbError]  =useState("");
-  const [tab,      setTab]      =useState("calendar");
+  const [tab,      setTab]      =useState("about");
   const [isAdmin,  setIsAdmin]  =useState(false);
   const [showLogin,setShowLogin]=useState(false);
   const [selFac,   setSelFac]   =useState("all");
@@ -1775,6 +3998,30 @@ export default function App() {
   const [prefill,  setPrefill]  =useState({date:null,startHour:9,duration:1});
   const [toast,    setToast]    =useState(null);
   const [syncingMonth, setSyncingMonth] = useState(false);
+  const [silentMode, setSilentMode] = useState(true); // admin: suppress all outgoing emails
+  const [facilityRates, setFacilityRates] = useState(()=>{
+    try{return JSON.parse(localStorage.getItem("fb_facility_rates")||"{}");}catch{return {};}
+  });
+  const [listBookerFilter, setListBookerFilter] = useState(savedEmail||"all");
+  const [listShowClashes, setListShowClashes]   = useState(false);
+  const [showScheduleModal, setShowScheduleModal] = useState(false);
+  const [showAdminScheduleModal, setShowAdminScheduleModal] = useState(false);
+  const [showExtensionModal, setShowExtensionModal] = useState(false);
+  const [approxPlayers, setApproxPlayers] = useState(()=>{
+    try{return JSON.parse(localStorage.getItem("fb_approx_players")||"{}");}catch{return {};}
+  });
+  const [approxDurations, setApproxDurations] = useState(()=>{
+    try{return JSON.parse(localStorage.getItem("fb_approx_durations")||"{}");}catch{return {};}
+  });
+  const [pricingMode, setPricingModeState] = useState(()=>localStorage.getItem("fb_pricing_mode")||"hourly");
+  const [listNameSearch,  setListNameSearch]    = useState("");
+  const [listDateFrom,    setListDateFrom]      = useState("");
+  const [listDateTo,      setListDateTo]        = useState("");
+  const [listStatusFilter,setListStatusFilter]  = useState("all");
+  const [listColPurpose,  setListColPurpose]    = useState("");
+  const [listColFacility, setListColFacility]   = useState("all");
+  const [listSortCol,     setListSortCol]       = useState("date");
+  const [listSortDir,     setListSortDir]       = useState("asc");
 
   const isMobile = useMobile();
   const configured = !SUPABASE_URL.includes("YOUR_PROJECT");
@@ -1788,18 +4035,109 @@ export default function App() {
     finally{setLoading(false);}
   }
 
+  async function loadSettings() {
+    if(!configured) return;
+    try {
+      const rows = await sb.selectAll("settings");
+      const map = {};
+      rows.forEach(r => { map[r.key] = r.value; });
+      if (map.facility_rates && typeof map.facility_rates === "object") {
+        setFacilityRates(map.facility_rates);
+        try{localStorage.setItem("fb_facility_rates",JSON.stringify(map.facility_rates));}catch{}
+      }
+      if (map.approx_players && typeof map.approx_players === "object") {
+        setApproxPlayers(map.approx_players);
+        try{localStorage.setItem("fb_approx_players",JSON.stringify(map.approx_players));}catch{}
+      }
+      if (map.approx_durations && typeof map.approx_durations === "object") {
+        setApproxDurations(map.approx_durations);
+        try{localStorage.setItem("fb_approx_durations",JSON.stringify(map.approx_durations));}catch{}
+      }
+    } catch(e) {
+      // settings table may not yet exist; silent fallback to localStorage
+      console.warn("loadSettings:", e.message);
+    }
+  }
+
+  async function persistSetting(key, value) {
+    if(!configured) return;
+    try { await sb.upsert("settings", { key, value, updated_at: new Date().toISOString() }, "key"); }
+    catch(e) { console.warn("persistSetting "+key+":", e.message); }
+  }
+
   async function handleSyncMonth(year, month) {
     setSyncingMonth(true);
     try {
       const events = await fetchCJREvents(year, month);
-      let added = 0, skipped = 0;
+      let added = 0, skipped = 0, removed = 0, cpsaConfirmed = 0, cpsaReviewNeeded = 0;
       const currentBookings = configured ? (await sb.select("bookings")) : bookings;
+      const matchedUserIds = new Set();
+
+      // Build set of canonical keys for this month's feed
+      const feedKeys = new Set();
+      for (const ev of events) {
+        const date = parseCJRDate(ev.EventStartDate);
+        if (!date) continue;
+        const { start_hour } = parseCJRDateTime(ev.EventDateTime);
+        const purpose = ev.EventName || "External Booking";
+        const facilityIds = mapCJRFacility(purpose);
+        for (const facility_id of facilityIds) {
+          feedKeys.add(`${date}|${facility_id}|${start_hour}|${purpose}`);
+        }
+      }
+
+      // Remove admin bookings in this month that are no longer in the feed (only future dates)
+      const monthStr = `${year}-${String(month+1).padStart(2,"0")}`;
+      const syncToday = todayKey();
+      const staleAdminBks = currentBookings.filter(b =>
+        isAdminBooking(b) &&
+        b.date.startsWith(monthStr) &&
+        b.date >= syncToday &&
+        !feedKeys.has(`${b.date}|${b.facility_id}|${b.start_hour}|${b.purpose}`)
+      );
+      for (const sb_bk of staleAdminBks) {
+        if (configured) {
+          await sb.remove("bookings", sb_bk.id);
+        } else {
+          setBookings(prev => prev.filter(b => b.id !== sb_bk.id));
+        }
+        removed++;
+      }
+
       for (const ev of events) {
         const date = parseCJRDate(ev.EventStartDate);
         if (!date) { skipped++; continue; }
         const { start_hour, duration } = parseCJRDateTime(ev.EventDateTime);
         const purpose = ev.EventName || "External Booking";
         const facilityIds = mapCJRFacility(purpose);
+
+        // Check if this CPSA event matches an existing approved user booking
+        const match = findMatchingUserBooking(currentBookings, ev, facilityIds);
+        if (match) {
+          const targetStatus = match.exact ? "cpsa_confirmed" : "cpsa_review_needed";
+          matchedUserIds.add(match.booking.id);
+
+          // Remove any pre-existing admin bookings at this slot (from prior syncs)
+          for (const facility_id of facilityIds) {
+            const slotBk = { date, facility_id, start_hour, duration, id: "_sentinel_" };
+            const oldAdmin = currentBookings.find(b => isAdminBooking(b) && timeOverlaps(b, slotBk));
+            if (oldAdmin) {
+              if (configured) await sb.remove("bookings", oldAdmin.id);
+              else setBookings(prev => prev.filter(b => b.id !== oldAdmin.id));
+            }
+          }
+
+          if (match.booking.status !== targetStatus) {
+            if (configured) {
+              await sb.update("bookings", match.booking.id, { status: targetStatus, updated_at: new Date().toISOString() });
+            } else {
+              setBookings(prev => prev.map(b => b.id === match.booking.id ? { ...b, status: targetStatus } : b));
+            }
+            if (match.exact) cpsaConfirmed++; else cpsaReviewNeeded++;
+          }
+          continue;
+        }
+
         for (const facility_id of facilityIds) {
           const dup = currentBookings.find(b =>
             b.date === date &&
@@ -1830,7 +4168,34 @@ export default function App() {
         }
       }
       if (configured) await loadBookings();
-      showToast(`Sync complete: ${added} added, ${skipped} already existed.`);
+
+      // Auto-detect clashes with newly imported admin events and set user bookings to "clash"
+      const freshBookings = configured ? (await sb.select("bookings")) : bookings;
+      const today = todayKey();
+      const adminBks = freshBookings.filter(b => isAdminBooking(b) && b.date >= today);
+      const userBks  = freshBookings.filter(b => !isAdminBooking(b) && b.date >= today);
+      let clashUpdates = 0;
+      for (const ub of userBks) {
+        // Skip bookings already matched/confirmed via CPSA — their admin slot was removed above
+        if (matchedUserIds.has(ub.id)) continue;
+        if (ub.status === "cpsa_confirmed" || ub.status === "cpsa_review_needed") continue;
+        const hasClash = adminBks.some(ab => ab.facility_id === ub.facility_id && timeOverlaps(ab, ub));
+        if (hasClash && ub.status !== "clash") {
+          if (configured) {
+            await sb.update("bookings", ub.id, { status: "clash", updated_at: new Date().toISOString() });
+          } else {
+            setBookings(prev => prev.map(b => b.id === ub.id ? {...b, status:"clash"} : b));
+          }
+          clashUpdates++;
+        }
+      }
+      if (configured && clashUpdates > 0) await loadBookings();
+
+      const clashMsg = clashUpdates > 0 ? `, ${clashUpdates} clash${clashUpdates>1?"es":""} flagged` : "";
+      const removedMsg = removed > 0 ? `, ${removed} stale removed` : "";
+      const cpsaMsg = cpsaConfirmed > 0 ? `, ${cpsaConfirmed} CPSA-confirmed` : "";
+      const cpsaRevMsg = cpsaReviewNeeded > 0 ? `, ${cpsaReviewNeeded} need AMUA review` : "";
+      showToast(`Sync complete: ${added} added, ${skipped} already existed${cpsaMsg}${cpsaRevMsg}${removedMsg}${clashMsg}.`);
     } catch(e) {
       showToast("Sync failed: " + e.message, "error");
     } finally {
@@ -1838,8 +4203,32 @@ export default function App() {
     }
   }
 
+  async function handleSyncAll() {
+    const today = todayKey();
+    const future = bookings.filter(b => b.date >= today);
+    const months = new Set();
+    // Always include current month
+    const now = new Date();
+    months.add(`${now.getFullYear()}-${now.getMonth()}`);
+    for (const b of future) {
+      const [y,m] = b.date.split("-");
+      months.add(`${parseInt(y)}-${parseInt(m)-1}`); // store as 0-based month to match handleSyncMonth contract
+    }
+    const sorted = [...months].map(k=>k.split("-").map(Number)).sort((a,b)=>a[0]-b[0]||a[1]-b[1]);
+    for (const [y,m] of sorted) {
+      await handleSyncMonth(y, m);
+    }
+  }
+
   // All hooks before any conditional return
   useEffect(()=>{if(loggedInEmail)loadBookings();},[loggedInEmail]);
+  // If the booker filter points at an email with no bookings, fall back to "all"
+  useEffect(()=>{
+    if(listBookerFilter==="all"||loading) return;
+    const hasMatch = bookings.some(b=>!isAdminBooking(b)&&b.email?.toLowerCase()===listBookerFilter);
+    if(!hasMatch) setListBookerFilter("all");
+  },[bookings,loading,listBookerFilter]);
+  useEffect(()=>{ loadSettings(); /* eslint-disable-next-line */ },[]);
 
   const openNew=useCallback((date,startHour,duration=1)=>{setEditing(null);setPrefill({date,startHour,duration});setShowForm(true);},[]);
   const openEdit=useCallback((b)=>{setEditing({...b});setViewing(null);setShowForm(true);},[]);
@@ -1852,6 +4241,7 @@ export default function App() {
 
   // handleSave now accepts an array of drafts + name/email for multi-booking support
   async function handleSave(drafts, bookerName, bookerEmail, { skipEmail = false } = {}) {
+    skipEmail = skipEmail || silentMode;
     const draftsArr = Array.isArray(drafts) ? drafts : [drafts];
     // Strip client-only fields that don't exist in Supabase schema
     const toDb = d => { const {recur, ...rest} = d; return rest; };
@@ -1896,12 +4286,74 @@ export default function App() {
       catch(e){showToast("Update failed: "+e.message,"error");return;}}
     else{setBookings(prev=>prev.map(b=>b.id===booking.id?{...b,...patch}:b));}
     setViewing(null);showToast(`Booking ${newStatus}!`);
-    sendApprovalEmail({to:booking.email,subject:`Booking ${STATUS_META[newStatus]?.label}`,
-      html:buildApprovalEmailHtml({name:booking.name,email:booking.email,bookings:[{...booking,...patch}],newStatus,adminNote:""})});
+    if(!silentMode){
+      sendApprovalEmail({to:booking.email,subject:`Booking ${STATUS_META[newStatus]?.label}`,
+        html:buildApprovalEmailHtml({name:booking.name,email:booking.email,bookings:[{...booking,...patch}],newStatus,adminNote:""})});
+    }
+  }
+
+  function updateFacilityRate(facilityId, type, value) {
+    const existing = typeof facilityRates[facilityId] === "object" ? facilityRates[facilityId] : { day: 0, evening: 0 };
+    const newRates = { ...facilityRates, [facilityId]: { ...existing, [type]: parseFloat(value) || 0 } };
+    setFacilityRates(newRates);
+    try{localStorage.setItem("fb_facility_rates",JSON.stringify(newRates));}catch{}
+    persistSetting("facility_rates", newRates);
+  }
+
+  function setPricingMode(mode) {
+    setPricingModeState(mode);
+    try{localStorage.setItem("fb_pricing_mode", mode);}catch{}
+  }
+  function updateApproxPlayers(email, value) {
+    const v = Math.max(0, parseInt(value) || 0);
+    const next = { ...approxPlayers, [email.toLowerCase()]: v };
+    setApproxPlayers(next);
+    try{localStorage.setItem("fb_approx_players",JSON.stringify(next));}catch{}
+    persistSetting("approx_players", next);
+  }
+  function updateApproxDuration(email, value) {
+    const v = Math.max(0, parseFloat(value) || 0);
+    const next = { ...approxDurations, [email.toLowerCase()]: v };
+    setApproxDurations(next);
+    try{localStorage.setItem("fb_approx_durations",JSON.stringify(next));}catch{}
+    persistSetting("approx_durations", next);
+  }
+
+  async function handleSyncDB() {
+    await loadBookings();
+    await loadSettings();
+    await persistSetting("facility_rates", facilityRates);
+    await persistSetting("approx_players", approxPlayers);
+    await persistSetting("approx_durations", approxDurations);
+    showToast("Synced with database.");
+  }
+
+  async function handleBulkApply({email, bkgs, bulkTime, bulkDur, bulkFac, cancelFrom}) {
+    const toCancel = cancelFrom ? bkgs.filter(b=>b.date>=cancelFrom) : [];
+    const toUpdate = bkgs.filter(b=>!cancelFrom||b.date<cancelFrom);
+    if(configured){
+      try{
+        for(const b of toUpdate) await sb.update("bookings",b.id,{start_hour:bulkTime,duration:bulkDur,facility_id:bulkFac,updated_at:new Date().toISOString()});
+        for(const b of toCancel) await sb.remove("bookings",b.id);
+        await loadBookings();
+      }catch(e){showToast("Bulk apply failed: "+e.message,"error");return;}
+    } else {
+      setBookings(prev=>{
+        const cancelIds=new Set(toCancel.map(b=>b.id));
+        const updateIds=new Set(toUpdate.map(b=>b.id));
+        return prev.filter(b=>!cancelIds.has(b.id)).map(b=>updateIds.has(b.id)?{...b,start_hour:bulkTime,duration:bulkDur,facility_id:bulkFac}:b);
+      });
+    }
+    const parts=[toUpdate.length>0&&`${toUpdate.length} updated`,toCancel.length>0&&`${toCancel.length} cancelled`].filter(Boolean);
+    showToast(parts.join(", ")||"Applied.");
+  }
+
+  function handleProposeMerge(mergeLines) {
+    showToast("Merge proposal added — commit your cart to notify bookers.");
   }
 
   // Bulk approve/reject — groups by email and sends one summary per person
-  async function handleBulkStatusChange(ids, newStatus, adminNote) {
+  async function handleBulkStatusChange(ids, newStatus, adminNote, skipEmail=false) {
     const affected=bookings.filter(b=>ids.includes(b.id));
     const patch={status:newStatus,updated_at:new Date().toISOString()};
     if(configured){
@@ -1914,18 +4366,22 @@ export default function App() {
     }
     showToast(`${ids.length} booking${ids.length>1?"s":""} ${newStatus}!`);
 
-    // Group by email, send one email per unique booker
-    const byEmail={};
-    affected.forEach(b=>{
-      const k=b.email.toLowerCase();
-      if(!byEmail[k]) byEmail[k]={name:b.name,email:b.email,bkgs:[]};
-      byEmail[k].bkgs.push({...b,...patch});
-    });
-    await Promise.all(Object.values(byEmail).map(({name,email,bkgs})=>
-      sendApprovalEmail({to:email,
-        subject:`Your Booking${bkgs.length>1?"s have":" has"} been ${newStatus}`,
-        html:buildApprovalEmailHtml({name,email,bookings:bkgs,newStatus,adminNote})})
-    ));
+    const noEmailStatuses = new Set(["pending_cpsa"]);
+    if(!skipEmail && !noEmailStatuses.has(newStatus)){
+      // Group by email, send one email per unique booker
+      const byEmail={};
+      affected.forEach(b=>{
+        const k=b.email.toLowerCase();
+        if(!byEmail[k]) byEmail[k]={name:b.name,email:b.email,bkgs:[]};
+        byEmail[k].bkgs.push({...b,...patch});
+      });
+      const statusLabel = STATUS_META[newStatus]?.label || newStatus;
+      await Promise.all(Object.values(byEmail).map(({name,email,bkgs})=>
+        sendApprovalEmail({to:email,
+          subject:`Your Booking${bkgs.length>1?"s":""} — ${statusLabel}`,
+          html:buildApprovalEmailHtml({name,email,bookings:bkgs,newStatus,adminNote})})
+      ));
+    }
   }
 
   // Queue a booking for removal (shows in removal cart)
@@ -1933,7 +4389,13 @@ export default function App() {
     const b = bookings.find(x=>x.id===id); if(!b) return;
     setDeleteQueue(prev => prev.find(x=>x.id===id) ? prev : [...prev, b]);
     setViewing(null);
-    setShowDeleteCart(true);
+    showToast("Added to removal queue.");
+  }
+
+  // Queue for removal without opening the modal (used by admin panel row delete)
+  function queueForRemovalSilent(id) {
+    const b = bookings.find(x=>x.id===id); if(!b) return;
+    setDeleteQueue(prev => prev.find(x=>x.id===id) ? prev : [...prev, b]);
     showToast("Added to removal queue.");
   }
 
@@ -1944,12 +4406,11 @@ export default function App() {
       const existing = new Set(prev.map(b=>b.id));
       return [...prev, ...toAdd.filter(b=>!existing.has(b.id))];
     });
-    setShowDeleteCart(true);
     showToast(`${toAdd.length} booking${toAdd.length>1?"s":""} added to removal queue.`);
   }
 
-  // Submit the deletion queue — delete all, send email summaries grouped by email using order template
-  async function handleDeleteCartSubmit(adminNote) {
+  // Submit the deletion queue — delete all, optionally send email summaries grouped by email
+  async function handleDeleteCartSubmit(adminNote, skipEmail=false) {
     if(deleteQueue.length === 0) return;
     const ids = deleteQueue.map(b=>b.id);
     if(configured){
@@ -1957,21 +4418,48 @@ export default function App() {
       catch(e){showToast("Delete failed: "+e.message,"error");return;}
     } else { setBookings(prev=>prev.filter(b=>!ids.includes(b.id))); }
 
-    // Group by email and send one summary per booker via order template (deletions section)
-    const byEmail = {};
-    deleteQueue.forEach(b => {
-      const k = b.email.toLowerCase();
-      if(!byEmail[k]) byEmail[k] = {name:b.name, email:b.email, bkgs:[]};
-      byEmail[k].bkgs.push(b);
-    });
-    await Promise.all(Object.values(byEmail).map(({name,email,bkgs})=>
-      sendEmail({to:email, subject:`Your Booking${bkgs.length>1?"s have":" has"} been removed`,
-        html:buildOrderEmailHtml({name, email, bookings:[], deletedBookings:bkgs, orderRef:null, isDeletionOnly:true})})
-    ));
+    if(!skipEmail){
+      // Group by email and send one summary per booker via order template (deletions section)
+      const byEmail = {};
+      deleteQueue.forEach(b => {
+        const k = b.email.toLowerCase();
+        if(!byEmail[k]) byEmail[k] = {name:b.name, email:b.email, bkgs:[]};
+        byEmail[k].bkgs.push(b);
+      });
+      await Promise.all(Object.values(byEmail).map(({name,email,bkgs})=>
+        sendEmail({to:email, subject:`Your Booking${bkgs.length>1?"s have":" has"} been removed`,
+          html:buildOrderEmailHtml({name, email, bookings:[], deletedBookings:bkgs, orderRef:null, isDeletionOnly:true})})
+      ));
+    }
 
     showToast(`${ids.length} booking${ids.length>1?"s":""} removed.`);
     setDeleteQueue([]);
     setShowDeleteCart(false);
+  }
+
+  // Delete old unapproved (past pending) bookings silently
+  async function handleClearOldUnapproved(ids, skipEmail) {
+    if(!ids.length) return;
+    const toRemove = bookings.filter(b=>ids.includes(b.id));
+    if(configured){
+      try{ await Promise.all(ids.map(id=>sb.remove("bookings",id))); await loadBookings(); }
+      catch(e){showToast("Delete failed: "+e.message,"error");return;}
+    } else { setBookings(prev=>prev.filter(b=>!ids.includes(b.id))); }
+
+    if(!skipEmail){
+      const byEmail = {};
+      toRemove.forEach(b=>{
+        const k = b.email.toLowerCase();
+        if(!byEmail[k]) byEmail[k]={name:b.name,email:b.email,bkgs:[]};
+        byEmail[k].bkgs.push(b);
+      });
+      await Promise.all(Object.values(byEmail).map(({name,email,bkgs})=>
+        sendEmail({to:email,subject:`Your Booking${bkgs.length>1?"s have":" has"} been removed`,
+          html:buildOrderEmailHtml({name,email,bookings:[],deletedBookings:bkgs,orderRef:null,isDeletionOnly:true})})
+      ));
+    }
+
+    showToast(`${ids.length} old unapproved booking${ids.length>1?"s":""} cleared.`);
   }
 
   async function handleCancel(id) {
@@ -2006,15 +4494,15 @@ export default function App() {
     }));
     const sourceIds = selectedBookings.map(b=>b.id);
     setCart(prev => [...prev, { drafts, name: ref.name, email: ref.email, isMultiEdit: true, sourceIds }]);
-    setShowCart(true);
     showToast(`${drafts.length} bookings added to cart for editing!`);
   }
 
   function handleAddToCart(drafts, name, email, sourceIds=[]) {
-    setCart(prev => [...prev, { drafts, name, email, sourceIds }]);
+    const isEdit = drafts.some(d => d.id && bookings.find(b => b.id === d.id));
+    setCart(prev => [...prev, { drafts, name, email, sourceIds, isEdit }]);
     setShowForm(false);
-    setShowCart(true);
-    showToast(`${drafts.length} booking${drafts.length>1?"s":""} added to cart!`);
+    setEditing(null);
+    showToast(isEdit ? "Edit added to cart." : `${drafts.length} booking${drafts.length>1?"s":""} added to cart!`);
   }
 
   function removeFromCart(idx) {
@@ -2034,29 +4522,38 @@ export default function App() {
   async function handleCartSubmit() {
     if (cart.length === 0) return;
     const allDrafts = cart.flatMap(item => item.drafts);
-    // Save all drafts
+    // Save all drafts — handleSave skips email so we can send grouped below
     const name = cart[0].name, email = cart[0].email;
     await handleSave(allDrafts, name, email, { skipEmail: true });
-    // handleSave skips email — handleCartSubmit handles all sending grouped by email
-    const byEmail = {};
-    cart.forEach(item => {
-      const k = item.email.toLowerCase();
-      if(!byEmail[k]) byEmail[k] = {name:item.name, email:item.email, drafts:[]};
-      byEmail[k].drafts.push(...item.drafts);
-    });
-    // Send one confirmation email per unique booker
-    for (const {name:n, email:e, drafts:d} of Object.values(byEmail)) {
-      const orderRef = "ORD-"+Date.now().toString(36).toUpperCase();
-      sendEmail({to:e, subject:`Booking Request Received [${orderRef}]`,
-        html:buildOrderEmailHtml({name:n,email:e,bookings:d,orderRef})});
+
+    if (!silentMode) {
+      // New bookings: group by email and send one order confirmation each
+      const newItems = cart.filter(item => !item.isEdit && !item.isMultiEdit);
+      const byEmailNew = {};
+      newItems.forEach(item => {
+        const k = item.email.toLowerCase();
+        if(!byEmailNew[k]) byEmailNew[k] = {name:item.name, email:item.email, drafts:[]};
+        byEmailNew[k].drafts.push(...item.drafts);
+      });
+      for (const {name:n, email:e, drafts:d} of Object.values(byEmailNew)) {
+        const orderRef = "ORD-"+Date.now().toString(36).toUpperCase();
+        sendEmail({to:e, subject:`Booking Request Received [${orderRef}]`,
+          html:buildOrderEmailHtml({name:n,email:e,bookings:d,orderRef})});
+      }
+      // Edits: send one "Booking Updated" per item (each is a separate edit)
+      for (const item of cart.filter(item => item.isEdit)) {
+        sendApprovalEmail({to:item.email, subject:"Booking Updated",
+          html:buildApprovalEmailHtml({name:item.name,email:item.email,bookings:item.drafts,newStatus:item.drafts[0]?.status,adminNote:""})});
+      }
     }
+
     setCart([]);
     setShowCart(false);
   }
 
   function handleLogout(){try{sessionStorage.removeItem("fb_user_email");}catch(_){}setLoggedInEmail("");setIsAdmin(false);setCart([]);}
 
-  const pendingCount=bookings.filter(b=>b.status==="pending").length;
+  const pendingCount=bookings.filter(b=>REVIEW_STATUSES.has(b.status)).length;
 
   // ─── Clash detection ──────────────────────────────────────────────────────
   const allClashes = getClashes(bookings);
@@ -2064,10 +4561,6 @@ export default function App() {
   const myClashCount = isAdmin
     ? allClashes.length
     : allClashes.filter(c => c.user.email?.toLowerCase() === loggedInEmail?.toLowerCase()).length;
-
-  // ─── List-tab filters (booker + clash) ────────────────────────────────────
-  const [listBookerFilter, setListBookerFilter] = useState("all");
-  const [listShowClashes, setListShowClashes]   = useState(false);
 
   function TabBtn({id,label,badge}){return(
     <button onClick={()=>setTab(id)} style={{padding:"8px 12px",borderRadius:8,border:"none",cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",background:tab===id?"#0f172a":"transparent",color:tab===id?"#fff":"#64748b",display:"flex",alignItems:"center",gap:5,whiteSpace:"nowrap",flexShrink:0}}>
@@ -2086,7 +4579,7 @@ export default function App() {
     </div>
   );
 
-  const emailLegend=[...new Set(bookings.map(b=>b.email).filter(Boolean))];
+  const emailLegend=[...new Set(bookings.filter(b=>!isAdminBooking(b)).map(b=>b.email).filter(Boolean))];
 
   return (
     <div style={{minHeight:"100vh",background:"#f8fafc",fontFamily:"'DM Sans','Segoe UI',system-ui,sans-serif"}}>
@@ -2123,6 +4616,18 @@ export default function App() {
                   <span style={{background:"#fff",color:"#7f1d1d",borderRadius:999,fontSize:11,fontWeight:800,padding:"1px 6px",minWidth:18,textAlign:"center"}}>{deleteQueue.length}</span>
                 </button>
               )}
+              {isAdmin&&(
+                <button onClick={()=>setShowExtensionModal(true)} title="Install the AMUA booking browser extension"
+                  style={S.btn({background:"#7c3aed",color:"#fff",fontSize:11,padding:"7px 10px"})}>
+                  🧩{!isMobile&&" Extension"}
+                </button>
+              )}
+              {isAdmin&&(
+                <button onClick={handleSyncAll} disabled={syncingMonth} title="Sync all months with bookings from today forward"
+                  style={S.btn({background:syncingMonth?"#e2e8f0":"#0ea5e9",color:syncingMonth?"#94a3b8":"#fff",fontSize:11,padding:"7px 10px",cursor:syncingMonth?"wait":"pointer",opacity:syncingMonth?0.7:1})}>
+                  {syncingMonth?"⏳":"🔄"}{!isMobile&&(syncingMonth?" Syncing…":" Sync All")}
+                </button>
+              )}
               {isAdmin
                 ?<button onClick={()=>setIsAdmin(false)} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#64748b",fontSize:11,padding:"7px 10px"})}>Exit Admin</button>
                 :<button onClick={()=>setShowLogin(true)} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#64748b",fontSize:11,padding:"7px 10px"})}>Admin →</button>}
@@ -2133,6 +4638,7 @@ export default function App() {
           </div>
           {/* Bottom row: tabs (always visible, scrollable) */}
           <div style={{display:"flex",gap:2,overflowX:"auto",paddingBottom:8,WebkitOverflowScrolling:"touch",scrollbarWidth:"none",msOverflowStyle:"none"}}>
+            <TabBtn id="about"    label={isMobile?"ℹ️":"ℹ️ About"}/>
             <TabBtn id="calendar" label={isMobile?"📅 Week":"📅 Week"}/>
             <TabBtn id="month"    label={isMobile?"🗓 Month":"🗓 Month"}/>
             <TabBtn id="list"     label={isMobile?"📋 List":"📋 Bookings"} badge={myClashCount>0?myClashCount:undefined}/>
@@ -2149,8 +4655,20 @@ export default function App() {
 
         {emailLegend.length>0&&(tab==="calendar"||tab==="month"||tab==="list")&&(
           <div style={{display:"flex",gap:6,marginBottom:12,alignItems:"center",overflowX:"auto",WebkitOverflowScrolling:"touch",scrollbarWidth:"none",msOverflowStyle:"none",paddingBottom:2}}>
-            <span style={{fontSize:11,fontWeight:600,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.05em",flexShrink:0}}>Bookers:</span>
-            {emailLegend.map(e=><EmailChip key={e} email={e}/>)}
+            <button onClick={()=>setListBookerFilter("all")}
+              style={{padding:"5px 12px",borderRadius:20,border:"1.5px solid",cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",flexShrink:0,borderColor:listBookerFilter==="all"?"#0f172a":"#e2e8f0",background:listBookerFilter==="all"?"#0f172a":"#fff",color:listBookerFilter==="all"?"#fff":"#475569"}}>
+              All
+            </button>
+            {emailLegend.map(e=>{
+              const active=listBookerFilter===e.toLowerCase();
+              const c=emailColor(e);
+              return(
+                <button key={e} onClick={()=>setListBookerFilter(p=>p===e.toLowerCase()?"all":e.toLowerCase())}
+                  style={{padding:"5px 12px",borderRadius:20,border:`1.5px solid ${active?c:"#e2e8f0"}`,cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",flexShrink:0,background:active?c:"#fff",color:active?"#fff":"#475569"}}>
+                  {e.split("@")[0]}
+                </button>
+              );
+            })}
           </div>
         )}
 
@@ -2162,88 +4680,217 @@ export default function App() {
         {tab==="list"&&(
           <div style={S.card}>
             {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:(()=>{
-              // Unique booker emails (non-admin)
-              const bookerEmails = [...new Set(bookings.filter(b=>!isAdminBooking(b)&&b.email).map(b=>b.email.toLowerCase()))];
-              // Clash-involved booking IDs
+              const bookerMap = {};
+              bookings.filter(b=>!isAdminBooking(b)&&b.email&&b.name).forEach(b=>{bookerMap[b.email.toLowerCase()]=b.name;});
+              const bookerEmails = Object.keys(bookerMap).sort();
               const clashAdminIds = new Set(allClashes.map(c=>c.admin.id));
               const clashUserIds  = new Set(allClashes.map(c=>c.user.id));
               const allClashIds   = new Set([...clashAdminIds,...clashUserIds]);
-
+              const listDir = listSortDir==="asc"?1:-1;
               let visible = [...bookings]
+                .filter(b => !isAdminBooking(b))
                 .filter(b => selFac==="all" || b.facility_id===selFac)
+                .filter(b => listColFacility==="all" || b.facility_id===listColFacility)
                 .filter(b => listBookerFilter==="all" || b.email?.toLowerCase()===listBookerFilter)
+                .filter(b => listStatusFilter==="all" || b.status===listStatusFilter)
                 .filter(b => !listShowClashes || allClashIds.has(b.id))
-                .sort((a,b)=>a.date.localeCompare(b.date)||a.start_hour-b.start_hour);
+                .filter(b => !listDateFrom || b.date>=listDateFrom)
+                .filter(b => !listDateTo   || b.date<=listDateTo)
+                .filter(b => !listColPurpose || (b.purpose||"").toLowerCase().includes(listColPurpose.toLowerCase()))
+                .sort((a,b)=>{
+                  if(listSortCol==="date") return listDir*(a.date.localeCompare(b.date)||a.start_hour-b.start_hour);
+                  if(listSortCol==="booker") return listDir*(a.name||"").localeCompare(b.name||"");
+                  if(listSortCol==="facility") return listDir*(a.facility_id||"").localeCompare(b.facility_id||"");
+                  if(listSortCol==="status") return listDir*(a.status||"").localeCompare(b.status||"");
+                  return listDir*(a.date.localeCompare(b.date)||a.start_hour-b.start_hour);
+                });
+
+              function lToggleSort(col) {
+                if(listSortCol===col) setListSortDir(d=>d==="asc"?"desc":"asc");
+                else { setListSortCol(col); setListSortDir("asc"); }
+              }
+              const lArrow = col => listSortCol===col?(listSortDir==="asc"?" ↑":" ↓"):"";
+              const anyListFilter = listDateFrom||listDateTo||listStatusFilter!=="all"||listColPurpose||listColFacility!=="all";
 
               return (
                 <>
-                  {/* Filter bar */}
-                  <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14,alignItems:"center"}}>
-                    {/* Clash toggle */}
+                  {/* Top action bar */}
+                  <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:8,alignItems:"center"}}>
                     {allClashes.length>0&&(
                       <button onClick={()=>setListShowClashes(v=>!v)}
-                        style={{...S.btn({background:listShowClashes?"#ef4444":"#fff",color:listShowClashes?"#fff":"#ef4444",border:"1.5px solid #ef4444",fontSize:12,padding:"6px 12px"}),fontWeight:700,display:"flex",alignItems:"center",gap:5}}>
-                        ⚠️ {listShowClashes?"All bookings":`Show clashes (${allClashes.length})`}
+                        style={S.btn({background:listShowClashes?"#ef4444":"#fff",color:listShowClashes?"#fff":"#ef4444",border:"1.5px solid #ef4444",fontSize:12,fontWeight:700})}>
+                        ⚠️ {listShowClashes?"All":"Clashes only"} ({allClashes.length})
                       </button>
                     )}
-                    {/* Booker chips */}
-                    <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
-                      <span style={{fontSize:11,fontWeight:600,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.05em"}}>Filter:</span>
-                      <button onClick={()=>setListBookerFilter("all")}
-                        style={{...S.btn({background:listBookerFilter==="all"?"#0f172a":"#f8fafc",color:listBookerFilter==="all"?"#fff":"#475569",border:"1.5px solid #e2e8f0",fontSize:12,padding:"4px 10px"})}}>
-                        All
-                      </button>
-                      {bookerEmails.map(em=>(
-                        <button key={em} onClick={()=>setListBookerFilter(prev=>prev===em?"all":em)}
-                          style={{...S.btn({background:listBookerFilter===em?emailColor(em):"#f8fafc",color:listBookerFilter===em?"#fff":"#475569",border:`1.5px solid ${listBookerFilter===em?emailColor(em):"#e2e8f0"}`,fontSize:11,padding:"4px 10px"})}}>
-                          {em.split("@")[0]}
-                        </button>
-                      ))}
-                    </div>
+                    <button onClick={()=>setShowScheduleModal(true)}
+                      style={S.btn({background:"#f0f9ff",color:"#0369a1",border:"1.5px solid #bae6fd",fontSize:12,fontWeight:700})}>
+                      📅 Summarise
+                    </button>
                   </div>
-
-                  {visible.length===0&&<div style={{textAlign:"center",padding:"40px 0",color:"#94a3b8",fontSize:14}}>{listShowClashes?"No clashes found.":"No bookings found."}</div>}
-                  <div style={{display:"flex",flexDirection:"column",gap:10}}>
-                    {visible.map(b=>{
-                      const f=FACILITIES.find(x=>x.id===b.facility_id);
-                      const isAdmin_bk=isAdminBooking(b);
-                      const isClash=allClashIds.has(b.id);
-                      const ec=isAdmin_bk?"#94a3b8":emailColor(b.email);
-                      return(
-                        <div key={b.id} onClick={()=>setViewing(b)}
-                          style={{background:isAdmin_bk?"#f8fafc":"#fff",border:isClash?"1.5px solid #ef4444":"1.5px solid #f1f5f9",borderRadius:12,padding:"14px 16px",display:"flex",gap:14,alignItems:"center",cursor:"pointer",borderLeft:`5px solid ${ec}`,opacity:isAdmin_bk?0.85:1}}
-                          onMouseEnter={e=>{e.currentTarget.style.boxShadow="0 2px 8px rgba(0,0,0,0.06)";}}
-                          onMouseLeave={e=>{e.currentTarget.style.boxShadow="none";}}>
-                          <div style={{width:4,borderRadius:4,background:f?.color||"#e2e8f0",alignSelf:"stretch",flexShrink:0}}/>
-                          <div style={{flex:1,minWidth:0}}>
-                            <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:2}}>
-                              <span style={{fontWeight:700,fontSize:14,color:"#0f172a"}}>{b.purpose||"Booking"}</span>
-                              <Badge status={b.status}/>
-                              {isAdmin_bk
-                                ? <span style={{fontSize:11,fontWeight:700,color:"#94a3b8",background:"#f1f5f9",borderRadius:4,padding:"1px 6px"}}>🔒 admin</span>
-                                : <EmailChip email={b.email}/>
-                              }
-                              {isClash&&<span style={{fontSize:11,fontWeight:700,color:"#ef4444",background:"#fff1f2",borderRadius:4,padding:"1px 6px"}}>⚠️ clash</span>}
-                            </div>
-                            <div style={{fontSize:13,color:"#475569"}}>{f?.name} · {fmtDate(b.date)} · {fmtTime(b.start_hour)}–{fmtTime(b.start_hour+b.duration)}</div>
-                            {!isAdmin_bk&&<div style={{fontSize:12,color:"#94a3b8"}}>{b.name}</div>}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
+                  {visible.length===0
+                    ? <div style={{textAlign:"center",padding:"40px 0",color:"#94a3b8",fontSize:14}}>No bookings match the current filters.</div>
+                    : <div style={{overflowX:"auto",borderRadius:10,border:"1px solid #f1f5f9"}}>
+                        <table style={{width:"100%",borderCollapse:"collapse",background:"#fff",fontSize:12}}>
+                          <thead>
+                            <tr style={{background:"#f8fafc"}}>
+                              {[["date","Date"],["booker","Booker"],["facility","Facility"],["status","Status"]].map(([col,label])=>(
+                                <th key={col} onClick={()=>lToggleSort(col)}
+                                  style={{padding:"5px 8px",textAlign:"left",cursor:"pointer",userSelect:"none",fontWeight:600,color:"#64748b",whiteSpace:"nowrap",borderBottom:"1px solid #e2e8f0",fontSize:11}}>
+                                  {label}{lArrow(col)}
+                                </th>
+                              ))}
+                              <th style={{padding:"5px 8px",textAlign:"left",fontWeight:600,color:"#64748b",borderBottom:"1px solid #e2e8f0",fontSize:11}}>Time · Dur</th>
+                              <th style={{padding:"5px 8px",textAlign:"left",fontWeight:600,color:"#64748b",borderBottom:"1px solid #e2e8f0",fontSize:11}}>Purpose</th>
+                            </tr>
+                            <tr style={{background:"#f1f5f9"}}>
+                              <th style={{padding:"3px 4px"}}>
+                                <div style={{display:"flex",gap:2}}>
+                                  <input type="date" value={listDateFrom} onChange={e=>setListDateFrom(e.target.value)} title="From date"
+                                    style={{padding:"2px 3px",fontSize:10,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",width:"100%",minWidth:88}}/>
+                                  <span style={{fontSize:9,color:"#94a3b8",alignSelf:"center",flexShrink:0}}>–</span>
+                                  <input type="date" value={listDateTo} onChange={e=>setListDateTo(e.target.value)} title="To date"
+                                    style={{padding:"2px 3px",fontSize:10,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",width:"100%",minWidth:88}}/>
+                                </div>
+                              </th>
+                              <th style={{padding:"3px 4px",whiteSpace:"normal"}}>
+                                <div style={{display:"flex",gap:3,flexWrap:"wrap",alignItems:"center"}}>
+                                  <button onClick={()=>setListBookerFilter("all")}
+                                    style={{padding:"1px 7px",fontSize:10,borderRadius:10,border:"1.5px solid #e2e8f0",background:listBookerFilter==="all"?"#0f172a":"#fff",color:listBookerFilter==="all"?"#fff":"#475569",cursor:"pointer",fontWeight:listBookerFilter==="all"?700:400,lineHeight:1.6}}>All</button>
+                                  {bookerEmails.map(em=>(
+                                    <button key={em} onClick={()=>setListBookerFilter(p=>p===em?"all":em)}
+                                      style={{padding:"1px 7px",fontSize:10,borderRadius:10,border:`1.5px solid ${listBookerFilter===em?emailColor(em):"#e2e8f0"}`,background:listBookerFilter===em?emailColor(em):"#fff",color:listBookerFilter===em?"#fff":"#475569",cursor:"pointer",fontWeight:listBookerFilter===em?700:400,lineHeight:1.6}}>
+                                      {em.split("@")[0]}
+                                    </button>
+                                  ))}
+                                </div>
+                              </th>
+                              <th style={{padding:"3px 4px"}}>
+                                <select value={listColFacility} onChange={e=>setListColFacility(e.target.value)}
+                                  style={{padding:"3px 4px",fontSize:11,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",width:"100%"}}>
+                                  <option value="all">All</option>
+                                  {FACILITIES.map(f=><option key={f.id} value={f.id}>{f.name}</option>)}
+                                </select>
+                              </th>
+                              <th style={{padding:"3px 4px"}}>
+                                <select value={listStatusFilter} onChange={e=>setListStatusFilter(e.target.value)}
+                                  style={{padding:"3px 4px",fontSize:11,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",width:"100%"}}>
+                                  <option value="all">All</option>
+                                  {Object.entries(STATUS_META).filter(([k])=>!["pending","amua_submit"].includes(k)).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
+                                </select>
+                              </th>
+                              <th style={{padding:"3px 4px"}}/>
+                              <th style={{padding:"3px 4px"}}>
+                                <div style={{display:"flex",gap:2,alignItems:"center"}}>
+                                  <input placeholder="Search purpose…" value={listColPurpose} onChange={e=>setListColPurpose(e.target.value)}
+                                    style={{padding:"3px 6px",fontSize:11,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",flex:1}}/>
+                                  {anyListFilter&&(
+                                    <button onClick={()=>{setListDateFrom("");setListDateTo("");setListStatusFilter("all");setListColPurpose("");setListColFacility("all");}}
+                                      title="Clear all column filters"
+                                      style={{padding:"2px 5px",fontSize:10,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",color:"#64748b",cursor:"pointer",flexShrink:0}}>✕</button>
+                                  )}
+                                </div>
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {visible.map((b,ri)=>{
+                              const f=FACILITIES.find(x=>x.id===b.facility_id);
+                              const isAdmin_bk=isAdminBooking(b);
+                              const isClash=allClashIds.has(b.id);
+                              const facShort = f ? (f.name.includes("Field") ? f.name.replace("Field ","Fld ") : f.name.split("–")[0].trim()) : "—";
+                              const d = new Date(b.date+"T12:00");
+                              const dateShort = d.toLocaleDateString("en-NZ",{weekday:"short",day:"numeric",month:"short"});
+                              return(
+                                <tr key={b.id} onClick={()=>setViewing(b)} style={{background:isAdmin_bk?"#f8fafc":isClash?"#fff5f5":"#fff",borderTop:ri>0?"1px solid #f1f5f9":"none",cursor:"pointer"}}
+                                  onMouseEnter={e=>e.currentTarget.style.background=isAdmin_bk?"#f1f5f9":"#f8fafc"}
+                                  onMouseLeave={e=>e.currentTarget.style.background=isAdmin_bk?"#f8fafc":isClash?"#fff5f5":"#fff"}>
+                                  <td style={{padding:"4px 8px",whiteSpace:"nowrap",color:"#475569",fontSize:11}}>{dateShort}</td>
+                                  <td style={{padding:"4px 8px"}} onClick={isAdmin_bk?undefined:e=>{e.stopPropagation();setListBookerFilter(p=>p===b.email.toLowerCase()?"all":b.email.toLowerCase());}}>
+                                    {isAdmin_bk
+                                      ? <span style={{fontSize:10,fontWeight:700,color:"#94a3b8",background:"#f1f5f9",borderRadius:10,padding:"2px 7px"}}>🔒 admin</span>
+                                      : <span style={{display:"inline-block",padding:"2px 9px",borderRadius:10,background:emailColor(b.email),color:"#fff",fontSize:11,fontWeight:600,cursor:"pointer",outline:listBookerFilter===b.email.toLowerCase()?"2px solid #0f172a":"none",outlineOffset:1}}>
+                                          {b.email.split("@")[0]}
+                                        </span>
+                                    }
+                                  </td>
+                                  <td style={{padding:"4px 8px",whiteSpace:"nowrap"}}>
+                                    <span style={{width:7,height:7,borderRadius:"50%",background:f?.color,display:"inline-block",marginRight:4,verticalAlign:"middle",flexShrink:0}}/>
+                                    <span style={{fontSize:11,color:"#475569"}}>{facShort}</span>
+                                  </td>
+                                  <td style={{padding:"4px 8px"}}>
+                                    <Badge status={b.status}/>
+                                    {isClash&&<span style={{display:"block",fontSize:10,fontWeight:700,color:"#ef4444"}}>⚠️ clash</span>}
+                                  </td>
+                                  <td style={{padding:"4px 8px",whiteSpace:"nowrap",color:"#475569",fontSize:11}}>{fmtTime(b.start_hour)}–{fmtTime(b.start_hour+b.duration)}<span style={{color:"#94a3b8",marginLeft:4}}>{b.duration}h</span></td>
+                                  <td style={{padding:"4px 8px",color:"#64748b",maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",fontSize:11}}>{b.purpose}</td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                  }
+                  <div style={{marginTop:8,fontSize:12,color:"#94a3b8"}}>{visible.length} booking{visible.length!==1?"s":""} shown</div>
                 </>
               );
             })()}
           </div>
         )}
 
-        {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<SummaryTab bookings={bookings} loggedInEmail={loggedInEmail}/>}</div>}
-        {tab==="admin"&&isAdmin&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onDelete={queueForRemoval} clashes={allClashes}/>}</div>}
+        {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<SummaryTab bookings={bookings} loggedInEmail={loggedInEmail} facilityRates={facilityRates} isAdmin={isAdmin} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onUpdateFacilityRate={updateFacilityRate} pricingMode={pricingMode} onSetPricingMode={setPricingMode} onProposeMerge={handleProposeMerge} onBulkApply={handleBulkApply}/>}</div>}
+        {tab==="about"&&<div style={{padding:"8px 0"}}><AboutTab/></div>}
+        {tab==="admin"&&isAdmin&&<div style={S.card}>
+          {/* Silent mode banner */}
+          <div style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",marginBottom:12,background:silentMode?"#fef3c7":"#f8fafc",border:`1.5px solid ${silentMode?"#f59e0b":"#e2e8f0"}`,borderRadius:10,flexWrap:"wrap"}}>
+            <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",flex:1,minWidth:200}}>
+              <div style={{position:"relative",width:38,height:22,flexShrink:0}} onClick={()=>setSilentMode(v=>!v)}>
+                <div style={{position:"absolute",inset:0,borderRadius:11,background:silentMode?"#f59e0b":"#cbd5e1",transition:"background 0.2s"}}/>
+                <div style={{position:"absolute",top:3,left:silentMode?18:3,width:16,height:16,borderRadius:"50%",background:"#fff",boxShadow:"0 1px 3px rgba(0,0,0,0.2)",transition:"left 0.2s"}}/>
+              </div>
+              <span style={{fontWeight:700,fontSize:13,color:silentMode?"#92400e":"#475569"}}>
+                {silentMode?"🔇 Silent mode ON — no emails will be sent":"🔔 Silent mode off"}
+              </span>
+            </label>
+            {silentMode&&<span style={{fontSize:12,color:"#92400e"}}>All status changes, approvals, deletions and edits will be processed without notifying bookers.</span>}
+          </div>
+          {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onQueueDelete={queueForRemovalSilent} clashes={allClashes} deleteIds={new Set(deleteQueue.map(b=>b.id))} facilityRates={facilityRates} onUpdateFacilityRate={updateFacilityRate} onClearOldUnapproved={handleClearOldUnapproved} silentMode={silentMode} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onSyncDB={handleSyncDB} onShowSchedule={()=>setShowAdminScheduleModal(true)} onBulkApply={handleBulkApply}/>}
+        </div>}
       </div>
 
       {/* Modals */}
-      {showLogin&&<Modal title="Admin Access" onClose={()=>setShowLogin(false)}><AdminLogin onLogin={()=>{setIsAdmin(true);setShowLogin(false);setTab("admin");}}/></Modal>}
+      {showScheduleModal && <ScheduleSummaryModal bookings={bookings} isAdmin={isAdmin} loggedInEmail={loggedInEmail} onBulkApply={handleBulkApply} onClose={()=>setShowScheduleModal(false)}/>}
+      {showAdminScheduleModal && <ScheduleSummaryModal bookings={bookings} isAdmin={true} loggedInEmail={loggedInEmail} onBulkApply={handleBulkApply} onClose={()=>setShowAdminScheduleModal(false)}/>}
+      {showLogin&&<Modal title="Admin Access" onClose={()=>setShowLogin(false)}><AdminLogin onLogin={()=>{setIsAdmin(true);setShowLogin(false);setTab(prev=>prev==="about"?"admin":prev);}}/></Modal>}
+
+      {showExtensionModal&&(
+        <Modal title="🧩 Install AMUA Booking Extension" onClose={()=>setShowExtensionModal(false)} width={560}>
+          <div style={{display:"flex",flexDirection:"column",gap:16,fontSize:14,color:"#0f172a"}}>
+            <div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:8,padding:"10px 14px",fontSize:13,color:"#166534"}}>
+              The browser extension lets you submit bookings to CPSA (Sporty) directly from this app and syncs confirmation links back automatically.
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:10}}>
+              {[
+                ["1","Download the extension", "Clone or download the amua-booking-extension repository from GitHub."],
+                ["2","Build it", <>Run <code style={{background:"#f1f5f9",padding:"1px 5px",borderRadius:4,fontSize:12}}>build.bat</code> (Windows) or <code style={{background:"#f1f5f9",padding:"1px 5px",borderRadius:4,fontSize:12}}>npm run build</code> in the repo folder. A <code style={{background:"#f1f5f9",padding:"1px 5px",borderRadius:4,fontSize:12}}>dist/</code> folder will be created.</>],
+                ["3","Open Chrome Extensions", <>Navigate to <code style={{background:"#f1f5f9",padding:"1px 5px",borderRadius:4,fontSize:12}}>chrome://extensions</code> and enable <strong>Developer mode</strong> (toggle top-right).</>],
+                ["4","Load unpacked", <>Click <strong>Load unpacked</strong> and select the <code style={{background:"#f1f5f9",padding:"1px 5px",borderRadius:4,fontSize:12}}>dist/</code> folder from step 2.</>],
+                ["5","Pin & use", "Pin the extension from the Chrome toolbar. Open a CPSA booking page on Sporty and the extension will detect it automatically."],
+              ].map(([num,title,desc])=>(
+                <div key={num} style={{display:"flex",gap:12,alignItems:"flex-start"}}>
+                  <span style={{minWidth:24,height:24,background:"#7c3aed",color:"#fff",borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:12,flexShrink:0}}>{num}</span>
+                  <div>
+                    <div style={{fontWeight:600,marginBottom:2}}>{title}</div>
+                    <div style={{fontSize:13,color:"#475569"}}>{desc}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div style={{borderTop:"1px solid #f1f5f9",paddingTop:12,display:"flex",gap:8,justifyContent:"flex-end"}}>
+              <button onClick={()=>setShowExtensionModal(false)} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#475569"})}>Close</button>
+            </div>
+          </div>
+        </Modal>
+      )}
 
       {showForm&&(
         <Modal title={editing?"Edit Booking":"New Booking Request"} onClose={()=>{setShowForm(false);setEditing(null);}} width={620}>
@@ -2267,13 +4914,13 @@ export default function App() {
 
       {showDeleteCart&&(
         <Modal title="🗑 Removal Queue" onClose={()=>setShowDeleteCart(false)} width={580}>
-          <DeleteCartModal deleteQueue={deleteQueue} setDeleteQueue={setDeleteQueue} onClose={()=>setShowDeleteCart(false)} onSubmit={handleDeleteCartSubmit} isAdmin={isAdmin}/>
+          <DeleteCartModal deleteQueue={deleteQueue} setDeleteQueue={setDeleteQueue} onClose={()=>setShowDeleteCart(false)} onSubmit={handleDeleteCartSubmit} isAdmin={isAdmin} silentMode={silentMode}/>
         </Modal>
       )}
 
       {viewing&&(
         <Modal title="Booking Details" onClose={()=>setViewing(null)}>
-          <BookingDetail booking={viewing} onEdit={()=>openEdit(viewing)} onClose={()=>setViewing(null)} onCancel={()=>queueForRemoval(viewing.id)} isAdmin={isAdmin} onStatusChange={status=>handleStatusChange(viewing,status)} loggedInEmail={loggedInEmail}/>
+          <BookingDetail booking={viewing} onEdit={()=>openEdit(viewing)} onClose={()=>setViewing(null)} onCancel={()=>queueForRemoval(viewing.id)} isAdmin={isAdmin} onStatusChange={status=>handleStatusChange(viewing,status)} loggedInEmail={loggedInEmail} allClashes={allClashes}/>
         </Modal>
       )}
     </div>
