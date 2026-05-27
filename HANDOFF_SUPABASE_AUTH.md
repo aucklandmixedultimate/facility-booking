@@ -63,17 +63,36 @@ carry a logged-in user's JWT.
 - Login gate: `session === undefined` renders nothing (loading); `!session` renders
   the Google sign-in screen.
 
-## CPSA browser extension — CURRENTLY BROKEN (known, accepted)
+## CPSA browser extension — v2.0.0 is OAuth-compatible
 
 The `amua-booking-extension` writes confirmation notes/links back to `bookings`.
-RLS is now live, so its anon-key writes are **denied** — the extension's auto-sync no
-longer works until it is updated. Admins can still do everything through the app.
-To fix, the extension needs one of:
+RLS blocked the old anon-key writes; **v2.0.0 carries a logged-in admin's Google
+OAuth access_token**, so its writes satisfy the bookings RLS policies again. The
+in-app install modal links to the v2.0.0 release; no app-side change was needed
+beyond the download link.
 
-1. Carry a logged-in admin's session access_token in its requests, OR
-2. Route writes through the app instead of writing to Supabase directly, OR
-3. A server-side Edge Function that holds the `service_role` key (never shipped
-   inside the extension).
+## activity_log (audit trail)
+
+`supabase-migration-activity-log.sql` adds `public.activity_log` (append-only).
+- INSERT: authenticated users may log their own rows (`user_id = auth.uid()`).
+- SELECT: admins only. UPDATE/DELETE: nobody.
+- The app logs via the `logActivity(action, detail)` helper (module-level, fire-and-
+  forget — never throws). Captures `sign_in`/`sign_out`, `booking_create`/`_edit`,
+  `status_change`, `bulk_status_change`, `invoiced`, `cpsa_sync_start`/`_complete`,
+  `email_sent`/`email_failed`. Each row carries a per-page-load `session_id`.
+- Run this migration in the SQL editor before relying on the trail; until then the
+  inserts silently no-op.
+
+## Invoiced state + billing-change tracking
+
+- New booking status `invoiced` (manual, or via the "Mark as invoiced" option in the
+  PO/Invoice export modal). On invoice, a `[BILLED] facility|start|duration` snapshot
+  is written into `notes` (no schema change — mirrors the `[CPSA-MISMATCH]` marker).
+- If an invoiced booking's time/duration/field later changes, the admin **Track
+  Changes** dropdown lists the drift (excess hours = owing, reduced = credit). Field
+  changes are flagged so retroactive revaluation is possible.
+- PO/Invoice file name convention: `AMUA PO - <Name> - <YYYYMMDD>-<YYYYMMDD>` where
+  `<Name>` is a free-text field entered per export (drives the saved-PDF/CSV name).
 
 ## Migration status checklist
 
@@ -87,8 +106,11 @@ Done:
 - [x] RLS policies enabled on `bookings` and `settings`.
 - [x] Admin role granted to `aucklandmixedultimate@gmail.com`; login/booking verified.
 
+- [x] CPSA extension auth fixed by shipping v2.0.0 (OAuth token); install link updated.
+
 Outstanding:
-- [ ] Fix the CPSA extension auth (see above) — currently broken.
+- [ ] Run `supabase-migration-activity-log.sql` in the SQL editor (creates the audit
+      table + RLS). Until then `logActivity` inserts silently no-op.
 - [ ] Rotate the anon key (Supabase Settings -> API), update `.env.local`, redeploy.
       Deferred by choice; the current key is still the original one that was committed
       to git history, so rotation is recommended eventually.
