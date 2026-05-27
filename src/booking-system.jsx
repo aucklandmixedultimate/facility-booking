@@ -1365,15 +1365,12 @@ function WeekCalendar({ bookings, onNewBooking, onBookingClick, selectedFacility
     const moved  = dragMoved.current;
     dragMoved.current = false;
     setDragState(null);
-    // Only open new booking if click/drag was on empty column space
-    // (booking chips call e.stopPropagation so they won't reach here)
-    if (moved) {
-      // Drag: use the full dragged range
-      onNewBooking(nd.date, slotToHour(nd.lo), (nd.hi - nd.lo + 1) * 0.5);
-    } else {
-      // Click on empty space: 1-hour slot at clicked time
-      onNewBooking(nd.date, slotToHour(nd.lo), 1);
-    }
+    // Interacting with the week grid (click or drag) opens the day timeline popup
+    // centered on the start time, rather than creating a booking directly — so the
+    // user picks a facility column there. (booking chips stopPropagation, so they
+    // never reach here.)
+    if (onOpenDay) onOpenDay(nd.date, slotToHour(nd.lo));
+    else onNewBooking(nd.date, slotToHour(nd.lo), moved ? (nd.hi - nd.lo + 1) * 0.5 : 1);
   }
 
   function getStackStyle(b, dayBkgs) {
@@ -1405,8 +1402,10 @@ function WeekCalendar({ bookings, onNewBooking, onBookingClick, selectedFacility
               return (
                 <div key={dk} style={{ flex:1, textAlign:"center", padding:"6px 0 10px" }}>
                   <div style={{ fontSize:11, fontWeight:600, color:"#94a3b8", textTransform:"uppercase", letterSpacing:"0.08em" }}>{d.toLocaleDateString("en-NZ",{weekday:"short"})}</div>
-                  <div onClick={()=>onOpenDay&&onOpenDay(dk)} title="View full day"
+                  <div onClick={()=>onOpenDay&&onOpenDay(dk)} title="Open day view"
                     style={{ width:32, height:32, borderRadius:"50%", margin:"4px auto 0", background:isToday?"#0f172a":"transparent", display:"flex", alignItems:"center", justifyContent:"center", fontSize:15, fontWeight:isToday?700:500, color:isToday?"#fff":"#0f172a", cursor:onOpenDay?"pointer":"default" }}>{d.getDate()}</div>
+                  {onOpenDay&&<button onClick={()=>onOpenDay(dk)} title="Open day view"
+                    style={{ marginTop:3, fontSize:9, fontWeight:700, color:"#4f46e5", background:"#eef2ff", border:"1px solid #c7d2fe", borderRadius:6, padding:"1px 6px", cursor:"pointer", fontFamily:"inherit" }}>⤢ day</button>}
                 </div>
               );
             })}
@@ -1647,11 +1646,19 @@ function MonthCalendar({ bookings, onBookingClick, onNewBooking, selectedFacilit
 // Bookings render as blocks; a plain click opens a booking, a click-drag (even
 // starting on a block) passes through to create a new booking — so overlapping /
 // same-facility bookings (e.g. for merges) are easy to create.
-function DayTimelinePopup({ date, bookings, onClose, onBookingClick, onNewBooking, cartNewDrafts=[], deleteIds=new Set(), cartSourceIds=new Set() }) {
+function DayTimelinePopup({ date, bookings, onClose, onBookingClick, onNewBooking, cartNewDrafts=[], deleteIds=new Set(), cartSourceIds=new Set(), focusHour=null }) {
   const [dragState, setDragState] = useState(null); // {facility, startSlot, endSlot}
   const dragMoved   = useRef(false);
   const justDragged = useRef(false);
   const downBooking = useRef(false);
+  const scrollRef   = useRef(null);
+  // When opened from a week/month interaction, center the time grid on the chosen hour.
+  useEffect(()=>{
+    if (focusHour==null || !scrollRef.current) return;
+    const el = scrollRef.current;
+    const y = (focusHour-CAL_START)*HOUR_H;
+    el.scrollTop = Math.max(0, y - el.clientHeight/2 + HOUR_H);
+  },[focusHour]);
 
   const dk = typeof date === "string" ? date : dateKey(date);
   const dObj = typeof date === "string" ? new Date(date+"T00:00:00") : date;
@@ -1694,10 +1701,11 @@ function DayTimelinePopup({ date, bookings, onClose, onBookingClick, onNewBookin
   return (
     <Modal title={`📅 ${dObj.toLocaleDateString("en-NZ",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}`} onClose={onClose} width={760}>
       <div style={{fontSize:12,color:"#94a3b8",marginBottom:8}}>Click a booking to view it · click or drag an empty area (or across existing bookings) to create a new one.</div>
-      <div style={{overflowX:"auto"}}>
+      <div ref={scrollRef} style={{overflow:"auto",maxHeight:"60vh"}}>
         <div style={{display:"flex",minWidth:560}}>
-          {/* Hour labels */}
-          <div style={{width:48,flexShrink:0,paddingTop:24}}>
+          {/* Hour labels (sticky on horizontal scroll) */}
+          <div style={{width:48,flexShrink:0,position:"sticky",left:0,zIndex:6,background:"#fff"}}>
+            <div style={{height:24,position:"sticky",top:0,zIndex:7,background:"#fff"}}/>
             {Array.from({length:CAL_TOTAL+1},(_,i)=>CAL_START+i).map(h=>(
               <div key={h} style={{height:HOUR_H,display:"flex",alignItems:"flex-start",justifyContent:"flex-end",paddingRight:6,paddingTop:3}}>
                 <span style={{fontSize:10,color:"#94a3b8",whiteSpace:"nowrap"}}>{fmtTime(h)}</span>
@@ -1710,7 +1718,7 @@ function DayTimelinePopup({ date, bookings, onClose, onBookingClick, onNewBookin
             const isDragging = dragState?.facility===fac.id;
             return (
               <div key={fac.id} style={{flex:1,minWidth:96}}>
-                <div style={{height:24,display:"flex",alignItems:"center",justifyContent:"center",gap:4,fontSize:10,fontWeight:700,color:"#475569",whiteSpace:"nowrap",overflow:"hidden"}}>
+                <div style={{height:24,position:"sticky",top:0,zIndex:5,display:"flex",alignItems:"center",justifyContent:"center",gap:4,fontSize:10,fontWeight:700,color:"#475569",whiteSpace:"nowrap",overflow:"hidden",background:"#fff",borderBottom:"1px solid #f1f5f9"}}>
                   <span style={{width:7,height:7,borderRadius:"50%",background:fac.color,flexShrink:0}}/>
                   {fac.name.includes("Field")?fac.name.replace("Field ","Fld "):fac.name.split("–")[0].trim().slice(0,10)}
                 </div>
@@ -4417,6 +4425,7 @@ export default function App() {
   const [showForm, setShowForm] =useState(false);
   const [focusedDate, setFocusedDate] = useState(new Date());
   const [dayPopupDate, setDayPopupDate] = useState(null);
+  const [dayPopupFocus, setDayPopupFocus] = useState(null);
   const [showCart, setShowCart]       =useState(false);
   const [cart,     setCart]           =useState([]); // { drafts, name, email, isMultiEdit? }[]
   const [deleteQueue,setDeleteQueue]  =useState([]); // bookings queued for removal
@@ -4713,6 +4722,7 @@ export default function App() {
   useEffect(()=>{ loadSettings(); /* eslint-disable-next-line */ },[]);
 
   const openNew=useCallback((date,startHour,duration=1,facility=null)=>{setEditing(null);setPrefill({date,startHour,duration,facility});setDayPopupDate(null);setShowForm(true);},[]);
+  const openDay=useCallback((dk,focusHour=null)=>{setDayPopupDate(dk);setDayPopupFocus(focusHour);},[]);
   const openEdit=useCallback((b)=>{setEditing({...b});setViewing(null);setShowForm(true);},[]);
 
   bookings.forEach(b=>emailColor(b.email));
@@ -5200,8 +5210,8 @@ export default function App() {
 
         {(tab==="calendar"||tab==="month"||tab==="list")&&<FacilityPills/>}
 
-        {tab==="calendar"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<WeekCalendar bookings={bookings} selectedFacility={selFac} onNewBooking={openNew} onBookingClick={setViewing} cartSourceIds={new Set(cart.flatMap(i=>i.sourceIds||[]))} deleteIds={new Set(deleteQueue.map(b=>b.id))} cartNewDrafts={cart.flatMap(i=>(i.sourceIds||[]).length===0?i.drafts:[])} focusedDate={focusedDate} setFocusedDate={setFocusedDate} onOpenDay={setDayPopupDate}/>}</div>}
-        {tab==="month"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<MonthCalendar bookings={bookings} selectedFacility={selFac} onBookingClick={setViewing} onNewBooking={openNew} onMultiDelete={queueMultiForRemoval} onMultiAddToCart={handleMultiAddToCart} loggedInEmail={loggedInEmail} isAdmin={isAdmin} cartSourceIds={new Set(cart.flatMap(i=>i.sourceIds||[]))} deleteIds={new Set(deleteQueue.map(b=>b.id))} cartNewDrafts={cart.flatMap(i=>(i.sourceIds||[]).length===0?i.drafts:[])} onOpenDay={setDayPopupDate} onGotoWeek={dk=>{ setFocusedDate(new Date(dk+"T00:00:00")); setTab("calendar"); }}/>}</div>}
+        {tab==="calendar"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<WeekCalendar bookings={bookings} selectedFacility={selFac} onNewBooking={openNew} onBookingClick={setViewing} cartSourceIds={new Set(cart.flatMap(i=>i.sourceIds||[]))} deleteIds={new Set(deleteQueue.map(b=>b.id))} cartNewDrafts={cart.flatMap(i=>(i.sourceIds||[]).length===0?i.drafts:[])} focusedDate={focusedDate} setFocusedDate={setFocusedDate} onOpenDay={openDay}/>}</div>}
+        {tab==="month"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<MonthCalendar bookings={bookings} selectedFacility={selFac} onBookingClick={setViewing} onNewBooking={openNew} onMultiDelete={queueMultiForRemoval} onMultiAddToCart={handleMultiAddToCart} loggedInEmail={loggedInEmail} isAdmin={isAdmin} cartSourceIds={new Set(cart.flatMap(i=>i.sourceIds||[]))} deleteIds={new Set(deleteQueue.map(b=>b.id))} cartNewDrafts={cart.flatMap(i=>(i.sourceIds||[]).length===0?i.drafts:[])} onOpenDay={openDay} onGotoWeek={dk=>{ setFocusedDate(new Date(dk+"T00:00:00")); setTab("calendar"); }}/>}</div>}
 
         {tab==="list"&&(
           <div style={S.card}>
@@ -5468,8 +5478,8 @@ export default function App() {
       )}
 
       {dayPopupDate&&(
-        <DayTimelinePopup date={dayPopupDate} bookings={bookings} onClose={()=>setDayPopupDate(null)}
-          onBookingClick={b=>{ setDayPopupDate(null); setViewing(b); }}
+        <DayTimelinePopup date={dayPopupDate} focusHour={dayPopupFocus} bookings={bookings} onClose={()=>{setDayPopupDate(null);setDayPopupFocus(null);}}
+          onBookingClick={b=>{ setDayPopupDate(null);setDayPopupFocus(null); setViewing(b); }}
           onNewBooking={openNew}
           cartNewDrafts={cart.flatMap(i=>(i.sourceIds||[]).length===0?i.drafts:[])}
           deleteIds={new Set(deleteQueue.map(b=>b.id))} cartSourceIds={new Set(cart.flatMap(i=>i.sourceIds||[]))}/>
