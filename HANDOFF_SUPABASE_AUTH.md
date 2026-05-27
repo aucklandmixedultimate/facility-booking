@@ -68,8 +68,27 @@ carry a logged-in user's JWT.
 The `amua-booking-extension` writes confirmation notes/links back to `bookings`.
 RLS blocked the old anon-key writes; **v2.0.0 carries a logged-in admin's Google
 OAuth access_token**, so its writes satisfy the bookings RLS policies again. The
-in-app install modal links to the v2.0.0 release; no app-side change was needed
-beyond the download link.
+in-app install modal links to the v2.0.0 release.
+
+### Extension schema requirement (v2.1.0+)
+
+`supabase-migration-system-notes.sql` adds a `system_notes text` column to
+`bookings`. All machine-generated markers (`[CPSA-MISMATCH]`, `[BILLED]`,
+`[CPSA <date>] Ref <ref> · <url>`) now live in `system_notes` instead of
+`notes`. The `notes` field is reserved for user-editable free text.
+
+**Extension writes must target `system_notes`**, not `notes`:
+```json
+PATCH /rest/v1/bookings?id=eq.<id>
+{ "system_notes": "[CPSA 27/05/2026] Ref ABC123 · https://…" }
+```
+The app reads from `system_notes` first and falls back to `notes` for rows that
+pre-date the migration (backward compatible). Once the migration SQL has been run
+the fallback is not needed for new rows.
+
+The `notes` column PATCH must no longer include CPSA markers — it should only
+carry user-authored text that was already present (pass-through or omit the
+field entirely so existing user notes are preserved).
 
 ## activity_log (audit trail)
 
@@ -87,7 +106,7 @@ beyond the download link.
 
 - New booking status `invoiced` (manual, or via the "Mark as invoiced" option in the
   PO/Invoice export modal). On invoice, a `[BILLED] facility|start|duration` snapshot
-  is written into `notes` (no schema change — mirrors the `[CPSA-MISMATCH]` marker).
+  is written into `system_notes` (requires `supabase-migration-system-notes.sql`).
 - If an invoiced booking's time/duration/field later changes, the admin **Track
   Changes** dropdown lists the drift (excess hours = owing, reduced = credit). Field
   changes are flagged so retroactive revaluation is possible.
@@ -111,6 +130,10 @@ Done:
 Outstanding:
 - [ ] Run `supabase-migration-activity-log.sql` in the SQL editor (creates the audit
       table + RLS). Until then `logActivity` inserts silently no-op.
+- [ ] Run `supabase-migration-system-notes.sql` in the SQL editor (adds `system_notes`
+      column + migrates existing markers out of `notes` + index). Until then system
+      markers continue to be written to `notes` as a fallback — app reads from both.
+      After running: update CPSA browser extension to v2.1.0+ (writes to `system_notes`).
 - [ ] Rotate the anon key (Supabase Settings -> API), update `.env.local`, redeploy.
       Deferred by choice; the current key is still the original one that was committed
       to git history, so rotation is recommended eventually.

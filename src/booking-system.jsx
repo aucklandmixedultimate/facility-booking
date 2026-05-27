@@ -173,35 +173,38 @@ function timeOverlaps(a,b) {
   return a.start_hour<b.start_hour+b.duration && a.start_hour+a.duration>b.start_hour;
 }
 function isAdminBooking(b)  { return b.email === "admin"; }
-// CPSA mismatch reasons are stored as a marker line in notes (no schema change),
-// mirroring the existing "[CPSA …]" submission marker pattern.
+// System markers (CPSA mismatch, billing snapshot, CPSA submission refs) live in
+// booking.system_notes — separate from user-editable booking.notes. All read helpers
+// fall back to booking.notes for rows that pre-date the system_notes column migration.
 const CPSA_MISMATCH_RE = /\[CPSA-MISMATCH\][^\n]*/g;
-function setMismatchNote(notes, reasons) {
-  const base = (notes||"").replace(CPSA_MISMATCH_RE,"").trim();
+function setMismatchNote(sysNotes, reasons) {
+  const base = (sysNotes||"").replace(CPSA_MISMATCH_RE,"").trim();
   if (!reasons || !reasons.length) return base;
   const marker = `[CPSA-MISMATCH] ${reasons.join(" | ")}`;
   return base ? `${base}\n${marker}` : marker;
 }
-function parseMismatchNote(notes) {
-  const m = (notes||"").match(/\[CPSA-MISMATCH\]\s*([^\n]*)/);
+// Read from system_notes; fall back to notes for pre-migration rows.
+function parseMismatchNote(sysNotes, notesLegacy) {
+  const src = sysNotes || notesLegacy || "";
+  const m = src.match(/\[CPSA-MISMATCH\]\s*([^\n]*)/);
   return m ? m[1].split("|").map(s=>s.trim()).filter(Boolean) : [];
 }
-function stripMismatchNote(notes) { return (notes||"").replace(CPSA_MISMATCH_RE,"").trim(); }
+function stripMismatchNote(sysNotes) { return (sysNotes||"").replace(CPSA_MISMATCH_RE,"").trim(); }
 // Split a succinct reason "Label: old → new" into structured parts for old/new columns.
 function splitReason(r) {
   const m = (r||"").match(/^(.+?):\s*(.*?)\s*→\s*(.*)$/);
   return m ? { label: m[1], old: m[2], next: m[3] } : { label: r, old: "", next: "" };
 }
-// Billed snapshot: captures facility/time/duration at the moment a booking is invoiced,
-// so later edits (or CPSA-confirmed changes) can be reconciled as owing/credit.
+// Billed snapshot stored in system_notes.
 const BILLED_RE = /\[BILLED\][^\n]*/g;
-function setBilledSnapshot(notes, b) {
-  const base = (notes||"").replace(BILLED_RE,"").trim();
+function setBilledSnapshot(sysNotes, b) {
+  const base = (sysNotes||"").replace(BILLED_RE,"").trim();
   const marker = `[BILLED] ${b.facility_id}|${b.start_hour}|${b.duration}`;
   return base ? `${base}\n${marker}` : marker;
 }
-function parseBilledSnapshot(notes) {
-  const m = (notes||"").match(/\[BILLED\]\s*([^|]+)\|([^|]+)\|([^\n|]+)/);
+function parseBilledSnapshot(sysNotes, notesLegacy) {
+  const src = sysNotes || notesLegacy || "";
+  const m = src.match(/\[BILLED\]\s*([^|]+)\|([^|]+)\|([^\n|]+)/);
   if (!m) return null;
   return { facility_id: m[1].trim(), start_hour: parseFloat(m[2]), duration: parseFloat(m[3]) };
 }
@@ -209,7 +212,7 @@ function parseBilledSnapshot(notes) {
 // structured discrepancies (old → new) plus the net hours delta (owing if >0,
 // credit if <0), or null when there is no recorded snapshot / no drift.
 function getBillingDrift(booking) {
-  const snap = parseBilledSnapshot(booking.notes);
+  const snap = parseBilledSnapshot(booking.system_notes, booking.notes);
   if (!snap) return null;
   const rows = [];
   if (snap.facility_id !== booking.facility_id)
@@ -757,7 +760,7 @@ function CartModal({ cart, setCart, onClose, onSubmit, openNew, cartIdsSet }) {
                     {item.notifyOnly
                       ? item.drafts.map((d,di)=>{
                           const f=FACILITIES.find(x=>x.id===d.facility_id);
-                          const reasons=parseMismatchNote(d.notes);
+                          const reasons=parseMismatchNote(d.system_notes,d.notes);
                           return (
                             <div key={di} style={{padding:'10px 14px',borderBottom:di<item.drafts.length-1?'1px solid #f1f5f9':'none'}}>
                               <div style={{display:'flex',gap:10,alignItems:'center'}}>
@@ -1236,7 +1239,7 @@ function BookingDetail({booking,onEdit,onClose,onCancel,isAdmin,onStatusChange,l
           </div>
         )}
       </div>
-      {booking.status==="cpsa_review_needed"&&parseMismatchNote(booking.notes).length>0&&(
+      {booking.status==="cpsa_review_needed"&&parseMismatchNote(booking.system_notes,booking.notes).length>0&&(
         <div style={{background:"#fef9c3",border:"1px solid #fde047",borderRadius:10,padding:"12px 16px"}}>
           <div style={{fontSize:12,fontWeight:700,color:"#713f12",textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:8,display:"flex",alignItems:"center",gap:6}}>⚠ Flagged inconsistencies vs CPSA</div>
           <div style={{display:"grid",gridTemplateColumns:"auto 1fr auto 1fr",gap:"4px 10px",alignItems:"center"}}>
@@ -1244,7 +1247,7 @@ function BookingDetail({booking,onEdit,onClose,onCancel,isAdmin,onStatusChange,l
             <div style={{fontSize:10,fontWeight:700,color:"#a16207",textTransform:"uppercase"}}>Booked</div>
             <div></div>
             <div style={{fontSize:10,fontWeight:700,color:"#a16207",textTransform:"uppercase"}}>CPSA</div>
-            {parseMismatchNote(booking.notes).map((r,i)=>{const p=splitReason(r);return(<Fragment key={i}>
+            {parseMismatchNote(booking.system_notes,booking.notes).map((r,i)=>{const p=splitReason(r);return(<Fragment key={i}>
               <div style={{fontSize:13,fontWeight:600,color:"#713f12"}}>{p.label}</div>
               <div style={{fontSize:13,color:"#854d0e"}}>{p.old||"—"}</div>
               <div style={{fontSize:12,color:"#a16207"}}>→</div>
@@ -1271,13 +1274,16 @@ function BookingDetail({booking,onEdit,onClose,onCancel,isAdmin,onStatusChange,l
         </div>
       ))}
       {(()=>{
-        if(!booking.notes) return null;
+        // Parse system markers from system_notes; fall back to notes for pre-migration rows.
+        const sysNotesSrc = booking.system_notes || booking.notes || "";
+        const userNotesSrc = booking.notes || "";
         // Parse CPSA submission lines: [CPSA <date>] Ref <ref> · <url>
         const cpsaRe=/\[CPSA ([^\]]+)\]\s*Ref\s+(\S+)\s*·\s*(https?:\/\/\S+)/g;
         const cpsaLines=[];
         let m;
-        while((m=cpsaRe.exec(booking.notes))!==null) cpsaLines.push({date:m[1],ref:m[2],url:m[3]});
-        const remainingNotes=stripMismatchNote(booking.notes.replace(/\[CPSA [^\]]+\]\s*Ref\s+\S+\s*·\s*https?:\/\/\S+/g,"")).trim();
+        while((m=cpsaRe.exec(sysNotesSrc))!==null) cpsaLines.push({date:m[1],ref:m[2],url:m[3]});
+        // User-visible notes: strip any legacy system markers from the notes field for display.
+        const remainingNotes=stripMismatchNote(userNotesSrc.replace(/\[CPSA [^\]]+\]\s*Ref\s+\S+\s*·\s*https?:\/\/\S+/g,"").replace(BILLED_RE,"")).trim();
         if(!cpsaLines.length&&!remainingNotes) return null;
         return <>
           {cpsaLines.map((c,i)=>(
@@ -1317,7 +1323,7 @@ function BookingDetail({booking,onEdit,onClose,onCancel,isAdmin,onStatusChange,l
   );
 }
 
-function WeekCalendar({ bookings, onNewBooking, onBookingClick, selectedFacility, cartSourceIds=new Set(), deleteIds=new Set(), cartNewDrafts=[], focusedDate, setFocusedDate, onOpenDay }) {
+function WeekCalendar({ bookings, onNewBooking, onBookingClick, selectedFacility, cartSourceIds=new Set(), deleteIds=new Set(), cartNewDrafts=[], focusedDate, setFocusedDate, onOpenDay, bookerFilter=new Set() }) {
   const [localBase, setLocalBase] = useState(new Date());
   const weekBase    = focusedDate || localBase;
   const setWeekBase = setFocusedDate || setLocalBase;
@@ -1454,12 +1460,13 @@ function WeekCalendar({ bookings, onNewBooking, onBookingClick, selectedFacility
                       const isCpsaConfirmed = b.status==="cpsa_confirmed"||b.status==="cpsa_review_needed";
                       const bkBg = isAdmin_bk ? "#94a3b8" : isCpsaConfirmed ? "#78909c" : (fac?.color||"#4a90d9");
                       const bkBorderLeft = isAdmin_bk ? undefined : isCpsaConfirmed ? "4px solid #0891b2" : (deleteIds.has(b.id)||cartSourceIds.has(b.id) ? undefined : `4px solid ${ec}`);
+                      const isDimmed = !isAdmin_bk && bookerFilter.size > 0 && !bookerFilter.has(b.email?.toLowerCase());
                       return (
                         <div key={b.id}
-                          onClick={e=>{ e.stopPropagation(); onBookingClick(b); }}
+                          onClick={e=>{ e.stopPropagation(); if(!isDimmed) onBookingClick(b); }}
                           onMouseDown={e=>e.stopPropagation()}
-                          title={(()=>{const r=parseMismatchNote(b.notes);return `${b.name} – ${fac?.name}`+(b.status==="cpsa_review_needed"&&r.length?`\n⚠ CPSA inconsistencies:\n${r.join("\n")}`:b.status==="cpsa_confirmed"?"\n🌐 CPSA confirmed":"");})()}
-                          style={{ position:"absolute", top:(b.start_hour-CAL_START)*HOUR_H, height:Math.max(b.duration*HOUR_H-2,20), background:bkBg, borderRadius:6, padding:"3px 6px", cursor:"pointer", overflow:"hidden", opacity:REVIEW_STATUSES.has(b.status)?0.75:1, border:deleteIds.has(b.id)?"2.5px solid #ef4444":cartSourceIds.has(b.id)?"2.5px solid #f59e0b":b.status==="clash"?"2px dashed #d97706":REVIEW_STATUSES.has(b.status)?"2px dashed rgba(255,255,255,0.6)":b.status==="rejected"?"2px solid rgba(244,63,94,0.8)":"none", boxShadow:deleteIds.has(b.id)?"0 0 0 3px rgba(239,68,68,0.25)":cartSourceIds.has(b.id)?"0 0 0 3px rgba(245,158,11,0.25)":"0 1px 4px rgba(0,0,0,0.15)", zIndex:2, borderLeft:bkBorderLeft, ...stk }}>
+                          title={(()=>{const r=parseMismatchNote(b.system_notes,b.notes);return `${b.name} – ${fac?.name}`+(b.status==="cpsa_review_needed"&&r.length?`\n⚠ CPSA inconsistencies:\n${r.join("\n")}`:b.status==="cpsa_confirmed"?"\n🌐 CPSA confirmed":"");})()}
+                          style={{ position:"absolute", top:(b.start_hour-CAL_START)*HOUR_H, height:Math.max(b.duration*HOUR_H-2,20), background:bkBg, borderRadius:6, padding:"3px 6px", cursor:isDimmed?"default":"pointer", overflow:"hidden", opacity:isDimmed?0.12:REVIEW_STATUSES.has(b.status)?0.75:1, pointerEvents:isDimmed?"none":"auto", border:deleteIds.has(b.id)?"2.5px solid #ef4444":cartSourceIds.has(b.id)?"2.5px solid #f59e0b":b.status==="clash"?"2px dashed #d97706":REVIEW_STATUSES.has(b.status)?"2px dashed rgba(255,255,255,0.6)":b.status==="rejected"?"2px solid rgba(244,63,94,0.8)":"none", boxShadow:deleteIds.has(b.id)?"0 0 0 3px rgba(239,68,68,0.25)":cartSourceIds.has(b.id)?"0 0 0 3px rgba(245,158,11,0.25)":"0 1px 4px rgba(0,0,0,0.15)", zIndex:2, borderLeft:bkBorderLeft, ...stk }}>
                           <div style={{ fontSize:11, fontWeight:700, color:"#fff", lineHeight:1.3, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{b.purpose||b.name}</div>
                           {b.duration*HOUR_H>22&&!isAdmin_bk&&<div style={{ fontSize:9, color:"rgba(255,255,255,0.8)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{b.name}</div>}
                           {b.duration*HOUR_H>28&&<div style={{display:"flex",alignItems:"center",gap:3,marginTop:1}}>
@@ -1493,7 +1500,7 @@ function WeekCalendar({ bookings, onNewBooking, onBookingClick, selectedFacility
 }
 
 // ─── Month Calendar (multi-select + status chips) ───────────────────────────────
-function MonthCalendar({ bookings, onBookingClick, onNewBooking, selectedFacility, loggedInEmail, isAdmin, onMultiDelete, onMultiAddToCart, cartSourceIds=new Set(), deleteIds=new Set(), cartNewDrafts=[], onOpenDay, onGotoWeek }) {
+function MonthCalendar({ bookings, onBookingClick, onNewBooking, selectedFacility, loggedInEmail, isAdmin, onMultiDelete, onMultiAddToCart, cartSourceIds=new Set(), deleteIds=new Set(), cartNewDrafts=[], onOpenDay, onGotoWeek, bookerFilter=new Set() }) {
   const now = new Date();
   const [year,   setYear]   = useState(now.getFullYear());
   const [month,  setMonth]  = useState(now.getMonth());
@@ -1612,11 +1619,12 @@ function MonthCalendar({ bookings, onBookingClick, onNewBooking, selectedFacilit
                   const chipBg = isSel?"#6366f1": isAdmin_bk?"#94a3b8" : isCpsaConfirmed?"#78909c" : (fac?.color||"#4a90d9");
                   const chipOutline = inDelete?"2.5px solid #ef4444":inCart?"2.5px solid #f59e0b":isSel?"2px solid #4f46e5":"none";
                   const chipLeft = inDelete||inCart||isAdmin_bk?"none": isCpsaConfirmed?"3px solid #0891b2" :"3px solid "+ec;
+                  const isDimmed = !isAdmin_bk && bookerFilter.size > 0 && !bookerFilter.has(b.email?.toLowerCase());
                   return (
                     <div key={b.id}
-                      onClick={e=>{ e.stopPropagation(); if(selMode) toggleSel(b.id); else onBookingClick(b); }}
-                      title={(()=>{const r=parseMismatchNote(b.notes);return `${b.name} · ${fac?.name} · ${fmtTime(b.start_hour)}–${fmtTime(b.start_hour+b.duration)}`+(b.status==="cpsa_review_needed"&&r.length?`\n⚠ CPSA inconsistencies:\n${r.join("\n")}`:b.status==="cpsa_confirmed"?"\n🌐 CPSA confirmed":"");})()}
-                      style={{ background:chipBg, borderRadius:4, padding:"2px 4px", fontSize:10, fontWeight:700, color:"#fff", overflow:"hidden", whiteSpace:"nowrap", borderLeft:chipLeft, outline:chipOutline, opacity:REVIEW_STATUSES.has(b.status)?0.75:1, cursor:"pointer", display:"flex", alignItems:"center", gap:3 }}>
+                      onClick={e=>{ e.stopPropagation(); if(isDimmed) return; if(selMode) toggleSel(b.id); else onBookingClick(b); }}
+                      title={(()=>{const r=parseMismatchNote(b.system_notes,b.notes);return `${b.name} · ${fac?.name} · ${fmtTime(b.start_hour)}–${fmtTime(b.start_hour+b.duration)}`+(b.status==="cpsa_review_needed"&&r.length?`\n⚠ CPSA inconsistencies:\n${r.join("\n")}`:b.status==="cpsa_confirmed"?"\n🌐 CPSA confirmed":"");})()}
+                      style={{ background:chipBg, borderRadius:4, padding:"2px 4px", fontSize:10, fontWeight:700, color:"#fff", overflow:"hidden", whiteSpace:"nowrap", borderLeft:chipLeft, outline:chipOutline, opacity:isDimmed?0.15:REVIEW_STATUSES.has(b.status)?0.75:1, cursor:isDimmed?"default":"pointer", pointerEvents:isDimmed?"none":"auto", display:"flex", alignItems:"center", gap:3 }}>
                       <StatusDot status={b.status}/>
                       <span style={{overflow:"hidden",textOverflow:"ellipsis",flex:1}}>{fmtTime(b.start_hour)} {b.purpose||b.name}</span>
                     </div>
@@ -2165,7 +2173,25 @@ function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkApply, o
   );
 }
 
-function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = false, approxPlayers = {}, onUpdateApproxPlayers, approxDurations = {}, onUpdateApproxDuration, onUpdateFacilityRate, pricingMode = "hourly", onSetPricingMode, onProposeMerge, onBulkApply, onMarkInvoiced }) {
+// Invoice modal sub-components defined at module level so their references
+// are stable across SummaryTab re-renders — prevents focus loss on the Name input.
+function InvoiceOptionRow({label, children}) {
+  return (
+    <div style={{display:"flex",alignItems:"flex-start",gap:10,flexWrap:"wrap"}}>
+      <span style={{fontSize:12,fontWeight:600,color:"#64748b",minWidth:90,paddingTop:5}}>{label}</span>
+      <div style={{display:"flex",gap:6,flexWrap:"wrap",flex:1}}>{children}</div>
+    </div>
+  );
+}
+function InvoicePill({active, onClick, children}) {
+  return (
+    <button onClick={onClick} style={{padding:"4px 12px",borderRadius:8,border:active?"1.5px solid #0f172a":"1.5px solid #e2e8f0",background:active?"#0f172a":"#f8fafc",color:active?"#fff":"#475569",fontWeight:600,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>
+      {children}
+    </button>
+  );
+}
+
+function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = false, approxPlayers = {}, onUpdateApproxPlayers, approxDurations = {}, onUpdateApproxDuration, onUpdateFacilityRate, pricingMode = "hourly", onSetPricingMode, onProposeMerge, onBulkApply, onMarkInvoiced, bookerFilter=new Set() }) {
   const now = new Date();
   const thisYear = now.getFullYear();
 
@@ -2173,7 +2199,12 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
   const [preset,      setPreset]      = useState("this_year");
   const [customFrom,  setCustomFrom]  = useState("");
   const [customTo,    setCustomTo]    = useState("");
-  const [emailFilter, setEmailFilter] = useState(loggedInEmail||"all");
+  const [emailFilter, setEmailFilter] = useState(()=>bookerFilter.size===1?[...bookerFilter][0]:loggedInEmail||"all");
+  // Keep emailFilter in sync with the header booker pills when visiting this tab.
+  useEffect(()=>{
+    if(bookerFilter.size===1) setEmailFilter([...bookerFilter][0]);
+    else if(bookerFilter.size===0) setEmailFilter(loggedInEmail||"all");
+  },[bookerFilter,loggedInEmail]);
 
   // Invoice modal state
   const [showInvoice, setShowInvoice] = useState(false);
@@ -2525,7 +2556,9 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
   }
 
   function openInvoice() {
-    setInvSelectedEmails(emailFilter !== "all" ? new Set([emailFilter.toLowerCase()]) : new Set());
+    // One-time init from header pill state; falls back to current email filter.
+    if (bookerFilter.size > 0) setInvSelectedEmails(new Set([...bookerFilter]));
+    else setInvSelectedEmails(emailFilter !== "all" ? new Set([emailFilter.toLowerCase()]) : new Set());
     setShowInvoice(true);
   }
 
@@ -3385,17 +3418,8 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
         const docLabel = invDocType === "purchase_order" ? "Purchase Order" : "Invoice";
         const allBkgs = scopes.flatMap(s => s.bkgs);
         const totalCostInv = allBkgs.reduce((s,b)=>{const {day,evening}=splitHours(b);const r=getFacRates(b.facility_id);return s+day*r.day+evening*r.evening;},0);
-        const OptionRow = ({label, children}) => (
-          <div style={{display:"flex",alignItems:"flex-start",gap:10,flexWrap:"wrap"}}>
-            <span style={{fontSize:12,fontWeight:600,color:"#64748b",minWidth:90,paddingTop:5}}>{label}</span>
-            <div style={{display:"flex",gap:6,flexWrap:"wrap",flex:1}}>{children}</div>
-          </div>
-        );
-        const Pill = ({active, onClick, children}) => (
-          <button onClick={onClick} style={{padding:"4px 12px",borderRadius:8,border:active?"1.5px solid #0f172a":"1.5px solid #e2e8f0",background:active?"#0f172a":"#f8fafc",color:active?"#fff":"#475569",fontWeight:600,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>
-            {children}
-          </button>
-        );
+        const OptionRow = InvoiceOptionRow;
+        const Pill = InvoicePill;
         return (
           <div style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.45)",zIndex:999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
             <div style={{background:"#fff",borderRadius:16,padding:28,maxWidth:560,width:"100%",boxShadow:"0 8px 40px rgba(0,0,0,0.18)",display:"flex",flexDirection:"column",gap:18,maxHeight:"90vh",overflowY:"auto"}}>
@@ -4585,14 +4609,14 @@ export default function App() {
             }
           }
 
-          // Record/clear mismatch reasons in notes so the admin sees what differs.
-          const newNotes = targetStatus === "cpsa_review_needed"
-            ? setMismatchNote(match.booking.notes, match.reasons)
-            : stripMismatchNote(match.booking.notes);
+          // Record/clear mismatch reasons in system_notes (separate from user notes).
+          const newSysNotes = targetStatus === "cpsa_review_needed"
+            ? setMismatchNote(match.booking.system_notes, match.reasons)
+            : stripMismatchNote(match.booking.system_notes);
           const statusChanged = match.booking.status !== targetStatus;
-          const notesChanged  = (match.booking.notes || "") !== newNotes;
-          if (statusChanged || notesChanged) {
-            const patch = { status: targetStatus, notes: newNotes, updated_at: new Date().toISOString() };
+          const sysNotesChanged = (match.booking.system_notes || "") !== newSysNotes;
+          if (statusChanged || sysNotesChanged) {
+            const patch = { status: targetStatus, system_notes: newSysNotes, updated_at: new Date().toISOString() };
             if (configured) {
               await sb.update("bookings", match.booking.id, patch);
             } else {
@@ -4604,7 +4628,7 @@ export default function App() {
             // First-time transition into a CPSA status → queue a notify-only cart item.
             if (match.booking.email && !isAdminBooking(match.booking)) {
               cpsaNotifications.push({
-                drafts: [{ ...match.booking, status: targetStatus, notes: newNotes }],
+                drafts: [{ ...match.booking, status: targetStatus, system_notes: newSysNotes }],
                 name: match.booking.name, email: match.booking.email,
                 notifyOnly: true, newStatus: targetStatus,
               });
@@ -4643,6 +4667,22 @@ export default function App() {
         }
       }
       if (configured) await loadBookings();
+
+      // Reset cpsa_confirmed/cpsa_review_needed bookings in this month that no longer
+      // appear in the CPSA feed — they revert to "approved" and their mismatch markers clear.
+      const cpsaLinkedUnmatched = currentBookings.filter(b =>
+        !isAdminBooking(b) &&
+        b.date.startsWith(monthStr) &&
+        b.date >= syncToday &&
+        (b.status === "cpsa_confirmed" || b.status === "cpsa_review_needed") &&
+        !matchedUserIds.has(b.id)
+      );
+      for (const cb of cpsaLinkedUnmatched) {
+        const resetPatch = { status: "approved", system_notes: stripMismatchNote(cb.system_notes), updated_at: new Date().toISOString() };
+        if (configured) await sb.update("bookings", cb.id, resetPatch);
+        else setBookings(prev => prev.map(b => b.id === cb.id ? { ...b, ...resetPatch } : b));
+      }
+      if (configured && cpsaLinkedUnmatched.length > 0) await loadBookings();
 
       // Auto-detect clashes with newly imported admin events and set user bookings to "clash"
       const freshBookings = configured ? (await sb.select("bookings")) : bookings;
@@ -4856,12 +4896,12 @@ export default function App() {
     if (!targets.length) { showToast("Already invoiced."); return; }
     if (configured) {
       try {
-        for (const b of targets) await sb.update("bookings", b.id, { status:"invoiced", notes:setBilledSnapshot(b.notes, b), updated_at:new Date().toISOString() });
+        for (const b of targets) await sb.update("bookings", b.id, { status:"invoiced", system_notes:setBilledSnapshot(b.system_notes, b), updated_at:new Date().toISOString() });
         await loadBookings();
       } catch(e) { showToast("Mark invoiced failed: "+e.message, "error"); return; }
     } else {
       const ids = new Set(targets.map(b=>b.id));
-      setBookings(prev => prev.map(b => ids.has(b.id) ? { ...b, status:"invoiced", notes:setBilledSnapshot(b.notes, b) } : b));
+      setBookings(prev => prev.map(b => ids.has(b.id) ? { ...b, status:"invoiced", system_notes:setBilledSnapshot(b.system_notes, b) } : b));
     }
     logActivity("invoiced", { count: targets.length, ids: targets.map(b=>b.id) });
     showToast(`${targets.length} booking${targets.length>1?"s":""} marked invoiced.`);
@@ -5052,7 +5092,7 @@ export default function App() {
       for (const item of notifyItems) {
         const b = item.drafts[0];
         sendApprovalEmail({to:item.email, subject:item.newStatus==="cpsa_confirmed"?"Booking Confirmed by CPSA":"Booking Needs Review (CPSA Mismatch)",
-          html:buildApprovalEmailHtml({name:item.name,email:item.email,bookings:[b],newStatus:item.newStatus,adminNote:item.newStatus==="cpsa_review_needed"?parseMismatchNote(b.notes).join("; "):""})});
+          html:buildApprovalEmailHtml({name:item.name,email:item.email,bookings:[b],newStatus:item.newStatus,adminNote:item.newStatus==="cpsa_review_needed"?parseMismatchNote(b.system_notes,b.notes).join("; "):""})});
       }
       // New bookings: group by email and send one order confirmation each
       const newItems = saveItems.filter(item => !item.isEdit && !item.isMultiEdit);
@@ -5191,7 +5231,7 @@ export default function App() {
         {dbError&&<Banner type="error" msg={dbError}/>}
         {!configured&&<Banner type="info" msg="⚙️  Demo Mode — add Supabase credentials to enable persistent storage."/>}
 
-        {emailLegend.length>0&&(tab==="calendar"||tab==="month"||tab==="list")&&(
+        {emailLegend.length>0&&(tab==="calendar"||tab==="month"||tab==="list"||tab==="summary")&&(
           <div style={{display:"flex",gap:6,marginBottom:12,alignItems:"center",overflowX:"auto",WebkitOverflowScrolling:"touch",scrollbarWidth:"none",msOverflowStyle:"none",paddingBottom:2}}>
             <button onClick={()=>setListBookerFilter(prev=>prev.size===0?new Set(emailLegend.map(e=>e.toLowerCase())):new Set())}
               title={listBookerFilter.size===0?"Select all bookers":"Clear selection"}
@@ -5213,8 +5253,8 @@ export default function App() {
 
         {(tab==="calendar"||tab==="month"||tab==="list")&&<FacilityPills/>}
 
-        {tab==="calendar"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<WeekCalendar bookings={bookings} selectedFacility={selFac} onNewBooking={openNew} onBookingClick={setViewing} cartSourceIds={new Set(cart.flatMap(i=>i.sourceIds||[]))} deleteIds={new Set(deleteQueue.map(b=>b.id))} cartNewDrafts={cart.flatMap(i=>(i.sourceIds||[]).length===0?i.drafts:[])} focusedDate={focusedDate} setFocusedDate={setFocusedDate} onOpenDay={openDay}/>}</div>}
-        {tab==="month"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<MonthCalendar bookings={bookings} selectedFacility={selFac} onBookingClick={setViewing} onNewBooking={openNew} onMultiDelete={queueMultiForRemoval} onMultiAddToCart={handleMultiAddToCart} loggedInEmail={loggedInEmail} isAdmin={isAdmin} cartSourceIds={new Set(cart.flatMap(i=>i.sourceIds||[]))} deleteIds={new Set(deleteQueue.map(b=>b.id))} cartNewDrafts={cart.flatMap(i=>(i.sourceIds||[]).length===0?i.drafts:[])} onOpenDay={openDay} onGotoWeek={dk=>{ setFocusedDate(new Date(dk+"T00:00:00")); setTab("calendar"); }}/>}</div>}
+        {tab==="calendar"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<WeekCalendar bookings={bookings} selectedFacility={selFac} onNewBooking={openNew} onBookingClick={setViewing} cartSourceIds={new Set(cart.flatMap(i=>i.sourceIds||[]))} deleteIds={new Set(deleteQueue.map(b=>b.id))} cartNewDrafts={cart.flatMap(i=>(i.sourceIds||[]).length===0?i.drafts:[])} focusedDate={focusedDate} setFocusedDate={setFocusedDate} onOpenDay={openDay} bookerFilter={listBookerFilter}/>}</div>}
+        {tab==="month"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<MonthCalendar bookings={bookings} selectedFacility={selFac} onBookingClick={setViewing} onNewBooking={openNew} onMultiDelete={queueMultiForRemoval} onMultiAddToCart={handleMultiAddToCart} loggedInEmail={loggedInEmail} isAdmin={isAdmin} cartSourceIds={new Set(cart.flatMap(i=>i.sourceIds||[]))} deleteIds={new Set(deleteQueue.map(b=>b.id))} cartNewDrafts={cart.flatMap(i=>(i.sourceIds||[]).length===0?i.drafts:[])} onOpenDay={openDay} onGotoWeek={dk=>{ setFocusedDate(new Date(dk+"T00:00:00")); setTab("calendar"); }} bookerFilter={listBookerFilter}/>}</div>}
 
         {tab==="list"&&(
           <div style={S.card}>
@@ -5364,7 +5404,7 @@ export default function App() {
                                   </td>
                                   <td style={{padding:"4px 8px",whiteSpace:"nowrap",color:"#475569",fontSize:11}}>{fmtTime(b.start_hour)}–{fmtTime(b.start_hour+b.duration)}<span style={{color:"#94a3b8",marginLeft:4}}>{b.duration}h</span></td>
                                   <td style={{padding:"4px 8px",fontSize:11,maxWidth:170}}>{(()=>{
-                                    const reasons=parseMismatchNote(b.notes);
+                                    const reasons=parseMismatchNote(b.system_notes,b.notes);
                                     const drift=getBillingDrift(b);
                                     if(b.status==="cpsa_confirmed") return <span style={{color:"#0891b2",fontWeight:600}}>✓ confirmed</span>;
                                     if(b.status==="cpsa_review_needed"&&reasons.length){
@@ -5391,7 +5431,7 @@ export default function App() {
           </div>
         )}
 
-        {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<SummaryTab bookings={bookings} loggedInEmail={loggedInEmail} facilityRates={facilityRates} isAdmin={isAdmin} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onUpdateFacilityRate={updateFacilityRate} pricingMode={pricingMode} onSetPricingMode={setPricingMode} onProposeMerge={handleProposeMerge} onBulkApply={handleBulkApply} onMarkInvoiced={handleMarkInvoiced}/>}</div>}
+        {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<SummaryTab bookings={bookings} loggedInEmail={loggedInEmail} facilityRates={facilityRates} isAdmin={isAdmin} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onUpdateFacilityRate={updateFacilityRate} pricingMode={pricingMode} onSetPricingMode={setPricingMode} onProposeMerge={handleProposeMerge} onBulkApply={handleBulkApply} onMarkInvoiced={handleMarkInvoiced} bookerFilter={listBookerFilter}/>}</div>}
         {tab==="about"&&<div style={{padding:"8px 0"}}><AboutTab/></div>}
         {tab==="admin"&&isAdmin&&<div style={S.card}>
           {/* Silent mode banner */}
