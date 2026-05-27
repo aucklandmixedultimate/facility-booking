@@ -3521,9 +3521,17 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[]
   const [defaultFieldEvening,setDefaultFieldEvening]=useState(0);
   const [clashGrouped,setClashGrouped]=useState(true);
   const [clashPatternModal,setClashPatternModal]=useState(null);
+  const [showClashPanel,setShowClashPanel]=useState(false);
+  const [showTrackChanges,setShowTrackChanges]=useState(false);
 
   const si={padding:"7px 12px",borderRadius:8,border:"1.5px solid #e2e8f0",fontSize:13,fontFamily:"inherit",color:"#0f172a",background:"#f8fafc",outline:"none"};
   const today=todayKey();
+
+  // Invoiced bookings whose current time/duration/field has drifted from the billed
+  // snapshot — excess time is owing, reduced time is a credit.
+  const trackedChanges = bookings
+    .map(b => { const d = getBillingDrift(b); return d ? { booking: b, ...d } : null; })
+    .filter(Boolean);
 
   // Old unapproved = bookings in any review state with past dates
   const oldUnapproved=bookings.filter(b=>REVIEW_STATUSES.has(b.status)&&b.date<today);
@@ -3669,7 +3677,45 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[]
         {onShowSchedule&&<button onClick={onShowSchedule} style={S.btn({background:"#f0f9ff",color:"#0369a1",border:"1.5px solid #bae6fd",fontSize:12,fontWeight:700})}>
           📅 Schedule
         </button>}
+        <button onClick={()=>setShowClashPanel(v=>!v)} style={S.btn({border:`1.5px solid ${clashes.length>0?"#fda4af":"#e2e8f0"}`,background:showClashPanel?"#fff1f2":"#fff",color:clashes.length>0?"#9f1239":"#94a3b8",fontSize:12,fontWeight:clashes.length>0?700:500})}>
+          ⚠️ Clashes ({clashes.length}) {showClashPanel?"▴":"▾"}
+        </button>
+        <button onClick={()=>setShowTrackChanges(v=>!v)} style={S.btn({border:`1.5px solid ${trackedChanges.length>0?"#ddd6fe":"#e2e8f0"}`,background:showTrackChanges?"#f5f3ff":"#fff",color:trackedChanges.length>0?"#5b21b6":"#94a3b8",fontSize:12,fontWeight:trackedChanges.length>0?700:500})}>
+          🧾 Track Changes ({trackedChanges.length}) {showTrackChanges?"▴":"▾"}
+        </button>
       </div>
+
+      {/* Track-changes panel: invoiced bookings whose billed dimensions drifted */}
+      {showTrackChanges&&(
+        <div style={{background:"#f5f3ff",border:"1.5px solid #ddd6fe",borderRadius:12,padding:16,display:"flex",flexDirection:"column",gap:10}}>
+          <div style={{fontWeight:700,fontSize:14,color:"#5b21b6"}}>🧾 Billed-booking changes</div>
+          {trackedChanges.length===0
+            ? <div style={{fontSize:12,color:"#7c6aa8"}}>No changes detected since invoicing. Edits to an invoiced booking's time, duration or field will appear here as owing (excess) or credit (reduced).</div>
+            : <div style={{display:"flex",flexDirection:"column",gap:8,maxHeight:300,overflowY:"auto"}}>
+                {trackedChanges.map(({booking:b,rows,hoursDelta},i)=>(
+                  <div key={i} style={{background:"#fff",border:"1px solid #e9d5ff",borderRadius:8,padding:"8px 12px",fontSize:12}}>
+                    <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",marginBottom:6}}>
+                      <EmailChip email={b.email}/>
+                      <span style={{fontWeight:600,color:"#0f172a"}}>{b.name}</span>
+                      <span style={{color:"#94a3b8"}}>{fmtDate(b.date)} · {b.purpose}</span>
+                      <span style={{marginLeft:"auto",fontWeight:800,fontSize:12,color:hoursDelta>0?"#b91c1c":hoursDelta<0?"#15803d":"#64748b",background:hoursDelta>0?"#fef2f2":hoursDelta<0?"#f0fdf4":"#f8fafc",border:`1px solid ${hoursDelta>0?"#fecaca":hoursDelta<0?"#bbf7d0":"#e2e8f0"}`,borderRadius:6,padding:"2px 8px",whiteSpace:"nowrap"}}>
+                        {hoursDelta>0?`+${hoursDelta}h owing`:hoursDelta<0?`${Math.abs(hoursDelta)}h credit`:"field changed"}
+                      </span>
+                    </div>
+                    <div style={{display:"grid",gridTemplateColumns:"auto auto auto auto",gap:"2px 10px",alignItems:"center"}}>
+                      {rows.map((p,ri)=>(<Fragment key={ri}>
+                        <span style={{fontWeight:600,color:"#5b21b6"}}>{p.label}</span>
+                        <span style={{color:"#6b7280"}}>{p.old}</span>
+                        <span style={{color:"#a78bfa"}}>→</span>
+                        <span style={{color:"#0f172a",fontWeight:600}}>{p.next}</span>
+                      </Fragment>))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+          }
+        </div>
+      )}
 
       {/* Facility rates panel */}
       {showRates&&(()=>{
@@ -3846,7 +3892,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[]
       )}
 
       {/* Clash notification panel */}
-      {clashes.length>0&&(()=>{
+      {showClashPanel&&clashes.length>0&&(()=>{
         function clashDayName(d){return["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][new Date(d+"T12:00").getDay()];}
         const filtered=clashes.filter(c=>matchesQ(c.user)||matchesQ(c.admin));
         // Group by (userEmail + facilityId + dayOfWeek)
