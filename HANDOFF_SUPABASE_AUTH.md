@@ -1,13 +1,14 @@
 # Handoff: Supabase Auth + RLS migration
 
-Read this before touching Supabase or the app's data logic. These contract changes
-will break writes if ignored. Source of truth for the SQL is `supabase-migration-auth.sql`.
+Status: **MIGRATION COMPLETE — RLS is LIVE in production.** Read this before touching
+Supabase or the app's data logic; these contract changes break writes if ignored.
+Source of truth for the SQL is `supabase-migration-auth.sql`.
 
 ## TL;DR
 
 The app moved from "anon key does everything" to "Google OAuth + Row Level Security".
-Anon-key-only writes are being locked out. Every Supabase write must now carry a
-logged-in user's JWT.
+Anon-key-only writes are **now locked out** (RLS enabled). Every Supabase write must
+carry a logged-in user's JWT.
 
 ## Auth contract
 
@@ -43,9 +44,10 @@ logged-in user's JWT.
 
 - Admin = `app_metadata.role === 'admin'`.
   NOT `user_metadata` — that field is user-editable and would let users self-promote.
-- Set via Supabase dashboard SQL:
+- Current admin: `aucklandmixedultimate@gmail.com` (role granted, verified working).
+- To grant another admin, run this Supabase dashboard SQL (the user must already have
+  signed in once, then sign out and back in afterward for the claim to take effect):
   `update auth.users set raw_app_meta_data = raw_app_meta_data || '{"role":"admin"}'::jsonb where email = '<admin email>';`
-  The user must sign out and back in for the claim to appear in their JWT.
 - SQL helper `public.is_admin()` reads `auth.jwt() -> 'app_metadata' ->> 'role'`.
 - In the JSX, `isAdmin` is derived from `session.user.app_metadata.role`. There is no
   client-side admin toggle or password anymore.
@@ -61,26 +63,32 @@ logged-in user's JWT.
 - Login gate: `session === undefined` renders nothing (loading); `!session` renders
   the Google sign-in screen.
 
-## CPSA browser extension — WILL BREAK at cutover
+## CPSA browser extension — CURRENTLY BROKEN (known, accepted)
 
 The `amua-booking-extension` writes confirmation notes/links back to `bookings`.
-Once RLS is enabled, its anon-key writes get denied. It needs one of:
+RLS is now live, so its anon-key writes are **denied** — the extension's auto-sync no
+longer works until it is updated. Admins can still do everything through the app.
+To fix, the extension needs one of:
 
 1. Carry a logged-in admin's session access_token in its requests, OR
 2. Route writes through the app instead of writing to Supabase directly, OR
 3. A server-side Edge Function that holds the `service_role` key (never shipped
    inside the extension).
 
-Resolve this BEFORE enabling RLS.
+## Migration status checklist
 
-## Cutover order (so nobody gets locked out mid-migration)
+Done:
+- [x] Google Cloud OAuth client created (redirect URI
+      `https://bowfbamsjgozigcaygqq.supabase.co/auth/v1/callback`).
+- [x] Supabase Google provider enabled; Site URL + redirect allow-list set.
+- [x] `.env.local` filled with the anon key.
+- [x] `supabase-migration-auth.sql` schema + helper + backfill run (sections 1-4).
+- [x] New OAuth bundle deployed to gh-pages (`npm run deploy`).
+- [x] RLS policies enabled on `bookings` and `settings`.
+- [x] Admin role granted to `aucklandmixedultimate@gmail.com`; login/booking verified.
 
-1. Create Google Cloud OAuth client (redirect URI =
-   `https://bowfbamsjgozigcaygqq.supabase.co/auth/v1/callback`).
-2. Supabase: enable Google provider; set Site URL + redirect allow-list.
-3. Fill `.env.local` with the anon key.
-4. Run `supabase-migration-auth.sql` (schema + helper + backfill) — keep RLS off for now.
-5. `npm run deploy` the new OAuth bundle.
-6. Enable RLS (the policy blocks in the SQL file) — only after the extension is sorted.
-7. Set the admin user's `app_metadata.role` and have them re-login.
-8. Rotate the anon key (Supabase Settings -> API), update `.env.local`, redeploy.
+Outstanding:
+- [ ] Fix the CPSA extension auth (see above) — currently broken.
+- [ ] Rotate the anon key (Supabase Settings -> API), update `.env.local`, redeploy.
+      Deferred by choice; the current key is still the original one that was committed
+      to git history, so rotation is recommended eventually.
