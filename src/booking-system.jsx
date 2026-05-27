@@ -1459,7 +1459,7 @@ function WeekCalendar({ bookings, onNewBooking, onBookingClick, selectedFacility
                         <div key={b.id}
                           onClick={e=>{ e.stopPropagation(); onBookingClick(b); }}
                           onMouseDown={e=>e.stopPropagation()}
-                          title={`${b.name} – ${fac?.name}`}
+                          title={(()=>{const r=parseMismatchNote(b.notes);return `${b.name} – ${fac?.name}`+(b.status==="cpsa_review_needed"&&r.length?`\n⚠ CPSA inconsistencies:\n${r.join("\n")}`:b.status==="cpsa_confirmed"?"\n🌐 CPSA confirmed":"");})()}
                           style={{ position:"absolute", top:(b.start_hour-CAL_START)*HOUR_H, height:Math.max(b.duration*HOUR_H-2,20), background:bkBg, borderRadius:6, padding:"3px 6px", cursor:"pointer", overflow:"hidden", opacity:REVIEW_STATUSES.has(b.status)?0.75:1, border:deleteIds.has(b.id)?"2.5px solid #ef4444":cartSourceIds.has(b.id)?"2.5px solid #f59e0b":b.status==="clash"?"2px dashed #d97706":REVIEW_STATUSES.has(b.status)?"2px dashed rgba(255,255,255,0.6)":b.status==="rejected"?"2px solid rgba(244,63,94,0.8)":"none", boxShadow:deleteIds.has(b.id)?"0 0 0 3px rgba(239,68,68,0.25)":cartSourceIds.has(b.id)?"0 0 0 3px rgba(245,158,11,0.25)":"0 1px 4px rgba(0,0,0,0.15)", zIndex:2, borderLeft:bkBorderLeft, ...stk }}>
                           <div style={{ fontSize:11, fontWeight:700, color:"#fff", lineHeight:1.3, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{b.purpose||b.name}</div>
                           {b.duration*HOUR_H>22&&!isAdmin_bk&&<div style={{ fontSize:9, color:"rgba(255,255,255,0.8)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{b.name}</div>}
@@ -1616,6 +1616,7 @@ function MonthCalendar({ bookings, onBookingClick, onNewBooking, selectedFacilit
                   return (
                     <div key={b.id}
                       onClick={e=>{ e.stopPropagation(); if(selMode) toggleSel(b.id); else onBookingClick(b); }}
+                      title={(()=>{const r=parseMismatchNote(b.notes);return `${b.name} · ${fac?.name} · ${fmtTime(b.start_hour)}–${fmtTime(b.start_hour+b.duration)}`+(b.status==="cpsa_review_needed"&&r.length?`\n⚠ CPSA inconsistencies:\n${r.join("\n")}`:b.status==="cpsa_confirmed"?"\n🌐 CPSA confirmed":"");})()}
                       style={{ background:chipBg, borderRadius:4, padding:"2px 4px", fontSize:10, fontWeight:700, color:"#fff", overflow:"hidden", whiteSpace:"nowrap", borderLeft:chipLeft, outline:chipOutline, opacity:REVIEW_STATUSES.has(b.status)?0.75:1, cursor:"pointer", display:"flex", alignItems:"center", gap:3 }}>
                       <StatusDot status={b.status}/>
                       <span style={{overflow:"hidden",textOverflow:"ellipsis",flex:1}}>{fmtTime(b.start_hour)} {b.purpose||b.name}</span>
@@ -5265,6 +5266,7 @@ export default function App() {
                                 </th>
                               ))}
                               <th style={{padding:"5px 8px",textAlign:"left",fontWeight:600,color:"#64748b",borderBottom:"1px solid #e2e8f0",fontSize:11}}>Time · Dur</th>
+                              <th style={{padding:"5px 8px",textAlign:"left",fontWeight:600,color:"#64748b",borderBottom:"1px solid #e2e8f0",fontSize:11}}>CPSA</th>
                               <th style={{padding:"5px 8px",textAlign:"left",fontWeight:600,color:"#64748b",borderBottom:"1px solid #e2e8f0",fontSize:11}}>Purpose</th>
                             </tr>
                             <tr style={{background:"#f1f5f9"}}>
@@ -5303,6 +5305,7 @@ export default function App() {
                                   {Object.entries(STATUS_META).filter(([k])=>!["pending","amua_submit"].includes(k)).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
                                 </select>
                               </th>
+                              <th style={{padding:"3px 4px"}}/>
                               <th style={{padding:"3px 4px"}}/>
                               <th style={{padding:"3px 4px"}}>
                                 <div style={{display:"flex",gap:2,alignItems:"center"}}>
@@ -5347,6 +5350,19 @@ export default function App() {
                                     {isClash&&<span style={{display:"block",fontSize:10,fontWeight:700,color:"#ef4444"}}>⚠️ clash</span>}
                                   </td>
                                   <td style={{padding:"4px 8px",whiteSpace:"nowrap",color:"#475569",fontSize:11}}>{fmtTime(b.start_hour)}–{fmtTime(b.start_hour+b.duration)}<span style={{color:"#94a3b8",marginLeft:4}}>{b.duration}h</span></td>
+                                  <td style={{padding:"4px 8px",fontSize:11,maxWidth:170}}>{(()=>{
+                                    const reasons=parseMismatchNote(b.notes);
+                                    const drift=getBillingDrift(b);
+                                    if(b.status==="cpsa_confirmed") return <span style={{color:"#0891b2",fontWeight:600}}>✓ confirmed</span>;
+                                    if(b.status==="cpsa_review_needed"&&reasons.length){
+                                      return <span title={reasons.join("\n")} style={{color:"#a16207",cursor:"help",display:"inline-block",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:160}}>⚠ {reasons.join(", ")}</span>;
+                                    }
+                                    if(drift){
+                                      const lbl=drift.hoursDelta>0?`+${drift.hoursDelta}h owing`:drift.hoursDelta<0?`${Math.abs(drift.hoursDelta)}h credit`:"field Δ";
+                                      return <span title={drift.rows.map(r=>`${r.label}: ${r.old} → ${r.next}`).join("\n")} style={{color:drift.hoursDelta>0?"#b91c1c":drift.hoursDelta<0?"#15803d":"#5b21b6",cursor:"help",fontWeight:600}}>🧾 {lbl}</span>;
+                                    }
+                                    return <span style={{color:"#cbd5e1"}}>—</span>;
+                                  })()}</td>
                                   <td style={{padding:"4px 8px",color:"#64748b",maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",fontSize:11}}>{b.purpose}</td>
                                 </tr>
                               );
