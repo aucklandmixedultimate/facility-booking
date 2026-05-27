@@ -12,8 +12,29 @@ const supabase = SUPABASE_URL && SUPABASE_ANON
     })
   : null;
 let _accessToken = null;
+let _currentUser = null; // { id, email } — kept in sync by onAuthStateChange
+const _sessionId = (crypto?.randomUUID?.() || `sess-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 function authHeaders(extra = {}) {
   return { apikey: SUPABASE_ANON, Authorization: `Bearer ${_accessToken || SUPABASE_ANON}`, ...extra };
+}
+
+// Best-effort audit trail. Never throws — a missing table or RLS denial must not
+// break the app flow. Captures auth events, booking changes, syncs and emails.
+async function logActivity(action, detail = {}) {
+  if (!supabase || !_currentUser?.id) return;
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/activity_log`, {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json", Prefer: "return=minimal" }),
+      body: JSON.stringify({
+        user_id: _currentUser.id,
+        user_email: _currentUser.email || null,
+        session_id: _sessionId,
+        action,
+        detail,
+      }),
+    });
+  } catch { /* silent */ }
 }
 
 const sb = {
@@ -81,6 +102,7 @@ const STATUS_META = {
   approved:      {bg:"#f0fdf4",border:"#22c55e",text:"#14532d",dot:"#22c55e",label:"(4/4) Approved"},
   cpsa_confirmed:{bg:"#ecfeff",border:"#0891b2",text:"#155e75",dot:"#0891b2",label:"🌐 CPSA Confirmed"},
   cpsa_review_needed: {bg:"#fef9c3",border:"#ca8a04",text:"#713f12",dot:"#ca8a04",label:"⚠ CPSA Mismatch — AMUA Review"},
+  invoiced:     {bg:"#f5f3ff",border:"#7c3aed",text:"#5b21b6",dot:"#7c3aed",label:"🧾 Invoiced"},
   rejected:     {bg:"#fff1f2",border:"#f43f5e",text:"#881337",dot:"#f43f5e",label:"Rejected"},
   cancelled:    {bg:"#f8f8f8",border:"#94a3b8",text:"#475569",dot:"#94a3b8",label:"Cancelled"},
   clash:        {bg:"#fef3c7",border:"#d97706",text:"#92400e",dot:"#d97706",label:"Clash"},
@@ -170,6 +192,35 @@ function splitReason(r) {
   const m = (r||"").match(/^(.+?):\s*(.*?)\s*→\s*(.*)$/);
   return m ? { label: m[1], old: m[2], next: m[3] } : { label: r, old: "", next: "" };
 }
+// Billed snapshot: captures facility/time/duration at the moment a booking is invoiced,
+// so later edits (or CPSA-confirmed changes) can be reconciled as owing/credit.
+const BILLED_RE = /\[BILLED\][^\n]*/g;
+function setBilledSnapshot(notes, b) {
+  const base = (notes||"").replace(BILLED_RE,"").trim();
+  const marker = `[BILLED] ${b.facility_id}|${b.start_hour}|${b.duration}`;
+  return base ? `${base}\n${marker}` : marker;
+}
+function parseBilledSnapshot(notes) {
+  const m = (notes||"").match(/\[BILLED\]\s*([^|]+)\|([^|]+)\|([^\n|]+)/);
+  if (!m) return null;
+  return { facility_id: m[1].trim(), start_hour: parseFloat(m[2]), duration: parseFloat(m[3]) };
+}
+// Compare the billed snapshot to a booking's current dimensions. Returns the
+// structured discrepancies (old → new) plus the net hours delta (owing if >0,
+// credit if <0), or null when there is no recorded snapshot / no drift.
+function getBillingDrift(booking) {
+  const snap = parseBilledSnapshot(booking.notes);
+  if (!snap) return null;
+  const rows = [];
+  if (snap.facility_id !== booking.facility_id)
+    rows.push({ label:"Field", old: facShort(snap.facility_id), next: facShort(booking.facility_id) });
+  if (snap.start_hour !== booking.start_hour)
+    rows.push({ label:"Time", old: fmtTimeShort(snap.start_hour), next: fmtTimeShort(booking.start_hour) });
+  if (snap.duration !== booking.duration)
+    rows.push({ label:"Dur", old: `${snap.duration}h`, next: `${booking.duration}h` });
+  if (!rows.length) return null;
+  return { rows, hoursDelta: +(booking.duration - snap.duration).toFixed(2), snap };
+}
 function getSameFacilityOverlaps(draft, others) {
   return others.filter(o => o.facility_id === draft.facility_id && timeOverlaps(draft, o));
 }
@@ -213,8 +264,11 @@ async function sendEmail({ to, subject, html, templateId }) {
     if (!res.ok) {
       const body = await res.text().catch(()=>"(no body)");
       console.warn(`EmailJS ${res.status} for template ${tid}:`, body);
+      logActivity("email_failed", { to, subject, status: res.status });
+    } else {
+      logActivity("email_sent", { to, subject });
     }
-  } catch(e) { console.error("Email network error:", e); }
+  } catch(e) { console.error("Email network error:", e); logActivity("email_failed", { to, subject, error: String(e?.message||e) }); }
 }
 async function sendApprovalEmail({ to, subject, html }) {
   return sendEmail({ to, subject, html, templateId: EJ_TEMPLATE_APPROVAL });
@@ -1977,7 +2031,7 @@ function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkApply, o
   const [patternModal, setPatternModal] = useState(null);
   const [oneOffModalData, setOneOffModalData] = useState(null);
 
-  const active = bookings.filter(b=>["approved","cpsa_confirmed","cpsa_review_needed","pending_cpsa","queued_cpsa","pending_amua","amua_submit","pending"].includes(b.status)&&!isAdminBooking(b));
+  const active = bookings.filter(b=>["approved","cpsa_confirmed","cpsa_review_needed","invoiced","pending_cpsa","queued_cpsa","pending_amua","amua_submit","pending"].includes(b.status)&&!isAdminBooking(b));
   const patternMap = buildOverlapPatternMap(active, facSensitive);
 
   const rows = Object.entries(patternMap).map(([email,pats])=>{
@@ -2102,7 +2156,7 @@ function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkApply, o
   );
 }
 
-function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = false, approxPlayers = {}, onUpdateApproxPlayers, approxDurations = {}, onUpdateApproxDuration, onUpdateFacilityRate, pricingMode = "hourly", onSetPricingMode, onProposeMerge, onBulkApply }) {
+function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = false, approxPlayers = {}, onUpdateApproxPlayers, approxDurations = {}, onUpdateApproxDuration, onUpdateFacilityRate, pricingMode = "hourly", onSetPricingMode, onProposeMerge, onBulkApply, onMarkInvoiced }) {
   const now = new Date();
   const thisYear = now.getFullYear();
 
@@ -2125,6 +2179,8 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
   const [invGst,      setInvGst]      = useState("inclusive");       // "inclusive" | "exclusive" | "note"
   const [invScope,    setInvScope]    = useState("combined");         // "combined" | "per_booker"
   const [invDocType,  setInvDocType]  = useState("invoice");          // "invoice" | "purchase_order"
+  const [invName,     setInvName]     = useState("");                  // free-text label baked into the file name
+  const [invMarkInvoiced, setInvMarkInvoiced] = useState(false);       // flag exported bookings as invoiced
   const [invSelectedEmails, setInvSelectedEmails] = useState(new Set()); // empty = all
   // Schedule Summary state
   const [showSchedule,        setShowSchedule]        = useState(false);
@@ -2356,7 +2412,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
     return { pre: subtotal / 1.15, gst, total: subtotal };
   }
 
-  function buildInvoiceHtml({ bookerName, bookerEmail, lines, gstMode, dateRange, invNumber, docType="invoice" }) {
+  function buildInvoiceHtml({ bookerName, bookerEmail, lines, gstMode, dateRange, invNumber, docType="invoice", docName="" }) {
     const docLabel = docType === "purchase_order" ? "PURCHASE ORDER" : "INVOICE";
     const subtotal = lines.reduce((s, l) => s + l.cost, 0);
     const { pre, gst, total } = gstAmounts(subtotal, gstMode);
@@ -2374,7 +2430,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
          <tr style="background:#f8fafc"><td colspan="2" style="padding:8px 16px;font-size:12px;color:#64748b;text-align:right">GST (15%)</td><td style="padding:8px 16px;font-size:13px;color:#0f172a;text-align:right">${fmtCost(gst)}</td></tr>
          <tr style="background:#f0fdf4"><td colspan="2" style="padding:10px 16px;font-size:14px;font-weight:700;color:#0f172a;text-align:right">Total</td><td style="padding:10px 16px;font-size:16px;font-weight:800;color:#15803d;text-align:right">${fmtCost(total)}</td></tr>`;
     const amuaLines = [AMUA_INFO.address, AMUA_INFO.gstNumber ? `GST No: ${AMUA_INFO.gstNumber}` : "", AMUA_INFO.bank].filter(Boolean).map(l=>`<div>${l}</div>`).join("");
-    return `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>${docLabel} ${invNumber}</title><style>
+    return `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>${docName || `${docLabel} ${invNumber}`}</title><style>
       @media print { body{margin:0} }
       body{font-family:'Segoe UI',sans-serif;background:#f8fafc;margin:0;padding:32px 16px}
       .page{max-width:700px;margin:0 auto;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 4px 32px rgba(0,0,0,0.08)}
@@ -2417,12 +2473,24 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
     </div></body></html>`;
   }
 
+  // "AMUA PO - Pilot - 20260527-20260630" — label comes from the free-text name field;
+  // date range falls back to the min/max booking dates when no preset range is set.
+  function invoiceBaseName(bkgsForInvoice) {
+    const dates = bkgsForInvoice.map(b=>b.date).filter(Boolean).sort();
+    const fromD = (dateFrom || dates[0] || todayKey()).replace(/-/g,"");
+    const toD   = (dateTo   || dates[dates.length-1] || todayKey()).replace(/-/g,"");
+    const docTag = invDocType === "purchase_order" ? "PO" : "Invoice";
+    const label = (invName||"").trim();
+    return `AMUA ${docTag}${label?` - ${label}`:""} - ${fromD}-${toD}`;
+  }
+
   function exportInvoice(format, bkgsForInvoice, bookerName, bookerEmail) {
     const lines = buildInvoiceLines(bkgsForInvoice, invDetail);
     const dateRange = { from: dateFrom, to: dateTo };
-    const prefix = invDocType === "purchase_order" ? "po" : "invoice";
+    const baseName = invoiceBaseName(bkgsForInvoice);
     const invNumber = `${todayKey().replace(/-/g,"")}-${bookerEmail.replace(/[^a-z0-9]/gi,"").slice(0,6).toUpperCase()}`;
-    const html = buildInvoiceHtml({ bookerName, bookerEmail, lines, gstMode: invGst, dateRange, invNumber, docType: invDocType });
+    const html = buildInvoiceHtml({ bookerName, bookerEmail, lines, gstMode: invGst, dateRange, invNumber, docType: invDocType, docName: baseName });
+    if (invMarkInvoiced && onMarkInvoiced) onMarkInvoiced(bkgsForInvoice);
     if (format === "html" || format === "print") {
       const win = window.open("", "_blank");
       if (win) {
@@ -2442,7 +2510,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
       const csv = [[docLabel,"Name","Email","Description","Detail","Amount"].map(esc).join(","), ...csvRows].join("\n");
       const blob = new Blob([csv], { type:"text/csv" });
       const url = URL.createObjectURL(blob);
-      const a = document.createElement("a"); a.href=url; a.download=`${prefix}-${invNumber}.csv`; a.click();
+      const a = document.createElement("a"); a.href=url; a.download=`${baseName}.csv`; a.click();
       URL.revokeObjectURL(url);
     }
   }
@@ -3334,6 +3402,15 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
                   <Pill active={invDocType==="purchase_order"} onClick={()=>setInvDocType("purchase_order")}>Purchase Order</Pill>
                 </OptionRow>
 
+                {/* File-name label */}
+                <OptionRow label="Name">
+                  <input value={invName} onChange={e=>setInvName(e.target.value)} placeholder="e.g. Pilot"
+                    style={{...S.inp,fontSize:12,maxWidth:200}}/>
+                  <span style={{fontSize:11,color:"#94a3b8",alignSelf:"center"}}>
+                    {`AMUA ${invDocType==="purchase_order"?"PO":"Invoice"}${invName.trim()?` - ${invName.trim()}`:""} - ${(dateFrom||"…").replace(/-/g,"")}-${(dateTo||"…").replace(/-/g,"")}`}
+                  </span>
+                </OptionRow>
+
                 {/* Booker multi-select */}
                 <OptionRow label="Bookers">
                   <Pill active={invSelectedEmails.size===0} onClick={()=>setInvSelectedEmails(new Set())}>All</Pill>
@@ -3380,6 +3457,13 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
                   : <span>{docLabel} for <strong>{scopes[0]?.name||scopes[0]?.email}</strong> — <strong>{allBkgs.length}</strong> booking{allBkgs.length!==1?"s":""}, total <strong>{fmtCost(totalCostInv)}</strong></span>
                 }
               </div>
+
+              {isAdmin&&(
+                <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"#5b21b6",cursor:"pointer",background:"#f5f3ff",border:"1px solid #ddd6fe",borderRadius:8,padding:"8px 12px"}}>
+                  <input type="checkbox" checked={invMarkInvoiced} onChange={e=>setInvMarkInvoiced(e.target.checked)} style={{accentColor:"#7c3aed"}}/>
+                  Mark these {allBkgs.length} booking{allBkgs.length!==1?"s":""} as <strong>invoiced</strong> on export (snapshots billed time/field for change tracking)
+                </label>
+              )}
 
               <div style={{display:"flex",flexDirection:"column",gap:10}}>
                 <div style={{fontSize:12,fontWeight:600,color:"#64748b",marginBottom:2}}>Export as:</div>
@@ -3658,7 +3742,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[]
       {/* Approx player counts + duration panel */}
       {showPlayers&&(()=>{
         const bookers = Object.values(
-          bookings.filter(b=>["approved","cpsa_confirmed","cpsa_review_needed","pending_cpsa","queued_cpsa","pending_amua","amua_submit","pending"].includes(b.status))
+          bookings.filter(b=>["approved","cpsa_confirmed","cpsa_review_needed","invoiced","pending_cpsa","queued_cpsa","pending_amua","amua_submit","pending"].includes(b.status))
             .reduce((m,b)=>{ const k=b.email.toLowerCase(); if(!m[k]) m[k]={name:b.name,email:b.email}; return m; },{})
         ).sort((a,b)=>a.name.localeCompare(b.name));
         return (
@@ -4153,7 +4237,7 @@ function findMatchingUserBooking(allBookings, ev, facilityIds) {
   // potential CPSA link (99% of bookings are via Auckland Mixed Ultimate).
   const candidates = allBookings.filter(b => {
     if (b.email === "admin") return false;
-    if (!["approved","cpsa_confirmed","cpsa_review_needed","clash","pending_cpsa","queued_cpsa","pending_amua","amua_submit","pending"].includes(b.status)) return false;
+    if (!["approved","cpsa_confirmed","cpsa_review_needed","invoiced","clash","pending_cpsa","queued_cpsa","pending_amua","amua_submit","pending"].includes(b.status)) return false;
     if (b.date !== date) return false;
     if (b.start_hour + b.duration <= start_hour) return false;
     if (start_hour + duration <= b.start_hour) return false;
@@ -4330,10 +4414,14 @@ export default function App() {
       const s = data.session;
       setSession(s);
       _accessToken = s?.access_token || null;
+      _currentUser = s?.user ? { id: s.user.id, email: s.user.email } : null;
     });
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((evt, s) => {
+      if (evt === "SIGNED_OUT") logActivity("sign_out", {}); // log before clearing _currentUser
       setSession(s);
       _accessToken = s?.access_token || null;
+      _currentUser = s?.user ? { id: s.user.id, email: s.user.email } : null;
+      if (evt === "SIGNED_IN") logActivity("sign_in", { email: s?.user?.email });
     });
     return () => sub.subscription.unsubscribe();
   }, []);
@@ -4548,10 +4636,12 @@ export default function App() {
       months.add(`${parseInt(y)}-${parseInt(m)-1}`);
     }
     const sorted = [...months].map(k=>k.split("-").map(Number)).sort((a,b)=>a[0]-b[0]||a[1]-b[1]);
+    logActivity("cpsa_sync_start", { months: sorted.length });
     for (const [y,m] of sorted) {
       await handleSyncMonth(y, m);
     }
     try{localStorage.setItem("fb_last_sync_at", String(Date.now()));}catch{}
+    logActivity("cpsa_sync_complete", { months: sorted.length });
   }
 
   // All hooks before any conditional return
@@ -4609,6 +4699,7 @@ export default function App() {
       });
     }
     setShowForm(false);setViewing(null);
+    logActivity(isNew?"booking_create":"booking_edit", { count: draftsArr.length, ids: draftsArr.map(d=>d.id) });
     showToast(isNew?`${draftsArr.length} booking${draftsArr.length>1?"s":""} submitted!`:"Booking updated!");
 
     // Send confirmation email (skipped when caller handles its own sending, e.g. handleCartSubmit)
@@ -4632,6 +4723,7 @@ export default function App() {
       catch(e){showToast("Update failed: "+e.message,"error");return;}}
     else{setBookings(prev=>prev.map(b=>b.id===booking.id?{...b,...patch}:b));}
     setViewing(null);showToast(`Booking ${newStatus}!`);
+    logActivity("status_change", { id: booking.id, from: booking.status, to: newStatus });
     if(!silentMode){
       sendApprovalEmail({to:booking.email,subject:`Booking ${STATUS_META[newStatus]?.label}`,
         html:buildApprovalEmailHtml({name:booking.name,email:booking.email,bookings:[{...booking,...patch}],newStatus,adminNote:""})});
@@ -4698,6 +4790,24 @@ export default function App() {
     showToast("Merge proposal added — commit your cart to notify bookers.");
   }
 
+  // Flag bookings as invoiced and snapshot their billed dimensions so any later
+  // change to time/duration/field can be reconciled (owing vs credit).
+  async function handleMarkInvoiced(bkgs) {
+    const targets = bkgs.filter(b => !isAdminBooking(b) && b.status !== "invoiced");
+    if (!targets.length) { showToast("Already invoiced."); return; }
+    if (configured) {
+      try {
+        for (const b of targets) await sb.update("bookings", b.id, { status:"invoiced", notes:setBilledSnapshot(b.notes, b), updated_at:new Date().toISOString() });
+        await loadBookings();
+      } catch(e) { showToast("Mark invoiced failed: "+e.message, "error"); return; }
+    } else {
+      const ids = new Set(targets.map(b=>b.id));
+      setBookings(prev => prev.map(b => ids.has(b.id) ? { ...b, status:"invoiced", notes:setBilledSnapshot(b.notes, b) } : b));
+    }
+    logActivity("invoiced", { count: targets.length, ids: targets.map(b=>b.id) });
+    showToast(`${targets.length} booking${targets.length>1?"s":""} marked invoiced.`);
+  }
+
   // Bulk approve/reject — groups by email and sends one summary per person
   async function handleBulkStatusChange(ids, newStatus, adminNote, skipEmail=false) {
     const affected=bookings.filter(b=>ids.includes(b.id));
@@ -4710,6 +4820,7 @@ export default function App() {
     } else {
       setBookings(prev=>prev.map(b=>ids.includes(b.id)?{...b,...patch}:b));
     }
+    logActivity("bulk_status_change", { count: ids.length, to: newStatus });
     showToast(`${ids.length} booking${ids.length>1?"s":""} ${newStatus}!`);
 
     const noEmailStatuses = new Set(["pending_cpsa"]);
@@ -5205,7 +5316,7 @@ export default function App() {
           </div>
         )}
 
-        {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<SummaryTab bookings={bookings} loggedInEmail={loggedInEmail} facilityRates={facilityRates} isAdmin={isAdmin} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onUpdateFacilityRate={updateFacilityRate} pricingMode={pricingMode} onSetPricingMode={setPricingMode} onProposeMerge={handleProposeMerge} onBulkApply={handleBulkApply}/>}</div>}
+        {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<SummaryTab bookings={bookings} loggedInEmail={loggedInEmail} facilityRates={facilityRates} isAdmin={isAdmin} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onUpdateFacilityRate={updateFacilityRate} pricingMode={pricingMode} onSetPricingMode={setPricingMode} onProposeMerge={handleProposeMerge} onBulkApply={handleBulkApply} onMarkInvoiced={handleMarkInvoiced}/>}</div>}
         {tab==="about"&&<div style={{padding:"8px 0"}}><AboutTab/></div>}
         {tab==="admin"&&isAdmin&&<div style={S.card}>
           {/* Silent mode banner */}
