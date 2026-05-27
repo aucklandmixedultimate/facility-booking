@@ -1258,12 +1258,6 @@ function WeekCalendar({ bookings, onNewBooking, onBookingClick, selectedFacility
         ))}
         <span style={{ fontSize:15, fontWeight:700, color:"#0f172a", marginLeft:4 }}>{days[0].toLocaleDateString("en-NZ",{month:"long",year:"numeric"})}</span>
         {window.innerWidth>=768&&<span style={{ fontSize:12, color:"#94a3b8", marginLeft:8 }}>Click or drag to create a booking</span>}
-        {onSyncMonth&&(
-          <button onClick={()=>{ const d=days[0]; onSyncMonth(d.getFullYear(),d.getMonth()); }} disabled={syncingMonth}
-            style={{...S.btn({background:syncingMonth?"#e2e8f0":"#0ea5e9",color:syncingMonth?"#94a3b8":"#fff"}),marginLeft:"auto",cursor:syncingMonth?"wait":"pointer"}}>
-            {syncingMonth?"⏳ Syncing…":"🔄 Sync Month"}
-          </button>
-        )}
       </div>
       <div style={{ overflowX:"auto" }} ref={gridRef} onMouseLeave={()=>{ dragMoved.current=false; setDragState(null); }}>
         <div style={{ minWidth:680 }}>
@@ -1429,12 +1423,6 @@ function MonthCalendar({ bookings, onBookingClick, onNewBooking, selectedFacilit
           style={S.btn(selMode ? selBtnActive : selBtn)}>
           {selMode?"✕ Exit Select":"☑ Select"}
         </button>
-        {onSyncMonth&&(
-          <button onClick={()=>onSyncMonth(year,month)} disabled={syncingMonth}
-            style={S.btn({background:syncingMonth?"#e2e8f0":"#0ea5e9",color:syncingMonth?"#94a3b8":"#fff",opacity:syncingMonth?0.7:1,cursor:syncingMonth?"wait":"pointer"})}>
-            {syncingMonth?"⏳ Syncing…":"🔄 Sync Month"}
-          </button>
-        )}
       </div>
 
       {selMode && selIds.size > 0 && (
@@ -3934,12 +3922,13 @@ function findMatchingUserBooking(allBookings, ev, facilityIds) {
   const teamNorm = normalizeId(team);
   if (!teamNorm) return null;
 
-  // Eligible bookings: same date, time-overlap, facility within the mapped set, non-admin, in an approvable state
+  // Eligible bookings: same date, time-overlap, non-admin, in an approvable state.
+  // Facility is NOT required — any time overlap on the same date is considered a
+  // potential CPSA link (99% of bookings are via Auckland Mixed Ultimate).
   const candidates = allBookings.filter(b => {
     if (b.email === "admin") return false;
-    if (!["approved","cpsa_confirmed","cpsa_review_needed","clash"].includes(b.status)) return false;
+    if (!["approved","cpsa_confirmed","cpsa_review_needed","clash","pending_cpsa","queued_cpsa","pending_amua","amua_submit","pending"].includes(b.status)) return false;
     if (b.date !== date) return false;
-    if (!facilityIds.includes(b.facility_id)) return false;
     if (b.start_hour + b.duration <= start_hour) return false;
     if (start_hour + duration <= b.start_hour) return false;
     return true;
@@ -3963,10 +3952,9 @@ function findMatchingUserBooking(allBookings, ev, facilityIds) {
   }).sort((a,b)=>b.score-a.score);
 
   const best = scored[0];
-  if (best.identityScore === 0) return null; // no name link at all → not a match
-  // Exact: strong identity (>=3) AND time+duration align
+  // Any time overlap is treated as a potential CPSA link (cpsa_review_needed minimum).
+  // Exact match requires strong identity (>=3) AND time+duration alignment.
   const exact = best.identityScore >= 3 && best.score >= 7;
-  // Fuzzy: at least some identity link but missing precision
   return { booking: best.booking, exact };
 }
 
@@ -4278,21 +4266,32 @@ export default function App() {
     const today = todayKey();
     const future = bookings.filter(b => b.date >= today);
     const months = new Set();
-    // Always include current month
     const now = new Date();
     months.add(`${now.getFullYear()}-${now.getMonth()}`);
     for (const b of future) {
       const [y,m] = b.date.split("-");
-      months.add(`${parseInt(y)}-${parseInt(m)-1}`); // store as 0-based month to match handleSyncMonth contract
+      months.add(`${parseInt(y)}-${parseInt(m)-1}`);
     }
     const sorted = [...months].map(k=>k.split("-").map(Number)).sort((a,b)=>a[0]-b[0]||a[1]-b[1]);
     for (const [y,m] of sorted) {
       await handleSyncMonth(y, m);
     }
+    try{localStorage.setItem("fb_last_sync_at", String(Date.now()));}catch{}
   }
 
   // All hooks before any conditional return
-  useEffect(()=>{if(session)loadBookings();},[session]);
+  useEffect(()=>{
+    if(!session) return;
+    loadBookings();
+    // Auto-sync CPSA if admin and last sync was more than 4 hours ago
+    if(session.user?.app_metadata?.role==="admin"){
+      const last=parseInt(localStorage.getItem("fb_last_sync_at")||"0",10);
+      if(Date.now()-last > 4*60*60*1000) {
+        // Defer slightly so bookings load first
+        setTimeout(()=>handleSyncAll(),2000);
+      }
+    }
+  },[session]);
   // If the booker filter points at an email with no bookings, fall back to "all"
   useEffect(()=>{
     if(listBookerFilter==="all"||loading) return;
@@ -4694,12 +4693,19 @@ export default function App() {
                   🧩{!isMobile&&" Extension"}
                 </button>
               )}
-              {isAdmin&&(
-                <button onClick={handleSyncAll} disabled={syncingMonth} title="Sync all months with bookings from today forward"
-                  style={S.btn({background:syncingMonth?"#e2e8f0":"#0ea5e9",color:syncingMonth?"#94a3b8":"#fff",fontSize:11,padding:"7px 10px",cursor:syncingMonth?"wait":"pointer",opacity:syncingMonth?0.7:1})}>
-                  {syncingMonth?"⏳":"🔄"}{!isMobile&&(syncingMonth?" Syncing…":" Sync All")}
-                </button>
-              )}
+              {isAdmin&&(()=>{
+                const lastMs=parseInt(localStorage.getItem("fb_last_sync_at")||"0",10);
+                const minsAgo=lastMs?Math.floor((Date.now()-lastMs)/60000):null;
+                const syncLabel=minsAgo===null?"Never synced":minsAgo<1?"Just synced":minsAgo<60?`${minsAgo}m ago`:`${Math.floor(minsAgo/60)}h ago`;
+                return(
+                  <button onClick={handleSyncAll} disabled={syncingMonth}
+                    title={`Sync all months with CPSA · Last: ${syncLabel}`}
+                    style={S.btn({background:syncingMonth?"#e2e8f0":"#0ea5e9",color:syncingMonth?"#94a3b8":"#fff",fontSize:11,padding:"7px 10px",cursor:syncingMonth?"wait":"pointer",opacity:syncingMonth?0.7:1})}>
+                    {syncingMonth?"⏳":"🔄"}{!isMobile&&(syncingMonth?` Syncing…`:` Sync All`)}
+                    {!isMobile&&!syncingMonth&&<span style={{opacity:0.75,fontWeight:400}}> · {syncLabel}</span>}
+                  </button>
+                );
+              })()}
               {isAdmin&&<span style={{fontSize:11,fontWeight:700,color:"#7c3aed",background:"#f3e8ff",border:"1px solid #ddd6fe",borderRadius:8,padding:"4px 8px"}}>Admin</span>}
               <button onClick={()=>openNew(todayKey(),9,1)} style={S.btn({background:"#2d4a1e",color:"#fff",padding:"7px 10px",fontSize:12})}>
                 {isMobile?"+ Book":"+ New Booking"}
