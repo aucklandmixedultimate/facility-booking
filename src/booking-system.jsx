@@ -4439,7 +4439,8 @@ export default function App() {
   const [facilityRates, setFacilityRates] = useState(()=>{
     try{return JSON.parse(localStorage.getItem("fb_facility_rates")||"{}");}catch{return {};}
   });
-  const [listBookerFilter, setListBookerFilter] = useState("all");
+  const [listBookerFilter, setListBookerFilter] = useState(new Set()); // empty = all (additive multi-select)
+  const toggleBooker = em => setListBookerFilter(prev => { const s=new Set(prev); if(s.has(em)) s.delete(em); else s.add(em); return s; });
   const [listShowClashes, setListShowClashes]   = useState(false);
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [showAdminScheduleModal, setShowAdminScheduleModal] = useState(false);
@@ -4715,9 +4716,10 @@ export default function App() {
   },[session]);
   // If the booker filter points at an email with no bookings, fall back to "all"
   useEffect(()=>{
-    if(listBookerFilter==="all"||loading) return;
-    const hasMatch = bookings.some(b=>!isAdminBooking(b)&&b.email?.toLowerCase()===listBookerFilter);
-    if(!hasMatch) setListBookerFilter("all");
+    if(listBookerFilter.size===0||loading) return;
+    const present = new Set(bookings.filter(b=>!isAdminBooking(b)&&b.email).map(b=>b.email.toLowerCase()));
+    const pruned = [...listBookerFilter].filter(em=>present.has(em));
+    if(pruned.length!==listBookerFilter.size) setListBookerFilter(new Set(pruned));
   },[bookings,loading,listBookerFilter]);
   useEffect(()=>{ loadSettings(); /* eslint-disable-next-line */ },[]);
 
@@ -5191,15 +5193,16 @@ export default function App() {
 
         {emailLegend.length>0&&(tab==="calendar"||tab==="month"||tab==="list")&&(
           <div style={{display:"flex",gap:6,marginBottom:12,alignItems:"center",overflowX:"auto",WebkitOverflowScrolling:"touch",scrollbarWidth:"none",msOverflowStyle:"none",paddingBottom:2}}>
-            <button onClick={()=>setListBookerFilter("all")}
-              style={{padding:"5px 12px",borderRadius:20,border:"1.5px solid",cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",flexShrink:0,borderColor:listBookerFilter==="all"?"#0f172a":"#e2e8f0",background:listBookerFilter==="all"?"#0f172a":"#fff",color:listBookerFilter==="all"?"#fff":"#475569"}}>
-              All
+            <button onClick={()=>setListBookerFilter(prev=>prev.size===0?new Set(emailLegend.map(e=>e.toLowerCase())):new Set())}
+              title={listBookerFilter.size===0?"Select all bookers":"Clear selection"}
+              style={{padding:"5px 12px",borderRadius:20,border:"1.5px solid",cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",flexShrink:0,borderColor:listBookerFilter.size===0?"#0f172a":"#e2e8f0",background:listBookerFilter.size===0?"#0f172a":"#fff",color:listBookerFilter.size===0?"#fff":"#475569"}}>
+              {listBookerFilter.size===0?"All":"None"}
             </button>
             {emailLegend.map(e=>{
-              const active=listBookerFilter===e.toLowerCase();
+              const active=listBookerFilter.has(e.toLowerCase());
               const c=emailColor(e);
               return(
-                <button key={e} onClick={()=>setListBookerFilter(p=>p===e.toLowerCase()?"all":e.toLowerCase())}
+                <button key={e} onClick={()=>toggleBooker(e.toLowerCase())}
                   style={{padding:"5px 12px",borderRadius:20,border:`1.5px solid ${active?c:"#e2e8f0"}`,cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",flexShrink:0,background:active?c:"#fff",color:active?"#fff":"#475569"}}>
                   {e.split("@")[0]}
                 </button>
@@ -5227,7 +5230,7 @@ export default function App() {
                 .filter(b => !isAdminBooking(b))
                 .filter(b => selFac==="all" || b.facility_id===selFac)
                 .filter(b => listColFacility==="all" || b.facility_id===listColFacility)
-                .filter(b => listBookerFilter==="all" || b.email?.toLowerCase()===listBookerFilter)
+                .filter(b => listBookerFilter.size===0 || listBookerFilter.has(b.email?.toLowerCase()))
                 .filter(b => listStatusFilter==="all" || b.status===listStatusFilter)
                 .filter(b => !listShowClashes || allClashIds.has(b.id))
                 .filter(b => !listDateFrom || b.date>=listDateFrom)
@@ -5291,11 +5294,11 @@ export default function App() {
                               </th>
                               <th style={{padding:"3px 4px",whiteSpace:"normal"}}>
                                 <div style={{display:"flex",gap:3,flexWrap:"wrap",alignItems:"center"}}>
-                                  <button onClick={()=>setListBookerFilter("all")}
-                                    style={{padding:"1px 7px",fontSize:10,borderRadius:10,border:"1.5px solid #e2e8f0",background:listBookerFilter==="all"?"#0f172a":"#fff",color:listBookerFilter==="all"?"#fff":"#475569",cursor:"pointer",fontWeight:listBookerFilter==="all"?700:400,lineHeight:1.6}}>All</button>
+                                  <button onClick={()=>setListBookerFilter(prev=>prev.size===0?new Set(bookerEmails):new Set())}
+                                    style={{padding:"1px 7px",fontSize:10,borderRadius:10,border:"1.5px solid #e2e8f0",background:listBookerFilter.size===0?"#0f172a":"#fff",color:listBookerFilter.size===0?"#fff":"#475569",cursor:"pointer",fontWeight:listBookerFilter.size===0?700:400,lineHeight:1.6}}>{listBookerFilter.size===0?"All":"None"}</button>
                                   {bookerEmails.map(em=>(
-                                    <button key={em} onClick={()=>setListBookerFilter(p=>p===em?"all":em)}
-                                      style={{padding:"1px 7px",fontSize:10,borderRadius:10,border:`1.5px solid ${listBookerFilter===em?emailColor(em):"#e2e8f0"}`,background:listBookerFilter===em?emailColor(em):"#fff",color:listBookerFilter===em?"#fff":"#475569",cursor:"pointer",fontWeight:listBookerFilter===em?700:400,lineHeight:1.6}}>
+                                    <button key={em} onClick={()=>toggleBooker(em)}
+                                      style={{padding:"1px 7px",fontSize:10,borderRadius:10,border:`1.5px solid ${listBookerFilter.has(em)?emailColor(em):"#e2e8f0"}`,background:listBookerFilter.has(em)?emailColor(em):"#fff",color:listBookerFilter.has(em)?"#fff":"#475569",cursor:"pointer",fontWeight:listBookerFilter.has(em)?700:400,lineHeight:1.6}}>
                                       {em.split("@")[0]}
                                     </button>
                                   ))}
@@ -5343,10 +5346,10 @@ export default function App() {
                                   onMouseEnter={e=>e.currentTarget.style.background=isAdmin_bk?"#f1f5f9":"#f8fafc"}
                                   onMouseLeave={e=>e.currentTarget.style.background=isAdmin_bk?"#f8fafc":isClash?"#fff5f5":"#fff"}>
                                   <td style={{padding:"4px 8px",whiteSpace:"nowrap",color:"#475569",fontSize:11}}>{dateShort}</td>
-                                  <td style={{padding:"4px 8px"}} onClick={isAdmin_bk?undefined:e=>{e.stopPropagation();setListBookerFilter(p=>p===b.email.toLowerCase()?"all":b.email.toLowerCase());}}>
+                                  <td style={{padding:"4px 8px"}} onClick={isAdmin_bk?undefined:e=>{e.stopPropagation();toggleBooker(b.email.toLowerCase());}}>
                                     {isAdmin_bk
                                       ? <span style={{fontSize:10,fontWeight:700,color:"#94a3b8",background:"#f1f5f9",borderRadius:10,padding:"2px 7px"}}>🔒 admin</span>
-                                      : <span style={{display:"inline-block",padding:"2px 9px",borderRadius:10,background:emailColor(b.email),color:"#fff",fontSize:11,fontWeight:600,cursor:"pointer",outline:listBookerFilter===b.email.toLowerCase()?"2px solid #0f172a":"none",outlineOffset:1}}>
+                                      : <span style={{display:"inline-block",padding:"2px 9px",borderRadius:10,background:emailColor(b.email),color:"#fff",fontSize:11,fontWeight:600,cursor:"pointer",outline:listBookerFilter.has(b.email.toLowerCase())?"2px solid #0f172a":"none",outlineOffset:1}}>
                                           {b.email.split("@")[0]}
                                         </span>
                                     }
