@@ -414,6 +414,11 @@ function EmailChip({email}) {
   return <span style={{display:"inline-flex",alignItems:"center",gap:4,padding:"2px 8px",borderRadius:999,background:c+"18",border:`1px solid ${c}44`,color:c,fontSize:11,fontWeight:700,whiteSpace:"nowrap"}}>{email||"unknown"}</span>;
 }
 function Modal({title,onClose,children,width=560}) {
+  useEffect(()=>{
+    const onKey=e=>{ if(e.key==="Escape"){ e.stopPropagation(); onClose(); } };
+    window.addEventListener("keydown",onKey);
+    return ()=>window.removeEventListener("keydown",onKey);
+  },[onClose]);
   return (
     <div onClick={e=>e.target===e.currentTarget&&onClose()} style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.55)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:1000,padding:"0",backdropFilter:"blur(2px)"}}
       className="modal-backdrop">
@@ -3577,9 +3582,6 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[]
         <button onClick={()=>setShowPlayers(v=>!v)} style={S.btn({border:"1.5px solid #e2e8f0",background:showPlayers?"#f8fafc":"#fff",color:"#475569",fontSize:12})}>
           👥 Player Counts
         </button>
-        {onSyncDB&&<button onClick={onSyncDB} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#475569",fontSize:12})}>
-          🔄 Sync DB
-        </button>}
         {onShowSchedule&&<button onClick={onShowSchedule} style={S.btn({background:"#f0f9ff",color:"#0369a1",border:"1.5px solid #bae6fd",fontSize:12,fontWeight:700})}>
           📅 Schedule
         </button>}
@@ -4975,6 +4977,12 @@ export default function App() {
                 <button onClick={()=>setShowExtensionModal(true)} title="Install the AMUA booking browser extension"
                   style={S.btn({background:"#7c3aed",color:"#fff",fontSize:11,padding:"7px 10px"})}>
                   🧩{!isMobile&&" Extension"}
+                </button>
+              )}
+              {isAdmin&&(
+                <button onClick={handleSyncDB} title="Reload bookings & settings from the database"
+                  style={S.btn({background:"#fff",color:"#475569",border:"1.5px solid #e2e8f0",fontSize:11,padding:"7px 10px"})}>
+                  ⬇{!isMobile&&" Sync DB"}
                 </button>
               )}
               {isAdmin&&(()=>{
