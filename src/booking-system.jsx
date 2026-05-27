@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, Fragment } from "react";
 import { createClient } from "@supabase/supabase-js";
 
 // ─── LOGO ─────────────────────────────────────────────────────────────────────
@@ -101,6 +101,12 @@ function fmtTime(h) {
   return `${dh}:${m===0?"00":String(m).padStart(2,"0")} ${hh>=12?"PM":"AM"}`;
 }
 function fmtDate(s) { return new Date(s+"T00:00:00").toLocaleDateString("en-NZ",{weekday:"short",day:"numeric",month:"short",year:"numeric"}); }
+function fmtTimeShort(h) {
+  const hh=Math.floor(h), m=Math.round((h%1)*60), dh=hh>12?hh-12:hh===0?12:hh;
+  return `${dh}${m?":"+String(m).padStart(2,"0"):""}${hh>=12?"p":"a"}`;
+}
+const FAC_SHORT = { f1:"Mtg", f2:"Fn", f3:"Fld1", f4:"Fld2", f5:"Fld3" };
+function facShort(id) { return FAC_SHORT[id] || (FACILITIES.find(x=>x.id===id)?.name) || id; }
 // Global mobile styles
 const MOBILE_STYLE = `
   .modal-backdrop > div { border-radius: 16px 16px 0 0; }
@@ -159,6 +165,11 @@ function parseMismatchNote(notes) {
   return m ? m[1].split("|").map(s=>s.trim()).filter(Boolean) : [];
 }
 function stripMismatchNote(notes) { return (notes||"").replace(CPSA_MISMATCH_RE,"").trim(); }
+// Split a succinct reason "Label: old → new" into structured parts for old/new columns.
+function splitReason(r) {
+  const m = (r||"").match(/^(.+?):\s*(.*?)\s*→\s*(.*)$/);
+  return m ? { label: m[1], old: m[2], next: m[3] } : { label: r, old: "", next: "" };
+}
 function getSameFacilityOverlaps(draft, others) {
   return others.filter(o => o.facility_id === draft.facility_id && timeOverlaps(draft, o));
 }
@@ -665,7 +676,7 @@ function CartModal({ cart, setCart, onClose, onSubmit, openNew, cartIdsSet }) {
         : (
           <>
             <div style={{fontSize:13,color:'#64748b',marginBottom:12}}>
-              {[totalNew>0&&`${totalNew} new booking${totalNew>1?'s':''}`, totalEdits>0&&`${totalEdits} edit${totalEdits>1?'s':''}`].filter(Boolean).join(' · ')} ready to submit.
+              {[totalNew>0&&`${totalNew} new booking${totalNew>1?'s':''}`, totalEdits>0&&`${totalEdits} edit${totalEdits>1?'s':''}`, totalNotify>0&&`${totalNotify} CPSA notification${totalNotify>1?'s':''}`].filter(Boolean).join(' · ')} ready to submit.
             </div>
             <div style={{flex:1,overflowY:'auto',maxHeight:'55vh',display:'flex',flexDirection:'column',gap:10,paddingRight:2}}>
               {cart.map((item,gi)=>{
@@ -684,7 +695,37 @@ function CartModal({ cart, setCart, onClose, onSubmit, openNew, cartIdsSet }) {
                         }
                       </div>
                     </div>
-                    {groups.map((g,gi2)=>{
+                    {item.notifyOnly
+                      ? item.drafts.map((d,di)=>{
+                          const f=FACILITIES.find(x=>x.id===d.facility_id);
+                          const reasons=parseMismatchNote(d.notes);
+                          return (
+                            <div key={di} style={{padding:'10px 14px',borderBottom:di<item.drafts.length-1?'1px solid #f1f5f9':'none'}}>
+                              <div style={{display:'flex',gap:10,alignItems:'center'}}>
+                                <span style={{width:8,height:8,borderRadius:'50%',background:f?.color,flexShrink:0,display:'inline-block'}}/>
+                                <div style={{flex:1}}>
+                                  <div style={{fontSize:13,fontWeight:600,color:'#0f172a'}}>{f?.name||d.facility_id}</div>
+                                  <div style={{fontSize:12,color:'#64748b'}}>{fmtDate(d.date)} · {fmtTime(d.start_hour)}–{fmtTime(d.start_hour+d.duration)} · {d.purpose}</div>
+                                </div>
+                                <button onClick={()=>removeDraft(gi,di)} title="Remove from cart" style={{background:'none',border:'none',cursor:'pointer',color:'#f43f5e',fontSize:16,padding:'2px 5px',lineHeight:1}}>✕</button>
+                              </div>
+                              {reasons.length>0&&(
+                                <div style={{marginTop:8,marginLeft:18,display:'grid',gridTemplateColumns:'auto auto auto auto',gap:'2px 8px',alignItems:'center'}}>
+                                  {reasons.map((r,ri)=>{const p=splitReason(r);return(<Fragment key={ri}>
+                                    <span style={{fontSize:11,fontWeight:600,color:'#713f12'}}>{p.label}</span>
+                                    <span style={{fontSize:11,color:'#854d0e'}}>{p.old||'—'}</span>
+                                    <span style={{fontSize:10,color:'#a16207'}}>→</span>
+                                    <span style={{fontSize:11,color:'#854d0e',fontWeight:600}}>{p.next||'—'}</span>
+                                  </Fragment>);})}
+                                </div>
+                              )}
+                              <div style={{marginTop:6,marginLeft:18,fontSize:11,color:'#a16207'}}>
+                                Booker will be emailed that this booking is now {item.newStatus==='cpsa_confirmed'?'CPSA-confirmed':'flagged for AMUA review'}.
+                              </div>
+                            </div>
+                          );
+                        })
+                      : groups.map((g,gi2)=>{
                       if(g.type==='recur') {
                         const f=FACILITIES.find(x=>x.id===g.drafts[0].facility_id);
                         const first=g.drafts[0], last=g.drafts[g.drafts.length-1];
@@ -1139,9 +1180,18 @@ function BookingDetail({booking,onEdit,onClose,onCancel,isAdmin,onStatusChange,l
       {booking.status==="cpsa_review_needed"&&parseMismatchNote(booking.notes).length>0&&(
         <div style={{background:"#fef9c3",border:"1px solid #fde047",borderRadius:10,padding:"12px 16px"}}>
           <div style={{fontSize:12,fontWeight:700,color:"#713f12",textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:8,display:"flex",alignItems:"center",gap:6}}>⚠ Flagged inconsistencies vs CPSA</div>
-          <ul style={{margin:0,paddingLeft:18,display:"flex",flexDirection:"column",gap:4}}>
-            {parseMismatchNote(booking.notes).map((r,i)=>(<li key={i} style={{fontSize:13,color:"#854d0e"}}>{r}</li>))}
-          </ul>
+          <div style={{display:"grid",gridTemplateColumns:"auto 1fr auto 1fr",gap:"4px 10px",alignItems:"center"}}>
+            <div style={{fontSize:10,fontWeight:700,color:"#a16207",textTransform:"uppercase"}}></div>
+            <div style={{fontSize:10,fontWeight:700,color:"#a16207",textTransform:"uppercase"}}>Booked</div>
+            <div></div>
+            <div style={{fontSize:10,fontWeight:700,color:"#a16207",textTransform:"uppercase"}}>CPSA</div>
+            {parseMismatchNote(booking.notes).map((r,i)=>{const p=splitReason(r);return(<Fragment key={i}>
+              <div style={{fontSize:13,fontWeight:600,color:"#713f12"}}>{p.label}</div>
+              <div style={{fontSize:13,color:"#854d0e"}}>{p.old||"—"}</div>
+              <div style={{fontSize:12,color:"#a16207"}}>→</div>
+              <div style={{fontSize:13,color:"#854d0e",fontWeight:600}}>{p.next||"—"}</div>
+            </Fragment>);})}
+          </div>
           <div style={{fontSize:11,color:"#a16207",marginTop:8}}>Detected during CPSA sync — reconcile before confirming.</div>
         </div>
       )}
@@ -4061,6 +4111,30 @@ function extractCPSATeam(eventName) {
 
 function normalizeId(s) { return (s||"").toLowerCase().replace(/[^a-z0-9]/g,""); }
 
+function tokenize(s) { return (s||"").toLowerCase().replace(/[^a-z0-9\s]/g," ").split(/\s+/).filter(Boolean); }
+
+// Does a CPSA team/event name look like our own organisation (AMUA)?
+// When it does, the name is NOT an inconsistency even if the matched booking is
+// under an individual member's name.
+function resemblesAMUA(name) {
+  const t = tokenize(name);
+  if (t.includes("amua")) return true;
+  const hasUltimate = t.includes("ultimate");
+  return (hasUltimate && t.includes("mixed")) || (hasUltimate && t.includes("auckland"));
+}
+
+// Token-overlap (Jaccard) similarity between two names, 0..1, with acronym handling.
+function nameSimilarity(a, b) {
+  const ta = tokenize(a), tb = tokenize(b);
+  if (!ta.length || !tb.length) return 0;
+  const acr = toks => toks.map(w => w[0]).join("");
+  if (ta.length === 1 && ta[0] === acr(tb)) return 1;
+  if (tb.length === 1 && tb[0] === acr(ta)) return 1;
+  const sa = new Set(ta), sb = new Set(tb);
+  let inter = 0; sa.forEach(w => { if (sb.has(w)) inter++; });
+  return inter / (sa.size + sb.size - inter);
+}
+
 // Find a user booking that this CJR event likely represents.
 // Returns { booking, exact } where exact=true means tight match (auto-confirm),
 // exact=false means fuzzy match (flag for AMUA review).
@@ -4094,6 +4168,7 @@ function findMatchingUserBooking(allBookings, ev, facilityIds) {
     if (emailPrefix === teamNorm || nameNorm === teamNorm) identityScore = 4;
     else if (emailPrefix && (emailPrefix.includes(teamNorm) || teamNorm.includes(emailPrefix))) identityScore = 3;
     else if (nameNorm && (nameNorm.includes(teamNorm) || teamNorm.includes(nameNorm))) identityScore = 2;
+    else if (nameSimilarity(team, b.name) >= 0.5) identityScore = 2;
     else if (purposeNorm && (purposeNorm.includes(teamNorm) || teamNorm.includes(purposeNorm))) identityScore = 1;
     const timeExact = b.start_hour === start_hour ? 2 : 0;
     const durExact  = b.duration === duration ? 1 : 0;
@@ -4102,24 +4177,32 @@ function findMatchingUserBooking(allBookings, ev, facilityIds) {
   }).sort((a,b)=>b.score-a.score);
 
   const best = scored[0];
-  // Any time overlap is treated as a potential CPSA link (cpsa_review_needed minimum).
-  // Exact match requires strong identity (>=3) AND time+duration alignment.
-  const exact = best.identityScore >= 3 && best.score >= 7;
+  const teamIsOurs = resemblesAMUA(team);
+  // A CPSA event that is neither our own org (AMUA) nor a plausible identity match
+  // to the booking is a *different tenant* renting the same field at an overlapping
+  // time — do NOT link it (prevents e.g. "Auckland Girls Grammar" matching an AMUA
+  // member's booking purely on time overlap).
+  if (!teamIsOurs && best.identityScore < 2) return null;
+
+  // Exact match requires strong identity (>=3) AND time+duration alignment,
+  // or an AMUA-named event that lines up exactly on time + duration.
+  const exact = (best.identityScore >= 3 && best.score >= 7)
+    || (teamIsOurs && best.score - best.identityScore >= 3);
 
   // Capture specific inconsistencies between the CPSA event and the matched booking,
-  // so the admin sees exactly what differs on a "CPSA Mismatch — AMUA Review" booking.
+  // succinctly (old → new = booked → CPSA), so the admin sees exactly what differs.
   const b = best.booking;
   const reasons = [];
   if (b.start_hour !== start_hour)
-    reasons.push(`Time: booked ${fmtTime(b.start_hour)} vs CPSA ${fmtTime(start_hour)}`);
+    reasons.push(`Time: ${fmtTimeShort(b.start_hour)} → ${fmtTimeShort(start_hour)}`);
   if (b.duration !== duration)
-    reasons.push(`Duration: booked ${b.duration}h vs CPSA ${duration}h`);
-  if (!facilityIds.includes(b.facility_id)) {
-    const facName = f=>FACILITIES.find(x=>x.id===f)?.name || f;
-    reasons.push(`Facility: booked ${facName(b.facility_id)} vs CPSA ${facilityIds.map(facName).join("/")}`);
-  }
-  if (best.identityScore < 4)
-    reasons.push(`Name: "${b.name}" only loosely matches CPSA "${team}"`);
+    reasons.push(`Dur: ${b.duration}h → ${duration}h`);
+  if (!facilityIds.includes(b.facility_id))
+    reasons.push(`Field: ${facShort(b.facility_id)} → ${facilityIds.map(facShort).join("/")}`);
+  // Only flag the name when the CPSA event is NOT our own org and the identity match
+  // is loose. An AMUA-named event under an individual member is not a name mismatch.
+  if (!teamIsOurs && best.identityScore < 4)
+    reasons.push(`Name: ${b.name} → ${team}`);
 
   return { booking: b, exact, reasons };
 }
@@ -5143,13 +5226,13 @@ export default function App() {
             <div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:8,padding:"10px 14px",fontSize:13,color:"#166534"}}>
               The browser extension lets you submit bookings to CPSA (Sporty) directly from this app and syncs confirmation links back automatically.
             </div>
-            <a href="https://github.com/aucklandmixedultimate/amua-booking-extension/releases/tag/v1.4.0" target="_blank" rel="noopener noreferrer"
+            <a href="https://github.com/aucklandmixedultimate/amua-booking-extension/releases/tag/v2.0.0" target="_blank" rel="noopener noreferrer"
               style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,background:"#7c3aed",color:"#fff",borderRadius:10,padding:"12px 16px",textDecoration:"none",fontWeight:700,fontSize:14}}>
               ⬇ Download latest build (.zip)
             </a>
             <div style={{display:"flex",flexDirection:"column",gap:10}}>
               {[
-                ["1","Download the latest build", <>Click the button above to open the <a href="https://github.com/aucklandmixedultimate/amua-booking-extension/releases/tag/v1.4.0" target="_blank" rel="noopener noreferrer" style={{color:"#7c3aed",fontWeight:600}}>latest release</a>, download the attached <code style={{background:"#f1f5f9",padding:"1px 5px",borderRadius:4,fontSize:12}}>.zip</code>, and unzip it.</>],
+                ["1","Download the latest build", <>Click the button above to open the <a href="https://github.com/aucklandmixedultimate/amua-booking-extension/releases/tag/v2.0.0" target="_blank" rel="noopener noreferrer" style={{color:"#7c3aed",fontWeight:600}}>latest release</a>, download the attached <code style={{background:"#f1f5f9",padding:"1px 5px",borderRadius:4,fontSize:12}}>.zip</code>, and unzip it.</>],
                 ["2","Open Chrome Extensions", <>Navigate to <code style={{background:"#f1f5f9",padding:"1px 5px",borderRadius:4,fontSize:12}}>chrome://extensions</code> and enable <strong>Developer mode</strong> (toggle top-right).</>],
                 ["3","Load unpacked", <>Click <strong>Load unpacked</strong> and select the unzipped folder (the one containing <code style={{background:"#f1f5f9",padding:"1px 5px",borderRadius:4,fontSize:12}}>manifest.json</code>).</>],
                 ["4","Pin & use", "Pin the extension from the Chrome toolbar. Open a CPSA booking page on Sporty and the extension will detect it automatically."],
