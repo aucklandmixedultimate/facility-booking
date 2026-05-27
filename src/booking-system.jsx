@@ -1182,8 +1182,10 @@ function BookingDetail({booking,onEdit,onClose,onCancel,isAdmin,onStatusChange,l
   );
 }
 
-function WeekCalendar({ bookings, onNewBooking, onBookingClick, selectedFacility, cartSourceIds=new Set(), deleteIds=new Set(), cartNewDrafts=[], onSyncMonth, syncingMonth=false }) {
-  const [weekBase,  setWeekBase]  = useState(new Date());
+function WeekCalendar({ bookings, onNewBooking, onBookingClick, selectedFacility, cartSourceIds=new Set(), deleteIds=new Set(), cartNewDrafts=[], focusedDate, setFocusedDate, onOpenDay }) {
+  const [localBase, setLocalBase] = useState(new Date());
+  const weekBase    = focusedDate || localBase;
+  const setWeekBase = setFocusedDate || setLocalBase;
   // dragState tracks the active drag; dragMoved tracks whether mouse moved
   // enough to be considered a drag (vs a plain click)
   const [dragState, setDragState] = useState(null);
@@ -1268,7 +1270,8 @@ function WeekCalendar({ bookings, onNewBooking, onBookingClick, selectedFacility
               return (
                 <div key={dk} style={{ flex:1, textAlign:"center", padding:"6px 0 10px" }}>
                   <div style={{ fontSize:11, fontWeight:600, color:"#94a3b8", textTransform:"uppercase", letterSpacing:"0.08em" }}>{d.toLocaleDateString("en-NZ",{weekday:"short"})}</div>
-                  <div style={{ width:32, height:32, borderRadius:"50%", margin:"4px auto 0", background:isToday?"#0f172a":"transparent", display:"flex", alignItems:"center", justifyContent:"center", fontSize:15, fontWeight:isToday?700:500, color:isToday?"#fff":"#0f172a" }}>{d.getDate()}</div>
+                  <div onClick={()=>onOpenDay&&onOpenDay(dk)} title="View full day"
+                    style={{ width:32, height:32, borderRadius:"50%", margin:"4px auto 0", background:isToday?"#0f172a":"transparent", display:"flex", alignItems:"center", justifyContent:"center", fontSize:15, fontWeight:isToday?700:500, color:isToday?"#fff":"#0f172a", cursor:onOpenDay?"pointer":"default" }}>{d.getDate()}</div>
                 </div>
               );
             })}
@@ -1356,7 +1359,7 @@ function WeekCalendar({ bookings, onNewBooking, onBookingClick, selectedFacility
 }
 
 // ─── Month Calendar (multi-select + status chips) ───────────────────────────────
-function MonthCalendar({ bookings, onBookingClick, onNewBooking, selectedFacility, loggedInEmail, isAdmin, onMultiDelete, onMultiAddToCart, cartSourceIds=new Set(), deleteIds=new Set(), cartNewDrafts=[], onSyncMonth, syncingMonth=false }) {
+function MonthCalendar({ bookings, onBookingClick, onNewBooking, selectedFacility, loggedInEmail, isAdmin, onMultiDelete, onMultiAddToCart, cartSourceIds=new Set(), deleteIds=new Set(), cartNewDrafts=[], onOpenDay, onGotoWeek }) {
   const now = new Date();
   const [year,   setYear]   = useState(now.getFullYear());
   const [month,  setMonth]  = useState(now.getMonth());
@@ -1461,7 +1464,8 @@ function MonthCalendar({ bookings, onBookingClick, onNewBooking, selectedFacilit
               style={{ minHeight:80, background:cellBg, border:cellBorder, borderRadius:6, padding:"4px 4px 3px", cursor:selMode||isPast?"default":"pointer", overflow:"hidden" }}
               onMouseEnter={e=>{ if(!selMode&&!isPast) e.currentTarget.style.boxShadow="0 2px 8px rgba(0,0,0,0.08)"; }}
               onMouseLeave={e=>e.currentTarget.style.boxShadow="none"}>
-              <div style={{ fontSize:12, fontWeight:isToday?800:500, color:isToday?"#1d4ed8":isPast?"#cbd5e1":"#0f172a", marginBottom:4, textAlign:"right" }}>{d.getDate()}</div>
+              <div onClick={e=>{ e.stopPropagation(); onGotoWeek&&onGotoWeek(dk); }} title="Open this day in week view"
+                style={{ fontSize:12, fontWeight:isToday?800:500, color:isToday?"#1d4ed8":isPast?"#cbd5e1":"#0f172a", marginBottom:4, textAlign:"right", cursor:onGotoWeek?"pointer":"default" }}>{d.getDate()}</div>
               <div style={{ display:"flex", flexDirection:"column", gap:2 }}>
                 {dayBkgs.slice(0,3).map(b=>{
                   const fac=FACILITIES.find(x=>x.id===b.facility_id);
@@ -1483,7 +1487,8 @@ function MonthCalendar({ bookings, onBookingClick, onNewBooking, selectedFacilit
                     </div>
                   );
                 })}
-                {dayBkgs.length>3&&<div style={{ fontSize:10, color:"#94a3b8", paddingLeft:2 }}>+{dayBkgs.length-3} more</div>}
+                {dayBkgs.length>3&&<div onClick={e=>{ e.stopPropagation(); onOpenDay&&onOpenDay(dk); }} title="View all bookings this day"
+                  style={{ fontSize:10, color:"#6366f1", fontWeight:700, paddingLeft:2, cursor:onOpenDay?"pointer":"default" }}>+{dayBkgs.length-3} more</div>}
                 {cartNewDrafts.filter(d=>d.date===dk).map((d,gi)=>{
                   const fac=FACILITIES.find(x=>x.id===d.facility_id);
                   return (
@@ -1499,6 +1504,125 @@ function MonthCalendar({ bookings, onBookingClick, onNewBooking, selectedFacilit
         })}
       </div>
     </div>
+  );
+}
+
+// ─── Day Timeline Popup (per-facility columns, drag-through to create) ──────────
+// Bookings render as blocks; a plain click opens a booking, a click-drag (even
+// starting on a block) passes through to create a new booking — so overlapping /
+// same-facility bookings (e.g. for merges) are easy to create.
+function DayTimelinePopup({ date, bookings, onClose, onBookingClick, onNewBooking, cartNewDrafts=[], deleteIds=new Set(), cartSourceIds=new Set() }) {
+  const [dragState, setDragState] = useState(null); // {facility, startSlot, endSlot}
+  const dragMoved   = useRef(false);
+  const justDragged = useRef(false);
+  const downBooking = useRef(false);
+
+  const dk = typeof date === "string" ? date : dateKey(date);
+  const dObj = typeof date === "string" ? new Date(date+"T00:00:00") : date;
+  const dayBkgs = bookings.filter(b=>b.date===dk && !["cancelled","rejected"].includes(b.status));
+
+  const yToSlot   = y => Math.max(0, Math.min(Math.floor(y/SLOT_H), CAL_TOTAL*2-1));
+  const slotToHour= s => CAL_START + s*0.5;
+  const norm = ds => ds ? { ...ds, lo:Math.min(ds.startSlot,ds.endSlot), hi:Math.max(ds.startSlot,ds.endSlot) } : null;
+
+  function down(e, facId) {
+    if (e.button!==0) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const slot = yToSlot(e.clientY - rect.top);
+    dragMoved.current = false;
+    setDragState({ facility:facId, startSlot:slot, endSlot:slot });
+  }
+  function move(e, facId) {
+    if (!dragState || dragState.facility!==facId) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const slot = yToSlot(e.clientY - rect.top);
+    if (slot !== dragState.endSlot) { dragMoved.current = true; setDragState(ds=>({ ...ds, endSlot:slot })); }
+  }
+  function up(e, facId) {
+    if (!dragState || dragState.facility!==facId) return;
+    const nd = norm(dragState);
+    const moved = dragMoved.current;
+    const wasOnBooking = downBooking.current;
+    dragMoved.current = false; downBooking.current = false;
+    setDragState(null);
+    if (moved) {
+      justDragged.current = true; // suppress the click that follows a drag
+      onNewBooking(dk, slotToHour(nd.lo), (nd.hi-nd.lo+1)*0.5, facId);
+    } else if (!wasOnBooking) {
+      onNewBooking(dk, slotToHour(nd.lo), 1, facId);
+    }
+  }
+
+  const nd = norm(dragState);
+
+  return (
+    <Modal title={`📅 ${dObj.toLocaleDateString("en-NZ",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}`} onClose={onClose} width={760}>
+      <div style={{fontSize:12,color:"#94a3b8",marginBottom:8}}>Click a booking to view it · click or drag an empty area (or across existing bookings) to create a new one.</div>
+      <div style={{overflowX:"auto"}}>
+        <div style={{display:"flex",minWidth:560}}>
+          {/* Hour labels */}
+          <div style={{width:48,flexShrink:0,paddingTop:24}}>
+            {Array.from({length:CAL_TOTAL+1},(_,i)=>CAL_START+i).map(h=>(
+              <div key={h} style={{height:HOUR_H,display:"flex",alignItems:"flex-start",justifyContent:"flex-end",paddingRight:6,paddingTop:3}}>
+                <span style={{fontSize:10,color:"#94a3b8",whiteSpace:"nowrap"}}>{fmtTime(h)}</span>
+              </div>
+            ))}
+          </div>
+          {/* Facility columns */}
+          {FACILITIES.map(fac=>{
+            const facBkgs = dayBkgs.filter(b=>b.facility_id===fac.id || isAdminBooking(b));
+            const isDragging = dragState?.facility===fac.id;
+            return (
+              <div key={fac.id} style={{flex:1,minWidth:96}}>
+                <div style={{height:24,display:"flex",alignItems:"center",justifyContent:"center",gap:4,fontSize:10,fontWeight:700,color:"#475569",whiteSpace:"nowrap",overflow:"hidden"}}>
+                  <span style={{width:7,height:7,borderRadius:"50%",background:fac.color,flexShrink:0}}/>
+                  {fac.name.includes("Field")?fac.name.replace("Field ","Fld "):fac.name.split("–")[0].trim().slice(0,10)}
+                </div>
+                <div style={{position:"relative",borderLeft:"1px solid #f1f5f9",cursor:isDragging?"ns-resize":"crosshair"}}
+                  onMouseDown={e=>down(e,fac.id)} onMouseMove={e=>move(e,fac.id)} onMouseUp={e=>up(e,fac.id)}
+                  onMouseLeave={()=>{ if(isDragging){ dragMoved.current=false; setDragState(null);} }}>
+                  {/* Hour cells */}
+                  {Array.from({length:CAL_TOTAL},(_,i)=>i).map(i=>(
+                    <div key={i} style={{height:HOUR_H,borderBottom:"1px solid #f1f5f9"}}>
+                      <div style={{height:"50%",borderBottom:"1px dashed #f8fafc"}}/>
+                    </div>
+                  ))}
+                  {/* Drag preview */}
+                  {isDragging && nd && (
+                    <div style={{position:"absolute",left:2,right:2,top:nd.lo*SLOT_H,height:(nd.hi-nd.lo+1)*SLOT_H,background:"rgba(99,102,241,0.15)",border:"2px solid rgba(99,102,241,0.5)",borderRadius:6,pointerEvents:"none",zIndex:4}}>
+                      <div style={{position:"absolute",top:2,left:4,fontSize:9,fontWeight:700,color:"#4f46e5"}}>{fmtTime(slotToHour(nd.lo))}–{fmtTime(slotToHour(nd.hi+1))}</div>
+                    </div>
+                  )}
+                  {/* Booking blocks (only this facility's own, non-admin shown in colour; admin as grey background) */}
+                  {dayBkgs.filter(b=>b.facility_id===fac.id).map(b=>{
+                    const ec=emailColor(b.email);
+                    const isAdmin_bk=isAdminBooking(b);
+                    const isCpsa=b.status==="cpsa_confirmed"||b.status==="cpsa_review_needed";
+                    const bg=isAdmin_bk?"#94a3b8":isCpsa?"#78909c":fac.color;
+                    return (
+                      <div key={b.id}
+                        onMouseDown={()=>{ downBooking.current = true; }}
+                        onClick={e=>{ e.stopPropagation(); if(justDragged.current){ justDragged.current=false; return; } onBookingClick(b); }}
+                        title={`${b.name} · ${fmtTime(b.start_hour)}`}
+                        style={{position:"absolute",top:(b.start_hour-CAL_START)*HOUR_H,height:Math.max(b.duration*HOUR_H-2,18),left:3,right:3,background:bg,borderRadius:6,padding:"2px 5px",cursor:"pointer",overflow:"hidden",opacity:REVIEW_STATUSES.has(b.status)?0.78:0.95,borderLeft:isAdmin_bk?undefined:`4px solid ${ec}`,zIndex:2,boxShadow:"0 1px 3px rgba(0,0,0,0.15)"}}>
+                        <div style={{fontSize:10,fontWeight:700,color:"#fff",lineHeight:1.2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{b.purpose||b.name}</div>
+                        {b.duration*HOUR_H>30&&<div style={{fontSize:9,color:"rgba(255,255,255,0.85)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{b.name}</div>}
+                      </div>
+                    );
+                  })}
+                  {/* Ghost blocks for cart drafts */}
+                  {cartNewDrafts.filter(d=>d.date===dk&&d.facility_id===fac.id).map((d,gi)=>(
+                    <div key={"g"+gi} title={"🛒 In cart"} style={{position:"absolute",top:(d.start_hour-CAL_START)*HOUR_H,height:Math.max(d.duration*HOUR_H-2,16),left:3,right:3,background:"rgba(245,158,11,0.15)",border:"2px dashed #f59e0b",borderRadius:6,padding:"2px 5px",pointerEvents:"none",zIndex:1}}>
+                      <div style={{fontSize:9,fontWeight:700,color:"#92400e",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>🛒 {d.purpose}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </Modal>
   );
 }
 
@@ -4033,6 +4157,8 @@ export default function App() {
   const [tab,      setTab]      =useState("about");
   const [selFac,   setSelFac]   =useState("all");
   const [showForm, setShowForm] =useState(false);
+  const [focusedDate, setFocusedDate] = useState(new Date());
+  const [dayPopupDate, setDayPopupDate] = useState(null);
   const [showCart, setShowCart]       =useState(false);
   const [cart,     setCart]           =useState([]); // { drafts, name, email, isMultiEdit? }[]
   const [deleteQueue,setDeleteQueue]  =useState([]); // bookings queued for removal
@@ -4300,7 +4426,7 @@ export default function App() {
   },[bookings,loading,listBookerFilter]);
   useEffect(()=>{ loadSettings(); /* eslint-disable-next-line */ },[]);
 
-  const openNew=useCallback((date,startHour,duration=1)=>{setEditing(null);setPrefill({date,startHour,duration});setShowForm(true);},[]);
+  const openNew=useCallback((date,startHour,duration=1,facility=null)=>{setEditing(null);setPrefill({date,startHour,duration,facility});setDayPopupDate(null);setShowForm(true);},[]);
   const openEdit=useCallback((b)=>{setEditing({...b});setViewing(null);setShowForm(true);},[]);
 
   bookings.forEach(b=>emailColor(b.email));
@@ -4750,8 +4876,8 @@ export default function App() {
 
         {(tab==="calendar"||tab==="month"||tab==="list")&&<FacilityPills/>}
 
-        {tab==="calendar"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<WeekCalendar bookings={bookings} selectedFacility={selFac} onNewBooking={openNew} onBookingClick={setViewing} cartSourceIds={new Set(cart.flatMap(i=>i.sourceIds||[]))} deleteIds={new Set(deleteQueue.map(b=>b.id))} cartNewDrafts={cart.flatMap(i=>(i.sourceIds||[]).length===0?i.drafts:[])} onSyncMonth={isAdmin?handleSyncMonth:undefined} syncingMonth={syncingMonth}/>}</div>}
-        {tab==="month"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<MonthCalendar bookings={bookings} selectedFacility={selFac} onBookingClick={setViewing} onNewBooking={openNew} onMultiDelete={queueMultiForRemoval} onMultiAddToCart={handleMultiAddToCart} loggedInEmail={loggedInEmail} isAdmin={isAdmin} cartSourceIds={new Set(cart.flatMap(i=>i.sourceIds||[]))} deleteIds={new Set(deleteQueue.map(b=>b.id))} cartNewDrafts={cart.flatMap(i=>(i.sourceIds||[]).length===0?i.drafts:[])} onSyncMonth={isAdmin?handleSyncMonth:undefined} syncingMonth={syncingMonth}/>}</div>}
+        {tab==="calendar"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<WeekCalendar bookings={bookings} selectedFacility={selFac} onNewBooking={openNew} onBookingClick={setViewing} cartSourceIds={new Set(cart.flatMap(i=>i.sourceIds||[]))} deleteIds={new Set(deleteQueue.map(b=>b.id))} cartNewDrafts={cart.flatMap(i=>(i.sourceIds||[]).length===0?i.drafts:[])} focusedDate={focusedDate} setFocusedDate={setFocusedDate} onOpenDay={setDayPopupDate}/>}</div>}
+        {tab==="month"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<MonthCalendar bookings={bookings} selectedFacility={selFac} onBookingClick={setViewing} onNewBooking={openNew} onMultiDelete={queueMultiForRemoval} onMultiAddToCart={handleMultiAddToCart} loggedInEmail={loggedInEmail} isAdmin={isAdmin} cartSourceIds={new Set(cart.flatMap(i=>i.sourceIds||[]))} deleteIds={new Set(deleteQueue.map(b=>b.id))} cartNewDrafts={cart.flatMap(i=>(i.sourceIds||[]).length===0?i.drafts:[])} onOpenDay={setDayPopupDate} onGotoWeek={dk=>{ setFocusedDate(new Date(dk+"T00:00:00")); setTab("calendar"); }}/>}</div>}
 
         {tab==="list"&&(
           <div style={S.card}>
@@ -4973,7 +5099,7 @@ export default function App() {
       {showForm&&(
         <Modal title={editing?"Edit Booking":"New Booking Request"} onClose={()=>{setShowForm(false);setEditing(null);}} width={620}>
           <BookingForm
-            booking={editing!==null?editing:(prefill.date?{date:prefill.date,start_hour:prefill.startHour,duration:prefill.duration}:null)}
+            booking={editing!==null?editing:(prefill.date?{date:prefill.date,start_hour:prefill.startHour,duration:prefill.duration,...(prefill.facility?{facility_id:prefill.facility}:{})}:null)}
             allBookings={bookings}
             onSave={handleSave}
             onAddToCart={handleAddToCart}
@@ -5000,6 +5126,14 @@ export default function App() {
         <Modal title="Booking Details" onClose={()=>setViewing(null)}>
           <BookingDetail booking={viewing} onEdit={()=>openEdit(viewing)} onClose={()=>setViewing(null)} onCancel={()=>queueForRemoval(viewing.id)} isAdmin={isAdmin} onStatusChange={status=>handleStatusChange(viewing,status)} loggedInEmail={loggedInEmail} allClashes={allClashes}/>
         </Modal>
+      )}
+
+      {dayPopupDate&&(
+        <DayTimelinePopup date={dayPopupDate} bookings={bookings} onClose={()=>setDayPopupDate(null)}
+          onBookingClick={b=>{ setDayPopupDate(null); setViewing(b); }}
+          onNewBooking={openNew}
+          cartNewDrafts={cart.flatMap(i=>(i.sourceIds||[]).length===0?i.drafts:[])}
+          deleteIds={new Set(deleteQueue.map(b=>b.id))} cartSourceIds={new Set(cart.flatMap(i=>i.sourceIds||[]))}/>
       )}
     </div>
   );
