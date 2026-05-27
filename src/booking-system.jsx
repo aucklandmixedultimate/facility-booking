@@ -145,6 +145,20 @@ function timeOverlaps(a,b) {
   return a.start_hour<b.start_hour+b.duration && a.start_hour+a.duration>b.start_hour;
 }
 function isAdminBooking(b)  { return b.email === "admin"; }
+// CPSA mismatch reasons are stored as a marker line in notes (no schema change),
+// mirroring the existing "[CPSA …]" submission marker pattern.
+const CPSA_MISMATCH_RE = /\[CPSA-MISMATCH\][^\n]*/g;
+function setMismatchNote(notes, reasons) {
+  const base = (notes||"").replace(CPSA_MISMATCH_RE,"").trim();
+  if (!reasons || !reasons.length) return base;
+  const marker = `[CPSA-MISMATCH] ${reasons.join(" | ")}`;
+  return base ? `${base}\n${marker}` : marker;
+}
+function parseMismatchNote(notes) {
+  const m = (notes||"").match(/\[CPSA-MISMATCH\]\s*([^\n]*)/);
+  return m ? m[1].split("|").map(s=>s.trim()).filter(Boolean) : [];
+}
+function stripMismatchNote(notes) { return (notes||"").replace(CPSA_MISMATCH_RE,"").trim(); }
 function getSameFacilityOverlaps(draft, others) {
   return others.filter(o => o.facility_id === draft.facility_id && timeOverlaps(draft, o));
 }
@@ -596,9 +610,10 @@ function BookingRow({ row, idx, onChange, onRemove, isOnly, isAdmin, isEditing, 
 // ─── Cart Modal ───────────────────────────────────────────────────────────────
 function CartModal({ cart, setCart, onClose, onSubmit, openNew, cartIdsSet }) {
   const [editingDraft, setEditingDraft] = useState(null); // {gi, di, draft}
-  const totalNew  = cart.filter(i=>!i.isEdit&&!i.isMultiEdit).reduce((s,i)=>s+i.drafts.length,0);
+  const totalNew  = cart.filter(i=>!i.isEdit&&!i.isMultiEdit&&!i.notifyOnly).reduce((s,i)=>s+i.drafts.length,0);
   const totalEdits = cart.filter(i=>i.isEdit||i.isMultiEdit).reduce((s,i)=>s+i.drafts.length,0);
-  const totalCount = totalNew + totalEdits;
+  const totalNotify = cart.filter(i=>i.notifyOnly).reduce((s,i)=>s+i.drafts.length,0);
+  const totalCount = totalNew + totalEdits + totalNotify;
 
   function removeDraft(gi, di) {
     setCart(prev => prev.map((item,i) => {
@@ -657,11 +672,13 @@ function CartModal({ cart, setCart, onClose, onSubmit, openNew, cartIdsSet }) {
                 const groups = groupDrafts(item.drafts);
                 return (
                   <div key={gi} style={{border:'1.5px solid #e2e8f0',borderRadius:12,overflow:'hidden'}}>
-                    <div style={{background:item.isEdit||item.isMultiEdit?'#eff6ff':'#f8fafc',padding:'10px 14px',display:'flex',alignItems:'center',borderBottom:'1px solid #e2e8f0'}}>
+                    <div style={{background:item.notifyOnly?'#fef9c3':item.isEdit||item.isMultiEdit?'#eff6ff':'#f8fafc',padding:'10px 14px',display:'flex',alignItems:'center',borderBottom:'1px solid #e2e8f0'}}>
                       <div style={{display:'flex',alignItems:'center',gap:8,flex:1,flexWrap:'wrap'}}>
                         <EmailChip email={item.email}/>
                         <span style={{fontSize:13,fontWeight:600,color:'#0f172a'}}>{item.name}</span>
-                        {(item.isEdit||item.isMultiEdit)
+                        {item.notifyOnly
+                          ? <span style={{fontSize:11,fontWeight:700,color:'#854d0e',background:'#fef08a',border:'1px solid #fde047',borderRadius:4,padding:'1px 7px'}}>🔔 notify · {item.newStatus==='cpsa_confirmed'?'CPSA confirmed':'CPSA mismatch'}</span>
+                          : (item.isEdit||item.isMultiEdit)
                           ? <span style={{fontSize:11,fontWeight:700,color:'#1d4ed8',background:'#dbeafe',border:'1px solid #93c5fd',borderRadius:4,padding:'1px 7px'}}>✏ edit</span>
                           : <span style={{fontSize:12,color:'#94a3b8'}}>· {item.drafts.length} booking{item.drafts.length>1?'s':''}</span>
                         }
@@ -1119,6 +1136,15 @@ function BookingDetail({booking,onEdit,onClose,onCancel,isAdmin,onStatusChange,l
           </div>
         )}
       </div>
+      {booking.status==="cpsa_review_needed"&&parseMismatchNote(booking.notes).length>0&&(
+        <div style={{background:"#fef9c3",border:"1px solid #fde047",borderRadius:10,padding:"12px 16px"}}>
+          <div style={{fontSize:12,fontWeight:700,color:"#713f12",textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:8,display:"flex",alignItems:"center",gap:6}}>⚠ Flagged inconsistencies vs CPSA</div>
+          <ul style={{margin:0,paddingLeft:18,display:"flex",flexDirection:"column",gap:4}}>
+            {parseMismatchNote(booking.notes).map((r,i)=>(<li key={i} style={{fontSize:13,color:"#854d0e"}}>{r}</li>))}
+          </ul>
+          <div style={{fontSize:11,color:"#a16207",marginTop:8}}>Detected during CPSA sync — reconcile before confirming.</div>
+        </div>
+      )}
       {isPast&&<div style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:"8px 12px",fontSize:12,color:"#64748b",display:"flex",alignItems:"center",gap:6}}>🔒 Past booking — {isAdmin?"admin can delete":"read-only"}</div>}
       <div><EmailChip email={booking.email}/></div>
       {[
@@ -1142,7 +1168,7 @@ function BookingDetail({booking,onEdit,onClose,onCancel,isAdmin,onStatusChange,l
         const cpsaLines=[];
         let m;
         while((m=cpsaRe.exec(booking.notes))!==null) cpsaLines.push({date:m[1],ref:m[2],url:m[3]});
-        const remainingNotes=booking.notes.replace(/\[CPSA [^\]]+\]\s*Ref\s+\S+\s*·\s*https?:\/\/\S+/g,"").trim();
+        const remainingNotes=stripMismatchNote(booking.notes.replace(/\[CPSA [^\]]+\]\s*Ref\s+\S+\s*·\s*https?:\/\/\S+/g,"")).trim();
         if(!cpsaLines.length&&!remainingNotes) return null;
         return <>
           {cpsaLines.map((c,i)=>(
@@ -4079,7 +4105,23 @@ function findMatchingUserBooking(allBookings, ev, facilityIds) {
   // Any time overlap is treated as a potential CPSA link (cpsa_review_needed minimum).
   // Exact match requires strong identity (>=3) AND time+duration alignment.
   const exact = best.identityScore >= 3 && best.score >= 7;
-  return { booking: best.booking, exact };
+
+  // Capture specific inconsistencies between the CPSA event and the matched booking,
+  // so the admin sees exactly what differs on a "CPSA Mismatch — AMUA Review" booking.
+  const b = best.booking;
+  const reasons = [];
+  if (b.start_hour !== start_hour)
+    reasons.push(`Time: booked ${fmtTime(b.start_hour)} vs CPSA ${fmtTime(start_hour)}`);
+  if (b.duration !== duration)
+    reasons.push(`Duration: booked ${b.duration}h vs CPSA ${duration}h`);
+  if (!facilityIds.includes(b.facility_id)) {
+    const facName = f=>FACILITIES.find(x=>x.id===f)?.name || f;
+    reasons.push(`Facility: booked ${facName(b.facility_id)} vs CPSA ${facilityIds.map(facName).join("/")}`);
+  }
+  if (best.identityScore < 4)
+    reasons.push(`Name: "${b.name}" only loosely matches CPSA "${team}"`);
+
+  return { booking: b, exact, reasons };
 }
 
 // Maps facility mentions in EventName to internal facility IDs
@@ -4257,6 +4299,7 @@ export default function App() {
       let added = 0, skipped = 0, removed = 0, cpsaConfirmed = 0, cpsaReviewNeeded = 0;
       const currentBookings = configured ? (await sb.select("bookings")) : bookings;
       const matchedUserIds = new Set();
+      const cpsaNotifications = []; // notify-only cart items for first-time CPSA status changes
 
       // Build set of canonical keys for this month's feed
       const feedKeys = new Set();
@@ -4312,13 +4355,30 @@ export default function App() {
             }
           }
 
-          if (match.booking.status !== targetStatus) {
+          // Record/clear mismatch reasons in notes so the admin sees what differs.
+          const newNotes = targetStatus === "cpsa_review_needed"
+            ? setMismatchNote(match.booking.notes, match.reasons)
+            : stripMismatchNote(match.booking.notes);
+          const statusChanged = match.booking.status !== targetStatus;
+          const notesChanged  = (match.booking.notes || "") !== newNotes;
+          if (statusChanged || notesChanged) {
+            const patch = { status: targetStatus, notes: newNotes, updated_at: new Date().toISOString() };
             if (configured) {
-              await sb.update("bookings", match.booking.id, { status: targetStatus, updated_at: new Date().toISOString() });
+              await sb.update("bookings", match.booking.id, patch);
             } else {
-              setBookings(prev => prev.map(b => b.id === match.booking.id ? { ...b, status: targetStatus } : b));
+              setBookings(prev => prev.map(b => b.id === match.booking.id ? { ...b, ...patch } : b));
             }
+          }
+          if (statusChanged) {
             if (match.exact) cpsaConfirmed++; else cpsaReviewNeeded++;
+            // First-time transition into a CPSA status → queue a notify-only cart item.
+            if (match.booking.email && !isAdminBooking(match.booking)) {
+              cpsaNotifications.push({
+                drafts: [{ ...match.booking, status: targetStatus, notes: newNotes }],
+                name: match.booking.name, email: match.booking.email,
+                notifyOnly: true, newStatus: targetStatus,
+              });
+            }
           }
           continue;
         }
@@ -4376,11 +4436,15 @@ export default function App() {
       }
       if (configured && clashUpdates > 0) await loadBookings();
 
+      // Queue CPSA status-change notifications in the cart (notify-only, no booking edits).
+      if (cpsaNotifications.length) setCart(prev => [...prev, ...cpsaNotifications]);
+
       const clashMsg = clashUpdates > 0 ? `, ${clashUpdates} clash${clashUpdates>1?"es":""} flagged` : "";
       const removedMsg = removed > 0 ? `, ${removed} stale removed` : "";
       const cpsaMsg = cpsaConfirmed > 0 ? `, ${cpsaConfirmed} CPSA-confirmed` : "";
       const cpsaRevMsg = cpsaReviewNeeded > 0 ? `, ${cpsaReviewNeeded} need AMUA review` : "";
-      showToast(`Sync complete: ${added} added, ${skipped} already existed${cpsaMsg}${cpsaRevMsg}${removedMsg}${clashMsg}.`);
+      const notifyMsg = cpsaNotifications.length ? `, ${cpsaNotifications.length} queued in cart to notify` : "";
+      showToast(`Sync complete: ${added} added, ${skipped} already existed${cpsaMsg}${cpsaRevMsg}${notifyMsg}${removedMsg}${clashMsg}.`);
     } catch(e) {
       showToast("Sync failed: " + e.message, "error");
     } finally {
@@ -4718,14 +4782,25 @@ export default function App() {
 
   async function handleCartSubmit() {
     if (cart.length === 0) return;
-    const allDrafts = cart.flatMap(item => item.drafts);
-    // Save all drafts — handleSave skips email so we can send grouped below
-    const name = cart[0].name, email = cart[0].email;
-    await handleSave(allDrafts, name, email, { skipEmail: true });
+    // Notify-only items (CPSA status changes from sync) are NOT re-saved — the
+    // booking was already updated during sync; the cart only drives notification.
+    const saveItems = cart.filter(item => !item.notifyOnly);
+    const notifyItems = cart.filter(item => item.notifyOnly);
+    const allDrafts = saveItems.flatMap(item => item.drafts);
+    if (allDrafts.length) {
+      const name = (saveItems[0]||{}).name, email = (saveItems[0]||{}).email;
+      await handleSave(allDrafts, name, email, { skipEmail: true });
+    }
 
     if (!silentMode) {
+      // CPSA status-change notifications (notify-only)
+      for (const item of notifyItems) {
+        const b = item.drafts[0];
+        sendApprovalEmail({to:item.email, subject:item.newStatus==="cpsa_confirmed"?"Booking Confirmed by CPSA":"Booking Needs Review (CPSA Mismatch)",
+          html:buildApprovalEmailHtml({name:item.name,email:item.email,bookings:[b],newStatus:item.newStatus,adminNote:item.newStatus==="cpsa_review_needed"?parseMismatchNote(b.notes).join("; "):""})});
+      }
       // New bookings: group by email and send one order confirmation each
-      const newItems = cart.filter(item => !item.isEdit && !item.isMultiEdit);
+      const newItems = saveItems.filter(item => !item.isEdit && !item.isMultiEdit);
       const byEmailNew = {};
       newItems.forEach(item => {
         const k = item.email.toLowerCase();
