@@ -1559,7 +1559,10 @@ function WeekCalendar({ bookings, onNewBooking, onBookingClick, selectedFacility
                             {!isAdmin_bk&&<span style={{width:7,height:7,borderRadius:"50%",background:ec,flexShrink:0,boxShadow:"0 0 0 1px rgba(255,255,255,0.4)",display:"inline-block"}}/>}
                             {b.status==="cpsa_review_needed"&&<span style={{fontSize:9,flexShrink:0,lineHeight:1}}>⚠</span>}
                             {b.status==="cpsa_confirmed"&&<span style={{fontSize:9,flexShrink:0,lineHeight:1}}>🌐</span>}
-                            <div style={{ fontSize:11, fontWeight:700, color:bkTxt, lineHeight:1.3, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{b.purpose||b.name}</div>
+                            <div style={{ fontSize:11, fontWeight:700, color:bkTxt, lineHeight:1.3, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                              {b.purpose||b.name}
+                              {!isAdmin_bk&&b.email&&<span style={{fontWeight:500,color:bkTxtMuted,marginLeft:4}}>· {b.email.split("@")[0]}</span>}
+                            </div>
                           </div>
                           {b.duration*HOUR_H>22&&!isAdmin_bk&&<div style={{ fontSize:9, color:bkTxtMuted, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", paddingLeft:10 }}>{b.name}</div>}
                           {b.duration*HOUR_H>32&&<div style={{display:"flex",alignItems:"center",gap:3,marginTop:1,paddingLeft:10}}>
@@ -1733,7 +1736,10 @@ function MonthCalendar({ bookings, onBookingClick, onNewBooking, selectedFacilit
                       {!isAdmin_bk&&<span style={{width:6,height:6,borderRadius:"50%",background:ec,flexShrink:0,display:"inline-block",boxShadow:"0 0 0 1px rgba(255,255,255,0.35)"}}/>}
                       {b.status==="cpsa_review_needed"&&<span style={{fontSize:8,flexShrink:0,lineHeight:1}}>⚠</span>}
                       {b.status==="cpsa_confirmed"&&<span style={{fontSize:8,flexShrink:0,lineHeight:1}}>🌐</span>}
-                      <span style={{overflow:"hidden",textOverflow:"ellipsis",flex:1}}>{fmtTime(b.start_hour)} {b.purpose||b.name}</span>
+                      <span style={{overflow:"hidden",textOverflow:"ellipsis",flex:1}}>
+                        {fmtTime(b.start_hour)} {b.purpose||b.name}
+                        {!isAdmin_bk&&b.email&&<span style={{fontWeight:500,opacity:0.75,marginLeft:3}}>· {b.email.split("@")[0]}</span>}
+                      </span>
                       {b.invoiced&&<span style={{fontSize:8,flexShrink:0}}>🧾</span>}
                     </div>
                   );
