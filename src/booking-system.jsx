@@ -4249,49 +4249,282 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
       {/* Mismatch triage panel */}
       {showMismatchPanel&&(()=>{
         const mismatches=bookings.filter(b=>b.status==="cpsa_review_needed"&&!isAdminBooking(b));
-        const thS2={padding:"6px 10px",textAlign:"left",fontWeight:700,color:"#92400e",whiteSpace:"nowrap",borderBottom:"1px solid #fde68a",fontSize:11,textTransform:"uppercase",letterSpacing:"0.04em"};
-        const tdS2={padding:"6px 10px",borderBottom:"1px solid #fde68a",verticalAlign:"middle"};
-        function mismatchCSV(){
-          const hdr="Name,Email,Date,Facility,Booked,CPSA Says,Resolution,Billing";
-          const esc=v=>`"${String(v).replace(/"/g,'""')}"`;
-          const rows=mismatches.map(b=>{
-            const fac=FACILITIES.find(x=>x.id===b.facility_id);
-            const reasons=parseMismatchNote(b.system_notes,b.notes);
-            const cpsaVals=extractCpsaAmendValues(reasons,b);
-            const saved=parseCpsaResolution(b.system_notes);
-            const rs=mismatchResState[b.id];
-            return [b.name,b.email,b.date,fac?.name||b.facility_id,
-              `${fmtTime(b.start_hour)}–${fmtTime(b.start_hour+b.duration)} ${b.duration}h`,
-              `${fmtTime(cpsaVals.start_hour)}–${fmtTime(cpsaVals.start_hour+cpsaVals.duration)} ${cpsaVals.duration}h`,
-              rs?.resolution||saved?.resolution||"pending",
-              rs?.billingState||saved?.billingState||"none"
-            ].map(esc).join(",");
-          });
-          return [hdr,...rows].join("\n");
-        }
-        // Suggest a billing state when resolution "amended" is chosen for an invoiced booking.
+        const thS2={padding:"7px 10px",textAlign:"left",fontWeight:700,color:"#92400e",whiteSpace:"nowrap",borderBottom:"1px solid #fde68a",fontSize:11,textTransform:"uppercase",letterSpacing:"0.04em"};
+        const tdS2={padding:"7px 10px",borderBottom:"1px solid #fde68a",verticalAlign:"top"};
+
+        // Suggest a billing state when "amended" is chosen for an invoiced booking.
         function suggestBillingState(b, reasons) {
           if (!b.invoiced) return "none";
-          const cpsaVals = extractCpsaAmendValues(reasons, b);
-          const delta = cpsaVals.duration - b.duration;
-          if (delta > 0) return "invoice_pending";
-          if (delta < 0) return "credit_pending";
-          return "none";
+          const cv=extractCpsaAmendValues(reasons,b);
+          const delta=cv.duration-b.duration;
+          return delta>0?"invoice_pending":delta<0?"credit_pending":"none";
         }
-        const BILLING_LABELS = { none:"— no adjustment", credit_pending:"Credit pending", invoice_pending:"Invoice pending", credited:"Credited ✓", invoiced:"Invoiced ✓" };
-        const RES_LABELS = { pending:"Pending review", amended:"Amended (CPSA intended)", to_correct:"CPSA to correct" };
+
+        // Derive overall resolution from per-field selections.
+        // Returns "amended"|"to_correct"|"pending"
+        function deriveResolution(changedFields, fieldSel) {
+          if (!changedFields.length) return "to_correct";
+          const allSelected=changedFields.every(f=>fieldSel[f]);
+          if (!allSelected) return "pending";
+          const hasCpsa=changedFields.some(f=>fieldSel[f]==="cpsa");
+          const allOurs=changedFields.every(f=>fieldSel[f]==="ours");
+          return allOurs?"to_correct":"amended";
+        }
+
+        // Rich HTML email for clipboard, plain text fallback.
+        async function copyEmailFormat() {
+          const dateStr = new Date().toLocaleDateString("en-NZ",{day:"numeric",month:"long",year:"numeric"});
+          const rowsHtml = mismatches.map(b=>{
+            const fac=FACILITIES.find(x=>x.id===b.facility_id);
+            const reasons=parseMismatchNote(b.system_notes,b.notes);
+            const cv=extractCpsaAmendValues(reasons,b);
+            const cfac=FACILITIES.find(x=>x.id===cv.facility_id);
+            const changes=reasons.join("; ");
+            return `<tr>
+              <td style="padding:8px 12px;border-bottom:1px solid #fde68a">${b.name}<br><span style="color:#64748b;font-size:11px">${b.email}</span></td>
+              <td style="padding:8px 12px;border-bottom:1px solid #fde68a;white-space:nowrap">${fmtDate(b.date)}</td>
+              <td style="padding:8px 12px;border-bottom:1px solid #fde68a;white-space:nowrap">${fac?.name||b.facility_id}</td>
+              <td style="padding:8px 12px;border-bottom:1px solid #fde68a;white-space:nowrap"><span style="text-decoration:line-through;color:#94a3b8">${fmtTime(b.start_hour)}–${fmtTime(b.start_hour+b.duration)}, ${b.duration}h${b.facility_id!==cv.facility_id?" ("+fac?.name+")":""}</span><br><span style="color:#a16207;font-weight:700">→ ${fmtTime(cv.start_hour)}–${fmtTime(cv.start_hour+cv.duration)}, ${cv.duration}h${b.facility_id!==cv.facility_id?" ("+(cfac?.name||cv.facility_id)+")":""}</span></td>
+              <td style="padding:8px 12px;border-bottom:1px solid #fde68a;font-size:11px;color:#64748b">${changes}</td>
+            </tr>`;
+          }).join("");
+          const html=`<div style="font-family:sans-serif;font-size:13px;color:#0f172a;max-width:720px">
+<h3 style="color:#a16207;margin:0 0 8px">⚡ CPSA Mismatch Report — ${dateStr}</h3>
+<p style="color:#475569;margin:0 0 16px">The following ${mismatches.length} field booking${mismatches.length!==1?"s":""} have discrepancies between our records and CPSA data. Please review and advise whether each reflects your intended booking.</p>
+<table cellpadding="0" cellspacing="0" style="border-collapse:collapse;width:100%;font-size:12px;border:1px solid #fde68a;border-radius:8px;overflow:hidden">
+<thead><tr style="background:#fef3c7">
+  <th style="padding:8px 12px;text-align:left;font-weight:700;color:#92400e">Booker</th>
+  <th style="padding:8px 12px;text-align:left;font-weight:700;color:#92400e">Date</th>
+  <th style="padding:8px 12px;text-align:left;font-weight:700;color:#92400e">Field</th>
+  <th style="padding:8px 12px;text-align:left;font-weight:700;color:#92400e">Booked → CPSA</th>
+  <th style="padding:8px 12px;text-align:left;font-weight:700;color:#92400e">Changes</th>
+</tr></thead>
+<tbody>${rowsHtml}</tbody>
+</table>
+<p style="color:#94a3b8;font-size:11px;margin:12px 0 0">Generated by FacilityBook · ${dateStr}</p>
+</div>`;
+          const plain=["CPSA Mismatch Report — "+dateStr,"","Booker\tDate\tField\tBooked\tCPSA Says\tChanges",
+            ...mismatches.map(b=>{
+              const fac=FACILITIES.find(x=>x.id===b.facility_id);
+              const reasons=parseMismatchNote(b.system_notes,b.notes);
+              const cv=extractCpsaAmendValues(reasons,b);
+              return [b.name,b.email,fmtDate(b.date),fac?.name||b.facility_id,
+                `${fmtTime(b.start_hour)}–${fmtTime(b.start_hour+b.duration)} ${b.duration}h`,
+                `${fmtTime(cv.start_hour)}–${fmtTime(cv.start_hour+cv.duration)} ${cv.duration}h`,
+                reasons.join("; ")].join("\t");
+            })
+          ].join("\n");
+          try {
+            await navigator.clipboard.write([new ClipboardItem({"text/html":new Blob([html],{type:"text/html"}),"text/plain":new Blob([plain],{type:"text/plain"})})]);
+          } catch { navigator.clipboard?.writeText(plain); }
+        }
+
+        // Billing display helpers
+        const BILLING_COLOR = {credit_pending:"#d97706",invoice_pending:"#2563eb",credited:"#15803d",invoiced:"#5b21b6"};
+        const BILLING_LABEL = {none:"—",credit_pending:"Credit pending",invoice_pending:"Invoice pending",credited:"Credited ✓",invoiced:"Invoiced ✓"};
+
+        // Each row is a component so it can hold its own useState hooks.
+        function MismatchRow({b, rowIdx}) {
+          const reasons=parseMismatchNote(b.system_notes,b.notes);
+          const cpsaVals=extractCpsaAmendValues(reasons,b);
+          const fac=FACILITIES.find(x=>x.id===b.facility_id);
+          const cpsaFac=FACILITIES.find(x=>x.id===cpsaVals.facility_id);
+          const facChanged=cpsaVals.facility_id!==b.facility_id;
+          const timeChanged=cpsaVals.start_hour!==b.start_hour;
+          const durChanged=cpsaVals.duration!==b.duration;
+          const changedFields=[
+            ...(facChanged?["facility"]:[]),
+            ...(timeChanged?["time"]:[]),
+            ...(durChanged?["duration"]:[]),
+          ];
+
+          const saved=parseCpsaResolution(b.system_notes);
+          const local=mismatchResState[b.id];
+          const fieldSel=local?.fieldSel||{};
+          const curBilling=local?.billingState??saved?.billingState??"none";
+          const alreadySettled=saved?.billingState==="credited"||saved?.billingState==="invoiced";
+          const [showWarn,setShowWarn]=useState(false);
+
+          // Derive resolution from per-field selections
+          const curRes=deriveResolution(changedFields, fieldSel);
+
+          function pickField(field, who) {
+            if (alreadySettled && who==="cpsa") setShowWarn(true);
+            const newSel={...fieldSel,[field]:who};
+            const newRes=deriveResolution(changedFields,newSel);
+            const auto=newRes==="amended"?suggestBillingState(b,reasons):"none";
+            setMismatchResState(prev=>({
+              ...prev,
+              [b.id]:{
+                ...prev[b.id],
+                resolution:newRes,
+                billingState:prev[b.id]?.billingState??auto,
+                fieldSel:newSel
+              }
+            }));
+          }
+          function resetField(field) {
+            const newSel={...fieldSel};delete newSel[field];
+            const newRes=deriveResolution(changedFields,newSel);
+            setMismatchResState(prev=>({
+              ...prev,
+              [b.id]:{...prev[b.id],resolution:newRes,fieldSel:newSel}
+            }));
+          }
+          function setBilling(bs) {
+            setMismatchResState(prev=>({...prev,[b.id]:{...prev[b.id],resolution:curRes,billingState:bs}}));
+          }
+          function doSave() { saveMismatchResolution(b,curRes,curBilling); }
+
+          const isDirty=!!local;
+          const rowBg=rowIdx%2===0?"#fff":"#fffbeb";
+          const btnPill={fontFamily:"inherit",fontSize:11,fontWeight:600,borderRadius:5,padding:"3px 8px",cursor:"pointer",border:"1.5px solid",display:"inline-flex",alignItems:"center",gap:3,whiteSpace:"nowrap",lineHeight:1.4};
+
+          // Render a value pair as two clickable buttons.
+          // who="ours"|"cpsa"|undefined (not yet selected)
+          function ValPair({field, ourVal, cpsaVal, changed, prefix}) {
+            if (!changed) return <span style={{color:"#475569",fontSize:12}}>{ourVal}</span>;
+            const sel=fieldSel[field];
+            const oursActive=sel==="ours";
+            const cpsaActive=sel==="cpsa";
+            return (
+              <div style={{display:"flex",flexDirection:"column",gap:3}}>
+                {prefix&&<span style={{fontSize:10,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.03em",fontWeight:700}}>{prefix}</span>}
+                <button
+                  style={{...btnPill,
+                    background:oursActive?"#dbeafe":"#f8fafc",
+                    borderColor:oursActive?"#3b82f6":"#cbd5e1",
+                    color:oursActive?"#1e40af":"#64748b",
+                    textDecoration:cpsaActive?"line-through":undefined,
+                    opacity:cpsaActive?0.55:1
+                  }}
+                  title="Our record — click to mark CPSA should correct this"
+                  onClick={()=>sel==="ours"?resetField(field):pickField(field,"ours")}
+                >{oursActive?"✓ ":""}{ourVal}</button>
+                <button
+                  style={{...btnPill,
+                    background:cpsaActive?"#fef9c3":"#f8fafc",
+                    borderColor:cpsaActive?"#f59e0b":"#cbd5e1",
+                    color:cpsaActive?"#92400e":"#475569",
+                    fontWeight:cpsaActive?700:600,
+                    opacity:oursActive?0.55:1
+                  }}
+                  title="CPSA value — click to accept and amend our record"
+                  onClick={()=>sel==="cpsa"?resetField(field):pickField(field,"cpsa")}
+                >{cpsaActive?"✓ ":"→ "}{cpsaVal}</button>
+              </div>
+            );
+          }
+
+          return (
+            <tr style={{background:rowBg}}>
+              {/* Booker */}
+              <td style={tdS2}>
+                <div style={{fontWeight:600,color:"#0f172a",whiteSpace:"nowrap"}}>{b.name}</div>
+                <div style={{color:"#64748b",fontSize:10}}>{b.email}</div>
+                {b.invoiced&&<span style={{fontSize:10,fontWeight:700,background:"#f5f3ff",color:"#5b21b6",border:"1px solid #ddd6fe",borderRadius:4,padding:"1px 4px",display:"inline-block",marginTop:2}}>🧾 invoiced</span>}
+              </td>
+              {/* Date */}
+              <td style={{...tdS2,whiteSpace:"nowrap",color:"#475569"}}>{fmtDate(b.date)}</td>
+              {/* Field — button pair if changed */}
+              <td style={tdS2}>
+                <div style={{display:"inline-flex",alignItems:"flex-start",gap:4}}>
+                  <span style={{width:7,height:7,borderRadius:2,background:fac?.color||"#94a3b8",display:"inline-block",flexShrink:0,marginTop:5}}/>
+                  <ValPair field="facility" ourVal={fac?.name||b.facility_id} cpsaVal={cpsaFac?.name||cpsaVals.facility_id} changed={facChanged}/>
+                </div>
+              </td>
+              {/* Time — button pair if changed */}
+              <td style={tdS2}>
+                <ValPair field="time"
+                  ourVal={`${fmtTime(b.start_hour)}–${fmtTime(b.start_hour+b.duration)}`}
+                  cpsaVal={`${fmtTime(cpsaVals.start_hour)}–${fmtTime(cpsaVals.start_hour+cpsaVals.duration)}`}
+                  changed={timeChanged}/>
+              </td>
+              {/* Duration — button pair if changed */}
+              <td style={tdS2}>
+                <ValPair field="duration" ourVal={`${b.duration}h`} cpsaVal={`${cpsaVals.duration}h`} changed={durChanged}/>
+              </td>
+              {/* Actions: status indicator + billing + save */}
+              <td style={{...tdS2,minWidth:170}}>
+                <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                  {/* Resolution status derived from field buttons */}
+                  {curRes!=="pending"&&(
+                    <div style={{fontSize:10,fontWeight:700,
+                      color:curRes==="amended"?"#a16207":"#5b21b6",
+                      background:curRes==="amended"?"#fef9c3":"#f5f3ff",
+                      border:`1px solid ${curRes==="amended"?"#fde68a":"#ddd6fe"}`,
+                      borderRadius:4,padding:"2px 7px",display:"inline-block"}}>
+                      {curRes==="amended"?"✓ Amended":"↩ CPSA to correct"}
+                    </div>
+                  )}
+                  {curRes==="pending"&&changedFields.length>0&&(
+                    <div style={{fontSize:10,color:"#94a3b8"}}>← Click values to resolve</div>
+                  )}
+                  {/* Warning when billing already settled */}
+                  {showWarn&&alreadySettled&&(
+                    <div style={{fontSize:10,background:"#fef2f2",border:"1px solid #fecaca",borderRadius:4,padding:"3px 7px",color:"#b91c1c"}}>⚠ Billing already settled from invoice view</div>
+                  )}
+                  {/* Billing adjustment (only when amended + invoiced) */}
+                  {curRes==="amended"&&b.invoiced&&(()=>{
+                    const delta=cpsaVals.duration-b.duration;
+                    const ghost=(col)=>({fontFamily:"inherit",fontSize:11,fontWeight:700,borderRadius:5,padding:"3px 9px",cursor:"pointer",background:"transparent",border:`1.5px solid ${col}`,color:col});
+                    return (
+                      <div style={{borderTop:"1px dashed #fde68a",paddingTop:4}}>
+                        <div style={{fontSize:10,fontWeight:700,color:"#92400e",textTransform:"uppercase",letterSpacing:"0.04em",marginBottom:3}}>Billing</div>
+                        {curBilling==="none"&&(
+                          <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
+                            {delta<=0&&<button style={ghost("#15803d")} onClick={()=>setBilling("credit_pending")}>Credit pending</button>}
+                            {delta>=0&&<button style={ghost("#2563eb")} onClick={()=>setBilling("invoice_pending")}>Invoice pending</button>}
+                            <button style={ghost("#94a3b8")} onClick={()=>setBilling("nochange")}>No adj.</button>
+                          </div>
+                        )}
+                        {(curBilling==="credit_pending"||curBilling==="invoice_pending")&&(
+                          <div style={{display:"flex",gap:4,alignItems:"center"}}>
+                            <span style={{fontSize:11,fontWeight:700,color:BILLING_COLOR[curBilling]}}>{BILLING_LABEL[curBilling]}</span>
+                            <button style={{fontFamily:"inherit",fontSize:11,border:"1.5px solid #cbd5e1",borderRadius:4,background:"transparent",color:"#94a3b8",cursor:"pointer",padding:"1px 5px"}} onClick={()=>setBilling("none")}>↩</button>
+                          </div>
+                        )}
+                        {(curBilling==="credited"||curBilling==="invoiced")&&(
+                          <span style={{fontSize:11,fontWeight:700,color:BILLING_COLOR[curBilling]}}>{BILLING_LABEL[curBilling]}</span>
+                        )}
+                      </div>
+                    );
+                  })()}
+                  {/* Save */}
+                  {isDirty&&curRes!=="pending"&&(
+                    <button style={{fontFamily:"inherit",fontSize:11,fontWeight:700,borderRadius:6,padding:"4px 12px",cursor:"pointer",background:"#f59e0b",color:"#fff",border:"none"}}
+                      onClick={doSave}>Save resolution</button>
+                  )}
+                </div>
+              </td>
+            </tr>
+          );
+        }
+
         return (
           <div style={{background:"#fffbeb",border:"1.5px solid #fde68a",borderRadius:12,padding:16,display:"flex",flexDirection:"column",gap:10}}>
             <div style={{display:"flex",alignItems:"center",gap:8,justifyContent:"space-between",flexWrap:"wrap"}}>
               <div>
                 <span style={{fontWeight:700,fontSize:14,color:"#b45309"}}>⚡ {mismatches.length} CPSA mismatch{mismatches.length!==1?"es":""} pending review</span>
-                <div style={{fontSize:12,color:"#92400e",marginTop:2}}>Select a resolution per row and save. "Amended" overwrites booking values with CPSA values.</div>
+                <div style={{fontSize:12,color:"#92400e",marginTop:2}}>Click old or new values in each row to set resolution — amended bookings are updated to CPSA values.</div>
               </div>
-              <button onClick={()=>{
-                const blob=new Blob([mismatchCSV()],{type:"text/csv"});
-                const url=URL.createObjectURL(blob); const a=document.createElement("a");
-                a.href=url; a.download="cpsa-mismatches.csv"; a.click(); setTimeout(()=>URL.revokeObjectURL(url),1000);
-              }} style={S.btn({background:"#f59e0b",color:"#fff",fontWeight:700,fontSize:12})}>⬇ Export CSV</button>
+              <div style={{display:"flex",gap:6}}>
+                <button onClick={copyEmailFormat} style={S.btn({background:"#fff",border:"1.5px solid #fde68a",color:"#a16207",fontWeight:700,fontSize:12})}>📧 Copy email</button>
+                <button onClick={()=>{
+                  const blob=new Blob([["Name,Email,Date,Field,Booked,CPSA Says,Changes",...mismatches.map(b=>{
+                    const fac=FACILITIES.find(x=>x.id===b.facility_id);
+                    const reasons=parseMismatchNote(b.system_notes,b.notes);
+                    const cv=extractCpsaAmendValues(reasons,b);
+                    const esc=v=>`"${String(v).replace(/"/g,'""')}"`;
+                    return [b.name,b.email,b.date,fac?.name||b.facility_id,
+                      `${fmtTime(b.start_hour)}–${fmtTime(b.start_hour+b.duration)} ${b.duration}h`,
+                      `${fmtTime(cv.start_hour)}–${fmtTime(cv.start_hour+cv.duration)} ${cv.duration}h`,
+                      reasons.join("; ")].map(esc).join(",");
+                  })].join("\n")],{type:"text/csv"});
+                  const url=URL.createObjectURL(blob);const a=document.createElement("a");
+                  a.href=url;a.download="cpsa-mismatches.csv";a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+                }} style={S.btn({background:"#f59e0b",color:"#fff",fontWeight:700,fontSize:12})}>⬇ Export CSV</button>
+              </div>
             </div>
             {mismatches.length===0
               ? <div style={{fontSize:12,color:"#92400e"}}>No mismatches at this time. Run a sync to refresh.</div>
@@ -4299,88 +4532,13 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                   <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
                     <thead>
                       <tr style={{background:"#fef3c7"}}>
-                        {["Booker","Date","Field","Time","Dur","Resolution","Billing",""].map(h=>(
+                        {["Booker","Date","Field","Time","Dur","Resolution & Billing"].map(h=>(
                           <th key={h} style={thS2}>{h}</th>
                         ))}
                       </tr>
                     </thead>
                     <tbody>
-                      {mismatches.map((b,i)=>{
-                        const fac=FACILITIES.find(x=>x.id===b.facility_id);
-                        const reasons=parseMismatchNote(b.system_notes,b.notes);
-                        const cpsaVals=extractCpsaAmendValues(reasons,b);
-                        const cpsaFac=FACILITIES.find(x=>x.id===cpsaVals.facility_id);
-                        const saved=parseCpsaResolution(b.system_notes);
-                        const pending=mismatchResState[b.id];
-                        const curRes=pending?.resolution ?? saved?.resolution ?? "pending";
-                        const curBilling=pending?.billingState ?? saved?.billingState ?? "none";
-                        const isDirty=!!pending;
-                        const rowBg=i%2===0?"#fff":"#fffbeb";
-                        // Cell that shows current value, with strike-through + arrow + new value when changed.
-                        const diffCell = (curVal, newVal, changed) => (
-                          <span style={{whiteSpace:"nowrap"}}>
-                            <span style={changed?{color:"#94a3b8",textDecoration:"line-through"}:{color:"#475569"}}>{curVal}</span>
-                            {changed&&<>
-                              <span style={{color:"#a16207",margin:"0 4px"}}>→</span>
-                              <span style={{color:"#a16207",fontWeight:700}}>{newVal}</span>
-                            </>}
-                          </span>
-                        );
-                        const facChanged  = cpsaVals.facility_id !== b.facility_id;
-                        const timeChanged = cpsaVals.start_hour !== b.start_hour;
-                        const durChanged  = cpsaVals.duration !== b.duration;
-                        return (
-                          <tr key={b.id} style={{background:rowBg}}>
-                            <td style={tdS2}>
-                              <div style={{fontWeight:600,color:"#0f172a",whiteSpace:"nowrap"}}>{b.name}</div>
-                              <div style={{color:"#64748b",fontSize:10}}>{b.email}</div>
-                              {b.invoiced&&<span style={{fontSize:10,fontWeight:700,background:"#f5f3ff",color:"#5b21b6",border:"1px solid #ddd6fe",borderRadius:4,padding:"1px 4px"}}>🧾 invoiced</span>}
-                            </td>
-                            <td style={{...tdS2,whiteSpace:"nowrap",color:"#475569"}}>{fmtDate(b.date)}</td>
-                            <td style={tdS2}>
-                              <span style={{display:"inline-flex",alignItems:"center",gap:4,whiteSpace:"nowrap"}}>
-                                <span style={{width:7,height:7,borderRadius:2,background:fac?.color||"#94a3b8",display:"inline-block",flexShrink:0}}/>
-                                {diffCell(fac?.name||b.facility_id, cpsaFac?.name||cpsaVals.facility_id, facChanged)}
-                              </span>
-                            </td>
-                            <td style={tdS2}>
-                              {diffCell(
-                                `${fmtTime(b.start_hour)}–${fmtTime(b.start_hour+b.duration)}`,
-                                `${fmtTime(cpsaVals.start_hour)}–${fmtTime(cpsaVals.start_hour+cpsaVals.duration)}`,
-                                timeChanged
-                              )}
-                            </td>
-                            <td style={tdS2}>{diffCell(`${b.duration}h`, `${cpsaVals.duration}h`, durChanged)}</td>
-                            <td style={{...tdS2,minWidth:160}}>
-                              <select value={curRes} style={{fontSize:11,padding:"3px 6px",borderRadius:6,border:"1.5px solid "+(isDirty?"#f59e0b":"#fde68a"),background:"#fff",fontFamily:"inherit",color:"#0f172a",width:"100%"}}
-                                onChange={e=>{
-                                  const res=e.target.value;
-                                  const auto = res==="amended" ? suggestBillingState(b,reasons) : "none";
-                                  setMismatchResState(prev=>({...prev,[b.id]:{resolution:res,billingState:prev[b.id]?.billingState??auto}}));
-                                }}>
-                                {Object.entries(RES_LABELS).map(([v,l])=><option key={v} value={v}>{l}</option>)}
-                              </select>
-                            </td>
-                            <td style={{...tdS2,minWidth:140}}>
-                              {(b.invoiced||curRes==="amended")&&(
-                                <select value={curBilling} style={{fontSize:11,padding:"3px 6px",borderRadius:6,border:"1.5px solid "+(isDirty?"#f59e0b":"#fde68a"),background:"#fff",fontFamily:"inherit",color:"#0f172a",width:"100%"}}
-                                  onChange={e=>setMismatchResState(prev=>({...prev,[b.id]:{resolution:prev[b.id]?.resolution??curRes,billingState:e.target.value}}))}>
-                                  {Object.entries(BILLING_LABELS).map(([v,l])=><option key={v} value={v}>{l}</option>)}
-                                </select>
-                              )}
-                              {!b.invoiced&&curRes!=="amended"&&<span style={{color:"#94a3b8",fontSize:11}}>—</span>}
-                            </td>
-                            <td style={{...tdS2,whiteSpace:"nowrap"}}>
-                              {isDirty&&curRes!=="pending"
-                                ? <button onClick={()=>saveMismatchResolution(b,curRes,curBilling)}
-                                    style={S.btn({background:"#f59e0b",color:"#fff",fontWeight:700,fontSize:11,padding:"4px 10px"})}>Save</button>
-                                : <button onClick={()=>onView&&onView(b)}
-                                    style={S.btn({background:"#fff",border:"1px solid #fde68a",color:"#92400e",fontSize:11,padding:"4px 10px"})}>View</button>
-                              }
-                            </td>
-                          </tr>
-                        );
-                      })}
+                      {mismatches.map((b,i)=><MismatchRow key={b.id} b={b} rowIdx={i}/>)}
                     </tbody>
                   </table>
                 </div>
