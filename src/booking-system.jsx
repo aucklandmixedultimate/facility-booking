@@ -633,6 +633,110 @@ function ActivityLogModal({onClose}) {
   );
 }
 
+// Admin UI: map secondary emails into a primary profile.
+// `aliases` is { secondaryEmail: primaryEmail } — both keys lowercase.
+function UserMgmtModal({ bookings, aliases, onChange, onClose }) {
+  const allEmails = useMemo(() => {
+    const s = new Set();
+    bookings.forEach(b => { if (b.email && !isAdminBooking(b)) s.add(b.email.toLowerCase()); });
+    Object.keys(aliases||{}).forEach(k => s.add(k));
+    Object.values(aliases||{}).forEach(v => s.add(v));
+    return [...s].sort();
+  }, [bookings, aliases]);
+  // group emails by primary
+  const groups = useMemo(() => {
+    const g = {};
+    allEmails.forEach(em => {
+      const primary = aliases[em] || em;
+      if (!g[primary]) g[primary] = new Set();
+      g[primary].add(em);
+    });
+    return g;
+  }, [allEmails, aliases]);
+  const [linkSource, setLinkSource] = useState("");
+  const [linkTarget, setLinkTarget] = useState("");
+  function link() {
+    if (!linkSource || !linkTarget) return;
+    const src = linkSource.toLowerCase().trim();
+    const tgt = linkTarget.toLowerCase().trim();
+    if (src === tgt) return;
+    const next = { ...aliases };
+    // If target is itself an alias, resolve to its primary
+    const realTarget = next[tgt] || tgt;
+    // Anyone currently aliasing to src now aliases to realTarget
+    Object.keys(next).forEach(k => { if (next[k] === src) next[k] = realTarget; });
+    next[src] = realTarget;
+    onChange(next);
+    setLinkSource(""); setLinkTarget("");
+  }
+  function unlink(em) {
+    const next = { ...aliases };
+    delete next[em];
+    onChange(next);
+  }
+  return (
+    <Modal title="👤 User Management — Email Aliases" onClose={onClose} width={620}>
+      <div style={{fontSize:12,color:"#64748b",marginBottom:12,lineHeight:1.5}}>
+        Map a secondary email onto a primary profile. Bookings, filters and
+        summaries will treat both as the same user.
+      </div>
+      <div style={{background:"#f8fafc",border:"1.5px solid #e2e8f0",borderRadius:10,padding:12,marginBottom:14}}>
+        <div style={{fontSize:12,fontWeight:700,color:"#0f172a",marginBottom:8}}>Link two emails</div>
+        <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+          <select value={linkSource} onChange={e=>setLinkSource(e.target.value)}
+            style={{flex:"1 1 180px",padding:"6px 8px",borderRadius:6,border:"1.5px solid #e2e8f0",fontSize:13,fontFamily:"inherit",background:"#fff"}}>
+            <option value="">Secondary email…</option>
+            {allEmails.filter(em=>!aliases[em]).map(em=><option key={em} value={em}>{em}</option>)}
+          </select>
+          <span style={{fontSize:12,color:"#64748b"}}>→ map to</span>
+          <select value={linkTarget} onChange={e=>setLinkTarget(e.target.value)}
+            style={{flex:"1 1 180px",padding:"6px 8px",borderRadius:6,border:"1.5px solid #e2e8f0",fontSize:13,fontFamily:"inherit",background:"#fff"}}>
+            <option value="">Primary email…</option>
+            {allEmails.filter(em=>em!==linkSource).map(em=><option key={em} value={em}>{em}</option>)}
+          </select>
+          <button onClick={link} disabled={!linkSource||!linkTarget}
+            style={S.btn({background:linkSource&&linkTarget?"#0f172a":"#cbd5e1",color:"#fff",fontSize:12,cursor:linkSource&&linkTarget?"pointer":"not-allowed"})}>
+            Link
+          </button>
+        </div>
+      </div>
+      <div style={{fontSize:12,fontWeight:700,color:"#0f172a",marginBottom:6}}>Profiles ({Object.keys(groups).length})</div>
+      <div style={{display:"flex",flexDirection:"column",gap:8,maxHeight:"45vh",overflowY:"auto"}}>
+        {Object.entries(groups).sort(([a],[b])=>a.localeCompare(b)).map(([primary, set])=>{
+          const secondaries = [...set].filter(e=>e!==primary).sort();
+          return (
+            <div key={primary} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,padding:"8px 12px"}}>
+              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:secondaries.length?6:0}}>
+                <span style={{width:9,height:9,borderRadius:"50%",background:emailColor(primary),flexShrink:0}}/>
+                <span style={{fontSize:13,fontWeight:700,color:"#0f172a"}}>{primary}</span>
+                <span style={{fontSize:10,fontWeight:700,padding:"1px 6px",borderRadius:10,background:"#f1f5f9",color:"#475569"}}>primary</span>
+              </div>
+              {secondaries.length>0 && (
+                <div style={{display:"flex",flexDirection:"column",gap:4,paddingLeft:18}}>
+                  {secondaries.map(s=>(
+                    <div key={s} style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"#475569"}}>
+                      <span style={{color:"#94a3b8"}}>↪</span>
+                      <span style={{flex:1,wordBreak:"break-all"}}>{s}</span>
+                      <button onClick={()=>unlink(s)}
+                        style={{background:"#fff1f2",border:"1px solid #fda4af",borderRadius:4,color:"#f43f5e",cursor:"pointer",fontSize:11,fontWeight:600,padding:"2px 8px"}}>
+                        ✕ Unlink
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+        {Object.keys(groups).length===0 && <div style={{color:"#94a3b8",fontSize:13,textAlign:"center",padding:20}}>No bookers yet.</div>}
+      </div>
+      <div style={{marginTop:12,display:"flex",justifyContent:"flex-end"}}>
+        <button onClick={onClose} style={S.btn({background:"#0f172a",color:"#fff",fontSize:12})}>Done</button>
+      </div>
+    </Modal>
+  );
+}
+
 function UserMenuItem({icon, label, onClick, danger=false}) {
   const [hover, setHover] = useState(false);
   return (
@@ -753,14 +857,13 @@ function BookingRow({ row, idx, onChange, onRemove, isOnly, isAdmin, isEditing, 
   const [recurMode, setRecurMode] = useState(row.recur?.mode || "none");
   const [recurWeeks, setRecurWeeks] = useState(row.recur?.weeks || 4);
   const [recurUntil, setRecurUntil] = useState(row.recur?.until || "");
-  // Day-grid is the default selection UI for new bookings.
-  // Switches to manual once a slot is picked, or when toggled.
-  const [manualMode, setManualMode] = useState(isEditing);
+  // Manual entry for facility/time/duration. Day-grid picker opens in its own popup.
+  const [showPicker, setShowPicker] = useState(false);
 
   function upd(k,v) { onChange(idx, {...row, [k]:v}); }
   function pickSlot(facility_id, start_hour, duration) {
     onChange(idx, {...row, facility_id, start_hour, duration});
-    setManualMode(true);
+    setShowPicker(false);
   }
   function updRecur(changes) {
     const r = {mode:recurMode, weeks:recurWeeks, until:recurUntil, ...changes};
@@ -777,44 +880,50 @@ function BookingRow({ row, idx, onChange, onRemove, isOnly, isAdmin, isEditing, 
       {!isOnly && <button onClick={()=>onRemove(idx)} style={{position:"absolute",top:10,right:10,background:"#fff1f2",border:"1px solid #fda4af",borderRadius:6,color:"#f43f5e",cursor:"pointer",fontSize:12,fontWeight:700,padding:"2px 8px"}}>✕ Remove</button>}
       {!isOnly && <div style={{fontSize:11,fontWeight:700,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.08em"}}>Booking #{idx+1}</div>}
 
-      {/* Date row + manual toggle */}
+      {/* Date row + slot-picker launcher */}
       <div style={{display:"flex",alignItems:"flex-end",gap:10,flexWrap:"wrap"}}>
         <div style={{flex:"1 1 200px"}}>
           <label style={S.lbl}>Date *</label>
           <input style={S.inp} type="date" value={row.date} onChange={e=>upd("date",e.target.value)} min={todayKey()}/>
         </div>
-        <button type="button" onClick={()=>setManualMode(m=>!m)}
-          title={manualMode?"Use day grid to pick a slot":"Configure facility/time/duration directly"}
-          style={S.btn({border:`1.5px solid ${manualMode?"#6366f1":"#e2e8f0"}`,background:manualMode?"#eef2ff":"#fff",color:manualMode?"#4338ca":"#475569",fontSize:12,padding:"7px 12px"})}>
-          {manualMode?"📅 Day grid":"⌨ Manual"}
+        <button type="button" onClick={()=>setShowPicker(true)}
+          title="Pick a slot on the day grid"
+          style={S.btn({border:"1.5px solid #6366f1",background:"#eef2ff",color:"#4338ca",fontSize:12,padding:"7px 12px",fontWeight:700})}>
+          📅 Pick on day grid
         </button>
       </div>
 
-      {manualMode ? (
-        <>
-          <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:10}}>
-            <div>
-              <label style={S.lbl}>Facility *</label>
-              <select style={S.inp} value={row.facility_id} onChange={e=>upd("facility_id",e.target.value)}>
-                {FACILITIES.map(f=><option key={f.id} value={f.id}>{f.name}</option>)}
-              </select>
-            </div>
-            <div>
-              <label style={S.lbl}>Start Time *</label>
-              <select style={S.inp} value={row.start_hour} onChange={e=>upd("start_hour",parseFloat(e.target.value))}>
-                {Array.from({length:CAL_TOTAL*2+1},(_,i)=>CAL_START+i*0.5).filter(h=>h<=CAL_END).map(h=><option key={h} value={h}>{fmtTime(h)}</option>)}
-              </select>
-            </div>
+      <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:10}}>
+        <div>
+          <label style={S.lbl}>Facility *</label>
+          <select style={S.inp} value={row.facility_id} onChange={e=>upd("facility_id",e.target.value)}>
+            {FACILITIES.map(f=><option key={f.id} value={f.id}>{f.name}</option>)}
+          </select>
+        </div>
+        <div>
+          <label style={S.lbl}>Start Time *</label>
+          <select style={S.inp} value={row.start_hour} onChange={e=>upd("start_hour",parseFloat(e.target.value))}>
+            {Array.from({length:CAL_TOTAL*2+1},(_,i)=>CAL_START+i*0.5).filter(h=>h<=CAL_END).map(h=><option key={h} value={h}>{fmtTime(h)}</option>)}
+          </select>
+        </div>
+      </div>
+      <div>
+        <label style={S.lbl}>Duration *</label>
+        <select style={S.inp} value={row.duration} onChange={e=>upd("duration",parseFloat(e.target.value))}>
+          {DURATIONS.map(d=><option key={d.value} value={d.value}>{d.label}</option>)}
+        </select>
+      </div>
+
+      {showPicker && (
+        <Modal title={`📅 Pick a slot — ${row.date||"select date first"}`} onClose={()=>setShowPicker(false)} width={760}>
+          {row.date
+            ? <InlineDayPicker date={row.date} bookings={allBookings} onPick={pickSlot}/>
+            : <div style={{padding:24,textAlign:"center",color:"#94a3b8",fontSize:13}}>Set a date first, then pick a slot.</div>
+          }
+          <div style={{marginTop:12,display:"flex",justifyContent:"flex-end"}}>
+            <button onClick={()=>setShowPicker(false)} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#475569",fontSize:12})}>Close</button>
           </div>
-          <div>
-            <label style={S.lbl}>Duration *</label>
-            <select style={S.inp} value={row.duration} onChange={e=>upd("duration",parseFloat(e.target.value))}>
-              {DURATIONS.map(d=><option key={d.value} value={d.value}>{d.label}</option>)}
-            </select>
-          </div>
-        </>
-      ) : (
-        <InlineDayPicker date={row.date} bookings={allBookings} onPick={pickSlot}/>
+        </Modal>
       )}
       <div>
         <label style={S.lbl}>Purpose *</label>
@@ -2131,17 +2240,9 @@ function AboutTab() {
         <div style={step}>
           <div style={stepNum("#22c55e")}>4</div>
           <div>
-            <div style={{fontWeight:600,fontSize:14,color:"#0f172a"}}>CPSA decision</div>
-            <div style={{fontSize:13,color:"#475569",marginTop:2}}>CPSA reviews and either approves or rejects. An <Badge status="approved"/> booking is confirmed and you will be notified. A rejected booking will show as <Badge status="rejected"/>.</div>
-          </div>
-        </div>
-        <div style={arrow}>↓</div>
-        <div style={step}>
-          <div style={stepNum("#0891b2")}>5</div>
-          <div>
-            <div style={{fontWeight:600,fontSize:14,color:"#0f172a"}}>Reconciled against CPSA records</div>
+            <div style={{fontWeight:600,fontSize:14,color:"#0f172a"}}>CPSA decision &amp; reconciliation</div>
             <div style={{fontSize:13,color:"#475569",marginTop:2}}>
-              When AMUA periodically syncs the official CPSA schedule, an approved booking that matches CPSA's record exactly is promoted to <Badge status="cpsa_confirmed"/> — confirming that what you booked is what CPSA has on file. If anything differs (time, duration or facility), the booking is flagged <Badge status="cpsa_review_needed"/> instead, and AMUA will triage the discrepancy. Bookings with a 🌐 marker in the calendar are CPSA-confirmed.
+              Once AMUA receives verbal confirmation from CPSA, the booking is marked <Badge status="approved"/> (or <Badge status="rejected"/> if declined) — accept/reject only applies while a booking has not yet been reconciled against CPSA's published schedule. When AMUA later syncs the official CPSA schedule, an approved booking that matches CPSA's record exactly is promoted to <Badge status="cpsa_confirmed"/> — confirming that what you booked is what CPSA has on file. If anything differs (time, duration or facility), the booking is flagged <Badge status="cpsa_review_needed"/> instead, and AMUA will triage the discrepancy. Bookings with a 🌐 marker in the calendar are CPSA-confirmed.
             </div>
           </div>
         </div>
@@ -3961,11 +4062,6 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
   // Clear old unapproved modal
   const [showClearModal,setShowClearModal]=useState(false);
   const [clearSkipEmail,setClearSkipEmail]=useState(false);
-  // Facility rates section
-  const [showRates,setShowRates]=useState(false);
-  const [showPlayers,setShowPlayers]=useState(false);
-  const [defaultFieldDay,setDefaultFieldDay]=useState(0);
-  const [defaultFieldEvening,setDefaultFieldEvening]=useState(0);
   const [clashGrouped,setClashGrouped]=useState(true);
   const [clashPatternModal,setClashPatternModal]=useState(null);
   const [showClashPanel,setShowClashPanel]=useState(false);
@@ -4134,12 +4230,6 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
             🧹 Clear old unapproved ({oldUnapproved.length})
           </button>
         )}
-        <button onClick={()=>setShowRates(v=>!v)} style={S.btn({border:"1.5px solid #e2e8f0",background:showRates?"#f8fafc":"#fff",color:"#475569",fontSize:12})}>
-          💲 Facility Rates
-        </button>
-        <button onClick={()=>setShowPlayers(v=>!v)} style={S.btn({border:"1.5px solid #e2e8f0",background:showPlayers?"#f8fafc":"#fff",color:"#475569",fontSize:12})}>
-          👥 Player Counts
-        </button>
         {onShowSchedule&&<button onClick={onShowSchedule} style={S.btn({background:"#f0f9ff",color:"#0369a1",border:"1.5px solid #bae6fd",fontSize:12,fontWeight:700})}>
           📅 Schedule
         </button>}
@@ -4214,122 +4304,6 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
           }
         </div>
       )}
-
-      {/* Facility rates panel */}
-      {showRates&&(()=>{
-        const fieldFacs = FACILITIES.filter(f=>f.name.includes("Field"));
-        const step = 2.5;
-        return (
-          <div style={{background:"#f8fafc",border:"1.5px solid #e2e8f0",borderRadius:12,padding:14}}>
-            <div style={{fontWeight:700,fontSize:14,color:"#0f172a",marginBottom:4}}>Hourly Rates</div>
-            <div style={{fontSize:12,color:"#64748b",marginBottom:10}}>Day = before 5:30pm · Evening = 5:30pm onwards · Step: $2.50</div>
-            {fieldFacs.length>0&&(
-              <div style={{background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:8,padding:"8px 12px",marginBottom:10,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
-                <span style={{fontSize:12,fontWeight:700,color:"#0369a1",minWidth:80}}>🏟 Fields default</span>
-                <span style={{fontSize:11,color:"#64748b"}}>Day $</span>
-                <input type="number" min="0" step={step} value={defaultFieldDay||""} placeholder="0"
-                  onChange={e=>setDefaultFieldDay(parseFloat(e.target.value)||0)}
-                  style={{...si,width:64,padding:"3px 6px",textAlign:"right",fontSize:13}}/>
-                <span style={{fontSize:11,color:"#64748b"}}>/hr</span>
-                <span style={{fontSize:11,color:"#7c3aed"}}>Evening $</span>
-                <input type="number" min="0" step={step} value={defaultFieldEvening||""} placeholder="0"
-                  onChange={e=>setDefaultFieldEvening(parseFloat(e.target.value)||0)}
-                  style={{...si,width:64,padding:"3px 6px",textAlign:"right",fontSize:13}}/>
-                <span style={{fontSize:11,color:"#64748b"}}>/hr</span>
-                <button onClick={()=>fieldFacs.forEach(f=>{onUpdateFacilityRate(f.id,"day",defaultFieldDay);onUpdateFacilityRate(f.id,"evening",defaultFieldEvening);})}
-                  style={S.btn({background:"#0369a1",color:"#fff",fontSize:11,padding:"4px 10px"})}>Apply to all fields</button>
-              </div>
-            )}
-            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(240px,1fr))",gap:8}}>
-              {FACILITIES.map(fac=>{
-                const r = typeof facilityRates[fac.id]==="object" ? facilityRates[fac.id] : {day:facilityRates[fac.id]||0,evening:50};
-                const day=r.day??0, evening=r.evening??50;
-                const isField = fac.name.includes("Field");
-                const adj = (type, cur, delta) => onUpdateFacilityRate(fac.id, type, Math.max(0, (parseFloat(cur)||0)+delta));
-                return (
-                  <div key={fac.id} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,padding:"8px 10px"}}>
-                    <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6,justifyContent:"space-between"}}>
-                      <div style={{display:"flex",alignItems:"center",gap:5}}>
-                        <span style={{width:8,height:8,borderRadius:"50%",background:fac.color,flexShrink:0,display:"inline-block"}}/>
-                        <span style={{fontSize:11,fontWeight:700,color:"#0f172a"}}>{fac.name}</span>
-                      </div>
-                      {isField&&(defaultFieldDay>0||defaultFieldEvening>0)&&(
-                        <button onClick={()=>{onUpdateFacilityRate(fac.id,"day",defaultFieldDay);onUpdateFacilityRate(fac.id,"evening",defaultFieldEvening);}}
-                          title="Reset to default field rate"
-                          style={{background:"none",border:"1px solid #bae6fd",borderRadius:5,cursor:"pointer",fontSize:10,color:"#0369a1",padding:"1px 5px"}}>↺ reset</button>
-                      )}
-                    </div>
-                    <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
-                      <span style={{fontSize:10,color:"#64748b",width:24}}>Day</span>
-                      <button onClick={()=>adj("day",day,-step)} style={{background:"#f1f5f9",border:"none",borderRadius:4,width:20,height:20,cursor:"pointer",fontSize:13,lineHeight:1}}>−</button>
-                      <input type="number" min="0" step={step} value={day||""} placeholder="0"
-                        onChange={e=>onUpdateFacilityRate(fac.id,"day",e.target.value)}
-                        style={{...si,width:58,padding:"2px 5px",textAlign:"right",fontSize:12}}/>
-                      <button onClick={()=>adj("day",day,+step)} style={{background:"#f1f5f9",border:"none",borderRadius:4,width:20,height:20,cursor:"pointer",fontSize:13,lineHeight:1}}>+</button>
-                      <span style={{fontSize:10,color:"#64748b"}}>/hr</span>
-                      <span style={{fontSize:10,color:"#7c3aed",width:28,marginLeft:4}}>Eve</span>
-                      <button onClick={()=>adj("evening",evening,-step)} style={{background:"#f1f5f9",border:"none",borderRadius:4,width:20,height:20,cursor:"pointer",fontSize:13,lineHeight:1}}>−</button>
-                      <input type="number" min="0" step={step} value={evening||""} placeholder="0"
-                        onChange={e=>onUpdateFacilityRate(fac.id,"evening",e.target.value)}
-                        style={{...si,width:58,padding:"2px 5px",textAlign:"right",fontSize:12}}/>
-                      <button onClick={()=>adj("evening",evening,+step)} style={{background:"#f1f5f9",border:"none",borderRadius:4,width:20,height:20,cursor:"pointer",fontSize:13,lineHeight:1}}>+</button>
-                      <span style={{fontSize:10,color:"#64748b"}}>/hr</span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        );
-      })()}
-
-      {/* Approx player counts + duration panel */}
-      {showPlayers&&(()=>{
-        const bookers = Object.values(
-          bookings.filter(b=>["approved","cpsa_confirmed","cpsa_review_needed","pending_cpsa","queued_cpsa","pending_amua","amua_submit","pending"].includes(b.status)||b.invoiced)
-            .reduce((m,b)=>{ const k=b.email.toLowerCase(); if(!m[k]) m[k]={name:b.name,email:b.email}; return m; },{})
-        ).sort((a,b)=>a.name.localeCompare(b.name));
-        return (
-          <div style={{background:"#f8fafc",border:"1.5px solid #e2e8f0",borderRadius:12,padding:16}}>
-            <div style={{fontWeight:700,fontSize:14,color:"#0f172a",marginBottom:4}}>Approximate Players &amp; Duration per Booker</div>
-            <div style={{fontSize:12,color:"#64748b",marginBottom:12}}>Used in Summary to calculate per-player cost and per-booking mode hours. Duration defaults to 2 h if not set.</div>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(300px,1fr))",gap:8}}>
-              {bookers.map(b=>{
-                const players = approxPlayers[b.email.toLowerCase()] || 0;
-                const durSaved = approxDurations[b.email.toLowerCase()];
-                const dur = (durSaved && durSaved > 0) ? durSaved : 2;
-                return (
-                  <div key={b.email} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,padding:"8px 12px",display:"flex",alignItems:"center",gap:10}}>
-                    <div style={{flex:1,minWidth:0}}>
-                      <div style={{fontSize:12,fontWeight:600,color:"#0f172a",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{b.name}</div>
-                      <div style={{fontSize:11,color:"#64748b",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{b.email}</div>
-                    </div>
-                    <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
-                      <span style={{fontSize:11,color:"#64748b"}}>Players:</span>
-                      <input
-                        type="number" min="0" step="1"
-                        value={players||""}
-                        onChange={e=>onUpdateApproxPlayers(b.email, e.target.value)}
-                        placeholder="0"
-                        style={{...si,width:56,padding:"3px 6px",textAlign:"right",fontSize:13}}
-                      />
-                      <span style={{fontSize:11,color:"#64748b",marginLeft:6}}>~Dur (h):</span>
-                      <input
-                        type="number" min="0.5" step="0.5"
-                        value={dur||""}
-                        onChange={e=>onUpdateApproxDuration(b.email, e.target.value)}
-                        placeholder="2"
-                        style={{...si,width:56,padding:"3px 6px",textAlign:"right",fontSize:13}}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
-              {bookers.length===0&&<div style={{fontSize:13,color:"#94a3b8"}}>No active bookers found.</div>}
-            </div>
-          </div>
-        );
-      })()}
 
       {/* Per-row action queue submission panel */}
       {actionQueue.length>0&&(
@@ -5225,13 +5199,33 @@ export default function App() {
   const [showActivityLog, setShowActivityLog] = useState(false);
   const [showRatesModal, setShowRatesModal] = useState(false);
   const [showPlayersModal, setShowPlayersModal] = useState(false);
+  const [showUserMgmtModal, setShowUserMgmtModal] = useState(false);
+  // emailAliases: { secondaryEmail: primaryEmail } — secondaries fold into the primary profile.
+  const [emailAliases, setEmailAliases] = useState(()=>{
+    try{ return JSON.parse(localStorage.getItem("fb_email_aliases")||"{}"); }catch{ return {}; }
+  });
+  useEffect(()=>{ try{ localStorage.setItem("fb_email_aliases", JSON.stringify(emailAliases)); }catch{} }, [emailAliases]);
+  const canonEmail = useCallback(em => {
+    if (!em) return em;
+    const k = em.toLowerCase();
+    return (emailAliases[k] || k);
+  }, [emailAliases]);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [silentMode, setSilentMode] = useState(true); // admin: suppress all outgoing emails
   const [facilityRates, setFacilityRates] = useState(()=>{
     try{return JSON.parse(localStorage.getItem("fb_facility_rates")||"{}");}catch{return {};}
   });
   const [listBookerFilter, setListBookerFilter] = useState(new Set()); // empty = all (additive multi-select)
-  const toggleBooker = em => setListBookerFilter(prev => { const s=new Set(prev); if(s.has(em)) s.delete(em); else s.add(em); return s; });
+  const [showBookerPicker, setShowBookerPicker] = useState(false);
+  // Toggle a booker; if it's a primary with linked secondaries, toggle the whole profile group.
+  const toggleBooker = em => setListBookerFilter(prev => {
+    const s = new Set(prev);
+    const group = new Set([em]);
+    Object.entries(emailAliases).forEach(([sec, pri]) => { if (pri === em) group.add(sec); });
+    if (s.has(em)) group.forEach(g => s.delete(g));
+    else group.forEach(g => s.add(g));
+    return s;
+  });
   const [listShowClashes, setListShowClashes]   = useState(false);
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [showAdminScheduleModal, setShowAdminScheduleModal] = useState(false);
@@ -6060,9 +6054,19 @@ export default function App() {
                       {isAdmin&&(
                         <div style={{padding:"6px 0",borderBottom:"1px solid #f1f5f9"}}>
                           <div style={{padding:"4px 14px 6px",fontSize:10,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.05em",fontWeight:700}}>Admin</div>
+                          <button onClick={()=>setSilentMode(v=>!v)}
+                            style={{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"9px 14px",background:silentMode?"#fef3c7":"transparent",border:"none",fontFamily:"inherit",fontSize:13,color:silentMode?"#92400e":"#0f172a",textAlign:"left",cursor:"pointer",fontWeight:500}}>
+                            <span style={{fontSize:14,width:18,textAlign:"center"}}>{silentMode?"🔇":"🔔"}</span>
+                            <span style={{flex:1}}>{silentMode?"Silent mode ON":"Silent mode off"}</span>
+                            <span style={{position:"relative",width:30,height:18,flexShrink:0}}>
+                              <span style={{position:"absolute",inset:0,borderRadius:9,background:silentMode?"#f59e0b":"#cbd5e1",transition:"background 0.2s"}}/>
+                              <span style={{position:"absolute",top:2,left:silentMode?14:2,width:14,height:14,borderRadius:"50%",background:"#fff",boxShadow:"0 1px 2px rgba(0,0,0,0.2)",transition:"left 0.2s"}}/>
+                            </span>
+                          </button>
                           <UserMenuItem icon="🧩" label="Install Extension" onClick={()=>{setShowUserMenu(false);setShowExtensionModal(true);}}/>
                           <UserMenuItem icon="💲" label="Facility Rates" onClick={()=>{setShowUserMenu(false);setShowRatesModal(true);}}/>
                           <UserMenuItem icon="👥" label="Player Counts" onClick={()=>{setShowUserMenu(false);setShowPlayersModal(true);}}/>
+                          <UserMenuItem icon="👤" label="User Management" onClick={()=>{setShowUserMenu(false);setShowUserMgmtModal(true);}}/>
                           <UserMenuItem icon="📜" label="Activity Log" onClick={()=>{setShowUserMenu(false);setShowActivityLog(true);}}/>
                           <UserMenuItem icon="⬇" label="Reload from DB" onClick={()=>{setShowUserMenu(false);handleSyncDB();}}/>
                         </div>
@@ -6092,22 +6096,52 @@ export default function App() {
         {!configured&&<Banner type="info" msg="⚙️  Demo Mode — add Supabase credentials to enable persistent storage."/>}
 
         {emailLegend.length>0&&(tab==="calendar"||tab==="month"||tab==="list"||tab==="summary")&&(
-          <div style={{display:"flex",gap:6,marginBottom:12,alignItems:"center",overflowX:"auto",WebkitOverflowScrolling:"touch",scrollbarWidth:"none",msOverflowStyle:"none",paddingBottom:2}}>
+          <div style={{display:"flex",gap:6,marginBottom:12,alignItems:"center",flexWrap:"wrap",paddingBottom:2,position:"relative"}}>
             <button onClick={()=>setListBookerFilter(prev=>prev.size===0?new Set(emailLegend.map(e=>e.toLowerCase())):new Set())}
               title={listBookerFilter.size===0?"Select all bookers":"Clear selection"}
               style={{padding:"5px 12px",borderRadius:20,border:"1.5px solid",cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",flexShrink:0,borderColor:listBookerFilter.size===0?"#0f172a":"#e2e8f0",background:listBookerFilter.size===0?"#0f172a":"#fff",color:listBookerFilter.size===0?"#fff":"#475569"}}>
               {listBookerFilter.size===0?"All":"None"}
             </button>
-            {emailLegend.map(e=>{
-              const active=listBookerFilter.has(e.toLowerCase());
-              const c=emailColor(e);
-              return(
-                <button key={e} onClick={()=>toggleBooker(e.toLowerCase())}
-                  style={{padding:"5px 12px",borderRadius:20,border:`1.5px solid ${active?c:"#e2e8f0"}`,cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",flexShrink:0,background:active?c:"#fff",color:active?"#fff":"#475569"}}>
-                  {e.split("@")[0]}
+            <button onClick={()=>setShowBookerPicker(v=>!v)}
+              style={{display:"flex",alignItems:"center",gap:6,padding:"5px 12px",borderRadius:20,border:`1.5px solid ${listBookerFilter.size>0?"#0f172a":"#e2e8f0"}`,cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",flexShrink:0,background:"#fff",color:"#475569"}}>
+              <span>👥 Bookers</span>
+              {listBookerFilter.size>0 && (
+                <span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",minWidth:18,height:18,padding:"0 5px",borderRadius:9,background:"#0f172a",color:"#fff",fontSize:10,fontWeight:700}}>
+                  {listBookerFilter.size}
+                </span>
+              )}
+              <span style={{fontSize:9,color:"#94a3b8"}}>▾</span>
+            </button>
+            {/* Show selected chips inline for quick visual reference */}
+            {listBookerFilter.size>0 && listBookerFilter.size<=4 && [...listBookerFilter].map(em=>{
+              const c=emailColor(em);
+              return (
+                <button key={em} onClick={()=>toggleBooker(em)} title="Remove from filter"
+                  style={{padding:"5px 10px",borderRadius:20,border:`1.5px solid ${c}`,cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",flexShrink:0,background:c,color:"#fff",display:"inline-flex",alignItems:"center",gap:4}}>
+                  {em.split("@")[0]}<span style={{opacity:0.8,fontSize:11}}>✕</span>
                 </button>
               );
             })}
+            {showBookerPicker && (
+              <>
+                <div onClick={()=>setShowBookerPicker(false)} style={{position:"fixed",inset:0,zIndex:30}}/>
+                <div style={{position:"absolute",top:"calc(100% + 4px)",left:0,zIndex:31,background:"#fff",border:"1.5px solid #e2e8f0",borderRadius:12,boxShadow:"0 8px 24px rgba(15,23,42,0.12)",padding:10,minWidth:240,maxWidth:360,maxHeight:340,overflowY:"auto"}}>
+                  <div style={{fontSize:11,fontWeight:700,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:8,padding:"0 4px"}}>Filter bookers</div>
+                  <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                    {emailLegend.map(e=>{
+                      const active=listBookerFilter.has(e.toLowerCase());
+                      const c=emailColor(e);
+                      return(
+                        <button key={e} onClick={()=>toggleBooker(e.toLowerCase())}
+                          style={{padding:"5px 10px",borderRadius:18,border:`1.5px solid ${active?c:"#e2e8f0"}`,cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",background:active?c:"#fff",color:active?"#fff":"#475569"}}>
+                          {e.split("@")[0]}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         )}
 
@@ -6304,19 +6338,6 @@ export default function App() {
         {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<SummaryTab bookings={bookings} loggedInEmail={loggedInEmail} facilityRates={facilityRates} isAdmin={isAdmin} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onUpdateFacilityRate={updateFacilityRate} pricingMode={pricingMode} onSetPricingMode={setPricingMode} onProposeMerge={handleProposeMerge} onBulkApply={handleBulkApply} onMarkInvoiced={handleMarkInvoiced} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} bookerFilter={listBookerFilter}/>}</div>}
         {tab==="about"&&<div style={{padding:"8px 0"}}><AboutTab/></div>}
         {tab==="admin"&&isAdmin&&<div style={S.card}>
-          {/* Silent mode banner */}
-          <div style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",marginBottom:12,background:silentMode?"#fef3c7":"#f8fafc",border:`1.5px solid ${silentMode?"#f59e0b":"#e2e8f0"}`,borderRadius:10,flexWrap:"wrap"}}>
-            <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",flex:1,minWidth:200}}>
-              <div style={{position:"relative",width:38,height:22,flexShrink:0}} onClick={()=>setSilentMode(v=>!v)}>
-                <div style={{position:"absolute",inset:0,borderRadius:11,background:silentMode?"#f59e0b":"#cbd5e1",transition:"background 0.2s"}}/>
-                <div style={{position:"absolute",top:3,left:silentMode?18:3,width:16,height:16,borderRadius:"50%",background:"#fff",boxShadow:"0 1px 3px rgba(0,0,0,0.2)",transition:"left 0.2s"}}/>
-              </div>
-              <span style={{fontWeight:700,fontSize:13,color:silentMode?"#92400e":"#475569"}}>
-                {silentMode?"🔇 Silent mode ON — no emails will be sent":"🔔 Silent mode off"}
-              </span>
-            </label>
-            {silentMode&&<span style={{fontSize:12,color:"#92400e"}}>All status changes, approvals, deletions and edits will be processed without notifying bookers.</span>}
-          </div>
           {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onView={setViewing} onQueueDelete={queueForRemovalSilent} clashes={allClashes} deleteIds={new Set(deleteQueue.map(b=>b.id))} facilityRates={facilityRates} onUpdateFacilityRate={updateFacilityRate} onClearOldUnapproved={handleClearOldUnapproved} silentMode={silentMode} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onSyncDB={handleSyncDB} onShowSchedule={()=>setShowAdminScheduleModal(true)} onBulkApply={handleBulkApply} onSaveMismatch={handleSaveMismatch} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} onShowActivityLog={()=>setShowActivityLog(true)} onShowSyncResults={()=>setShowSyncPopup(true)} syncResultsCount={syncResults.length}/>}
         </div>}
       </div>
@@ -6406,8 +6427,10 @@ export default function App() {
               const r = typeof facilityRates[fac.id]==="object" ? facilityRates[fac.id] : { day: facilityRates[fac.id]||0, evening: 50 };
               return (
                 <div key={fac.id} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,padding:"10px 14px"}}>
-                  <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:7}}>
-                    <span style={{width:10,height:10,borderRadius:"50%",background:fac.color,flexShrink:0}}/>
+                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:7}}>
+                    <span className={fac.kind==="social"?"fac-social-tex":undefined}
+                      title={fac.kind==="social"?"Social space":"Field"}
+                      style={{display:"inline-block",width:28,height:16,borderRadius:4,background:fac.color,flexShrink:0,border:"1px solid rgba(0,0,0,0.08)"}}/>
                     <span style={{fontSize:13,fontWeight:700,color:"#0f172a"}}>{fac.name}</span>
                     <span style={{fontSize:10,fontWeight:700,padding:"1px 6px",borderRadius:10,background:fac.kind==="social"?"#f3e8ff":"#dcfce7",color:fac.kind==="social"?"#7c3aed":"#166534",marginLeft:"auto"}}>{fac.kind==="social"?"Social":"Field"}</span>
                   </div>
@@ -6461,6 +6484,15 @@ export default function App() {
             <button onClick={()=>setShowPlayersModal(false)} style={S.btn({background:"#0f172a",color:"#fff",fontSize:12})}>Done</button>
           </div>
         </Modal>
+      )}
+
+      {showUserMgmtModal&&isAdmin&&(
+        <UserMgmtModal
+          bookings={bookings}
+          aliases={emailAliases}
+          onChange={setEmailAliases}
+          onClose={()=>setShowUserMgmtModal(false)}
+        />
       )}
 
       {showForm&&(
