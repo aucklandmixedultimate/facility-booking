@@ -3553,6 +3553,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
 function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,clashes=[],deleteIds=new Set(),facilityRates={},onUpdateFacilityRate,onClearOldUnapproved,silentMode=false,approxPlayers={},onUpdateApproxPlayers,approxDurations={},onUpdateApproxDuration,onSyncDB,onShowSchedule,onBulkApply}) {
   const [sf,setSf]=useState("all"), [ff,setFf]=useState("all"), [q,setQ]=useState("");
   const [adminBookerFilter,setAdminBookerFilter]=useState("all");
+  const [showBookerFilter,setShowBookerFilter]=useState(false);
   const [adminDateFrom,setAdminDateFrom]=useState(""), [adminDateTo,setAdminDateTo]=useState("");
   const [adminColPurpose,setAdminColPurpose]=useState("");
   const [sortCol,setSortCol]=useState("date"), [sortDir,setSortDir]=useState("desc");
@@ -4059,17 +4060,27 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                       style={{padding:"2px 4px",fontSize:10,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",width:"100%",minWidth:90}}/>
                   </div>
                 </th>
-                <th style={{padding:"3px 4px",whiteSpace:"normal"}}>
-                  <div style={{display:"flex",gap:3,flexWrap:"wrap",alignItems:"center"}}>
-                    <button onClick={()=>setAdminBookerFilter("all")}
-                      style={{padding:"1px 7px",fontSize:10,borderRadius:10,border:"1.5px solid #e2e8f0",background:adminBookerFilter==="all"?"#0f172a":"#fff",color:adminBookerFilter==="all"?"#fff":"#475569",cursor:"pointer",fontWeight:adminBookerFilter==="all"?700:400,lineHeight:1.6}}>All</button>
-                    {adminBookerEmails.map(em=>(
-                      <button key={em} onClick={()=>setAdminBookerFilter(p=>p===em?"all":em)}
-                        style={{padding:"1px 7px",fontSize:10,borderRadius:10,border:`1.5px solid ${adminBookerFilter===em?emailColor(em):"#e2e8f0"}`,background:adminBookerFilter===em?emailColor(em):"#fff",color:adminBookerFilter===em?"#fff":"#475569",cursor:"pointer",fontWeight:adminBookerFilter===em?700:400,lineHeight:1.6}}>
-                        {em.split("@")[0]}
-                      </button>
-                    ))}
-                  </div>
+                <th style={{padding:"3px 4px",position:"relative"}}>
+                  <button onClick={()=>setShowBookerFilter(v=>!v)}
+                    style={{display:"flex",alignItems:"center",gap:4,padding:"2px 8px",fontSize:10,borderRadius:10,border:`1.5px solid ${adminBookerFilter==="all"?"#e2e8f0":emailColor(adminBookerFilter)}`,background:adminBookerFilter==="all"?"#fff":emailColor(adminBookerFilter),color:adminBookerFilter==="all"?"#475569":"#fff",cursor:"pointer",fontWeight:600,lineHeight:1.6,whiteSpace:"nowrap",maxWidth:"100%"}}>
+                    <span style={{overflow:"hidden",textOverflow:"ellipsis"}}>{adminBookerFilter==="all"?"All bookers":adminBookerFilter.split("@")[0]}</span>
+                    <span style={{flexShrink:0,opacity:0.7}}>▾</span>
+                  </button>
+                  {showBookerFilter&&(
+                    <>
+                      <div onClick={()=>setShowBookerFilter(false)} style={{position:"fixed",inset:0,zIndex:40}}/>
+                      <div style={{position:"absolute",top:"100%",left:4,marginTop:2,background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,boxShadow:"0 6px 24px rgba(0,0,0,0.12)",padding:8,zIndex:41,display:"flex",flexDirection:"column",gap:3,maxHeight:260,overflowY:"auto",minWidth:160}}>
+                        <button onClick={()=>{setAdminBookerFilter("all");setShowBookerFilter(false);}}
+                          style={{padding:"4px 9px",fontSize:11,borderRadius:8,border:"1.5px solid #e2e8f0",background:adminBookerFilter==="all"?"#0f172a":"#fff",color:adminBookerFilter==="all"?"#fff":"#475569",cursor:"pointer",fontWeight:adminBookerFilter==="all"?700:400,textAlign:"left",whiteSpace:"nowrap"}}>All bookers</button>
+                        {adminBookerEmails.map(em=>(
+                          <button key={em} onClick={()=>{setAdminBookerFilter(p=>p===em?"all":em);setShowBookerFilter(false);}}
+                            style={{padding:"4px 9px",fontSize:11,borderRadius:8,border:`1.5px solid ${adminBookerFilter===em?emailColor(em):"#e2e8f0"}`,background:adminBookerFilter===em?emailColor(em):"#fff",color:adminBookerFilter===em?"#fff":"#475569",cursor:"pointer",fontWeight:adminBookerFilter===em?700:400,textAlign:"left",whiteSpace:"nowrap"}}>
+                            {em.split("@")[0]}
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
                 </th>
                 <th style={{padding:"3px 4px"}}>
                   <select value={ff} onChange={e=>setFf(e.target.value)}
@@ -4563,14 +4574,17 @@ export default function App() {
       const matchedUserIds = new Set();
       const cpsaNotifications = []; // notify-only cart items for first-time CPSA status changes
 
-      // Build set of canonical keys for this month's feed
+      // Build set of canonical keys for this month's feed + a list of time slots
+      // (date/start/duration) used to decide whether a booking still overlaps CPSA.
       const feedKeys = new Set();
+      const feedSlots = [];
       for (const ev of events) {
         const date = parseCJRDate(ev.EventStartDate);
         if (!date) continue;
-        const { start_hour } = parseCJRDateTime(ev.EventDateTime);
+        const { start_hour, duration } = parseCJRDateTime(ev.EventDateTime);
         const purpose = ev.EventName || "External Booking";
         const facilityIds = mapCJRFacility(purpose);
+        feedSlots.push({ date, start_hour, duration });
         for (const facility_id of facilityIds) {
           feedKeys.add(`${date}|${facility_id}|${start_hour}|${purpose}`);
         }
@@ -4676,15 +4690,22 @@ export default function App() {
       }
       if (configured) await loadBookings();
 
-      // Reset cpsa_confirmed/cpsa_review_needed bookings in this month that no longer
-      // appear in the CPSA feed — they revert to "approved" and their mismatch markers clear.
-      const cpsaLinkedUnmatched = currentBookings.filter(b =>
-        !isAdminBooking(b) &&
-        b.date.startsWith(monthStr) &&
-        b.date >= syncToday &&
-        (b.status === "cpsa_confirmed" || b.status === "cpsa_review_needed") &&
-        !matchedUserIds.has(b.id)
-      );
+      // Reset cpsa_confirmed/cpsa_review_needed bookings in this month only when NO
+      // CPSA feed event overlaps them at all — i.e. they are genuinely gone from CPSA.
+      // A booking that still overlaps a feed event keeps its flag even if it wasn't the
+      // top-scored match this run, so legitimate mismatches are never silently wiped.
+      const cpsaLinkedUnmatched = currentBookings.filter(b => {
+        if (isAdminBooking(b)) return false;
+        if (!b.date.startsWith(monthStr) || b.date < syncToday) return false;
+        if (b.status !== "cpsa_confirmed" && b.status !== "cpsa_review_needed") return false;
+        if (matchedUserIds.has(b.id)) return false;
+        const stillOverlaps = feedSlots.some(s =>
+          s.date === b.date &&
+          b.start_hour < s.start_hour + s.duration &&
+          s.start_hour < b.start_hour + b.duration
+        );
+        return !stillOverlaps;
+      });
       for (const cb of cpsaLinkedUnmatched) {
         const resetPatch = { status: "approved", system_notes: stripMismatchNote(cb.system_notes), updated_at: new Date().toISOString() };
         if (configured) await sb.update("bookings", cb.id, resetPatch);
