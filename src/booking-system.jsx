@@ -583,7 +583,23 @@ function ActivityLogModal({onClose}) {
       } catch(e) { setError(e.message); setRows([]); }
     })();
   },[]);
-  const filtered = (rows||[]).filter(r => filter==="all" ? true : SYNC_ACTIONS.has(r.action));
+  // Collapse sign_in/sign_out into one row per user (most recent) — admins want
+  // "last login per user", not a history of every session.
+  const collapsed = useMemo(() => {
+    if (!rows) return [];
+    const out = [];
+    const seenLogin = new Set();
+    for (const r of rows) { // rows arrive in created_at DESC order from sb.select
+      if (r.action === "sign_in" || r.action === "sign_out") {
+        const key = `${r.action}:${(r.user_email||r.user_id||"").toLowerCase()}`;
+        if (seenLogin.has(key)) continue;
+        seenLogin.add(key);
+      }
+      out.push(r);
+    }
+    return out;
+  }, [rows]);
+  const filtered = collapsed.filter(r => filter==="all" ? true : SYNC_ACTIONS.has(r.action));
   const actionStyle = a => {
     if (a.startsWith("cpsa_sync")) return {color:"#0e7490",bg:"#ecfeff",border:"#a5f3fc"};
     if (a==="cpsa_confirm") return {color:"#0e7490",bg:"#ecfeff",border:"#a5f3fc"};
@@ -599,7 +615,7 @@ function ActivityLogModal({onClose}) {
         <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0}}>
           <button onClick={()=>setFilter("sync")} style={{padding:"4px 10px",borderRadius:14,border:`1.5px solid ${filter==="sync"?"#0f172a":"#e2e8f0"}`,background:filter==="sync"?"#0f172a":"#fff",color:filter==="sync"?"#fff":"#475569",fontSize:12,fontWeight:600,fontFamily:"inherit",cursor:"pointer"}}>Sync & CPSA</button>
           <button onClick={()=>setFilter("all")} style={{padding:"4px 10px",borderRadius:14,border:`1.5px solid ${filter==="all"?"#0f172a":"#e2e8f0"}`,background:filter==="all"?"#0f172a":"#fff",color:filter==="all"?"#fff":"#475569",fontSize:12,fontWeight:600,fontFamily:"inherit",cursor:"pointer"}}>All</button>
-          <span style={{marginLeft:"auto",fontSize:11,color:"#94a3b8"}}>{rows===null?"Loading…":`${filtered.length} of ${rows.length} entries`}</span>
+          <span style={{marginLeft:"auto",fontSize:11,color:"#94a3b8"}}>{rows===null?"Loading…":`${filtered.length} of ${collapsed.length} entries (logins collapsed to most-recent per user)`}</span>
         </div>
         {error&&<div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:6,padding:"6px 10px",fontSize:12,color:"#b91c1c"}}>⚠ {error} — has <code>supabase-migration-activity-log.sql</code> been run?</div>}
         <div style={{overflowY:"auto",flex:1,minHeight:0,border:"1px solid #f1f5f9",borderRadius:8}}>
@@ -635,7 +651,7 @@ function ActivityLogModal({onClose}) {
 
 // Admin UI: map secondary emails into a primary profile.
 // `aliases` is { secondaryEmail: primaryEmail } — both keys lowercase.
-function UserMgmtModal({ bookings, aliases, onChange, onClose }) {
+function UserMgmtModal({ bookings, aliases, aliasNames, onChange, onChangeNames, onClose }) {
   const allEmails = useMemo(() => {
     const s = new Set();
     bookings.forEach(b => { if (b.email && !isAdminBooking(b)) s.add(b.email.toLowerCase()); });
@@ -643,6 +659,17 @@ function UserMgmtModal({ bookings, aliases, onChange, onClose }) {
     Object.values(aliases||{}).forEach(v => s.add(v));
     return [...s].sort();
   }, [bookings, aliases]);
+  // Collect every distinct `name` value a booker has used on bookings, keyed by email.
+  const namesByEmail = useMemo(() => {
+    const m = {};
+    bookings.forEach(b => {
+      if (!b.email || isAdminBooking(b) || !b.name) return;
+      const k = b.email.toLowerCase();
+      if (!m[k]) m[k] = new Set();
+      m[k].add(b.name);
+    });
+    return m;
+  }, [bookings]);
   // group emails by primary
   const groups = useMemo(() => {
     const g = {};
@@ -653,6 +680,14 @@ function UserMgmtModal({ bookings, aliases, onChange, onClose }) {
     });
     return g;
   }, [allEmails, aliases]);
+  function setAliasName(primary, value) {
+    const next = { ...(aliasNames||{}) };
+    const trimmed = (value||"").trim();
+    const dflt = primary.split("@")[0];
+    if (!trimmed || trimmed === dflt) delete next[primary];
+    else next[primary] = trimmed;
+    onChangeNames(next);
+  }
   const [linkSource, setLinkSource] = useState("");
   const [linkTarget, setLinkTarget] = useState("");
   function link() {
@@ -704,13 +739,33 @@ function UserMgmtModal({ bookings, aliases, onChange, onClose }) {
       <div style={{display:"flex",flexDirection:"column",gap:8,maxHeight:"45vh",overflowY:"auto"}}>
         {Object.entries(groups).sort(([a],[b])=>a.localeCompare(b)).map(([primary, set])=>{
           const secondaries = [...set].filter(e=>e!==primary).sort();
+          const dflt = primary.split("@")[0];
+          const aliasName = (aliasNames||{})[primary] || "";
+          // Gather all booker `name` values seen on either the primary or its secondaries.
+          const allNames = new Set();
+          [primary, ...secondaries].forEach(em => { (namesByEmail[em]||[]).forEach(n=>allNames.add(n)); });
           return (
             <div key={primary} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,padding:"8px 12px"}}>
-              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:secondaries.length?6:0}}>
+              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6,flexWrap:"wrap"}}>
                 <span style={{width:9,height:9,borderRadius:"50%",background:emailColor(primary),flexShrink:0}}/>
                 <span style={{fontSize:13,fontWeight:700,color:"#0f172a"}}>{primary}</span>
                 <span style={{fontSize:10,fontWeight:700,padding:"1px 6px",borderRadius:10,background:"#f1f5f9",color:"#475569"}}>primary</span>
               </div>
+              <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:secondaries.length||allNames.size?8:0,flexWrap:"wrap"}}>
+                <span style={{fontSize:11,color:"#64748b",fontWeight:600,minWidth:60}}>Alias</span>
+                <input value={aliasName} onChange={e=>setAliasName(primary,e.target.value)}
+                  placeholder={dflt}
+                  style={{flex:"1 1 160px",minWidth:120,padding:"4px 8px",fontSize:12,borderRadius:6,border:"1.5px solid #e2e8f0",fontFamily:"inherit",outline:"none"}}/>
+                <span style={{fontSize:10,color:"#94a3b8"}}>defaults to <code style={{background:"#f1f5f9",padding:"1px 4px",borderRadius:3}}>{dflt}</code></span>
+              </div>
+              {allNames.size>0 && (
+                <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:secondaries.length?8:0,flexWrap:"wrap"}}>
+                  <span style={{fontSize:11,color:"#64748b",fontWeight:600,minWidth:60}}>Names</span>
+                  {[...allNames].sort().map(n=>(
+                    <span key={n} style={{fontSize:11,padding:"2px 8px",borderRadius:10,background:"#f8fafc",border:"1px solid #e2e8f0",color:"#475569"}}>{n}</span>
+                  ))}
+                </div>
+              )}
               {secondaries.length>0 && (
                 <div style={{display:"flex",flexDirection:"column",gap:4,paddingLeft:18}}>
                   {secondaries.map(s=>(
@@ -4067,6 +4122,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
   const [showClashPanel,setShowClashPanel]=useState(false);
   const [showMismatchPanel,setShowMismatchPanel]=useState(false);
   const [mismatchResState,setMismatchResState]=useState({}); // { [bookingId]: { resolution, billingState } }
+  const [mismatchSort,setMismatchSort]=useState({key:"date",dir:"asc"});
   const [showTrackChanges,setShowTrackChanges]=useState(false);
 
   const si={padding:"7px 12px",borderRadius:8,border:"1.5px solid #e2e8f0",fontSize:13,fontFamily:"inherit",color:"#0f172a",background:"#f8fafc",outline:"none"};
@@ -4444,7 +4500,33 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
 
       {/* Mismatch triage panel */}
       {showMismatchPanel&&(()=>{
-        const mismatches=bookings.filter(b=>b.status==="cpsa_review_needed"&&!isAdminBooking(b));
+        const rawMismatches=bookings.filter(b=>b.status==="cpsa_review_needed"&&!isAdminBooking(b));
+        const sortKey=mismatchSort.key, sortDir=mismatchSort.dir;
+        const facName = id => FACILITIES.find(f=>f.id===id)?.name || id;
+        const valOf = (b, k) => {
+          switch (k) {
+            case "name": return (b.name||"").toLowerCase();
+            case "date": return b.date||"";
+            case "facility": return facName(b.facility_id).toLowerCase();
+            case "time": return b.start_hour;
+            case "duration": return b.duration;
+            default: return "";
+          }
+        };
+        const mismatches=[...rawMismatches].sort((a,b)=>{
+          const av=valOf(a,sortKey), bv=valOf(b,sortKey);
+          if (av<bv) return sortDir==="asc"?-1:1;
+          if (av>bv) return sortDir==="asc"?1:-1;
+          // tie-breaker: date asc
+          if (a.date<b.date) return -1;
+          if (a.date>b.date) return 1;
+          return 0;
+        });
+        function toggleSort(key) {
+          setMismatchSort(prev => prev.key===key
+            ? {key, dir: prev.dir==="asc"?"desc":"asc"}
+            : {key, dir:"asc"});
+        }
         const thS2={padding:"7px 10px",textAlign:"left",fontWeight:700,color:"#92400e",whiteSpace:"nowrap",borderBottom:"1px solid #fde68a",fontSize:11,textTransform:"uppercase",letterSpacing:"0.04em"};
         const tdS2={padding:"7px 10px",borderBottom:"1px solid #fde68a",verticalAlign:"top"};
 
@@ -4577,35 +4659,45 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
           const btnPill={fontFamily:"inherit",fontSize:11,fontWeight:600,borderRadius:5,padding:"3px 8px",cursor:"pointer",border:"1.5px solid",display:"inline-flex",alignItems:"center",gap:3,whiteSpace:"nowrap",lineHeight:1.4};
 
           // Render a value pair as two clickable buttons.
+          // Original (ours): light yellow + italic. CPSA (mismatch): light blue + bold.
           // who="ours"|"cpsa"|undefined (not yet selected)
           function ValPair({field, ourVal, cpsaVal, changed, prefix}) {
             if (!changed) return <span style={{color:"#475569",fontSize:12}}>{ourVal}</span>;
             const sel=fieldSel[field];
             const oursActive=sel==="ours";
             const cpsaActive=sel==="cpsa";
+            const oursTooltip = oursActive
+              ? "Keeping our record — CPSA will be asked to correct this on their side"
+              : "Our record (original) — click to keep ours and flag CPSA to correct";
+            const cpsaTooltip = cpsaActive
+              ? "Accepting CPSA's value — our record will be amended to match"
+              : "CPSA's value (mismatch) — click to accept and amend our record";
             return (
               <div style={{display:"flex",flexDirection:"column",gap:3}}>
                 {prefix&&<span style={{fontSize:10,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.03em",fontWeight:700}}>{prefix}</span>}
                 <button
                   style={{...btnPill,
-                    background:oursActive?"#dbeafe":"#f8fafc",
-                    borderColor:oursActive?"#3b82f6":"#cbd5e1",
-                    color:oursActive?"#1e40af":"#64748b",
+                    fontStyle:"italic",
+                    background:"#fef9c3",
+                    borderColor:oursActive?"#a16207":"#fde68a",
+                    color:"#854d0e",
                     textDecoration:cpsaActive?"line-through":undefined,
-                    opacity:cpsaActive?0.55:1
+                    opacity:cpsaActive?0.55:1,
+                    boxShadow:oursActive?"0 0 0 2px #fde68a":undefined
                   }}
-                  title="Our record — click to mark CPSA should correct this"
+                  title={oursTooltip}
                   onClick={()=>sel==="ours"?resetField(field):pickField(field,"ours")}
                 >{oursActive?"✓ ":""}{ourVal}</button>
                 <button
                   style={{...btnPill,
-                    background:cpsaActive?"#fef9c3":"#f8fafc",
-                    borderColor:cpsaActive?"#f59e0b":"#cbd5e1",
-                    color:cpsaActive?"#92400e":"#475569",
-                    fontWeight:cpsaActive?700:600,
-                    opacity:oursActive?0.55:1
+                    fontWeight:700,
+                    background:"#dbeafe",
+                    borderColor:cpsaActive?"#1d4ed8":"#bfdbfe",
+                    color:"#1e3a8a",
+                    opacity:oursActive?0.55:1,
+                    boxShadow:cpsaActive?"0 0 0 2px #bfdbfe":undefined
                   }}
-                  title="CPSA value — click to accept and amend our record"
+                  title={cpsaTooltip}
                   onClick={()=>sel==="cpsa"?resetField(field):pickField(field,"cpsa")}
                 >{cpsaActive?"✓ ":"→ "}{cpsaVal}</button>
               </div>
@@ -4645,11 +4737,15 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                 <div style={{display:"flex",flexDirection:"column",gap:5}}>
                   {/* Resolution status derived from field buttons */}
                   {curRes!=="pending"&&(
-                    <div style={{fontSize:10,fontWeight:700,
-                      color:curRes==="amended"?"#a16207":"#5b21b6",
-                      background:curRes==="amended"?"#fef9c3":"#f5f3ff",
-                      border:`1px solid ${curRes==="amended"?"#fde68a":"#ddd6fe"}`,
-                      borderRadius:4,padding:"2px 7px",display:"inline-block"}}>
+                    <div
+                      title={curRes==="amended"
+                        ? "Resolved: our record has been amended to CPSA's values."
+                        : "Pending: CPSA to correct on their side. Becomes 'corrected' once CPSA acknowledges."}
+                      style={{fontSize:10,fontWeight:700,
+                        color:curRes==="amended"?"#a16207":"#5b21b6",
+                        background:curRes==="amended"?"#fef9c3":"#f5f3ff",
+                        border:`1px solid ${curRes==="amended"?"#fde68a":"#ddd6fe"}`,
+                        borderRadius:4,padding:"2px 7px",display:"inline-block",cursor:"help"}}>
                       {curRes==="amended"?"✓ Amended":"↩ CPSA to correct"}
                     </div>
                   )}
@@ -4660,28 +4756,72 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                   {showWarn&&alreadySettled&&(
                     <div style={{fontSize:10,background:"#fef2f2",border:"1px solid #fecaca",borderRadius:4,padding:"3px 7px",color:"#b91c1c"}}>⚠ Billing already settled from invoice view</div>
                   )}
-                  {/* Billing adjustment (only when amended + invoiced) */}
-                  {curRes==="amended"&&b.invoiced&&(()=>{
+                  {/* Billing follow-up — only relevant when amended */}
+                  {curRes==="amended"&&(()=>{
                     const delta=cpsaVals.duration-b.duration;
                     const ghost=(col)=>({fontFamily:"inherit",fontSize:11,fontWeight:700,borderRadius:5,padding:"3px 9px",cursor:"pointer",background:"transparent",border:`1.5px solid ${col}`,color:col});
+                    // For not-yet-invoiced bookings, the only follow-up is to update
+                    // the source record (no money has changed hands). For invoiced
+                    // bookings the duration drift implies a credit (overcharge) or
+                    // deficit invoice (undercharge).
+                    if (!b.invoiced) {
+                      const settled = curBilling==="nochange";
+                      return (
+                        <div style={{borderTop:"1px dashed #fde68a",paddingTop:4}}>
+                          <div style={{fontSize:10,fontWeight:700,color:"#92400e",textTransform:"uppercase",letterSpacing:"0.04em",marginBottom:3}}>Follow-up</div>
+                          {!settled
+                            ? <button style={ghost("#94a3b8")}
+                                title="Booking has not been invoiced yet — just update the stored record to match CPSA. No billing adjustment needed."
+                                onClick={()=>setBilling("nochange")}>📝 Update record</button>
+                            : <div style={{display:"flex",gap:4,alignItems:"center"}}>
+                                <span title="Record will be updated to CPSA values on save."
+                                  style={{fontSize:11,fontWeight:700,color:"#475569",cursor:"help"}}>📝 Update record</span>
+                                <button style={{fontFamily:"inherit",fontSize:11,border:"1.5px solid #cbd5e1",borderRadius:4,background:"transparent",color:"#94a3b8",cursor:"pointer",padding:"1px 5px"}} onClick={()=>setBilling("none")} title="Undo">↩</button>
+                              </div>
+                          }
+                        </div>
+                      );
+                    }
+                    // Invoiced path — duration delta picks credit vs deficit invoice.
+                    const overcharged = delta < 0; // booked > actual → we owe a credit
+                    const undercharged = delta > 0; // booked < actual → owed a deficit invoice
                     return (
                       <div style={{borderTop:"1px dashed #fde68a",paddingTop:4}}>
                         <div style={{fontSize:10,fontWeight:700,color:"#92400e",textTransform:"uppercase",letterSpacing:"0.04em",marginBottom:3}}>Billing</div>
                         {curBilling==="none"&&(
                           <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
-                            {delta<=0&&<button style={ghost("#15803d")} onClick={()=>setBilling("credit_pending")}>Credit pending</button>}
-                            {delta>=0&&<button style={ghost("#2563eb")} onClick={()=>setBilling("invoice_pending")}>Invoice pending</button>}
-                            <button style={ghost("#94a3b8")} onClick={()=>setBilling("nochange")}>No adj.</button>
+                            {overcharged&&<button style={ghost("#15803d")}
+                              title={`Booking was invoiced for ${b.duration}h but CPSA shows ${cpsaVals.duration}h. We owe the booker a credit for ${Math.abs(delta)}h.`}
+                              onClick={()=>setBilling("credit_pending")}>💚 Credit (pending)</button>}
+                            {undercharged&&<button style={ghost("#dc2626")}
+                              title={`Booking was invoiced for ${b.duration}h but CPSA shows ${cpsaVals.duration}h. Booker owes a deficit invoice for ${delta}h.`}
+                              onClick={()=>setBilling("invoice_pending")}>📨 Deficit invoice (pending)</button>}
+                            {delta===0&&<span style={{fontSize:11,color:"#475569"}}>No hours changed — no billing impact.</span>}
+                            <button style={ghost("#94a3b8")}
+                              title="No billing adjustment needed (already reconciled or intentional)."
+                              onClick={()=>setBilling("nochange")}>No adj.</button>
                           </div>
                         )}
                         {(curBilling==="credit_pending"||curBilling==="invoice_pending")&&(
                           <div style={{display:"flex",gap:4,alignItems:"center"}}>
-                            <span style={{fontSize:11,fontWeight:700,color:BILLING_COLOR[curBilling]}}>{BILLING_LABEL[curBilling]}</span>
-                            <button style={{fontFamily:"inherit",fontSize:11,border:"1.5px solid #cbd5e1",borderRadius:4,background:"transparent",color:"#94a3b8",cursor:"pointer",padding:"1px 5px"}} onClick={()=>setBilling("none")}>↩</button>
+                            <span
+                              title={curBilling==="credit_pending"
+                                ? `Pending: issue credit for ${Math.abs(delta)}h to the booker.`
+                                : `Pending: send a deficit invoice for the extra ${delta}h.`}
+                              style={{fontSize:11,fontWeight:700,color:curBilling==="credit_pending"?"#15803d":"#dc2626",cursor:"help"}}>
+                              {curBilling==="credit_pending"?`💚 Credit (${Math.abs(delta)}h)`:`📨 Deficit invoice (+${delta}h)`}
+                            </span>
+                            <button style={{fontFamily:"inherit",fontSize:11,border:"1.5px solid #cbd5e1",borderRadius:4,background:"transparent",color:"#94a3b8",cursor:"pointer",padding:"1px 5px"}} onClick={()=>setBilling("none")} title="Undo">↩</button>
                           </div>
                         )}
                         {(curBilling==="credited"||curBilling==="invoiced")&&(
                           <span style={{fontSize:11,fontWeight:700,color:BILLING_COLOR[curBilling]}}>{BILLING_LABEL[curBilling]}</span>
+                        )}
+                        {curBilling==="nochange"&&(
+                          <div style={{display:"flex",gap:4,alignItems:"center"}}>
+                            <span title="No billing adjustment required." style={{fontSize:11,fontWeight:700,color:"#475569",cursor:"help"}}>No adjustment</span>
+                            <button style={{fontFamily:"inherit",fontSize:11,border:"1.5px solid #cbd5e1",borderRadius:4,background:"transparent",color:"#94a3b8",cursor:"pointer",padding:"1px 5px"}} onClick={()=>setBilling("none")} title="Undo">↩</button>
+                          </div>
                         )}
                       </div>
                     );
@@ -4728,8 +4868,22 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                   <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
                     <thead>
                       <tr style={{background:"#fef3c7"}}>
-                        {["Booker","Date","Field","Time","Dur","Resolution & Billing"].map(h=>(
-                          <th key={h} style={thS2}>{h}</th>
+                        {[
+                          ["name","Booker"],
+                          ["date","Date"],
+                          ["facility","Field"],
+                          ["time","Time"],
+                          ["duration","Dur"],
+                          [null,"Resolution & Billing"],
+                        ].map(([key,label])=>(
+                          <th key={label} style={{...thS2,cursor:key?"pointer":"default",userSelect:"none"}}
+                            onClick={key?()=>toggleSort(key):undefined}
+                            title={key?"Click to sort":undefined}>
+                            {label}
+                            {key && sortKey===key && (
+                              <span style={{marginLeft:4,color:"#a16207"}}>{sortDir==="asc"?"▲":"▼"}</span>
+                            )}
+                          </th>
                         ))}
                       </tr>
                     </thead>
@@ -5205,11 +5359,21 @@ export default function App() {
     try{ return JSON.parse(localStorage.getItem("fb_email_aliases")||"{}"); }catch{ return {}; }
   });
   useEffect(()=>{ try{ localStorage.setItem("fb_email_aliases", JSON.stringify(emailAliases)); }catch{} }, [emailAliases]);
+  // aliasNames: { primaryEmail: displayName } — overrides the default email-prefix label.
+  const [aliasNames, setAliasNames] = useState(()=>{
+    try{ return JSON.parse(localStorage.getItem("fb_alias_names")||"{}"); }catch{ return {}; }
+  });
+  useEffect(()=>{ try{ localStorage.setItem("fb_alias_names", JSON.stringify(aliasNames)); }catch{} }, [aliasNames]);
   const canonEmail = useCallback(em => {
     if (!em) return em;
     const k = em.toLowerCase();
     return (emailAliases[k] || k);
   }, [emailAliases]);
+  const displayNameFor = useCallback(em => {
+    if (!em) return em;
+    const primary = canonEmail(em);
+    return aliasNames[primary] || primary.split("@")[0];
+  }, [canonEmail, aliasNames]);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [silentMode, setSilentMode] = useState(true); // admin: suppress all outgoing emails
   const [facilityRates, setFacilityRates] = useState(()=>{
@@ -6095,55 +6259,32 @@ export default function App() {
         {dbError&&<Banner type="error" msg={dbError}/>}
         {!configured&&<Banner type="info" msg="⚙️  Demo Mode — add Supabase credentials to enable persistent storage."/>}
 
-        {emailLegend.length>0&&(tab==="calendar"||tab==="month"||tab==="list"||tab==="summary")&&(
-          <div style={{display:"flex",gap:6,marginBottom:12,alignItems:"center",flexWrap:"wrap",paddingBottom:2,position:"relative"}}>
-            <button onClick={()=>setListBookerFilter(prev=>prev.size===0?new Set(emailLegend.map(e=>e.toLowerCase())):new Set())}
-              title={listBookerFilter.size===0?"Select all bookers":"Clear selection"}
-              style={{padding:"5px 12px",borderRadius:20,border:"1.5px solid",cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",flexShrink:0,borderColor:listBookerFilter.size===0?"#0f172a":"#e2e8f0",background:listBookerFilter.size===0?"#0f172a":"#fff",color:listBookerFilter.size===0?"#fff":"#475569"}}>
-              {listBookerFilter.size===0?"All":"None"}
-            </button>
-            <button onClick={()=>setShowBookerPicker(v=>!v)}
-              style={{display:"flex",alignItems:"center",gap:6,padding:"5px 12px",borderRadius:20,border:`1.5px solid ${listBookerFilter.size>0?"#0f172a":"#e2e8f0"}`,cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",flexShrink:0,background:"#fff",color:"#475569"}}>
-              <span>👥 Bookers</span>
-              {listBookerFilter.size>0 && (
-                <span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",minWidth:18,height:18,padding:"0 5px",borderRadius:9,background:"#0f172a",color:"#fff",fontSize:10,fontWeight:700}}>
-                  {listBookerFilter.size}
-                </span>
-              )}
-              <span style={{fontSize:9,color:"#94a3b8"}}>▾</span>
-            </button>
-            {/* Show selected chips inline for quick visual reference */}
-            {listBookerFilter.size>0 && listBookerFilter.size<=4 && [...listBookerFilter].map(em=>{
-              const c=emailColor(em);
-              return (
-                <button key={em} onClick={()=>toggleBooker(em)} title="Remove from filter"
-                  style={{padding:"5px 10px",borderRadius:20,border:`1.5px solid ${c}`,cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",flexShrink:0,background:c,color:"#fff",display:"inline-flex",alignItems:"center",gap:4}}>
-                  {em.split("@")[0]}<span style={{opacity:0.8,fontSize:11}}>✕</span>
-                </button>
-              );
-            })}
-            {showBookerPicker && (
-              <>
-                <div onClick={()=>setShowBookerPicker(false)} style={{position:"fixed",inset:0,zIndex:30}}/>
-                <div style={{position:"absolute",top:"calc(100% + 4px)",left:0,zIndex:31,background:"#fff",border:"1.5px solid #e2e8f0",borderRadius:12,boxShadow:"0 8px 24px rgba(15,23,42,0.12)",padding:10,minWidth:240,maxWidth:360,maxHeight:340,overflowY:"auto"}}>
-                  <div style={{fontSize:11,fontWeight:700,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:8,padding:"0 4px"}}>Filter bookers</div>
-                  <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                    {emailLegend.map(e=>{
-                      const active=listBookerFilter.has(e.toLowerCase());
-                      const c=emailColor(e);
-                      return(
-                        <button key={e} onClick={()=>toggleBooker(e.toLowerCase())}
-                          style={{padding:"5px 10px",borderRadius:18,border:`1.5px solid ${active?c:"#e2e8f0"}`,cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",background:active?c:"#fff",color:active?"#fff":"#475569"}}>
-                          {e.split("@")[0]}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
-        )}
+        {emailLegend.length>0&&(tab==="calendar"||tab==="month"||tab==="list"||tab==="summary")&&(()=>{
+          // Top header: always show every booker (by alias). The All/None chip toggles
+          // between "everything selected" and "nothing selected" on each click.
+          const allLower = emailLegend.map(e=>e.toLowerCase());
+          const allSelected = listBookerFilter.size>0 && allLower.every(e=>listBookerFilter.has(e));
+          return (
+            <div style={{display:"flex",gap:6,marginBottom:12,alignItems:"center",overflowX:"auto",WebkitOverflowScrolling:"touch",scrollbarWidth:"none",msOverflowStyle:"none",paddingBottom:2}}>
+              <button onClick={()=>setListBookerFilter(allSelected?new Set():new Set(allLower))}
+                title={allSelected?"Clear all bookers":"Select all bookers"}
+                style={{padding:"5px 12px",borderRadius:20,border:"1.5px solid",cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",flexShrink:0,borderColor:listBookerFilter.size===0?"#0f172a":"#e2e8f0",background:listBookerFilter.size===0?"#0f172a":"#fff",color:listBookerFilter.size===0?"#fff":"#475569"}}>
+                {allSelected?"None":"All"}
+              </button>
+              {emailLegend.map(e=>{
+                const active=listBookerFilter.has(e.toLowerCase());
+                const c=emailColor(e);
+                return(
+                  <button key={e} onClick={()=>toggleBooker(e.toLowerCase())}
+                    title={e}
+                    style={{padding:"5px 12px",borderRadius:20,border:`1.5px solid ${active?c:"#e2e8f0"}`,cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",flexShrink:0,background:active?c:"#fff",color:active?"#fff":"#475569"}}>
+                    {displayNameFor(e)}
+                  </button>
+                );
+              })}
+            </div>
+          );
+        })()}
 
         {(tab==="calendar"||tab==="month"||tab==="list")&&<FacilityPills/>}
 
@@ -6226,17 +6367,43 @@ export default function App() {
                                     style={{padding:"2px 3px",fontSize:10,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",width:"100%",minWidth:88}}/>
                                 </div>
                               </th>
-                              <th style={{padding:"3px 4px",whiteSpace:"normal"}}>
-                                <div style={{display:"flex",gap:3,flexWrap:"wrap",alignItems:"center"}}>
-                                  <button onClick={()=>setListBookerFilter(prev=>prev.size===0?new Set(bookerEmails):new Set())}
-                                    style={{padding:"1px 7px",fontSize:10,borderRadius:10,border:"1.5px solid #e2e8f0",background:listBookerFilter.size===0?"#0f172a":"#fff",color:listBookerFilter.size===0?"#fff":"#475569",cursor:"pointer",fontWeight:listBookerFilter.size===0?700:400,lineHeight:1.6}}>{listBookerFilter.size===0?"All":"None"}</button>
-                                  {bookerEmails.map(em=>(
-                                    <button key={em} onClick={()=>toggleBooker(em)}
-                                      style={{padding:"1px 7px",fontSize:10,borderRadius:10,border:`1.5px solid ${listBookerFilter.has(em)?emailColor(em):"#e2e8f0"}`,background:listBookerFilter.has(em)?emailColor(em):"#fff",color:listBookerFilter.has(em)?"#fff":"#475569",cursor:"pointer",fontWeight:listBookerFilter.has(em)?700:400,lineHeight:1.6}}>
-                                      {em.split("@")[0]}
-                                    </button>
-                                  ))}
-                                </div>
+                              <th style={{padding:"3px 4px",whiteSpace:"normal",position:"relative"}}>
+                                {(()=>{
+                                  const allSel = listBookerFilter.size>0 && bookerEmails.every(e=>listBookerFilter.has(e));
+                                  return (
+                                    <div style={{display:"flex",gap:3,alignItems:"center",flexWrap:"wrap"}}>
+                                      <button onClick={()=>setListBookerFilter(allSel?new Set():new Set(bookerEmails))}
+                                        title={allSel?"Clear all bookers":"Select all bookers"}
+                                        style={{padding:"1px 7px",fontSize:10,borderRadius:10,border:"1.5px solid #e2e8f0",background:listBookerFilter.size===0?"#0f172a":"#fff",color:listBookerFilter.size===0?"#fff":"#475569",cursor:"pointer",fontWeight:listBookerFilter.size===0?700:400,lineHeight:1.6}}>{allSel?"None":"All"}</button>
+                                      <button onClick={()=>setShowBookerPicker(v=>!v)}
+                                        style={{display:"inline-flex",alignItems:"center",gap:4,padding:"1px 7px",fontSize:10,borderRadius:10,border:`1.5px solid ${listBookerFilter.size>0?"#0f172a":"#e2e8f0"}`,background:"#fff",color:"#475569",cursor:"pointer",fontWeight:600,lineHeight:1.6}}>
+                                        <span>👥</span>
+                                        {listBookerFilter.size>0&&<span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",minWidth:14,height:14,padding:"0 4px",borderRadius:7,background:"#0f172a",color:"#fff",fontSize:9,fontWeight:700}}>{listBookerFilter.size}</span>}
+                                        <span style={{fontSize:8,color:"#94a3b8"}}>▾</span>
+                                      </button>
+                                      {showBookerPicker&&(
+                                        <>
+                                          <div onClick={()=>setShowBookerPicker(false)} style={{position:"fixed",inset:0,zIndex:30}}/>
+                                          <div style={{position:"absolute",top:"100%",left:0,zIndex:31,marginTop:4,background:"#fff",border:"1.5px solid #e2e8f0",borderRadius:10,boxShadow:"0 8px 24px rgba(15,23,42,0.12)",padding:8,minWidth:200,maxWidth:340,maxHeight:300,overflowY:"auto"}}>
+                                            <div style={{fontSize:10,fontWeight:700,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:6,padding:"0 2px"}}>Filter bookers</div>
+                                            <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                                              {bookerEmails.map(em=>{
+                                                const active=listBookerFilter.has(em);
+                                                const c=emailColor(em);
+                                                return(
+                                                  <button key={em} onClick={()=>toggleBooker(em)}
+                                                    style={{padding:"3px 8px",fontSize:11,borderRadius:14,border:`1.5px solid ${active?c:"#e2e8f0"}`,background:active?c:"#fff",color:active?"#fff":"#475569",cursor:"pointer",fontWeight:600,fontFamily:"inherit"}}>
+                                                    {displayNameFor(em)}
+                                                  </button>
+                                                );
+                                              })}
+                                            </div>
+                                          </div>
+                                        </>
+                                      )}
+                                    </div>
+                                  );
+                                })()}
                               </th>
                               <th style={{padding:"3px 4px"}}>
                                 <select value={listColFacility} onChange={e=>setListColFacility(e.target.value)}
@@ -6490,7 +6657,9 @@ export default function App() {
         <UserMgmtModal
           bookings={bookings}
           aliases={emailAliases}
+          aliasNames={aliasNames}
           onChange={setEmailAliases}
+          onChangeNames={setAliasNames}
           onClose={()=>setShowUserMgmtModal(false)}
         />
       )}
