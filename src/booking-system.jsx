@@ -101,7 +101,7 @@ const STATUS_META = {
   pending_cpsa: {bg:"#e0f2fe",border:"#7dd3fc",text:"#075985",dot:"#0ea5e9",label:"(3/4) Pending CPSA Review"},
   approved:      {bg:"#f0fdf4",border:"#22c55e",text:"#14532d",dot:"#22c55e",label:"(4/4) Approved"},
   cpsa_confirmed:{bg:"#ecfeff",border:"#0891b2",text:"#155e75",dot:"#0891b2",label:"🌐 CPSA Confirmed"},
-  cpsa_review_needed: {bg:"#fef9c3",border:"#ca8a04",text:"#713f12",dot:"#ca8a04",label:"⚠ CPSA Mismatch — AMUA Review"},
+  cpsa_review_needed: {bg:"#ffedd5",border:"#d97706",text:"#7c2d12",dot:"#d97706",label:"⚠ CPSA Mismatch — AMUA Review"},
   rejected:     {bg:"#fff1f2",border:"#f43f5e",text:"#881337",dot:"#f43f5e",label:"Rejected"},
   cancelled:    {bg:"#f8f8f8",border:"#94a3b8",text:"#475569",dot:"#94a3b8",label:"Cancelled"},
   clash:        {bg:"#fef3c7",border:"#d97706",text:"#92400e",dot:"#d97706",label:"Clash"},
@@ -117,7 +117,7 @@ const REVIEW_STATUSES = new Set(["pending_amua","queued_cpsa","amua_submit","pen
 const STATUS_CAL_COLOR = {
   pending_amua:"#f59e0b", queued_cpsa:"#3b82f6", amua_submit:"#3b82f6",
   pending_cpsa:"#0ea5e9", pending:"#f59e0b",     approved:"#22c55e",
-  cpsa_confirmed:"#0891b2", cpsa_review_needed:"#ca8a04",
+  cpsa_confirmed:"#0891b2", cpsa_review_needed:"#d97706",
   clash:"#d97706", rejected:"#f43f5e", cancelled:"#94a3b8",
 };
 // Fields that participate in CPSA sync (f1/f2 are meeting/function rooms and stay "approved").
@@ -1627,7 +1627,7 @@ function MonthCalendar({ bookings, onBookingClick, onNewBooking, selectedFacilit
     const cfg={
       approved:           {c:"#22c55e",l:"✓"},
       cpsa_confirmed:     {c:"#0891b2",l:"✓"},
-      cpsa_review_needed: {c:"#ca8a04",l:"?"},
+      cpsa_review_needed: {c:"#d97706",l:"?"},
       rejected:           {c:"#f43f5e",l:"✗"},
       cancelled:          {c:"#94a3b8",l:"—"},
       clash:              {c:"#d97706",l:"!"},
