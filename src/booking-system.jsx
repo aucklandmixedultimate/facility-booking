@@ -111,6 +111,16 @@ const STATUS_META = {
 // invoiced is an orthogonal billing flag (booking.invoiced boolean), not a workflow status.
 const INVOICED_META = {bg:"#f5f3ff",border:"#7c3aed",text:"#5b21b6",dot:"#7c3aed",label:"🧾 Invoiced"};
 const REVIEW_STATUSES = new Set(["pending_amua","queued_cpsa","amua_submit","pending_cpsa","pending","cpsa_review_needed"]);
+// Solid status colours used as the primary background in week/month calendar blocks.
+// Field colour becomes the left-border accent; booker email colour appears as a small dot.
+const STATUS_CAL_COLOR = {
+  pending_amua:"#f59e0b", queued_cpsa:"#2563eb", amua_submit:"#7c3aed",
+  pending_cpsa:"#0284c7", pending:"#64748b",     approved:"#16a34a",
+  cpsa_confirmed:"#0891b2", cpsa_review_needed:"#b45309",
+  clash:"#d97706", rejected:"#dc2626", cancelled:"#94a3b8",
+};
+// Fields that participate in CPSA sync (f1/f2 are meeting/function rooms and stay "approved").
+const CPSA_FIELD_IDS = new Set(["f3","f4","f5"]);
 const AMUA_INFO = {
   name:      "Auckland Mixed Ultimate Association (AMUA)",
   address:   "",
@@ -480,13 +490,13 @@ function Modal({title,onClose,children,width=560}) {
   return (
     <div onClick={e=>e.target===e.currentTarget&&onClose()} style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.55)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:1000,padding:"0",backdropFilter:"blur(2px)"}}
       className="modal-backdrop">
-      <div style={{background:"#fff",borderRadius:"16px 16px 0 0",width:"100%",maxWidth:width,maxHeight:"92vh",overflowY:"auto",boxShadow:"0 -8px 40px rgba(0,0,0,0.2)"}}
+      <div style={{background:"#fff",borderRadius:"16px 16px 0 0",width:"100%",maxWidth:width,maxHeight:"92vh",display:"flex",flexDirection:"column",boxShadow:"0 -8px 40px rgba(0,0,0,0.2)"}}
         onClick={e=>e.stopPropagation()}>
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"20px 24px 16px",borderBottom:"1px solid #f1f5f9"}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"20px 24px 16px",borderBottom:"1px solid #f1f5f9",flexShrink:0}}>
           <h2 style={{margin:0,fontSize:18,fontWeight:700,color:"#0f172a"}}>{title}</h2>
           <button onClick={onClose} style={{background:"none",border:"none",cursor:"pointer",fontSize:20,color:"#94a3b8",lineHeight:1,padding:4}}>✕</button>
         </div>
-        <div style={{padding:24}}>{children}</div>
+        <div style={{padding:24,flex:1,minHeight:0,display:"flex",flexDirection:"column",overflow:"hidden"}}>{children}</div>
       </div>
     </div>
   );
@@ -752,7 +762,7 @@ function CartModal({ cart, setCart, onClose, onSubmit, openNew, cartIdsSet }) {
             <div style={{fontSize:13,color:'#64748b',marginBottom:12}}>
               {[totalNew>0&&`${totalNew} new booking${totalNew>1?'s':''}`, totalEdits>0&&`${totalEdits} edit${totalEdits>1?'s':''}`, totalNotify>0&&`${totalNotify} CPSA notification${totalNotify>1?'s':''}`].filter(Boolean).join(' · ')} ready to submit.
             </div>
-            <div style={{flex:1,overflowY:'auto',maxHeight:'60vh',display:'flex',flexDirection:'column',gap:10,paddingRight:2}}>
+            <div style={{flex:1,minHeight:0,overflowY:'auto',display:'flex',flexDirection:'column',gap:10,paddingRight:2}}>
               {/* Regular (non-notify) cart items */}
               {cart.map((item,gi)=>{
                 if(item.notifyOnly) return null;
@@ -1476,9 +1486,8 @@ function WeekCalendar({ bookings, onNewBooking, onBookingClick, selectedFacility
                       const stk=getStackStyle(b,dayBkgs);
                       const ec=emailColor(b.email);
                       const isAdmin_bk = isAdminBooking(b);
-                      const isCpsaConfirmed = b.status==="cpsa_confirmed"||b.status==="cpsa_review_needed";
-                      const bkBg = isAdmin_bk ? "#94a3b8" : isCpsaConfirmed ? "#78909c" : (fac?.color||"#4a90d9");
-                      const bkBorderLeft = isAdmin_bk ? undefined : isCpsaConfirmed ? "4px solid #0891b2" : (deleteIds.has(b.id)||cartSourceIds.has(b.id) ? undefined : `4px solid ${ec}`);
+                      const bkBg = isAdmin_bk ? "#94a3b8" : (STATUS_CAL_COLOR[b.status] || "#64748b");
+                      const bkBorderLeft = (deleteIds.has(b.id)||cartSourceIds.has(b.id)||isAdmin_bk) ? undefined : `4px solid ${fac?.color||"#4a90d9"}`;
                       const filterActive = bookerFilter.size > 0;
                       const isDimmed = filterActive && !bookerFilter.has(b.email?.toLowerCase());
                       const dimOpacity = isAdmin_bk ? 0.25 : 0.12;
@@ -1488,15 +1497,18 @@ function WeekCalendar({ bookings, onNewBooking, onBookingClick, selectedFacility
                           onMouseDown={e=>e.stopPropagation()}
                           title={(()=>{const r=parseMismatchNote(b.system_notes,b.notes);return `${b.name} – ${fac?.name}`+(b.status==="cpsa_review_needed"&&r.length?`\n⚠ CPSA inconsistencies:\n${r.join("\n")}`:b.status==="cpsa_confirmed"?"\n🌐 CPSA confirmed":"");})()}
                           style={{ position:"absolute", top:(b.start_hour-CAL_START)*HOUR_H, height:Math.max(b.duration*HOUR_H-2,20), background:bkBg, borderRadius:6, padding:"3px 6px", cursor:isDimmed?"default":"pointer", overflow:"hidden", opacity:isDimmed?dimOpacity:REVIEW_STATUSES.has(b.status)?0.75:1, pointerEvents:isDimmed?"none":"auto", border:deleteIds.has(b.id)?"2.5px solid #ef4444":cartSourceIds.has(b.id)?"2.5px solid #f59e0b":b.status==="clash"?"2px dashed #d97706":REVIEW_STATUSES.has(b.status)?"2px dashed rgba(255,255,255,0.6)":b.status==="rejected"?"2px solid rgba(244,63,94,0.8)":"none", boxShadow:deleteIds.has(b.id)?"0 0 0 3px rgba(239,68,68,0.25)":cartSourceIds.has(b.id)?"0 0 0 3px rgba(245,158,11,0.25)":"0 1px 4px rgba(0,0,0,0.15)", zIndex:2, borderLeft:bkBorderLeft, ...stk }}>
-                          <div style={{ fontSize:11, fontWeight:700, color:"#fff", lineHeight:1.3, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{b.purpose||b.name}</div>
-                          {b.duration*HOUR_H>22&&!isAdmin_bk&&<div style={{ fontSize:9, color:"rgba(255,255,255,0.8)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{b.name}</div>}
-                          {b.duration*HOUR_H>28&&<div style={{display:"flex",alignItems:"center",gap:3,marginTop:1}}>
-                            <span style={{fontSize:9,fontWeight:700,color:"rgba(255,255,255,0.9)",background:"rgba(0,0,0,0.2)",borderRadius:3,padding:"1px 4px",whiteSpace:"nowrap"}}>
-                              {STATUS_META[b.status]?.label || "Unknown"}
-                            </span>
+                          <div style={{display:"flex",alignItems:"center",gap:3,overflow:"hidden"}}>
+                            {!isAdmin_bk&&<span style={{width:7,height:7,borderRadius:"50%",background:ec,flexShrink:0,boxShadow:"0 0 0 1px rgba(255,255,255,0.4)",display:"inline-block"}}/>}
+                            <div style={{ fontSize:11, fontWeight:700, color:"#fff", lineHeight:1.3, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{b.purpose||b.name}</div>
+                          </div>
+                          {b.duration*HOUR_H>22&&!isAdmin_bk&&<div style={{ fontSize:9, color:"rgba(255,255,255,0.85)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", paddingLeft:10 }}>{b.name}</div>}
+                          {b.duration*HOUR_H>32&&<div style={{display:"flex",alignItems:"center",gap:3,marginTop:1,paddingLeft:10}}>
                             {b.invoiced&&<span style={{fontSize:9,fontWeight:700,color:"rgba(255,255,255,0.9)",background:"rgba(124,58,237,0.5)",borderRadius:3,padding:"1px 4px",whiteSpace:"nowrap"}}>🧾</span>}
                           </div>}
-                          {b.duration*HOUR_H>44&&<div style={{ fontSize:10, color:"rgba(255,255,255,0.85)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{fac?.name}</div>}
+                          {b.duration*HOUR_H>44&&<div style={{display:"flex",alignItems:"center",gap:4,paddingLeft:10,marginTop:1}}>
+                            <span style={{width:6,height:6,borderRadius:2,background:fac?.color||"#4a90d9",flexShrink:0,display:"inline-block"}}/>
+                            <span style={{ fontSize:9, color:"rgba(255,255,255,0.85)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{fac?.name}</span>
+                          </div>}
                         </div>
                       );
                     })}
@@ -1637,10 +1649,9 @@ function MonthCalendar({ bookings, onBookingClick, onNewBooking, selectedFacilit
                   const inDelete = deleteIds.has(b.id);
                   const inCart   = cartSourceIds.has(b.id);
                   const isAdmin_bk = isAdminBooking(b);
-                  const isCpsaConfirmed = b.status==="cpsa_confirmed"||b.status==="cpsa_review_needed";
-                  const chipBg = isSel?"#6366f1": isAdmin_bk?"#94a3b8" : isCpsaConfirmed?"#78909c" : (fac?.color||"#4a90d9");
+                  const chipBg = isSel?"#6366f1": isAdmin_bk?"#94a3b8" : (STATUS_CAL_COLOR[b.status]||"#64748b");
                   const chipOutline = inDelete?"2.5px solid #ef4444":inCart?"2.5px solid #f59e0b":isSel?"2px solid #4f46e5":"none";
-                  const chipLeft = inDelete||inCart||isAdmin_bk?"none": isCpsaConfirmed?"3px solid #0891b2" :"3px solid "+ec;
+                  const chipLeft = inDelete||inCart||isAdmin_bk?"none": `3px solid ${fac?.color||"#4a90d9"}`;
                   const filterActive = bookerFilter.size > 0;
                   const isDimmed = filterActive && !bookerFilter.has(b.email?.toLowerCase());
                   const dimOpacity = isAdmin_bk ? 0.25 : 0.15;
@@ -1649,7 +1660,7 @@ function MonthCalendar({ bookings, onBookingClick, onNewBooking, selectedFacilit
                       onClick={e=>{ e.stopPropagation(); if(isDimmed) return; if(selMode) toggleSel(b.id); else onBookingClick(b); }}
                       title={(()=>{const r=parseMismatchNote(b.system_notes,b.notes);return `${b.name} · ${fac?.name} · ${fmtTime(b.start_hour)}–${fmtTime(b.start_hour+b.duration)}`+(b.status==="cpsa_review_needed"&&r.length?`\n⚠ CPSA inconsistencies:\n${r.join("\n")}`:b.status==="cpsa_confirmed"?"\n🌐 CPSA confirmed":"");})()}
                       style={{ background:chipBg, borderRadius:4, padding:"2px 4px", fontSize:10, fontWeight:700, color:"#fff", overflow:"hidden", whiteSpace:"nowrap", borderLeft:chipLeft, outline:chipOutline, opacity:isDimmed?dimOpacity:REVIEW_STATUSES.has(b.status)?0.75:1, cursor:isDimmed?"default":"pointer", pointerEvents:isDimmed?"none":"auto", display:"flex", alignItems:"center", gap:3 }}>
-                      <StatusDot status={b.status}/>
+                      {!isAdmin_bk&&<span style={{width:6,height:6,borderRadius:"50%",background:ec,flexShrink:0,display:"inline-block",boxShadow:"0 0 0 1px rgba(255,255,255,0.35)"}}/>}
                       <span style={{overflow:"hidden",textOverflow:"ellipsis",flex:1}}>{fmtTime(b.start_hour)} {b.purpose||b.name}</span>
                       {b.invoiced&&<span style={{fontSize:8,flexShrink:0}}>🧾</span>}
                     </div>
@@ -3581,6 +3592,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
   const [clashGrouped,setClashGrouped]=useState(true);
   const [clashPatternModal,setClashPatternModal]=useState(null);
   const [showClashPanel,setShowClashPanel]=useState(false);
+  const [showMismatchPanel,setShowMismatchPanel]=useState(false);
   const [showTrackChanges,setShowTrackChanges]=useState(false);
 
   const si={padding:"7px 12px",borderRadius:8,border:"1.5px solid #e2e8f0",fontSize:13,fontFamily:"inherit",color:"#0f172a",background:"#f8fafc",outline:"none"};
@@ -3740,6 +3752,11 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
         <button onClick={()=>setShowClashPanel(v=>!v)} style={S.btn({border:`1.5px solid ${clashes.length>0?"#fda4af":"#e2e8f0"}`,background:showClashPanel?"#fff1f2":"#fff",color:clashes.length>0?"#9f1239":"#94a3b8",fontSize:12,fontWeight:clashes.length>0?700:500})}>
           ⚠️ Clashes ({clashes.length}) {showClashPanel?"▴":"▾"}
         </button>
+        {(()=>{ const mc=bookings.filter(b=>b.status==="cpsa_review_needed"&&!isAdminBooking(b)).length; return (
+        <button onClick={()=>setShowMismatchPanel(v=>!v)} style={S.btn({border:`1.5px solid ${mc>0?"#fde68a":"#e2e8f0"}`,background:showMismatchPanel?"#fffbeb":"#fff",color:mc>0?"#b45309":"#94a3b8",fontSize:12,fontWeight:mc>0?700:500})}>
+          ⚡ Mismatches ({mc}) {showMismatchPanel?"▴":"▾"}
+        </button>
+        );})()}
         <button onClick={()=>setShowTrackChanges(v=>!v)} style={S.btn({border:`1.5px solid ${trackedChanges.length>0?"#ddd6fe":"#e2e8f0"}`,background:showTrackChanges?"#f5f3ff":"#fff",color:trackedChanges.length>0?"#5b21b6":"#94a3b8",fontSize:12,fontWeight:trackedChanges.length>0?700:500})}>
           🧾 Track Changes ({trackedChanges.length}) {showTrackChanges?"▴":"▾"}
         </button>
@@ -4026,6 +4043,104 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                 onClose={()=>setClashPatternModal(null)}
                 onBulkApply={args=>{onBulkApply&&onBulkApply(args);setClashPatternModal(null);}}/>
             )}
+          </div>
+        );
+      })()}
+
+      {/* Mismatch triage panel */}
+      {showMismatchPanel&&(()=>{
+        const mismatches=bookings.filter(b=>b.status==="cpsa_review_needed"&&!isAdminBooking(b));
+        function mismatchTSV(){
+          const hdr="Name\tEmail\tDate\tFacility\tTime\tDuration\tMismatch Reasons";
+          const rows=mismatches.map(b=>{
+            const fac=FACILITIES.find(x=>x.id===b.facility_id);
+            const reasons=parseMismatchNote(b.system_notes,b.notes).join("; ");
+            return [b.name,b.email,b.date,fac?.name||b.facility_id,`${fmtTime(b.start_hour)}–${fmtTime(b.start_hour+b.duration)}`,`${b.duration}h`,reasons].join("\t");
+          });
+          return [hdr,...rows].join("\n");
+        }
+        function mismatchCSV(){
+          const hdr="Name,Email,Date,Facility,Time,Duration,Mismatch Reasons";
+          const esc=v=>`"${String(v).replace(/"/g,'""')}"`;
+          const rows=mismatches.map(b=>{
+            const fac=FACILITIES.find(x=>x.id===b.facility_id);
+            const reasons=parseMismatchNote(b.system_notes,b.notes).join("; ");
+            return [b.name,b.email,b.date,fac?.name||b.facility_id,`${fmtTime(b.start_hour)}–${fmtTime(b.start_hour+b.duration)}`,`${b.duration}h`,reasons].map(esc).join(",");
+          });
+          return [hdr,...rows].join("\n");
+        }
+        return (
+          <div style={{background:"#fffbeb",border:"1.5px solid #fde68a",borderRadius:12,padding:16,display:"flex",flexDirection:"column",gap:10}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,justifyContent:"space-between",flexWrap:"wrap"}}>
+              <div>
+                <span style={{fontWeight:700,fontSize:14,color:"#b45309"}}>⚡ {mismatches.length} CPSA mismatch{mismatches.length!==1?"es":""} pending review</span>
+                <div style={{fontSize:12,color:"#92400e",marginTop:2}}>Field bookings where CPSA data differs from what was booked. Export to triage with CPSA.</div>
+              </div>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                <button onClick={()=>{ navigator.clipboard?.writeText(mismatchTSV()); }} style={S.btn({background:"#fff",border:"1.5px solid #fde68a",color:"#b45309",fontSize:12,fontWeight:700})}>
+                  📋 Copy (TSV)
+                </button>
+                <button onClick={()=>{
+                  const blob=new Blob([mismatchCSV()],{type:"text/csv"});
+                  const url=URL.createObjectURL(blob);
+                  const a=document.createElement("a"); a.href=url; a.download="cpsa-mismatches.csv"; a.click();
+                  setTimeout(()=>URL.revokeObjectURL(url),1000);
+                }} style={S.btn({background:"#f59e0b",color:"#fff",fontWeight:700,fontSize:12})}>
+                  ⬇ Export CSV
+                </button>
+              </div>
+            </div>
+            {mismatches.length===0
+              ? <div style={{fontSize:12,color:"#92400e"}}>No mismatches at this time. Run a sync to refresh.</div>
+              : <div style={{overflowX:"auto",borderRadius:8,border:"1px solid #fde68a"}}>
+                  <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                    <thead>
+                      <tr style={{background:"#fef3c7"}}>
+                        {["Booker","Date","Facility","Time","Dur","Mismatch Reasons"].map(h=>(
+                          <th key={h} style={{padding:"6px 10px",textAlign:"left",fontWeight:700,color:"#92400e",whiteSpace:"nowrap",borderBottom:"1px solid #fde68a"}}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {mismatches.map((b,i)=>{
+                        const fac=FACILITIES.find(x=>x.id===b.facility_id);
+                        const reasons=parseMismatchNote(b.system_notes,b.notes);
+                        return (
+                          <tr key={b.id} onClick={()=>onView&&onView(b)} style={{cursor:"pointer",background:i%2===0?"#fff":"#fffbeb"}}
+                            onMouseEnter={e=>e.currentTarget.style.background="#fef9c3"}
+                            onMouseLeave={e=>e.currentTarget.style.background=i%2===0?"#fff":"#fffbeb"}>
+                            <td style={{padding:"5px 10px",borderBottom:"1px solid #fde68a"}}>
+                              <div style={{fontWeight:600,color:"#0f172a"}}>{b.name}</div>
+                              <div style={{color:"#64748b",fontSize:11}}>{b.email}</div>
+                            </td>
+                            <td style={{padding:"5px 10px",borderBottom:"1px solid #fde68a",whiteSpace:"nowrap",color:"#475569"}}>{fmtDate(b.date)}</td>
+                            <td style={{padding:"5px 10px",borderBottom:"1px solid #fde68a",whiteSpace:"nowrap"}}>
+                              <div style={{display:"flex",alignItems:"center",gap:5}}>
+                                <span style={{width:8,height:8,borderRadius:2,background:fac?.color||"#94a3b8",flexShrink:0,display:"inline-block"}}/>
+                                <span style={{color:"#475569"}}>{fac?.name||b.facility_id}</span>
+                              </div>
+                            </td>
+                            <td style={{padding:"5px 10px",borderBottom:"1px solid #fde68a",whiteSpace:"nowrap",color:"#475569"}}>{fmtTime(b.start_hour)}–{fmtTime(b.start_hour+b.duration)}</td>
+                            <td style={{padding:"5px 10px",borderBottom:"1px solid #fde68a",whiteSpace:"nowrap",color:"#94a3b8"}}>{b.duration}h</td>
+                            <td style={{padding:"5px 10px",borderBottom:"1px solid #fde68a"}}>
+                              {reasons.length>0
+                                ? <div style={{display:"flex",flexDirection:"column",gap:2}}>
+                                    {reasons.map((r,ri)=>{const p=splitReason(r);return(
+                                      <span key={ri} style={{display:"inline-flex",gap:4,alignItems:"center",whiteSpace:"nowrap"}}>
+                                        <span style={{fontWeight:600,color:"#92400e"}}>{p.label}</span>
+                                        {p.before&&<><span style={{color:"#64748b",textDecoration:"line-through"}}>{p.before}</span><span style={{color:"#94a3b8"}}>→</span><span style={{color:"#b45309",fontWeight:600}}>{p.after}</span></>}
+                                      </span>
+                                    );})}
+                                  </div>
+                                : <span style={{color:"#94a3b8"}}>—</span>}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+            }
           </div>
         );
       })()}
@@ -5452,7 +5567,10 @@ export default function App() {
                                     if(b.status==="cpsa_confirmed"){
                                       return cpsaUrl
                                         ? <a href={cpsaUrl} target="_blank" rel="noopener noreferrer" style={{color:"#0891b2",fontWeight:600,textDecoration:"none"}} title="View CPSA booking">🌐 confirmed ↗</a>
-                                        : <span style={{color:"#0891b2",fontWeight:600}}>✓ confirmed</span>;
+                                        : <span style={{color:"#94a3b8",fontWeight:600}} title="CPSA confirmed — no submission URL recorded">🌐 confirmed</span>;
+                                    }
+                                    if(b.status==="approved" && CPSA_FIELD_IDS.has(b.facility_id)){
+                                      return <span style={{color:"#94a3b8",fontSize:11}} title="Field booking — run sync to check CPSA status">⏳ awaiting sync</span>;
                                     }
                                     if(b.status==="cpsa_review_needed"&&reasons.length){
                                       return <span title={reasons.join("\n")} style={{color:"#a16207",cursor:"help",display:"inline-block",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:160}}>⚠ {reasons.join(", ")}</span>;
