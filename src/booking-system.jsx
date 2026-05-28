@@ -102,13 +102,14 @@ const STATUS_META = {
   approved:      {bg:"#f0fdf4",border:"#22c55e",text:"#14532d",dot:"#22c55e",label:"(4/4) Approved"},
   cpsa_confirmed:{bg:"#ecfeff",border:"#0891b2",text:"#155e75",dot:"#0891b2",label:"🌐 CPSA Confirmed"},
   cpsa_review_needed: {bg:"#fef9c3",border:"#ca8a04",text:"#713f12",dot:"#ca8a04",label:"⚠ CPSA Mismatch — AMUA Review"},
-  invoiced:     {bg:"#f5f3ff",border:"#7c3aed",text:"#5b21b6",dot:"#7c3aed",label:"🧾 Invoiced"},
   rejected:     {bg:"#fff1f2",border:"#f43f5e",text:"#881337",dot:"#f43f5e",label:"Rejected"},
   cancelled:    {bg:"#f8f8f8",border:"#94a3b8",text:"#475569",dot:"#94a3b8",label:"Cancelled"},
   clash:        {bg:"#fef3c7",border:"#d97706",text:"#92400e",dot:"#d97706",label:"Clash"},
   amua_submit:  {bg:"#dbeafe",border:"#93c5fd",text:"#1e40af",dot:"#3b82f6",label:"(2/4) Queued for CPSA"},
   pending:      {bg:"#fff8e1",border:"#f59e0b",text:"#92400e",dot:"#f59e0b",label:"(1/4) Pending AMUA Review"},
 };
+// invoiced is an orthogonal billing flag (booking.invoiced boolean), not a workflow status.
+const INVOICED_META = {bg:"#f5f3ff",border:"#7c3aed",text:"#5b21b6",dot:"#7c3aed",label:"🧾 Invoiced"};
 const REVIEW_STATUSES = new Set(["pending_amua","queued_cpsa","amua_submit","pending_cpsa","pending","cpsa_review_needed"]);
 const AMUA_INFO = {
   name:      "Auckland Mixed Ultimate Association (AMUA)",
@@ -613,7 +614,7 @@ function BookingRow({ row, idx, onChange, onRemove, isOnly, isAdmin, isEditing, 
         <div>
           <label style={S.lbl}>Status</label>
           <select style={S.inp} value={row.status} onChange={e=>upd("status",e.target.value)}>
-            {Object.entries(STATUS_META).filter(([k])=>k!=="pending").map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
+            {Object.entries(STATUS_META).filter(([k])=>!["pending","amua_submit"].includes(k)).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
           </select>
         </div>
       )}
@@ -1226,6 +1227,7 @@ function BookingDetail({booking,onEdit,onClose,onCancel,isAdmin,onStatusChange,l
           ) : (
             <Badge status={booking.status}/>
           )}
+          {booking.invoiced&&<span style={{fontSize:12,fontWeight:700,background:INVOICED_META.bg,color:INVOICED_META.text,border:`1px solid ${INVOICED_META.border}`,borderRadius:8,padding:"3px 9px"}}>🧾 Invoiced</span>}
           {REVIEW_STATUSES.has(booking.status)&&<p style={{margin:0,fontSize:13,color:m.text}}>Awaiting admin review.</p>}
         </div>
         {booking.status==="clash"&&clashingAdminBks.length>0&&(
@@ -1460,19 +1462,22 @@ function WeekCalendar({ bookings, onNewBooking, onBookingClick, selectedFacility
                       const isCpsaConfirmed = b.status==="cpsa_confirmed"||b.status==="cpsa_review_needed";
                       const bkBg = isAdmin_bk ? "#94a3b8" : isCpsaConfirmed ? "#78909c" : (fac?.color||"#4a90d9");
                       const bkBorderLeft = isAdmin_bk ? undefined : isCpsaConfirmed ? "4px solid #0891b2" : (deleteIds.has(b.id)||cartSourceIds.has(b.id) ? undefined : `4px solid ${ec}`);
-                      const isDimmed = !isAdmin_bk && bookerFilter.size > 0 && !bookerFilter.has(b.email?.toLowerCase());
+                      const filterActive = bookerFilter.size > 0;
+                      const isDimmed = filterActive && !bookerFilter.has(b.email?.toLowerCase());
+                      const dimOpacity = isAdmin_bk ? 0.25 : 0.12;
                       return (
                         <div key={b.id}
                           onClick={e=>{ e.stopPropagation(); if(!isDimmed) onBookingClick(b); }}
                           onMouseDown={e=>e.stopPropagation()}
                           title={(()=>{const r=parseMismatchNote(b.system_notes,b.notes);return `${b.name} – ${fac?.name}`+(b.status==="cpsa_review_needed"&&r.length?`\n⚠ CPSA inconsistencies:\n${r.join("\n")}`:b.status==="cpsa_confirmed"?"\n🌐 CPSA confirmed":"");})()}
-                          style={{ position:"absolute", top:(b.start_hour-CAL_START)*HOUR_H, height:Math.max(b.duration*HOUR_H-2,20), background:bkBg, borderRadius:6, padding:"3px 6px", cursor:isDimmed?"default":"pointer", overflow:"hidden", opacity:isDimmed?0.12:REVIEW_STATUSES.has(b.status)?0.75:1, pointerEvents:isDimmed?"none":"auto", border:deleteIds.has(b.id)?"2.5px solid #ef4444":cartSourceIds.has(b.id)?"2.5px solid #f59e0b":b.status==="clash"?"2px dashed #d97706":REVIEW_STATUSES.has(b.status)?"2px dashed rgba(255,255,255,0.6)":b.status==="rejected"?"2px solid rgba(244,63,94,0.8)":"none", boxShadow:deleteIds.has(b.id)?"0 0 0 3px rgba(239,68,68,0.25)":cartSourceIds.has(b.id)?"0 0 0 3px rgba(245,158,11,0.25)":"0 1px 4px rgba(0,0,0,0.15)", zIndex:2, borderLeft:bkBorderLeft, ...stk }}>
+                          style={{ position:"absolute", top:(b.start_hour-CAL_START)*HOUR_H, height:Math.max(b.duration*HOUR_H-2,20), background:bkBg, borderRadius:6, padding:"3px 6px", cursor:isDimmed?"default":"pointer", overflow:"hidden", opacity:isDimmed?dimOpacity:REVIEW_STATUSES.has(b.status)?0.75:1, pointerEvents:isDimmed?"none":"auto", border:deleteIds.has(b.id)?"2.5px solid #ef4444":cartSourceIds.has(b.id)?"2.5px solid #f59e0b":b.status==="clash"?"2px dashed #d97706":REVIEW_STATUSES.has(b.status)?"2px dashed rgba(255,255,255,0.6)":b.status==="rejected"?"2px solid rgba(244,63,94,0.8)":"none", boxShadow:deleteIds.has(b.id)?"0 0 0 3px rgba(239,68,68,0.25)":cartSourceIds.has(b.id)?"0 0 0 3px rgba(245,158,11,0.25)":"0 1px 4px rgba(0,0,0,0.15)", zIndex:2, borderLeft:bkBorderLeft, ...stk }}>
                           <div style={{ fontSize:11, fontWeight:700, color:"#fff", lineHeight:1.3, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{b.purpose||b.name}</div>
                           {b.duration*HOUR_H>22&&!isAdmin_bk&&<div style={{ fontSize:9, color:"rgba(255,255,255,0.8)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{b.name}</div>}
                           {b.duration*HOUR_H>28&&<div style={{display:"flex",alignItems:"center",gap:3,marginTop:1}}>
                             <span style={{fontSize:9,fontWeight:700,color:"rgba(255,255,255,0.9)",background:"rgba(0,0,0,0.2)",borderRadius:3,padding:"1px 4px",whiteSpace:"nowrap"}}>
                               {STATUS_META[b.status]?.label || "Unknown"}
                             </span>
+                            {b.invoiced&&<span style={{fontSize:9,fontWeight:700,color:"rgba(255,255,255,0.9)",background:"rgba(124,58,237,0.5)",borderRadius:3,padding:"1px 4px",whiteSpace:"nowrap"}}>🧾</span>}
                           </div>}
                           {b.duration*HOUR_H>44&&<div style={{ fontSize:10, color:"rgba(255,255,255,0.85)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{fac?.name}</div>}
                         </div>
@@ -1595,7 +1600,7 @@ function MonthCalendar({ bookings, onBookingClick, onNewBooking, selectedFacilit
           if (!d) return <div key={"p"+ci} style={{ minHeight:80, background:"#fafafa", borderRadius:6 }}/>;
           const dk=dateKey(d), isToday=dk===today, isPast=dk<today;
           const dayBkgs=visible.filter(b=>b.date===dk)
-            .sort((a,b)=>{ const ai=isAdminBooking(a)?1:0,bi=isAdminBooking(b)?1:0; return ai-bi||a.start_hour-b.start_hour; });
+            .sort((a,b)=>{ const ai=isAdminBooking(a)?0:1,bi=isAdminBooking(b)?0:1; return ai-bi||a.start_hour-b.start_hour; });
           const hasSelected=dayBkgs.some(b=>selIds.has(b.id));
           const cellBg = hasSelected?"#eef2ff":isToday?"#f0f9ff":"#fff";
           const cellBorder = hasSelected?"1.5px solid #6366f1":isToday?"1.5px solid #4a90d9":"1px solid #f1f5f9";
@@ -1619,14 +1624,17 @@ function MonthCalendar({ bookings, onBookingClick, onNewBooking, selectedFacilit
                   const chipBg = isSel?"#6366f1": isAdmin_bk?"#94a3b8" : isCpsaConfirmed?"#78909c" : (fac?.color||"#4a90d9");
                   const chipOutline = inDelete?"2.5px solid #ef4444":inCart?"2.5px solid #f59e0b":isSel?"2px solid #4f46e5":"none";
                   const chipLeft = inDelete||inCart||isAdmin_bk?"none": isCpsaConfirmed?"3px solid #0891b2" :"3px solid "+ec;
-                  const isDimmed = !isAdmin_bk && bookerFilter.size > 0 && !bookerFilter.has(b.email?.toLowerCase());
+                  const filterActive = bookerFilter.size > 0;
+                  const isDimmed = filterActive && !bookerFilter.has(b.email?.toLowerCase());
+                  const dimOpacity = isAdmin_bk ? 0.25 : 0.15;
                   return (
                     <div key={b.id}
                       onClick={e=>{ e.stopPropagation(); if(isDimmed) return; if(selMode) toggleSel(b.id); else onBookingClick(b); }}
                       title={(()=>{const r=parseMismatchNote(b.system_notes,b.notes);return `${b.name} · ${fac?.name} · ${fmtTime(b.start_hour)}–${fmtTime(b.start_hour+b.duration)}`+(b.status==="cpsa_review_needed"&&r.length?`\n⚠ CPSA inconsistencies:\n${r.join("\n")}`:b.status==="cpsa_confirmed"?"\n🌐 CPSA confirmed":"");})()}
-                      style={{ background:chipBg, borderRadius:4, padding:"2px 4px", fontSize:10, fontWeight:700, color:"#fff", overflow:"hidden", whiteSpace:"nowrap", borderLeft:chipLeft, outline:chipOutline, opacity:isDimmed?0.15:REVIEW_STATUSES.has(b.status)?0.75:1, cursor:isDimmed?"default":"pointer", pointerEvents:isDimmed?"none":"auto", display:"flex", alignItems:"center", gap:3 }}>
+                      style={{ background:chipBg, borderRadius:4, padding:"2px 4px", fontSize:10, fontWeight:700, color:"#fff", overflow:"hidden", whiteSpace:"nowrap", borderLeft:chipLeft, outline:chipOutline, opacity:isDimmed?dimOpacity:REVIEW_STATUSES.has(b.status)?0.75:1, cursor:isDimmed?"default":"pointer", pointerEvents:isDimmed?"none":"auto", display:"flex", alignItems:"center", gap:3 }}>
                       <StatusDot status={b.status}/>
                       <span style={{overflow:"hidden",textOverflow:"ellipsis",flex:1}}>{fmtTime(b.start_hour)} {b.purpose||b.name}</span>
+                      {b.invoiced&&<span style={{fontSize:8,flexShrink:0}}>🧾</span>}
                     </div>
                   );
                 })}
@@ -2048,7 +2056,7 @@ function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkApply, o
   const [patternModal, setPatternModal] = useState(null);
   const [oneOffModalData, setOneOffModalData] = useState(null);
 
-  const active = bookings.filter(b=>["approved","cpsa_confirmed","cpsa_review_needed","invoiced","pending_cpsa","queued_cpsa","pending_amua","amua_submit","pending"].includes(b.status)&&!isAdminBooking(b));
+  const active = bookings.filter(b=>(["approved","cpsa_confirmed","cpsa_review_needed","pending_cpsa","queued_cpsa","pending_amua","amua_submit","pending"].includes(b.status)||b.invoiced)&&!isAdminBooking(b));
   const patternMap = buildOverlapPatternMap(active, facSensitive);
 
   const rows = Object.entries(patternMap).map(([email,pats])=>{
@@ -3563,6 +3571,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[]
   // Invoiced bookings whose current time/duration/field has drifted from the billed
   // snapshot — excess time is owing, reduced time is a credit.
   const trackedChanges = bookings
+    .filter(b => b.invoiced)
     .map(b => { const d = getBillingDrift(b); return d ? { booking: b, ...d } : null; })
     .filter(Boolean);
 
@@ -3821,7 +3830,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[]
       {/* Approx player counts + duration panel */}
       {showPlayers&&(()=>{
         const bookers = Object.values(
-          bookings.filter(b=>["approved","cpsa_confirmed","cpsa_review_needed","invoiced","pending_cpsa","queued_cpsa","pending_amua","amua_submit","pending"].includes(b.status))
+          bookings.filter(b=>["approved","cpsa_confirmed","cpsa_review_needed","pending_cpsa","queued_cpsa","pending_amua","amua_submit","pending"].includes(b.status)||b.invoiced)
             .reduce((m,b)=>{ const k=b.email.toLowerCase(); if(!m[k]) m[k]={name:b.name,email:b.email}; return m; },{})
         ).sort((a,b)=>a.name.localeCompare(b.name));
         return (
@@ -4056,7 +4065,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[]
                   <select value={sf} onChange={e=>setSf(e.target.value)}
                     style={{padding:"3px 4px",fontSize:11,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",width:"100%"}}>
                     <option value="all">All statuses</option>
-                    {Object.entries(STATUS_META).filter(([k])=>k!=="pending").map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
+                    {Object.entries(STATUS_META).filter(([k])=>!["pending","amua_submit"].includes(k)).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
                   </select>
                 </th>
                 <th style={{padding:"3px 4px"}}>
@@ -4316,7 +4325,7 @@ function findMatchingUserBooking(allBookings, ev, facilityIds) {
   // potential CPSA link (99% of bookings are via Auckland Mixed Ultimate).
   const candidates = allBookings.filter(b => {
     if (b.email === "admin") return false;
-    if (!["approved","cpsa_confirmed","cpsa_review_needed","invoiced","clash","pending_cpsa","queued_cpsa","pending_amua","amua_submit","pending"].includes(b.status)) return false;
+    if (!["approved","cpsa_confirmed","cpsa_review_needed","clash","pending_cpsa","queued_cpsa","pending_amua","amua_submit","pending"].includes(b.status) && !b.invoiced) return false;
     if (b.date !== date) return false;
     if (b.start_hour + b.duration <= start_hour) return false;
     if (start_hour + duration <= b.start_hour) return false;
@@ -4892,16 +4901,16 @@ export default function App() {
   // Flag bookings as invoiced and snapshot their billed dimensions so any later
   // change to time/duration/field can be reconciled (owing vs credit).
   async function handleMarkInvoiced(bkgs) {
-    const targets = bkgs.filter(b => !isAdminBooking(b) && b.status !== "invoiced");
+    const targets = bkgs.filter(b => !isAdminBooking(b) && !b.invoiced);
     if (!targets.length) { showToast("Already invoiced."); return; }
     if (configured) {
       try {
-        for (const b of targets) await sb.update("bookings", b.id, { status:"invoiced", system_notes:setBilledSnapshot(b.system_notes, b), updated_at:new Date().toISOString() });
+        for (const b of targets) await sb.update("bookings", b.id, { invoiced:true, system_notes:setBilledSnapshot(b.system_notes, b), updated_at:new Date().toISOString() });
         await loadBookings();
       } catch(e) { showToast("Mark invoiced failed: "+e.message, "error"); return; }
     } else {
       const ids = new Set(targets.map(b=>b.id));
-      setBookings(prev => prev.map(b => ids.has(b.id) ? { ...b, status:"invoiced", system_notes:setBilledSnapshot(b.system_notes, b) } : b));
+      setBookings(prev => prev.map(b => ids.has(b.id) ? { ...b, invoiced:true, system_notes:setBilledSnapshot(b.system_notes, b) } : b));
     }
     logActivity("invoiced", { count: targets.length, ids: targets.map(b=>b.id) });
     showToast(`${targets.length} booking${targets.length>1?"s":""} marked invoiced.`);

@@ -104,9 +104,11 @@ field entirely so existing user notes are preserved).
 
 ## Invoiced state + billing-change tracking
 
-- New booking status `invoiced` (manual, or via the "Mark as invoiced" option in the
-  PO/Invoice export modal). On invoice, a `[BILLED] facility|start|duration` snapshot
-  is written into `system_notes` (requires `supabase-migration-system-notes.sql`).
+- `invoiced` is a separate boolean column on `bookings` (requires
+  `supabase-migration-invoiced-flag.sql`), orthogonal to the workflow `status`.
+  A booking can be `cpsa_confirmed` AND `invoiced=true` simultaneously.
+  On invoice, a `[BILLED] facility|start|duration` snapshot is written into
+  `system_notes` (requires `supabase-migration-system-notes.sql`).
 - If an invoiced booking's time/duration/field later changes, the admin **Track
   Changes** dropdown lists the drift (excess hours = owing, reduced = credit). Field
   changes are flagged so retroactive revaluation is possible.
@@ -130,6 +132,8 @@ Done:
 Outstanding:
 - [ ] Run `supabase-migration-activity-log.sql` in the SQL editor (creates the audit
       table + RLS). Until then `logActivity` inserts silently no-op.
+- [ ] Run `supabase-migration-invoiced-flag.sql` in the SQL editor (adds `invoiced boolean`
+      column; migrates old `status='invoiced'` rows to `invoiced=true, status='approved'`).
 - [ ] Run `supabase-migration-system-notes.sql` in the SQL editor (adds `system_notes`
       column + migrates existing markers out of `notes` + index). Until then system
       markers continue to be written to `notes` as a fallback — app reads from both.
