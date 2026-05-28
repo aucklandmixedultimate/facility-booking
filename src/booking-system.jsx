@@ -117,9 +117,11 @@ const REVIEW_STATUSES = new Set(["pending_amua","queued_cpsa","amua_submit","pen
 const STATUS_CAL_COLOR = {
   pending_amua:"#f59e0b", queued_cpsa:"#3b82f6", amua_submit:"#3b82f6",
   pending_cpsa:"#0ea5e9", pending:"#f59e0b",     approved:"#22c55e",
-  cpsa_confirmed:"#0891b2", cpsa_review_needed:"#a16207",
+  cpsa_confirmed:"#0891b2", cpsa_review_needed:"#fef9c3",
   clash:"#d97706", rejected:"#f43f5e", cancelled:"#94a3b8",
 };
+// Per-status text colour override for calendar chips (default white). Light backgrounds need dark text.
+const STATUS_CAL_TEXT = { cpsa_review_needed: "#713f12" };
 // Fields that participate in CPSA sync (f1/f2 are meeting/function rooms and stay "approved").
 const CPSA_FIELD_IDS = new Set(["f3","f4","f5"]);
 const AMUA_INFO = {
@@ -1541,6 +1543,8 @@ function WeekCalendar({ bookings, onNewBooking, onBookingClick, selectedFacility
                       const ec=emailColor(b.email);
                       const isAdmin_bk = isAdminBooking(b);
                       const bkBg = isAdmin_bk ? "#94a3b8" : (STATUS_CAL_COLOR[b.status] || "#64748b");
+                      const bkTxt = isAdmin_bk ? "#fff" : (STATUS_CAL_TEXT[b.status] || "#fff");
+                      const bkTxtMuted = bkTxt === "#fff" ? "rgba(255,255,255,0.85)" : "rgba(0,0,0,0.55)";
                       const bkBorderLeft = (deleteIds.has(b.id)||cartSourceIds.has(b.id)||isAdmin_bk) ? undefined : `4px solid ${fac?.color||"#4a90d9"}`;
                       const filterActive = bookerFilter.size > 0;
                       const isDimmed = filterActive && !bookerFilter.has(b.email?.toLowerCase());
@@ -1550,20 +1554,20 @@ function WeekCalendar({ bookings, onNewBooking, onBookingClick, selectedFacility
                           onClick={e=>{ e.stopPropagation(); if(!isDimmed) onBookingClick(b); }}
                           onMouseDown={e=>e.stopPropagation()}
                           title={(()=>{const r=parseMismatchNote(b.system_notes,b.notes);return `${b.name} – ${fac?.name}`+(b.status==="cpsa_review_needed"&&r.length?`\n⚠ CPSA inconsistencies:\n${r.join("\n")}`:b.status==="cpsa_confirmed"?"\n🌐 CPSA confirmed":"");})()}
-                          style={{ position:"absolute", top:(b.start_hour-CAL_START)*HOUR_H, height:Math.max(b.duration*HOUR_H-2,20), background:bkBg, borderRadius:6, padding:"3px 6px", cursor:isDimmed?"default":"pointer", overflow:"hidden", opacity:isDimmed?dimOpacity:REVIEW_STATUSES.has(b.status)?0.75:1, pointerEvents:isDimmed?"none":"auto", border:deleteIds.has(b.id)?"2.5px solid #ef4444":cartSourceIds.has(b.id)?"2.5px solid #f59e0b":b.status==="clash"?"2px dashed #d97706":REVIEW_STATUSES.has(b.status)?"2px dashed rgba(255,255,255,0.6)":b.status==="rejected"?"2px solid rgba(244,63,94,0.8)":"none", boxShadow:deleteIds.has(b.id)?"0 0 0 3px rgba(239,68,68,0.25)":cartSourceIds.has(b.id)?"0 0 0 3px rgba(245,158,11,0.25)":"0 1px 4px rgba(0,0,0,0.15)", zIndex:2, borderLeft:bkBorderLeft, ...stk }}>
+                          style={{ position:"absolute", top:(b.start_hour-CAL_START)*HOUR_H, height:Math.max(b.duration*HOUR_H-2,20), background:bkBg, borderRadius:6, padding:"3px 6px", cursor:isDimmed?"default":"pointer", overflow:"hidden", opacity:isDimmed?dimOpacity:REVIEW_STATUSES.has(b.status)?0.75:1, pointerEvents:isDimmed?"none":"auto", border:deleteIds.has(b.id)?"2.5px solid #ef4444":cartSourceIds.has(b.id)?"2.5px solid #f59e0b":b.status==="clash"?"2px dashed #d97706":REVIEW_STATUSES.has(b.status)?`2px dashed ${bkTxt==="#fff"?"rgba(255,255,255,0.6)":"rgba(113,63,18,0.5)"}`:b.status==="rejected"?"2px solid rgba(244,63,94,0.8)":"none", boxShadow:deleteIds.has(b.id)?"0 0 0 3px rgba(239,68,68,0.25)":cartSourceIds.has(b.id)?"0 0 0 3px rgba(245,158,11,0.25)":"0 1px 4px rgba(0,0,0,0.15)", zIndex:2, borderLeft:bkBorderLeft, ...stk }}>
                           <div style={{display:"flex",alignItems:"center",gap:3,overflow:"hidden"}}>
                             {!isAdmin_bk&&<span style={{width:7,height:7,borderRadius:"50%",background:ec,flexShrink:0,boxShadow:"0 0 0 1px rgba(255,255,255,0.4)",display:"inline-block"}}/>}
                             {b.status==="cpsa_review_needed"&&<span style={{fontSize:9,flexShrink:0,lineHeight:1}}>⚠</span>}
                             {b.status==="cpsa_confirmed"&&<span style={{fontSize:9,flexShrink:0,lineHeight:1}}>🌐</span>}
-                            <div style={{ fontSize:11, fontWeight:700, color:"#fff", lineHeight:1.3, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{b.purpose||b.name}</div>
+                            <div style={{ fontSize:11, fontWeight:700, color:bkTxt, lineHeight:1.3, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{b.purpose||b.name}</div>
                           </div>
-                          {b.duration*HOUR_H>22&&!isAdmin_bk&&<div style={{ fontSize:9, color:"rgba(255,255,255,0.85)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", paddingLeft:10 }}>{b.name}</div>}
+                          {b.duration*HOUR_H>22&&!isAdmin_bk&&<div style={{ fontSize:9, color:bkTxtMuted, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", paddingLeft:10 }}>{b.name}</div>}
                           {b.duration*HOUR_H>32&&<div style={{display:"flex",alignItems:"center",gap:3,marginTop:1,paddingLeft:10}}>
-                            {b.invoiced&&<span style={{fontSize:9,fontWeight:700,color:"rgba(255,255,255,0.9)",background:"rgba(124,58,237,0.5)",borderRadius:3,padding:"1px 4px",whiteSpace:"nowrap"}}>🧾</span>}
+                            {b.invoiced&&<span style={{fontSize:9,fontWeight:700,color:bkTxt==="#fff"?"rgba(255,255,255,0.9)":bkTxt,background:bkTxt==="#fff"?"rgba(124,58,237,0.5)":"rgba(124,58,237,0.15)",borderRadius:3,padding:"1px 4px",whiteSpace:"nowrap"}}>🧾</span>}
                           </div>}
                           {b.duration*HOUR_H>44&&<div style={{display:"flex",alignItems:"center",gap:4,paddingLeft:10,marginTop:1}}>
                             <span style={{width:6,height:6,borderRadius:2,background:fac?.color||"#4a90d9",flexShrink:0,display:"inline-block"}}/>
-                            <span style={{ fontSize:9, color:"rgba(255,255,255,0.85)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{fac?.name}</span>
+                            <span style={{ fontSize:9, color:bkTxtMuted, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{fac?.name}</span>
                           </div>}
                         </div>
                       );
@@ -1715,6 +1719,7 @@ function MonthCalendar({ bookings, onBookingClick, onNewBooking, selectedFacilit
                   const inCart   = cartSourceIds.has(b.id);
                   const isAdmin_bk = isAdminBooking(b);
                   const chipBg = isSel?"#6366f1": isAdmin_bk?"#94a3b8" : (STATUS_CAL_COLOR[b.status]||"#64748b");
+                  const chipTxt = isSel||isAdmin_bk?"#fff" : (STATUS_CAL_TEXT[b.status] || "#fff");
                   const chipOutline = inDelete?"2.5px solid #ef4444":inCart?"2.5px solid #f59e0b":isSel?"2px solid #4f46e5":"none";
                   const chipLeft = inDelete||inCart||isAdmin_bk?"none": `3px solid ${fac?.color||"#4a90d9"}`;
                   const filterActive = bookerFilter.size > 0;
@@ -1724,7 +1729,7 @@ function MonthCalendar({ bookings, onBookingClick, onNewBooking, selectedFacilit
                     <div key={b.id}
                       onClick={e=>{ e.stopPropagation(); if(isDimmed) return; if(selMode) toggleSel(b.id); else onBookingClick(b); }}
                       title={(()=>{const r=parseMismatchNote(b.system_notes,b.notes);return `${b.name} · ${fac?.name} · ${fmtTime(b.start_hour)}–${fmtTime(b.start_hour+b.duration)}`+(b.status==="cpsa_review_needed"&&r.length?`\n⚠ CPSA inconsistencies:\n${r.join("\n")}`:b.status==="cpsa_confirmed"?"\n🌐 CPSA confirmed":"");})()}
-                      style={{ background:chipBg, borderRadius:4, padding:"2px 4px", fontSize:10, fontWeight:700, color:"#fff", overflow:"hidden", whiteSpace:"nowrap", borderLeft:chipLeft, outline:chipOutline, opacity:isDimmed?dimOpacity:REVIEW_STATUSES.has(b.status)?0.75:1, cursor:isDimmed?"default":"pointer", pointerEvents:isDimmed?"none":"auto", display:"flex", alignItems:"center", gap:3 }}>
+                      style={{ background:chipBg, borderRadius:4, padding:"2px 4px", fontSize:10, fontWeight:700, color:chipTxt, overflow:"hidden", whiteSpace:"nowrap", borderLeft:chipLeft, outline:chipOutline, opacity:isDimmed?dimOpacity:REVIEW_STATUSES.has(b.status)?0.75:1, cursor:isDimmed?"default":"pointer", pointerEvents:isDimmed?"none":"auto", display:"flex", alignItems:"center", gap:3 }}>
                       {!isAdmin_bk&&<span style={{width:6,height:6,borderRadius:"50%",background:ec,flexShrink:0,display:"inline-block",boxShadow:"0 0 0 1px rgba(255,255,255,0.35)"}}/>}
                       {b.status==="cpsa_review_needed"&&<span style={{fontSize:8,flexShrink:0,lineHeight:1}}>⚠</span>}
                       {b.status==="cpsa_confirmed"&&<span style={{fontSize:8,flexShrink:0,lineHeight:1}}>🌐</span>}
