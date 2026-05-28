@@ -101,7 +101,7 @@ const STATUS_META = {
   pending_cpsa: {bg:"#e0f2fe",border:"#7dd3fc",text:"#075985",dot:"#0ea5e9",label:"(3/4) Pending CPSA Review"},
   approved:      {bg:"#f0fdf4",border:"#22c55e",text:"#14532d",dot:"#22c55e",label:"(4/4) Approved"},
   cpsa_confirmed:{bg:"#ecfeff",border:"#0891b2",text:"#155e75",dot:"#0891b2",label:"🌐 CPSA Confirmed"},
-  cpsa_review_needed: {bg:"#ffedd5",border:"#d97706",text:"#7c2d12",dot:"#d97706",label:"⚠ CPSA Mismatch — AMUA Review"},
+  cpsa_review_needed: {bg:"#fef9c3",border:"#a16207",text:"#713f12",dot:"#a16207",label:"⚠ CPSA Mismatch — AMUA Review"},
   rejected:     {bg:"#fff1f2",border:"#f43f5e",text:"#881337",dot:"#f43f5e",label:"Rejected"},
   cancelled:    {bg:"#f8f8f8",border:"#94a3b8",text:"#475569",dot:"#94a3b8",label:"Cancelled"},
   clash:        {bg:"#fef3c7",border:"#d97706",text:"#92400e",dot:"#d97706",label:"Clash"},
@@ -117,7 +117,7 @@ const REVIEW_STATUSES = new Set(["pending_amua","queued_cpsa","amua_submit","pen
 const STATUS_CAL_COLOR = {
   pending_amua:"#f59e0b", queued_cpsa:"#3b82f6", amua_submit:"#3b82f6",
   pending_cpsa:"#0ea5e9", pending:"#f59e0b",     approved:"#22c55e",
-  cpsa_confirmed:"#0891b2", cpsa_review_needed:"#d97706",
+  cpsa_confirmed:"#0891b2", cpsa_review_needed:"#a16207",
   clash:"#d97706", rejected:"#f43f5e", cancelled:"#94a3b8",
 };
 // Fields that participate in CPSA sync (f1/f2 are meeting/function rooms and stay "approved").
@@ -1553,6 +1553,8 @@ function WeekCalendar({ bookings, onNewBooking, onBookingClick, selectedFacility
                           style={{ position:"absolute", top:(b.start_hour-CAL_START)*HOUR_H, height:Math.max(b.duration*HOUR_H-2,20), background:bkBg, borderRadius:6, padding:"3px 6px", cursor:isDimmed?"default":"pointer", overflow:"hidden", opacity:isDimmed?dimOpacity:REVIEW_STATUSES.has(b.status)?0.75:1, pointerEvents:isDimmed?"none":"auto", border:deleteIds.has(b.id)?"2.5px solid #ef4444":cartSourceIds.has(b.id)?"2.5px solid #f59e0b":b.status==="clash"?"2px dashed #d97706":REVIEW_STATUSES.has(b.status)?"2px dashed rgba(255,255,255,0.6)":b.status==="rejected"?"2px solid rgba(244,63,94,0.8)":"none", boxShadow:deleteIds.has(b.id)?"0 0 0 3px rgba(239,68,68,0.25)":cartSourceIds.has(b.id)?"0 0 0 3px rgba(245,158,11,0.25)":"0 1px 4px rgba(0,0,0,0.15)", zIndex:2, borderLeft:bkBorderLeft, ...stk }}>
                           <div style={{display:"flex",alignItems:"center",gap:3,overflow:"hidden"}}>
                             {!isAdmin_bk&&<span style={{width:7,height:7,borderRadius:"50%",background:ec,flexShrink:0,boxShadow:"0 0 0 1px rgba(255,255,255,0.4)",display:"inline-block"}}/>}
+                            {b.status==="cpsa_review_needed"&&<span style={{fontSize:9,flexShrink:0,lineHeight:1}}>⚠</span>}
+                            {b.status==="cpsa_confirmed"&&<span style={{fontSize:9,flexShrink:0,lineHeight:1}}>🌐</span>}
                             <div style={{ fontSize:11, fontWeight:700, color:"#fff", lineHeight:1.3, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{b.purpose||b.name}</div>
                           </div>
                           {b.duration*HOUR_H>22&&!isAdmin_bk&&<div style={{ fontSize:9, color:"rgba(255,255,255,0.85)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", paddingLeft:10 }}>{b.name}</div>}
@@ -1627,7 +1629,7 @@ function MonthCalendar({ bookings, onBookingClick, onNewBooking, selectedFacilit
     const cfg={
       approved:           {c:"#22c55e",l:"✓"},
       cpsa_confirmed:     {c:"#0891b2",l:"✓"},
-      cpsa_review_needed: {c:"#d97706",l:"?"},
+      cpsa_review_needed: {c:"#a16207",l:"?"},
       rejected:           {c:"#f43f5e",l:"✗"},
       cancelled:          {c:"#94a3b8",l:"—"},
       clash:              {c:"#d97706",l:"!"},
