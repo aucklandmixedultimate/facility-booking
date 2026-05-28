@@ -4368,11 +4368,6 @@ function findMatchingUserBooking(allBookings, ev, facilityIds) {
   // member's booking purely on time overlap).
   if (!teamIsOurs && best.identityScore < 2) return null;
 
-  // Exact match requires strong identity (>=3) AND time+duration alignment,
-  // or an AMUA-named event that lines up exactly on time + duration.
-  const exact = (best.identityScore >= 3 && best.score >= 7)
-    || (teamIsOurs && best.score - best.identityScore >= 3);
-
   // Capture specific inconsistencies between the CPSA event and the matched booking,
   // succinctly (old → new = booked → CPSA), so the admin sees exactly what differs.
   const b = best.booking;
@@ -4387,6 +4382,12 @@ function findMatchingUserBooking(allBookings, ev, facilityIds) {
   // is loose. An AMUA-named event under an individual member is not a name mismatch.
   if (!teamIsOurs && best.identityScore < 4)
     reasons.push(`Name: ${b.name} → ${team}`);
+
+  // Exact = CPSA agrees with the booking on every dimension (no recorded drift) AND
+  // the identity link is strong enough to trust. Any inconsistency → review needed,
+  // so the specific reasons surface in the admin/booking views.
+  const identityOk = teamIsOurs || best.identityScore >= 3;
+  const exact = reasons.length === 0 && identityOk;
 
   return { booking: b, exact, reasons };
 }
