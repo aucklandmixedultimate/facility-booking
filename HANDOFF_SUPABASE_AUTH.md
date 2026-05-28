@@ -63,12 +63,13 @@ carry a logged-in user's JWT.
 - Login gate: `session === undefined` renders nothing (loading); `!session` renders
   the Google sign-in screen.
 
-## CPSA browser extension — v2.0.0 is OAuth-compatible
+## CPSA browser extension — v2.1.0 is the current release
 
 The `amua-booking-extension` writes confirmation notes/links back to `bookings`.
-RLS blocked the old anon-key writes; **v2.0.0 carries a logged-in admin's Google
-OAuth access_token**, so its writes satisfy the bookings RLS policies again. The
-in-app install modal links to the v2.0.0 release.
+RLS blocked the old anon-key writes; v2.0.0 introduced OAuth support, and
+**v2.1.0 additionally writes to `system_notes`** (instead of `notes`) and
+preserves admin/audit markers on re-sync. The in-app install modal links to the
+v2.1.0 release.
 
 ### Extension schema requirement (v2.1.0+)
 
@@ -161,6 +162,7 @@ Done:
 - [x] Admin role granted to `aucklandmixedultimate@gmail.com`; login/booking verified.
 
 - [x] CPSA extension auth fixed by shipping v2.0.0 (OAuth token); install link updated.
+- [x] CPSA extension v2.1.0 ships `system_notes` writes + marker preservation; install link updated to v2.1.0.
 
 Outstanding:
 - [ ] Run `supabase-migration-activity-log.sql` in the SQL editor (creates the audit
