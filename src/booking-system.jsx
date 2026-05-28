@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, Fragment } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo, Fragment } from "react";
 import { createClient } from "@supabase/supabase-js";
 
 // ─── LOGO ─────────────────────────────────────────────────────────────────────
@@ -75,12 +75,15 @@ const sb = {
 
 // ─── Facilities ───────────────────────────────────────────────────────────────
 const FACILITIES = [
-  { id:"f1", name:"Meeting Room – Ground Floor", capacity:20,  color:"#4a90d9" },
-  { id:"f2", name:"Function Room – Upstairs",    capacity:100, color:"#e07b39" },
-  { id:"f3", name:"Field #1",                    capacity:50,  color:"#5cb85c" },
-  { id:"f4", name:"Field #2",                    capacity:50,  color:"#22b89a" },
-  { id:"f5", name:"Field #3",                    capacity:50,  color:"#9b59b6" },
+  { id:"f1", name:"Meeting Room – Ground Floor", capacity:20,  color:"#a78bfa", kind:"social" }, // light purple
+  { id:"f2", name:"Function Room – Upstairs",    capacity:100, color:"#7c3aed", kind:"social" }, // deep purple
+  { id:"f3", name:"Field #1",                    capacity:50,  color:"#166534", kind:"field"  }, // darkest green
+  { id:"f4", name:"Field #2",                    capacity:50,  color:"#22c55e", kind:"field"  }, // mid green
+  { id:"f5", name:"Field #3",                    capacity:50,  color:"#86efac", kind:"field"  }, // light green
 ];
+// Light tint of each facility colour for day-view column backgrounds.
+const FACILITY_TINT = { f1:"#f5f3ff", f2:"#ede9fe", f3:"#dcfce7", f4:"#ecfdf5", f5:"#f0fdf4" };
+function isSocialFac(id) { return FACILITIES.find(f=>f.id===id)?.kind==="social"; }
 const EMAIL_COLORS = ["#6366f1","#ec4899","#f59e0b","#10b981","#ef4444","#8b5cf6","#06b6d4","#84cc16","#f97316","#14b8a6","#e879f9","#fb7185","#34d399","#60a5fa","#fbbf24"];
 const _ecc = {}; let _eci = 0;
 function emailColor(email) {
@@ -151,6 +154,13 @@ const MOBILE_STYLE = `
     .modal-backdrop > div { border-radius: 16px !important; max-height: 90vh !important; }
   }
   ::-webkit-scrollbar { display: none; }
+  /* Diagonal stripe overlay distinguishes social-space chips in week/month calendar */
+  .fac-social-tex {
+    background-image: repeating-linear-gradient(45deg, rgba(255,255,255,0.20) 0 4px, rgba(255,255,255,0) 4px 9px);
+  }
+  .fac-social-tex-dark {
+    background-image: repeating-linear-gradient(45deg, rgba(0,0,0,0.10) 0 4px, rgba(0,0,0,0) 4px 9px);
+  }
 `;
 function useMobile() {
   const [mobile, setMobile] = useState(() => window.innerWidth < 768);
@@ -557,6 +567,82 @@ function Modal({title,onClose,children,width=560}) {
     </div>
   );
 }
+function ActivityLogModal({onClose}) {
+  const [rows, setRows] = useState(null);
+  const [error, setError] = useState("");
+  const [filter, setFilter] = useState("sync"); // sync | all
+  const SYNC_ACTIONS = useMemo(()=>new Set([
+    "cpsa_sync_start","cpsa_sync_complete","cpsa_confirm","cpsa_review_flag",
+    "cpsa_admin_booking_add","cpsa_admin_booking_remove","mismatch_resolution","mismatch_billing_settled"
+  ]),[]);
+  useEffect(()=>{
+    (async ()=>{
+      try {
+        const data = await sb.select("activity_log", "select=*&limit=200");
+        setRows(data||[]);
+      } catch(e) { setError(e.message); setRows([]); }
+    })();
+  },[]);
+  const filtered = (rows||[]).filter(r => filter==="all" ? true : SYNC_ACTIONS.has(r.action));
+  const actionStyle = a => {
+    if (a.startsWith("cpsa_sync")) return {color:"#0e7490",bg:"#ecfeff",border:"#a5f3fc"};
+    if (a==="cpsa_confirm") return {color:"#0e7490",bg:"#ecfeff",border:"#a5f3fc"};
+    if (a==="cpsa_review_flag") return {color:"#b45309",bg:"#fffbeb",border:"#fde68a"};
+    if (a.startsWith("cpsa_admin_booking")) return {color:"#475569",bg:"#f8fafc",border:"#e2e8f0"};
+    if (a.startsWith("mismatch")) return {color:"#7c3aed",bg:"#f5f3ff",border:"#ddd6fe"};
+    if (a==="sign_in"||a==="sign_out") return {color:"#475569",bg:"#f8fafc",border:"#e2e8f0"};
+    return {color:"#475569",bg:"#fff",border:"#e2e8f0"};
+  };
+  return (
+    <Modal title="📜 Activity Log" onClose={onClose} width={780}>
+      <div style={{display:"flex",flexDirection:"column",gap:10,minHeight:0,flex:1}}>
+        <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0}}>
+          <button onClick={()=>setFilter("sync")} style={{padding:"4px 10px",borderRadius:14,border:`1.5px solid ${filter==="sync"?"#0f172a":"#e2e8f0"}`,background:filter==="sync"?"#0f172a":"#fff",color:filter==="sync"?"#fff":"#475569",fontSize:12,fontWeight:600,fontFamily:"inherit",cursor:"pointer"}}>Sync & CPSA</button>
+          <button onClick={()=>setFilter("all")} style={{padding:"4px 10px",borderRadius:14,border:`1.5px solid ${filter==="all"?"#0f172a":"#e2e8f0"}`,background:filter==="all"?"#0f172a":"#fff",color:filter==="all"?"#fff":"#475569",fontSize:12,fontWeight:600,fontFamily:"inherit",cursor:"pointer"}}>All</button>
+          <span style={{marginLeft:"auto",fontSize:11,color:"#94a3b8"}}>{rows===null?"Loading…":`${filtered.length} of ${rows.length} entries`}</span>
+        </div>
+        {error&&<div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:6,padding:"6px 10px",fontSize:12,color:"#b91c1c"}}>⚠ {error} — has <code>supabase-migration-activity-log.sql</code> been run?</div>}
+        <div style={{overflowY:"auto",flex:1,minHeight:0,border:"1px solid #f1f5f9",borderRadius:8}}>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+            <thead style={{position:"sticky",top:0,background:"#f8fafc",zIndex:1}}>
+              <tr>
+                <th style={{textAlign:"left",padding:"7px 10px",fontWeight:700,color:"#475569",borderBottom:"1px solid #e2e8f0"}}>When</th>
+                <th style={{textAlign:"left",padding:"7px 10px",fontWeight:700,color:"#475569",borderBottom:"1px solid #e2e8f0"}}>Action</th>
+                <th style={{textAlign:"left",padding:"7px 10px",fontWeight:700,color:"#475569",borderBottom:"1px solid #e2e8f0"}}>Detail</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.length===0&&rows!==null
+                ? <tr><td colSpan={3} style={{padding:24,textAlign:"center",color:"#94a3b8",fontSize:13}}>No activity matches this filter.</td></tr>
+                : filtered.map(r=>{
+                    const st = actionStyle(r.action);
+                    return (
+                      <tr key={r.id} style={{borderBottom:"1px solid #f1f5f9"}}>
+                        <td style={{padding:"6px 10px",color:"#64748b",whiteSpace:"nowrap",fontSize:11}}>{new Date(r.created_at).toLocaleString("en-NZ",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})}</td>
+                        <td style={{padding:"6px 10px",whiteSpace:"nowrap"}}><span style={{fontSize:11,fontWeight:700,padding:"1px 7px",borderRadius:10,background:st.bg,color:st.color,border:`1px solid ${st.border}`}}>{r.action}</span></td>
+                        <td style={{padding:"6px 10px",color:"#475569",fontFamily:"ui-monospace,monospace",fontSize:11,wordBreak:"break-word"}}>{r.detail?JSON.stringify(r.detail):""}</td>
+                      </tr>
+                    );
+                  })
+              }
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function UserMenuItem({icon, label, onClick, danger=false}) {
+  const [hover, setHover] = useState(false);
+  return (
+    <button onClick={onClick}
+      onMouseEnter={()=>setHover(true)} onMouseLeave={()=>setHover(false)}
+      style={{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"9px 14px",background:hover?(danger?"#fef2f2":"#f8fafc"):"transparent",border:"none",fontFamily:"inherit",fontSize:13,color:danger?"#b91c1c":"#0f172a",textAlign:"left",cursor:"pointer",fontWeight:500}}>
+      <span style={{fontSize:14,width:18,textAlign:"center"}}>{icon}</span>{label}
+    </button>
+  );
+}
 function OverlapWarning({title,description,bookings:bkgs,onProceed,onCancel}) {
   return (
     <div style={{display:"flex",flexDirection:"column",gap:16}}>
@@ -585,13 +671,97 @@ function OverlapWarning({title,description,bookings:bkgs,onProceed,onCancel}) {
 
 // ─── Single Booking Row Form ──────────────────────────────────────────────────
 // Used inside BookingForm to represent one item in the cart
+function InlineDayPicker({ date, bookings, onPick }) {
+  const [drag, setDrag] = useState(null);
+  const SH = 14; // shorter slot height for inline
+  const yToSlot = y => Math.max(0, Math.min(Math.floor(y/SH), CAL_TOTAL*2-1));
+  const slotToHour = s => CAL_START + s*0.5;
+  const norm = ds => ds ? { ...ds, lo:Math.min(ds.startSlot,ds.endSlot), hi:Math.max(ds.startSlot,ds.endSlot) } : null;
+  function down(e, facId) {
+    if (e.button!==0) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    setDrag({ facility:facId, startSlot:yToSlot(e.clientY-rect.top), endSlot:yToSlot(e.clientY-rect.top) });
+  }
+  function move(e, facId) {
+    if (!drag || drag.facility!==facId) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const slot = yToSlot(e.clientY-rect.top);
+    if (slot!==drag.endSlot) setDrag(ds=>({ ...ds, endSlot:slot }));
+  }
+  function up(e, facId) {
+    if (!drag || drag.facility!==facId) return;
+    const nd = norm(drag);
+    const duration = (nd.hi-nd.lo+1)*0.5;
+    setDrag(null);
+    onPick(facId, slotToHour(nd.lo), Math.max(0.5, duration));
+  }
+  const nd = norm(drag);
+  const dayBkgs = bookings.filter(b=>b.date===date && !["cancelled","rejected"].includes(b.status));
+  return (
+    <div style={{border:"1.5px solid #e2e8f0",borderRadius:8,background:"#fff",padding:8}}>
+      <div style={{fontSize:11,color:"#64748b",marginBottom:6,display:"flex",alignItems:"center",gap:6}}>
+        <span style={{fontWeight:700,color:"#0f172a"}}>📅 Pick a slot</span>
+        <span>Click or drag a column to set facility, start time and duration.</span>
+      </div>
+      <div style={{display:"flex",overflowX:"auto"}}>
+        {/* Hour labels */}
+        <div style={{width:36,flexShrink:0}}>
+          <div style={{height:18}}/>
+          {Array.from({length:CAL_TOTAL+1},(_,i)=>CAL_START+i).map(h=>(
+            <div key={h} style={{height:SH*2,fontSize:9,color:"#94a3b8",textAlign:"right",paddingRight:4}}>{fmtTime(h)}</div>
+          ))}
+        </div>
+        {FACILITIES.map(fac=>{
+          const isDragging = drag?.facility===fac.id;
+          const facBkgs = dayBkgs.filter(b=>b.facility_id===fac.id);
+          const colTint = FACILITY_TINT[fac.id] || "#fff";
+          return (
+            <div key={fac.id} style={{flex:1,minWidth:64}}>
+              <div title={fac.name} style={{height:18,display:"flex",alignItems:"center",justifyContent:"center",gap:3,fontSize:9,fontWeight:700,color:fac.color,background:colTint,borderTopLeftRadius:4,borderTopRightRadius:4,borderBottom:`2px solid ${fac.color}`,overflow:"hidden",whiteSpace:"nowrap"}}>
+                <span style={{width:6,height:6,borderRadius:"50%",background:fac.color,flexShrink:0}}/>
+                {fac.name.includes("Field")?fac.name.replace("Field ","Fld "):fac.name.split("–")[0].trim().slice(0,8)}
+              </div>
+              <div onMouseDown={e=>down(e,fac.id)} onMouseMove={e=>move(e,fac.id)} onMouseUp={e=>up(e,fac.id)}
+                onMouseLeave={()=>isDragging&&setDrag(null)}
+                style={{position:"relative",cursor:"crosshair",background:colTint,height:CAL_TOTAL*SH*2,borderLeft:"1px solid #f1f5f9"}}>
+                {Array.from({length:CAL_TOTAL},(_,i)=>(
+                  <div key={i} style={{height:SH*2,borderBottom:"1px solid rgba(0,0,0,0.05)"}}>
+                    <div style={{height:"50%",borderBottom:"1px dashed rgba(0,0,0,0.03)"}}/>
+                  </div>
+                ))}
+                {facBkgs.map(b=>(
+                  <div key={b.id} title={`${b.name||"booking"} · ${fmtTime(b.start_hour)}`}
+                    style={{position:"absolute",left:1,right:1,top:(b.start_hour-CAL_START)*SH*2,height:Math.max(b.duration*SH*2-1,12),background:fac.color,opacity:0.75,borderRadius:3,pointerEvents:"none",overflow:"hidden",fontSize:8,color:"#fff",padding:"1px 3px"}}>
+                    {b.purpose?b.purpose.slice(0,18):""}
+                  </div>
+                ))}
+                {isDragging&&nd&&(
+                  <div style={{position:"absolute",left:0,right:0,top:nd.lo*SH,height:(nd.hi-nd.lo+1)*SH,background:"rgba(99,102,241,0.20)",border:"1.5px solid #6366f1",borderRadius:4,pointerEvents:"none",zIndex:3,display:"flex",alignItems:"flex-start",justifyContent:"center",fontSize:8,fontWeight:700,color:"#4338ca",paddingTop:1}}>
+                    {fmtTime(slotToHour(nd.lo))}–{fmtTime(slotToHour(nd.hi+1))}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 function BookingRow({ row, idx, onChange, onRemove, isOnly, isAdmin, isEditing, allBookings, loggedInEmail }) {
   const isMobile = useMobile();
   const [recurMode, setRecurMode] = useState(row.recur?.mode || "none");
   const [recurWeeks, setRecurWeeks] = useState(row.recur?.weeks || 4);
   const [recurUntil, setRecurUntil] = useState(row.recur?.until || "");
+  // Day-grid is the default selection UI for new bookings.
+  // Switches to manual once a slot is picked, or when toggled.
+  const [manualMode, setManualMode] = useState(isEditing);
 
   function upd(k,v) { onChange(idx, {...row, [k]:v}); }
+  function pickSlot(facility_id, start_hour, duration) {
+    onChange(idx, {...row, facility_id, start_hour, duration});
+    setManualMode(true);
+  }
   function updRecur(changes) {
     const r = {mode:recurMode, weeks:recurWeeks, until:recurUntil, ...changes};
     if(changes.mode!==undefined) setRecurMode(changes.mode);
@@ -607,32 +777,45 @@ function BookingRow({ row, idx, onChange, onRemove, isOnly, isAdmin, isEditing, 
       {!isOnly && <button onClick={()=>onRemove(idx)} style={{position:"absolute",top:10,right:10,background:"#fff1f2",border:"1px solid #fda4af",borderRadius:6,color:"#f43f5e",cursor:"pointer",fontSize:12,fontWeight:700,padding:"2px 8px"}}>✕ Remove</button>}
       {!isOnly && <div style={{fontSize:11,fontWeight:700,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.08em"}}>Booking #{idx+1}</div>}
 
-      <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:10}}>
-        <div>
-          <label style={S.lbl}>Facility *</label>
-          <select style={S.inp} value={row.facility_id} onChange={e=>upd("facility_id",e.target.value)}>
-            {FACILITIES.map(f=><option key={f.id} value={f.id}>{f.name}</option>)}
-          </select>
-        </div>
-        <div>
+      {/* Date row + manual toggle */}
+      <div style={{display:"flex",alignItems:"flex-end",gap:10,flexWrap:"wrap"}}>
+        <div style={{flex:"1 1 200px"}}>
           <label style={S.lbl}>Date *</label>
           <input style={S.inp} type="date" value={row.date} onChange={e=>upd("date",e.target.value)} min={todayKey()}/>
         </div>
+        <button type="button" onClick={()=>setManualMode(m=>!m)}
+          title={manualMode?"Use day grid to pick a slot":"Configure facility/time/duration directly"}
+          style={S.btn({border:`1.5px solid ${manualMode?"#6366f1":"#e2e8f0"}`,background:manualMode?"#eef2ff":"#fff",color:manualMode?"#4338ca":"#475569",fontSize:12,padding:"7px 12px"})}>
+          {manualMode?"📅 Day grid":"⌨ Manual"}
+        </button>
       </div>
-      <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:10}}>
-        <div>
-          <label style={S.lbl}>Start Time *</label>
-          <select style={S.inp} value={row.start_hour} onChange={e=>upd("start_hour",parseFloat(e.target.value))}>
-            {Array.from({length:CAL_TOTAL*2+1},(_,i)=>CAL_START+i*0.5).filter(h=>h<=CAL_END).map(h=><option key={h} value={h}>{fmtTime(h)}</option>)}
-          </select>
-        </div>
-        <div>
-          <label style={S.lbl}>Duration *</label>
-          <select style={S.inp} value={row.duration} onChange={e=>upd("duration",parseFloat(e.target.value))}>
-            {DURATIONS.map(d=><option key={d.value} value={d.value}>{d.label}</option>)}
-          </select>
-        </div>
-      </div>
+
+      {manualMode ? (
+        <>
+          <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:10}}>
+            <div>
+              <label style={S.lbl}>Facility *</label>
+              <select style={S.inp} value={row.facility_id} onChange={e=>upd("facility_id",e.target.value)}>
+                {FACILITIES.map(f=><option key={f.id} value={f.id}>{f.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={S.lbl}>Start Time *</label>
+              <select style={S.inp} value={row.start_hour} onChange={e=>upd("start_hour",parseFloat(e.target.value))}>
+                {Array.from({length:CAL_TOTAL*2+1},(_,i)=>CAL_START+i*0.5).filter(h=>h<=CAL_END).map(h=><option key={h} value={h}>{fmtTime(h)}</option>)}
+              </select>
+            </div>
+          </div>
+          <div>
+            <label style={S.lbl}>Duration *</label>
+            <select style={S.inp} value={row.duration} onChange={e=>upd("duration",parseFloat(e.target.value))}>
+              {DURATIONS.map(d=><option key={d.value} value={d.value}>{d.label}</option>)}
+            </select>
+          </div>
+        </>
+      ) : (
+        <InlineDayPicker date={row.date} bookings={allBookings} onPick={pickSlot}/>
+      )}
       <div>
         <label style={S.lbl}>Purpose *</label>
         <input style={S.inp} value={row.purpose} onChange={e=>upd("purpose",e.target.value)} placeholder="e.g. Training, Meeting…"/>
@@ -1549,11 +1732,13 @@ function WeekCalendar({ bookings, onNewBooking, onBookingClick, selectedFacility
                       const filterActive = bookerFilter.size > 0;
                       const isDimmed = filterActive && !bookerFilter.has(b.email?.toLowerCase());
                       const dimOpacity = isAdmin_bk ? 0.25 : 0.12;
+                      const facSocial = !isAdmin_bk && isSocialFac(b.facility_id);
                       return (
                         <div key={b.id}
                           onClick={e=>{ e.stopPropagation(); if(!isDimmed) onBookingClick(b); }}
                           onMouseDown={e=>e.stopPropagation()}
                           title={(()=>{const r=parseMismatchNote(b.system_notes,b.notes);return `${b.name} – ${fac?.name}`+(b.status==="cpsa_review_needed"&&r.length?`\n⚠ CPSA inconsistencies:\n${r.join("\n")}`:b.status==="cpsa_confirmed"?"\n🌐 CPSA confirmed":"");})()}
+                          className={facSocial?(bkTxt==="#fff"?"fac-social-tex":"fac-social-tex-dark"):undefined}
                           style={{ position:"absolute", top:(b.start_hour-CAL_START)*HOUR_H, height:Math.max(b.duration*HOUR_H-2,20), background:bkBg, borderRadius:6, padding:"3px 6px", cursor:isDimmed?"default":"pointer", overflow:"hidden", opacity:isDimmed?dimOpacity:REVIEW_STATUSES.has(b.status)?0.75:1, pointerEvents:isDimmed?"none":"auto", border:deleteIds.has(b.id)?"2.5px solid #ef4444":cartSourceIds.has(b.id)?"2.5px solid #f59e0b":b.status==="clash"?"2px dashed #d97706":REVIEW_STATUSES.has(b.status)?`2px dashed ${bkTxt==="#fff"?"rgba(255,255,255,0.6)":"rgba(113,63,18,0.5)"}`:b.status==="rejected"?"2px solid rgba(244,63,94,0.8)":"none", boxShadow:deleteIds.has(b.id)?"0 0 0 3px rgba(239,68,68,0.25)":cartSourceIds.has(b.id)?"0 0 0 3px rgba(245,158,11,0.25)":"0 1px 4px rgba(0,0,0,0.15)", zIndex:2, borderLeft:bkBorderLeft, ...stk }}>
                           <div style={{display:"flex",alignItems:"center",gap:3,overflow:"hidden"}}>
                             {!isAdmin_bk&&<span style={{width:7,height:7,borderRadius:"50%",background:ec,flexShrink:0,boxShadow:"0 0 0 1px rgba(255,255,255,0.4)",display:"inline-block"}}/>}
@@ -1728,10 +1913,12 @@ function MonthCalendar({ bookings, onBookingClick, onNewBooking, selectedFacilit
                   const filterActive = bookerFilter.size > 0;
                   const isDimmed = filterActive && !bookerFilter.has(b.email?.toLowerCase());
                   const dimOpacity = isAdmin_bk ? 0.25 : 0.15;
+                  const facSocial = !isAdmin_bk && isSocialFac(b.facility_id);
                   return (
                     <div key={b.id}
                       onClick={e=>{ e.stopPropagation(); if(isDimmed) return; if(selMode) toggleSel(b.id); else onBookingClick(b); }}
                       title={(()=>{const r=parseMismatchNote(b.system_notes,b.notes);return `${b.name} · ${fac?.name} · ${fmtTime(b.start_hour)}–${fmtTime(b.start_hour+b.duration)}`+(b.status==="cpsa_review_needed"&&r.length?`\n⚠ CPSA inconsistencies:\n${r.join("\n")}`:b.status==="cpsa_confirmed"?"\n🌐 CPSA confirmed":"");})()}
+                      className={facSocial?(chipTxt==="#fff"?"fac-social-tex":"fac-social-tex-dark"):undefined}
                       style={{ background:chipBg, borderRadius:4, padding:"2px 4px", fontSize:10, fontWeight:700, color:chipTxt, overflow:"hidden", whiteSpace:"nowrap", borderLeft:chipLeft, outline:chipOutline, opacity:isDimmed?dimOpacity:REVIEW_STATUSES.has(b.status)?0.75:1, cursor:isDimmed?"default":"pointer", pointerEvents:isDimmed?"none":"auto", display:"flex", alignItems:"center", gap:3 }}>
                       {!isAdmin_bk&&<span style={{width:6,height:6,borderRadius:"50%",background:ec,flexShrink:0,display:"inline-block",boxShadow:"0 0 0 1px rgba(255,255,255,0.35)"}}/>}
                       {b.status==="cpsa_review_needed"&&<span style={{fontSize:8,flexShrink:0,lineHeight:1}}>⚠</span>}
@@ -1838,13 +2025,14 @@ function DayTimelinePopup({ date, bookings, onClose, onBookingClick, onNewBookin
           {FACILITIES.map(fac=>{
             const facBkgs = dayBkgs.filter(b=>b.facility_id===fac.id || isAdminBooking(b));
             const isDragging = dragState?.facility===fac.id;
+            const colTint = FACILITY_TINT[fac.id] || "#fff";
             return (
               <div key={fac.id} style={{flex:1,minWidth:96}}>
-                <div style={{height:24,position:"sticky",top:0,zIndex:5,display:"flex",alignItems:"center",justifyContent:"center",gap:4,fontSize:10,fontWeight:700,color:"#475569",whiteSpace:"nowrap",overflow:"hidden",background:"#fff",borderBottom:"1px solid #f1f5f9"}}>
+                <div style={{height:24,position:"sticky",top:0,zIndex:5,display:"flex",alignItems:"center",justifyContent:"center",gap:4,fontSize:10,fontWeight:700,color:fac.color,whiteSpace:"nowrap",overflow:"hidden",background:colTint,borderBottom:`2px solid ${fac.color}`}}>
                   <span style={{width:7,height:7,borderRadius:"50%",background:fac.color,flexShrink:0}}/>
                   {fac.name.includes("Field")?fac.name.replace("Field ","Fld "):fac.name.split("–")[0].trim().slice(0,10)}
                 </div>
-                <div style={{position:"relative",borderLeft:"1px solid #f1f5f9",cursor:isDragging?"ns-resize":"crosshair"}}
+                <div style={{position:"relative",borderLeft:"1px solid #f1f5f9",cursor:isDragging?"ns-resize":"crosshair",background:colTint}}
                   onMouseDown={e=>down(e,fac.id)} onMouseMove={e=>move(e,fac.id)} onMouseUp={e=>up(e,fac.id)}
                   onMouseLeave={()=>{ if(isDragging){ dragMoved.current=false; setDragState(null);} }}>
                   {/* Hour cells */}
@@ -3750,7 +3938,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
 
 
 // ─── Admin Panel with action queue, bulk approve, facility rates ──────────────
-function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,clashes=[],deleteIds=new Set(),facilityRates={},onUpdateFacilityRate,onClearOldUnapproved,silentMode=false,approxPlayers={},onUpdateApproxPlayers,approxDurations={},onUpdateApproxDuration,onSyncDB,onShowSchedule,onBulkApply,onSaveMismatch,onMarkAdjustmentSettled}) {
+function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,clashes=[],deleteIds=new Set(),facilityRates={},onUpdateFacilityRate,onClearOldUnapproved,silentMode=false,approxPlayers={},onUpdateApproxPlayers,approxDurations={},onUpdateApproxDuration,onSyncDB,onShowSchedule,onBulkApply,onSaveMismatch,onMarkAdjustmentSettled,onShowActivityLog,onShowSyncResults,syncResultsCount=0}) {
   const [sf,setSf]=useState("all"), [ff,setFf]=useState("all"), [q,setQ]=useState("");
   const [adminBookerFilter,setAdminBookerFilter]=useState("all");
   const [showBookerFilter,setShowBookerFilter]=useState(false);
@@ -3954,6 +4142,12 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
         </button>
         {onShowSchedule&&<button onClick={onShowSchedule} style={S.btn({background:"#f0f9ff",color:"#0369a1",border:"1.5px solid #bae6fd",fontSize:12,fontWeight:700})}>
           📅 Schedule
+        </button>}
+        {onShowActivityLog&&<button onClick={onShowActivityLog} style={S.btn({background:"#fff",color:"#475569",border:"1.5px solid #e2e8f0",fontSize:12,fontWeight:700})}>
+          📜 Activity Log
+        </button>}
+        {onShowSyncResults&&syncResultsCount>0&&<button onClick={onShowSyncResults} style={S.btn({background:"#ecfeff",color:"#0e7490",border:"1.5px solid #a5f3fc",fontSize:12,fontWeight:700})}>
+          🔄 Sync Results ({syncResultsCount})
         </button>}
         <button onClick={()=>setShowClashPanel(v=>!v)} style={S.btn({border:`1.5px solid ${clashes.length>0?"#fda4af":"#e2e8f0"}`,background:showClashPanel?"#fff1f2":"#fff",color:clashes.length>0?"#9f1239":"#94a3b8",fontSize:12,fontWeight:clashes.length>0?700:500})}>
           ⚠️ Clashes ({clashes.length}) {showClashPanel?"▴":"▾"}
@@ -5024,6 +5218,14 @@ export default function App() {
   const [prefill,  setPrefill]  =useState({date:null,startHour:9,duration:1});
   const [toast,    setToast]    =useState(null);
   const [syncingMonth, setSyncingMonth] = useState(false);
+  // Cumulative results across all months queried while the sync popup is open.
+  // Each entry: { month, label, added, skipped, removed, cpsaConfirmed, cpsaReviewNeeded, clashes, items: [...] }
+  const [syncResults, setSyncResults] = useState([]);
+  const [showSyncPopup, setShowSyncPopup] = useState(false);
+  const [showActivityLog, setShowActivityLog] = useState(false);
+  const [showRatesModal, setShowRatesModal] = useState(false);
+  const [showPlayersModal, setShowPlayersModal] = useState(false);
+  const [showUserMenu, setShowUserMenu] = useState(false);
   const [silentMode, setSilentMode] = useState(true); // admin: suppress all outgoing emails
   const [facilityRates, setFacilityRates] = useState(()=>{
     try{return JSON.parse(localStorage.getItem("fb_facility_rates")||"{}");}catch{return {};}
@@ -5152,6 +5354,7 @@ export default function App() {
           setBookings(prev => prev.filter(b => b.id !== sb_bk.id));
         }
         removed++;
+        logActivity("cpsa_admin_booking_remove", { id: sb_bk.id, date: sb_bk.date, facility_id: sb_bk.facility_id, purpose: sb_bk.purpose });
       }
 
       for (const ev of events) {
@@ -5196,6 +5399,7 @@ export default function App() {
           }
           if (statusChanged) {
             if (match.exact) cpsaConfirmed++; else cpsaReviewNeeded++;
+            logActivity(match.exact?"cpsa_confirm":"cpsa_review_flag", { booking_id: match.booking.id, from: match.booking.status, to: targetStatus, reasons: match.reasons||[] });
             // First-time transition into a CPSA status → queue a notify-only cart item.
             if (match.booking.email && !isAdminBooking(match.booking)) {
               cpsaNotifications.push({
@@ -5235,6 +5439,7 @@ export default function App() {
             setBookings(prev => [...prev, newBk]);
           }
           added++;
+          logActivity("cpsa_admin_booking_add", { date, facility_id, start_hour, duration, purpose });
         }
       }
       if (configured) await loadBookings();
@@ -5291,14 +5496,16 @@ export default function App() {
       // Queue CPSA status-change notifications in the cart (notify-only, no booking edits).
       if (cpsaNotifications.length) setCart(prev => [...prev, ...cpsaNotifications]);
 
-      const clashMsg = clashUpdates > 0 ? `, ${clashUpdates} clash${clashUpdates>1?"es":""} flagged` : "";
-      const removedMsg = removed > 0 ? `, ${removed} stale removed` : "";
-      const cpsaMsg = cpsaConfirmed > 0 ? `, ${cpsaConfirmed} CPSA-confirmed` : "";
-      const cpsaRevMsg = cpsaReviewNeeded > 0 ? `, ${cpsaReviewNeeded} need AMUA review` : "";
-      const notifyMsg = cpsaNotifications.length ? `, ${cpsaNotifications.length} queued in cart to notify` : "";
-      showToast(`Sync complete: ${added} added, ${skipped} already existed${cpsaMsg}${cpsaRevMsg}${notifyMsg}${removedMsg}${clashMsg}.`);
+      const label = `${MONTHS[month]} ${year}`;
+      const monthKey = `${year}-${String(month+1).padStart(2,"0")}`;
+      setSyncResults(prev => {
+        const without = prev.filter(r => r.monthKey !== monthKey);
+        return [...without, { monthKey, label, added, skipped, removed, cpsaConfirmed, cpsaReviewNeeded, clashes: clashUpdates, notified: cpsaNotifications.length, syncedAt: new Date().toISOString() }];
+      });
+      setShowSyncPopup(true);
     } catch(e) {
-      showToast("Sync failed: " + e.message, "error");
+      setSyncResults(prev => [...prev, { monthKey: `${year}-${String(month+1).padStart(2,"0")}`, label: `${MONTHS[month]} ${year}`, error: e.message, syncedAt: new Date().toISOString() }]);
+      setShowSyncPopup(true);
     } finally {
       setSyncingMonth(false);
     }
@@ -5803,13 +6010,7 @@ export default function App() {
               {!configured&&<span style={{fontSize:10,background:"#fef3c7",color:"#92400e",padding:"2px 6px",borderRadius:6,fontWeight:600}}>Demo</span>}
             </div>
             <div style={{marginLeft:"auto",display:"flex",gap:6,alignItems:"center",flexShrink:0,flexWrap:"nowrap"}}>
-              {/* User pill */}
-              <div style={{display:"flex",alignItems:"center",gap:5,background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:20,padding:"4px 10px",maxWidth:isMobile?130:180,overflow:"hidden"}}>
-                <span style={{width:7,height:7,borderRadius:"50%",background:emailColor(loggedInEmail),display:"inline-block",flexShrink:0}}/>
-                <span style={{fontSize:11,fontWeight:600,color:"#475569",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{loggedInEmail}</span>
-                <button onClick={handleLogout} title="Sign out" style={{background:"none",border:"none",cursor:"pointer",color:"#94a3b8",fontSize:13,padding:"0 0 0 2px",lineHeight:1,flexShrink:0}}>✕</button>
-              </div>
-              {/* Cart / removal / admin buttons */}
+              {/* Cart / removal — always visible when populated */}
               {cart.length>0&&(
                 <button onClick={()=>setShowCart(true)} style={S.btn({background:"#f59e0b",color:"#fff",display:"flex",alignItems:"center",gap:4,padding:"7px 10px"})}>
                   🛒{!isMobile&&" Cart"}
@@ -5822,18 +6023,6 @@ export default function App() {
                   <span style={{background:"#fff",color:"#7f1d1d",borderRadius:999,fontSize:11,fontWeight:800,padding:"1px 6px",minWidth:18,textAlign:"center"}}>{deleteQueue.length}</span>
                 </button>
               )}
-              {isAdmin&&(
-                <button onClick={()=>setShowExtensionModal(true)} title="Install the AMUA booking browser extension"
-                  style={S.btn({background:"#7c3aed",color:"#fff",fontSize:11,padding:"7px 10px"})}>
-                  🧩{!isMobile&&" Extension"}
-                </button>
-              )}
-              {isAdmin&&(
-                <button onClick={handleSyncDB} title="Reload bookings & settings from the database"
-                  style={S.btn({background:"#fff",color:"#475569",border:"1.5px solid #e2e8f0",fontSize:11,padding:"7px 10px"})}>
-                  ⬇{!isMobile&&" Sync DB"}
-                </button>
-              )}
               {isAdmin&&(()=>{
                 const lastMs=parseInt(localStorage.getItem("fb_last_sync_at")||"0",10);
                 const minsAgo=lastMs?Math.floor((Date.now()-lastMs)/60000):null;
@@ -5842,15 +6031,47 @@ export default function App() {
                   <button onClick={handleSyncAll} disabled={syncingMonth}
                     title={`Sync all months with CPSA · Last: ${syncLabel}`}
                     style={S.btn({background:syncingMonth?"#e2e8f0":"#0ea5e9",color:syncingMonth?"#94a3b8":"#fff",fontSize:11,padding:"7px 10px",cursor:syncingMonth?"wait":"pointer",opacity:syncingMonth?0.7:1})}>
-                    {syncingMonth?"⏳":"🔄"}{!isMobile&&(syncingMonth?` Syncing…`:` Sync All`)}
-                    {!isMobile&&!syncingMonth&&<span style={{opacity:0.75,fontWeight:400}}> · {syncLabel}</span>}
+                    {syncingMonth?"⏳":"🔄"}{!isMobile&&(syncingMonth?` Syncing…`:` Sync`)}
                   </button>
                 );
               })()}
-              {isAdmin&&<span style={{fontSize:11,fontWeight:700,color:"#7c3aed",background:"#f3e8ff",border:"1px solid #ddd6fe",borderRadius:8,padding:"4px 8px"}}>Admin</span>}
               <button onClick={()=>openNew(todayKey(),9,1)} style={S.btn({background:"#2d4a1e",color:"#fff",padding:"7px 10px",fontSize:12})}>
                 {isMobile?"+ Book":"+ New Booking"}
               </button>
+              {/* User dropdown — replaces inline status pill + admin buttons */}
+              <div style={{position:"relative"}}>
+                <button onClick={()=>setShowUserMenu(v=>!v)} title={loggedInEmail}
+                  style={{display:"flex",alignItems:"center",gap:6,background:showUserMenu?"#eef2ff":"#f8fafc",border:`1px solid ${showUserMenu?"#c7d2fe":"#e2e8f0"}`,borderRadius:20,padding:"4px 8px 4px 4px",cursor:"pointer",fontFamily:"inherit",fontSize:11,fontWeight:600,color:"#475569"}}>
+                  <span style={{width:26,height:26,borderRadius:"50%",background:emailColor(loggedInEmail),display:"inline-flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:11,fontWeight:800}}>{(loggedInEmail||"?")[0]?.toUpperCase()}</span>
+                  {!isMobile&&<span style={{maxWidth:120,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{loggedInEmail?.split("@")[0]}</span>}
+                  <span style={{fontSize:9,color:"#94a3b8"}}>▾</span>
+                </button>
+                {showUserMenu&&(
+                  <>
+                    <div onClick={()=>setShowUserMenu(false)} style={{position:"fixed",inset:0,zIndex:30}}/>
+                    <div style={{position:"absolute",right:0,top:"calc(100% + 6px)",zIndex:31,background:"#fff",border:"1.5px solid #e2e8f0",borderRadius:12,boxShadow:"0 8px 24px rgba(15,23,42,0.12)",minWidth:240,overflow:"hidden",fontSize:13}}>
+                      <div style={{padding:"10px 14px",borderBottom:"1px solid #f1f5f9",background:"#f8fafc"}}>
+                        <div style={{fontSize:11,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.05em",fontWeight:700}}>Signed in</div>
+                        <div style={{fontSize:12,color:"#0f172a",fontWeight:600,marginTop:2,wordBreak:"break-all"}}>{loggedInEmail}</div>
+                        <div style={{marginTop:6,display:"flex",alignItems:"center",gap:6}}>
+                          <span style={{fontSize:10,fontWeight:700,padding:"2px 7px",borderRadius:10,background:isAdmin?"#f3e8ff":"#f1f5f9",color:isAdmin?"#7c3aed":"#475569",border:`1px solid ${isAdmin?"#ddd6fe":"#e2e8f0"}`}}>{isAdmin?"👑 Admin":"👤 User"}</span>
+                        </div>
+                      </div>
+                      {isAdmin&&(
+                        <div style={{padding:"6px 0",borderBottom:"1px solid #f1f5f9"}}>
+                          <div style={{padding:"4px 14px 6px",fontSize:10,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.05em",fontWeight:700}}>Admin</div>
+                          <UserMenuItem icon="🧩" label="Install Extension" onClick={()=>{setShowUserMenu(false);setShowExtensionModal(true);}}/>
+                          <UserMenuItem icon="💲" label="Facility Rates" onClick={()=>{setShowUserMenu(false);setShowRatesModal(true);}}/>
+                          <UserMenuItem icon="👥" label="Player Counts" onClick={()=>{setShowUserMenu(false);setShowPlayersModal(true);}}/>
+                          <UserMenuItem icon="📜" label="Activity Log" onClick={()=>{setShowUserMenu(false);setShowActivityLog(true);}}/>
+                          <UserMenuItem icon="⬇" label="Reload from DB" onClick={()=>{setShowUserMenu(false);handleSyncDB();}}/>
+                        </div>
+                      )}
+                      <UserMenuItem icon="↪" label="Sign out" onClick={()=>{setShowUserMenu(false);handleLogout();}} danger/>
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
           </div>
           {/* Bottom row: tabs (always visible, scrollable) */}
@@ -6096,7 +6317,7 @@ export default function App() {
             </label>
             {silentMode&&<span style={{fontSize:12,color:"#92400e"}}>All status changes, approvals, deletions and edits will be processed without notifying bookers.</span>}
           </div>
-          {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onView={setViewing} onQueueDelete={queueForRemovalSilent} clashes={allClashes} deleteIds={new Set(deleteQueue.map(b=>b.id))} facilityRates={facilityRates} onUpdateFacilityRate={updateFacilityRate} onClearOldUnapproved={handleClearOldUnapproved} silentMode={silentMode} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onSyncDB={handleSyncDB} onShowSchedule={()=>setShowAdminScheduleModal(true)} onBulkApply={handleBulkApply} onSaveMismatch={handleSaveMismatch} onMarkAdjustmentSettled={handleMarkAdjustmentSettled}/>}
+          {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onView={setViewing} onQueueDelete={queueForRemovalSilent} clashes={allClashes} deleteIds={new Set(deleteQueue.map(b=>b.id))} facilityRates={facilityRates} onUpdateFacilityRate={updateFacilityRate} onClearOldUnapproved={handleClearOldUnapproved} silentMode={silentMode} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onSyncDB={handleSyncDB} onShowSchedule={()=>setShowAdminScheduleModal(true)} onBulkApply={handleBulkApply} onSaveMismatch={handleSaveMismatch} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} onShowActivityLog={()=>setShowActivityLog(true)} onShowSyncResults={()=>setShowSyncPopup(true)} syncResultsCount={syncResults.length}/>}
         </div>}
       </div>
 
@@ -6133,6 +6354,111 @@ export default function App() {
             <div style={{borderTop:"1px solid #f1f5f9",paddingTop:12,display:"flex",gap:8,justifyContent:"flex-end"}}>
               <button onClick={()=>setShowExtensionModal(false)} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#475569"})}>Close</button>
             </div>
+          </div>
+        </Modal>
+      )}
+
+      {showSyncPopup&&(
+        <Modal title="🔄 CPSA Sync Results" onClose={()=>setShowSyncPopup(false)} width={680}>
+          <div style={{display:"flex",flexDirection:"column",gap:12}}>
+            <div style={{fontSize:12,color:"#64748b"}}>Results accumulate across each month queried. Use <strong>Sync</strong> from the header to add another month, or <strong>Clear</strong> to reset.</div>
+            <div style={{maxHeight:"55vh",overflowY:"auto",display:"flex",flexDirection:"column",gap:8}}>
+              {syncResults.length===0
+                ? <div style={{textAlign:"center",padding:24,color:"#94a3b8",fontSize:13}}>No sync runs yet.</div>
+                : [...syncResults].sort((a,b)=>(b.syncedAt||"").localeCompare(a.syncedAt||"")).map(r=>(
+                    <div key={r.monthKey+r.syncedAt} style={{background:r.error?"#fef2f2":"#f8fafc",border:`1px solid ${r.error?"#fecaca":"#e2e8f0"}`,borderRadius:8,padding:"10px 14px"}}>
+                      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:r.error?0:6}}>
+                        <span style={{fontWeight:700,color:r.error?"#b91c1c":"#0f172a"}}>{r.label}</span>
+                        <span style={{fontSize:11,color:"#94a3b8"}}>{new Date(r.syncedAt).toLocaleTimeString("en-NZ",{hour:"2-digit",minute:"2-digit"})}</span>
+                      </div>
+                      {r.error
+                        ? <div style={{fontSize:12,color:"#b91c1c"}}>⚠ {r.error}</div>
+                        : <div style={{display:"flex",flexWrap:"wrap",gap:"4px 12px",fontSize:12,color:"#475569"}}>
+                            <span><strong style={{color:"#0f172a"}}>{r.added}</strong> added</span>
+                            <span><strong style={{color:"#0f172a"}}>{r.skipped}</strong> already existed</span>
+                            {r.cpsaConfirmed>0&&<span style={{color:"#0e7490"}}>🌐 <strong>{r.cpsaConfirmed}</strong> CPSA-confirmed</span>}
+                            {r.cpsaReviewNeeded>0&&<span style={{color:"#b45309"}}>⚠ <strong>{r.cpsaReviewNeeded}</strong> need review</span>}
+                            {r.clashes>0&&<span style={{color:"#c2410c"}}>⚡ <strong>{r.clashes}</strong> clash{r.clashes!==1?"es":""}</span>}
+                            {r.notified>0&&<span style={{color:"#7c3aed"}}>📧 <strong>{r.notified}</strong> queued to notify</span>}
+                            {r.removed>0&&<span style={{color:"#94a3b8"}}>{r.removed} stale removed</span>}
+                          </div>}
+                    </div>
+                  ))
+              }
+            </div>
+            <div style={{display:"flex",gap:8,justifyContent:"flex-end",paddingTop:8,borderTop:"1px solid #f1f5f9"}}>
+              {syncResults.length>0&&<button onClick={()=>setSyncResults([])} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#475569",fontSize:12})}>Clear</button>}
+              <button onClick={()=>setShowSyncPopup(false)} style={S.btn({background:"#0f172a",color:"#fff",fontSize:12})}>Close</button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {showActivityLog&&isAdmin&&(
+        <ActivityLogModal onClose={()=>setShowActivityLog(false)}/>
+      )}
+
+      {showRatesModal&&isAdmin&&(
+        <Modal title="💲 Facility Rates" onClose={()=>setShowRatesModal(false)} width={620}>
+          <div style={{fontSize:12,color:"#64748b",marginBottom:12}}>Day rate = before 5:30 pm · Evening rate = 5:30 pm onwards.</div>
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            {FACILITIES.map(fac => {
+              const r = typeof facilityRates[fac.id]==="object" ? facilityRates[fac.id] : { day: facilityRates[fac.id]||0, evening: 50 };
+              return (
+                <div key={fac.id} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,padding:"10px 14px"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:7}}>
+                    <span style={{width:10,height:10,borderRadius:"50%",background:fac.color,flexShrink:0}}/>
+                    <span style={{fontSize:13,fontWeight:700,color:"#0f172a"}}>{fac.name}</span>
+                    <span style={{fontSize:10,fontWeight:700,padding:"1px 6px",borderRadius:10,background:fac.kind==="social"?"#f3e8ff":"#dcfce7",color:fac.kind==="social"?"#7c3aed":"#166534",marginLeft:"auto"}}>{fac.kind==="social"?"Social":"Field"}</span>
+                  </div>
+                  <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+                    <span style={{fontSize:12,color:"#64748b"}}>Day $</span>
+                    <input type="number" min="0" step="0.5" value={r.day||""} placeholder="0"
+                      onChange={e=>updateFacilityRate(fac.id,"day",e.target.value)}
+                      style={{width:80,padding:"4px 8px",borderRadius:6,border:"1.5px solid #e2e8f0",fontSize:13,textAlign:"right",fontFamily:"inherit",outline:"none"}}/>
+                    <span style={{fontSize:12,color:"#64748b"}}>/hr</span>
+                    <span style={{fontSize:12,color:"#7c3aed",marginLeft:8}}>Evening $</span>
+                    <input type="number" min="0" step="0.5" value={r.evening||""} placeholder="0"
+                      onChange={e=>updateFacilityRate(fac.id,"evening",e.target.value)}
+                      style={{width:80,padding:"4px 8px",borderRadius:6,border:"1.5px solid #e2e8f0",fontSize:13,textAlign:"right",fontFamily:"inherit",outline:"none"}}/>
+                    <span style={{fontSize:12,color:"#64748b"}}>/hr</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <div style={{marginTop:12,display:"flex",justifyContent:"flex-end"}}>
+            <button onClick={()=>setShowRatesModal(false)} style={S.btn({background:"#0f172a",color:"#fff",fontSize:12})}>Done</button>
+          </div>
+        </Modal>
+      )}
+
+      {showPlayersModal&&isAdmin&&(
+        <Modal title="👥 Player Counts (per booker)" onClose={()=>setShowPlayersModal(false)} width={520}>
+          <div style={{fontSize:12,color:"#64748b",marginBottom:12}}>Approximate player counts drive per-booking cost estimates.</div>
+          {(()=>{
+            const emails = [...new Set(bookings.filter(b=>!isAdminBooking(b)).map(b=>b.email).filter(Boolean))].sort();
+            if(emails.length===0) return <div style={{color:"#94a3b8",fontSize:13,textAlign:"center",padding:20}}>No bookers yet.</div>;
+            return (
+              <div style={{display:"flex",flexDirection:"column",gap:6,maxHeight:"55vh",overflowY:"auto"}}>
+                {emails.map(em=>{
+                  const cur = approxPlayers[em.toLowerCase()]||0;
+                  return (
+                    <div key={em} style={{display:"flex",alignItems:"center",gap:10,padding:"7px 10px",background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:6}}>
+                      <span style={{width:9,height:9,borderRadius:"50%",background:emailColor(em),flexShrink:0}}/>
+                      <span style={{fontSize:12,fontWeight:600,color:"#0f172a",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{em}</span>
+                      <input type="number" min="0" value={cur||""} placeholder="0"
+                        onChange={e=>updateApproxPlayers(em,parseInt(e.target.value)||0)}
+                        style={{width:70,padding:"4px 8px",borderRadius:6,border:"1.5px solid #e2e8f0",fontSize:13,textAlign:"right",fontFamily:"inherit",outline:"none"}}/>
+                      <span style={{fontSize:11,color:"#94a3b8"}}>players</span>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
+          <div style={{marginTop:12,display:"flex",justifyContent:"flex-end"}}>
+            <button onClick={()=>setShowPlayersModal(false)} style={S.btn({background:"#0f172a",color:"#fff",fontSize:12})}>Done</button>
           </div>
         </Modal>
       )}
