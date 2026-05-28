@@ -4638,10 +4638,13 @@ export default function App() {
           const statusChanged = match.booking.status !== targetStatus;
           const sysNotesChanged = (match.booking.system_notes || "") !== newSysNotes;
           if (statusChanged || sysNotesChanged) {
-            const patch = { status: targetStatus, system_notes: newSysNotes, updated_at: new Date().toISOString() };
             if (configured) {
-              await sb.update("bookings", match.booking.id, patch);
+              // Always update status first — this is the critical write.
+              if (statusChanged) await sb.update("bookings", match.booking.id, { status: targetStatus, updated_at: new Date().toISOString() });
+              // system_notes is best-effort: silently no-ops until migration is run.
+              if (sysNotesChanged) sb.update("bookings", match.booking.id, { system_notes: newSysNotes }).catch(() => {});
             } else {
+              const patch = { status: targetStatus, system_notes: newSysNotes, updated_at: new Date().toISOString() };
               setBookings(prev => prev.map(b => b.id === match.booking.id ? { ...b, ...patch } : b));
             }
           }
@@ -4707,9 +4710,13 @@ export default function App() {
         return !stillOverlaps;
       });
       for (const cb of cpsaLinkedUnmatched) {
-        const resetPatch = { status: "approved", system_notes: stripMismatchNote(cb.system_notes), updated_at: new Date().toISOString() };
-        if (configured) await sb.update("bookings", cb.id, resetPatch);
-        else setBookings(prev => prev.map(b => b.id === cb.id ? { ...b, ...resetPatch } : b));
+        const strippedSysNotes = stripMismatchNote(cb.system_notes);
+        if (configured) {
+          await sb.update("bookings", cb.id, { status: "approved", updated_at: new Date().toISOString() });
+          sb.update("bookings", cb.id, { system_notes: strippedSysNotes }).catch(() => {});
+        } else {
+          setBookings(prev => prev.map(b => b.id === cb.id ? { ...b, status: "approved", system_notes: strippedSysNotes, updated_at: new Date().toISOString() } : b));
+        }
       }
       if (configured && cpsaLinkedUnmatched.length > 0) await loadBookings();
 
@@ -4925,7 +4932,10 @@ export default function App() {
     if (!targets.length) { showToast("Already invoiced."); return; }
     if (configured) {
       try {
-        for (const b of targets) await sb.update("bookings", b.id, { invoiced:true, system_notes:setBilledSnapshot(b.system_notes, b), updated_at:new Date().toISOString() });
+        for (const b of targets) {
+          await sb.update("bookings", b.id, { invoiced:true, updated_at:new Date().toISOString() });
+          sb.update("bookings", b.id, { system_notes:setBilledSnapshot(b.system_notes, b) }).catch(()=>{});
+        }
         await loadBookings();
       } catch(e) { showToast("Mark invoiced failed: "+e.message, "error"); return; }
     } else {
