@@ -1941,6 +1941,16 @@ function AboutTab() {
             <div style={{fontSize:13,color:"#475569",marginTop:2}}>CPSA reviews and either approves or rejects. An <Badge status="approved"/> booking is confirmed and you will be notified. A rejected booking will show as <Badge status="rejected"/>.</div>
           </div>
         </div>
+        <div style={arrow}>↓</div>
+        <div style={step}>
+          <div style={stepNum("#0891b2")}>5</div>
+          <div>
+            <div style={{fontWeight:600,fontSize:14,color:"#0f172a"}}>Reconciled against CPSA records</div>
+            <div style={{fontSize:13,color:"#475569",marginTop:2}}>
+              When AMUA periodically syncs the official CPSA schedule, an approved booking that matches CPSA's record exactly is promoted to <Badge status="cpsa_confirmed"/> — confirming that what you booked is what CPSA has on file. If anything differs (time, duration or facility), the booking is flagged <Badge status="cpsa_review_needed"/> instead, and AMUA will triage the discrepancy. Bookings with a 🌐 marker in the calendar are CPSA-confirmed.
+            </div>
+          </div>
+        </div>
       </div>
 
       <div style={card}>
