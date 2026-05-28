@@ -4236,7 +4236,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                   <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
                     <thead>
                       <tr style={{background:"#fef3c7"}}>
-                        {["Booker","Date","Field","Booked","CPSA Says","Changes","Resolution","Billing",""].map(h=>(
+                        {["Booker","Date","Field","Time","Dur","Resolution","Billing",""].map(h=>(
                           <th key={h} style={thS2}>{h}</th>
                         ))}
                       </tr>
@@ -4253,6 +4253,19 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                         const curBilling=pending?.billingState ?? saved?.billingState ?? "none";
                         const isDirty=!!pending;
                         const rowBg=i%2===0?"#fff":"#fffbeb";
+                        // Cell that shows current value, with strike-through + arrow + new value when changed.
+                        const diffCell = (curVal, newVal, changed) => (
+                          <span style={{whiteSpace:"nowrap"}}>
+                            <span style={changed?{color:"#94a3b8",textDecoration:"line-through"}:{color:"#475569"}}>{curVal}</span>
+                            {changed&&<>
+                              <span style={{color:"#a16207",margin:"0 4px"}}>→</span>
+                              <span style={{color:"#a16207",fontWeight:700}}>{newVal}</span>
+                            </>}
+                          </span>
+                        );
+                        const facChanged  = cpsaVals.facility_id !== b.facility_id;
+                        const timeChanged = cpsaVals.start_hour !== b.start_hour;
+                        const durChanged  = cpsaVals.duration !== b.duration;
                         return (
                           <tr key={b.id} style={{background:rowBg}}>
                             <td style={tdS2}>
@@ -4261,30 +4274,20 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                               {b.invoiced&&<span style={{fontSize:10,fontWeight:700,background:"#f5f3ff",color:"#5b21b6",border:"1px solid #ddd6fe",borderRadius:4,padding:"1px 4px"}}>🧾 invoiced</span>}
                             </td>
                             <td style={{...tdS2,whiteSpace:"nowrap",color:"#475569"}}>{fmtDate(b.date)}</td>
-                            <td style={{...tdS2,whiteSpace:"nowrap"}}>
-                              <span style={{display:"inline-flex",alignItems:"center",gap:4}}>
-                                <span style={{width:7,height:7,borderRadius:2,background:fac?.color||"#94a3b8",display:"inline-block"}}/>
-                                {fac?.name||b.facility_id}
+                            <td style={tdS2}>
+                              <span style={{display:"inline-flex",alignItems:"center",gap:4,whiteSpace:"nowrap"}}>
+                                <span style={{width:7,height:7,borderRadius:2,background:fac?.color||"#94a3b8",display:"inline-block",flexShrink:0}}/>
+                                {diffCell(fac?.name||b.facility_id, cpsaFac?.name||cpsaVals.facility_id, facChanged)}
                               </span>
                             </td>
-                            <td style={{...tdS2,whiteSpace:"nowrap",color:"#475569"}}>
-                              {fmtTime(b.start_hour)}–{fmtTime(b.start_hour+b.duration)}<br/>
-                              <span style={{color:"#94a3b8"}}>{b.duration}h</span>
+                            <td style={tdS2}>
+                              {diffCell(
+                                `${fmtTime(b.start_hour)}–${fmtTime(b.start_hour+b.duration)}`,
+                                `${fmtTime(cpsaVals.start_hour)}–${fmtTime(cpsaVals.start_hour+cpsaVals.duration)}`,
+                                timeChanged
+                              )}
                             </td>
-                            <td style={{...tdS2,whiteSpace:"nowrap",color:"#b45309",fontWeight:600}}>
-                              {fmtTime(cpsaVals.start_hour)}–{fmtTime(cpsaVals.start_hour+cpsaVals.duration)}<br/>
-                              <span style={{fontWeight:400,color:"#92400e"}}>{cpsaVals.duration}h
-                                {cpsaVals.facility_id!==b.facility_id&&<span style={{marginLeft:4,color:"#ca8a04"}}>{cpsaFac?.name||cpsaVals.facility_id}</span>}
-                              </span>
-                            </td>
-                            <td style={{...tdS2,minWidth:100}}>
-                              {reasons.map((r,ri)=>{ const p=splitReason(r); return (
-                                <div key={ri} style={{display:"flex",gap:3,alignItems:"center",whiteSpace:"nowrap",marginBottom:1}}>
-                                  <span style={{fontWeight:700,color:"#92400e",minWidth:28}}>{p.label}</span>
-                                  {p.old&&<><span style={{color:"#94a3b8",textDecoration:"line-through"}}>{p.old}</span><span style={{color:"#94a3b8",margin:"0 2px"}}>→</span><span style={{color:"#b45309",fontWeight:600}}>{p.next}</span></>}
-                                </div>
-                              );})}
-                            </td>
+                            <td style={tdS2}>{diffCell(`${b.duration}h`, `${cpsaVals.duration}h`, durChanged)}</td>
                             <td style={{...tdS2,minWidth:160}}>
                               <select value={curRes} style={{fontSize:11,padding:"3px 6px",borderRadius:6,border:"1.5px solid "+(isDirty?"#f59e0b":"#fde68a"),background:"#fff",fontFamily:"inherit",color:"#0f172a",width:"100%"}}
                                 onChange={e=>{
