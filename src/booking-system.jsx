@@ -792,6 +792,56 @@ function UserMgmtModal({ bookings, aliases, aliasNames, onChange, onChangeNames,
   );
 }
 
+// Single chip that opens a popover with From/To date inputs and an Apply button.
+// Applies only when the user clicks Apply, so partial selections don't trigger
+// re-renders / refilters.
+function DateRangePicker({ from, to, onApply }) {
+  const [open, setOpen] = useState(false);
+  const [draftFrom, setDraftFrom] = useState(from||"");
+  const [draftTo, setDraftTo] = useState(to||"");
+  useEffect(()=>{ if(open){ setDraftFrom(from||""); setDraftTo(to||""); } }, [open, from, to]);
+  const label = (from||to)
+    ? `${from?fmtDate(from):"…"} – ${to?fmtDate(to):"…"}`
+    : "Any date";
+  function apply() { onApply(draftFrom, draftTo); setOpen(false); }
+  function clear() { setDraftFrom(""); setDraftTo(""); onApply("", ""); setOpen(false); }
+  return (
+    <div style={{position:"relative"}}>
+      <button onClick={()=>setOpen(v=>!v)}
+        style={{display:"flex",alignItems:"center",gap:4,padding:"3px 8px",fontSize:11,borderRadius:5,border:`1.5px solid ${(from||to)?"#0f172a":"#cbd5e1"}`,background:"#fff",color:(from||to)?"#0f172a":"#475569",cursor:"pointer",fontFamily:"inherit",fontWeight:600,width:"100%",justifyContent:"center"}}>
+        📅 {label}<span style={{fontSize:9,color:"#94a3b8"}}>▾</span>
+      </button>
+      {open && (
+        <>
+          <div onClick={()=>setOpen(false)} style={{position:"fixed",inset:0,zIndex:30}}/>
+          <div style={{position:"absolute",top:"calc(100% + 4px)",left:0,zIndex:31,background:"#fff",border:"1.5px solid #e2e8f0",borderRadius:10,boxShadow:"0 8px 24px rgba(15,23,42,0.12)",padding:12,minWidth:240,display:"flex",flexDirection:"column",gap:10}}>
+            <div>
+              <div style={{fontSize:10,fontWeight:700,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:4}}>From</div>
+              <input type="date" value={draftFrom} max={draftTo||undefined} onChange={e=>setDraftFrom(e.target.value)}
+                style={{padding:"5px 8px",fontSize:12,border:"1.5px solid #e2e8f0",borderRadius:6,fontFamily:"inherit",width:"100%",outline:"none"}}/>
+            </div>
+            <div>
+              <div style={{fontSize:10,fontWeight:700,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:4}}>To</div>
+              <input type="date" value={draftTo} min={draftFrom||undefined} onChange={e=>setDraftTo(e.target.value)}
+                style={{padding:"5px 8px",fontSize:12,border:"1.5px solid #e2e8f0",borderRadius:6,fontFamily:"inherit",width:"100%",outline:"none"}}/>
+            </div>
+            <div style={{display:"flex",gap:6,justifyContent:"flex-end"}}>
+              <button onClick={clear}
+                style={{padding:"4px 10px",fontSize:11,borderRadius:5,border:"1.5px solid #e2e8f0",background:"#fff",color:"#475569",cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>
+                Clear
+              </button>
+              <button onClick={apply}
+                style={{padding:"4px 12px",fontSize:11,borderRadius:5,border:"none",background:"#0f172a",color:"#fff",cursor:"pointer",fontFamily:"inherit",fontWeight:700}}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function UserMenuItem({icon, label, onClick, danger=false}) {
   const [hover, setHover] = useState(false);
   return (
@@ -6358,14 +6408,11 @@ export default function App() {
                               <th style={{padding:"5px 8px",textAlign:"left",fontWeight:600,color:"#64748b",borderBottom:"1px solid #e2e8f0",fontSize:11}}>Purpose</th>
                             </tr>
                             <tr style={{background:"#f1f5f9"}}>
-                              <th style={{padding:"3px 4px"}}>
-                                <div style={{display:"flex",gap:2}}>
-                                  <input type="date" value={listDateFrom} onChange={e=>setListDateFrom(e.target.value)} title="From date"
-                                    style={{padding:"2px 3px",fontSize:10,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",width:"100%",minWidth:88}}/>
-                                  <span style={{fontSize:9,color:"#94a3b8",alignSelf:"center",flexShrink:0}}>–</span>
-                                  <input type="date" value={listDateTo} onChange={e=>setListDateTo(e.target.value)} title="To date"
-                                    style={{padding:"2px 3px",fontSize:10,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",width:"100%",minWidth:88}}/>
-                                </div>
+                              <th style={{padding:"3px 4px",position:"relative"}}>
+                                <DateRangePicker
+                                  from={listDateFrom} to={listDateTo}
+                                  onApply={(f,t)=>{setListDateFrom(f);setListDateTo(t);}}
+                                />
                               </th>
                               <th style={{padding:"3px 4px",whiteSpace:"normal",position:"relative"}}>
                                 {(()=>{
