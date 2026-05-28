@@ -90,6 +90,39 @@ The `notes` column PATCH must no longer include CPSA markers — it should only
 carry user-authored text that was already present (pass-through or omit the
 field entirely so existing user notes are preserved).
 
+### Full `system_notes` marker catalogue (as of 2026-05)
+
+The app and extension both share this column. Each marker is a single bracket-
+delimited token plus a payload; multiple markers concatenate, separated by
+whitespace/newlines. The extension MUST preserve markers it does not own when
+rewriting `system_notes`.
+
+| Marker | Owner | Written when | Payload |
+| --- | --- | --- | --- |
+| `[CPSA <date>] Ref <ref> · <url>` | extension | CPSA confirms a booking | confirmation ref + link |
+| `[CPSA-MISMATCH]` | extension | Sync finds CPSA values differ from our record | pipe-separated reason strings, e.g. `Time: 6p → 7p \| Dur: 2h → 3h \| Field: A → B` |
+| `[BILLED] facility\|start\|duration` | app | Invoice/PO export with "mark invoiced" | snapshot of billed values; used to compute drift for credit/invoice adjustments |
+| `[CPSA-ORIG] facility\|start\|duration` | app | Admin chooses **Amended** to accept CPSA values | snapshot of pre-amendment booking so the operation is reversible |
+| `[CPSA-RES] <resolution>\|<billing>\|<iso-date>` | app | Admin resolves a mismatch | values: resolution = `amended` \| `to_correct`; billing = `none` \| `credit_pending` \| `invoice_pending` \| `credited` \| `invoiced` |
+
+When the extension re-syncs a booking it should:
+1. Re-read existing `system_notes`.
+2. Strip and replace only `[CPSA …]` (confirmation) and `[CPSA-MISMATCH]` markers
+   it owns.
+3. Leave `[BILLED]`, `[CPSA-ORIG]`, `[CPSA-RES]` markers untouched — these are
+   admin/audit state managed exclusively by the web app.
+
+### Permanent audit trail: `mismatch_log`
+
+`supabase-migration-mismatch-log.sql` adds `public.mismatch_log` — an append-only
+record of every mismatch resolution (one row per Save action in the admin
+Mismatches panel). Columns: `booking_id text` (no FK because `bookings.id` is
+text), `reasons`, `orig_facility_id`, `orig_start_hour`, `orig_duration`,
+`resolution`, `billing_state`, `created_at`. Admin-only RLS.
+
+The extension does NOT write to `mismatch_log`; only the web app does. The
+extension may safely ignore the table.
+
 ## activity_log (audit trail)
 
 `supabase-migration-activity-log.sql` adds `public.activity_log` (append-only).
@@ -138,6 +171,9 @@ Outstanding:
       column + migrates existing markers out of `notes` + index). Until then system
       markers continue to be written to `notes` as a fallback — app reads from both.
       After running: update CPSA browser extension to v2.1.0+ (writes to `system_notes`).
+- [ ] Run `supabase-migration-mismatch-log.sql` in the SQL editor (creates the
+      permanent mismatch resolution audit table). Web app only — extension does
+      not touch this table.
 - [ ] Rotate the anon key (Supabase Settings -> API), update `.env.local`, redeploy.
       Deferred by choice; the current key is still the original one that was committed
       to git history, so rotation is recommended eventually.
