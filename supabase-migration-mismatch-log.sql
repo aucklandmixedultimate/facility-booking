@@ -1,10 +1,13 @@
 -- Migration: mismatch_log
 -- Permanent audit trail for CPSA mismatch resolutions.
 -- Run once per environment after supabase-migration-system-notes.sql.
+--
+-- Note: bookings.id is type TEXT (not uuid), so booking_id here is text
+-- with no FK constraint (Supabase requires matching types for FK references).
 
 create table if not exists public.mismatch_log (
   id               uuid        primary key default gen_random_uuid(),
-  booking_id       uuid        not null references public.bookings(id) on delete cascade,
+  booking_id       text        not null,          -- references bookings(id), text to match bookings schema
   created_at       timestamptz not null default now(),
 
   -- Mismatch detail as captured at resolution time
