@@ -2323,12 +2323,21 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
   const [preset,      setPreset]      = useState("this_year");
   const [customFrom,  setCustomFrom]  = useState("");
   const [customTo,    setCustomTo]    = useState("");
-  const [emailFilter, setEmailFilter] = useState(()=>bookerFilter.size===1?[...bookerFilter][0]:loggedInEmail||"all");
-  // Keep emailFilter in sync with the header booker pills when visiting this tab.
+  // Multi-select booker filter — Set of lowercased emails. Empty Set = all bookers.
+  const [emailFilterSet, setEmailFilterSet] = useState(()=>{
+    if (bookerFilter.size>0) return new Set([...bookerFilter].map(e=>e.toLowerCase()));
+    return loggedInEmail ? new Set([loggedInEmail.toLowerCase()]) : new Set();
+  });
+  // Keep in sync with the global header booker pills.
   useEffect(()=>{
-    if(bookerFilter.size===1) setEmailFilter([...bookerFilter][0]);
-    else if(bookerFilter.size===0) setEmailFilter(loggedInEmail||"all");
-  },[bookerFilter,loggedInEmail]);
+    setEmailFilterSet(new Set([...bookerFilter].map(e=>e.toLowerCase())));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[bookerFilter]);
+  const toggleEmailFilter = em => setEmailFilterSet(prev=>{
+    const s=new Set(prev); const lk=em.toLowerCase();
+    if(s.has(lk)) s.delete(lk); else s.add(lk);
+    return s;
+  });
 
   // Invoice modal state
   const [showInvoice, setShowInvoice] = useState(false);
@@ -2397,18 +2406,20 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
 
   const allEmails = [...new Set(bookings.filter(b=>!isAdminBooking(b)).map(b=>b.email).filter(Boolean))].sort();
 
-  // Fall back to "all" if the current filter doesn't match any booker
+  // Prune email filter entries that no longer match any booker in the dataset
   useEffect(()=>{
-    if(emailFilter==="all"||!allEmails.length) return;
-    if(!allEmails.find(e=>e.toLowerCase()===emailFilter.toLowerCase())) setEmailFilter("all");
-  },[allEmails,emailFilter]);
+    if(emailFilterSet.size===0||!allEmails.length) return;
+    const present=new Set(allEmails.map(e=>e.toLowerCase()));
+    const pruned=[...emailFilterSet].filter(e=>present.has(e));
+    if(pruned.length!==emailFilterSet.size) setEmailFilterSet(new Set(pruned));
+  },[allEmails,emailFilterSet]);
 
   const active = bookings.filter(b => {
     if (isAdminBooking(b)) return false;
     if (["cancelled","rejected"].includes(b.status)) return false;
     if (dateFrom && b.date < dateFrom) return false;
     if (dateTo   && b.date > dateTo)   return false;
-    if (emailFilter !== "all" && b.email.toLowerCase() !== emailFilter.toLowerCase()) return false;
+    if (emailFilterSet.size>0 && !emailFilterSet.has(b.email?.toLowerCase())) return false;
     return true;
   });
 
@@ -2722,9 +2733,9 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
   }
 
   function openInvoice() {
-    // One-time init from header pill state; falls back to current email filter.
+    // One-time init from header pill state; falls back to local summary filter.
     if (bookerFilter.size > 0) setInvSelectedEmails(new Set([...bookerFilter]));
-    else setInvSelectedEmails(emailFilter !== "all" ? new Set([emailFilter.toLowerCase()]) : new Set());
+    else setInvSelectedEmails(new Set(emailFilterSet));
     setShowInvoice(true);
   }
 
@@ -2792,17 +2803,18 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
               style={{ padding:"5px 10px", borderRadius:8, border:"1.5px solid #e2e8f0", fontSize:13, fontFamily:"inherit", background:"#f8fafc", color:"#0f172a", outline:"none" }}/>
           </div>
         )}
-        {/* Booker filter chips */}
+        {/* Booker filter chips — additive multi-select, mirrors global pills */}
         <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
-          <button onClick={()=>setEmailFilter("all")}
-            style={{padding:"5px 12px",borderRadius:20,border:"1.5px solid",cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",flexShrink:0,borderColor:emailFilter==="all"?"#0f172a":"#e2e8f0",background:emailFilter==="all"?"#0f172a":"#fff",color:emailFilter==="all"?"#fff":"#475569"}}>
-            All
+          <button onClick={()=>setEmailFilterSet(prev=>prev.size===0?new Set(allEmails.map(e=>e.toLowerCase())):new Set())}
+            title={emailFilterSet.size===0?"Select all bookers":"Clear selection"}
+            style={{padding:"5px 12px",borderRadius:20,border:"1.5px solid",cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",flexShrink:0,borderColor:emailFilterSet.size===0?"#0f172a":"#e2e8f0",background:emailFilterSet.size===0?"#0f172a":"#fff",color:emailFilterSet.size===0?"#fff":"#475569"}}>
+            {emailFilterSet.size===0?"All":"None"}
           </button>
           {allEmails.map(e=>{
-            const active=emailFilter.toLowerCase()===e.toLowerCase();
+            const active=emailFilterSet.has(e.toLowerCase());
             const c=emailColor(e);
             return(
-              <button key={e} onClick={()=>setEmailFilter(p=>p.toLowerCase()===e.toLowerCase()?"all":e)}
+              <button key={e} onClick={()=>toggleEmailFilter(e)}
                 style={{padding:"5px 12px",borderRadius:20,border:`1.5px solid ${active?c:"#e2e8f0"}`,cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",flexShrink:0,background:active?c:"#fff",color:active?"#fff":"#475569"}}>
                 {e.split("@")[0]}
               </button>
@@ -2867,7 +2879,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
         <div>
           <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10, flexWrap:"wrap" }}>
             <h3 style={{ margin:0, fontSize:15, fontWeight:700, color:"#0f172a", flex:1 }}>
-              Cost by Facility — {PRESETS.find(p=>p.key===preset)?.label}{dateFrom&&dateTo?` (${dateFrom} – ${dateTo})`:""}{emailFilter!=="all"?` · ${emailFilter}`:""}
+              Cost by Facility — {PRESETS.find(p=>p.key===preset)?.label}{dateFrom&&dateTo?` (${dateFrom} – ${dateTo})`:""}{emailFilterSet.size===1?` · ${[...emailFilterSet][0]}`:emailFilterSet.size>1?` · ${emailFilterSet.size} bookers`:""}
             </h3>
             {isAdmin && onUpdateFacilityRate && (
               <button onClick={()=>setShowRatesEdit(v=>!v)}
@@ -2949,7 +2961,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
       <div>
         <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:12, gap:8, flexWrap:"wrap" }}>
           <h3 style={{ margin:0, fontSize:15, fontWeight:700, color:"#0f172a" }}>
-            Hire Usage &amp; Cost by Booker — {PRESETS.find(p=>p.key===preset)?.label}{dateFrom&&dateTo?` (${dateFrom} – ${dateTo})`:""}{emailFilter!=="all"?` · ${emailFilter}`:""}
+            Hire Usage &amp; Cost by Booker — {PRESETS.find(p=>p.key===preset)?.label}{dateFrom&&dateTo?` (${dateFrom} – ${dateTo})`:""}{emailFilterSet.size===1?` · ${[...emailFilterSet][0]}`:emailFilterSet.size>1?` · ${emailFilterSet.size} bookers`:""}
           </h3>
           {rows.length>0&&<button onClick={()=>{
             const esc = v => `"${String(v||"").replace(/"/g,'""')}"`;
