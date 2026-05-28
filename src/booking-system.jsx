@@ -1726,6 +1726,8 @@ function MonthCalendar({ bookings, onBookingClick, onNewBooking, selectedFacilit
                       title={(()=>{const r=parseMismatchNote(b.system_notes,b.notes);return `${b.name} · ${fac?.name} · ${fmtTime(b.start_hour)}–${fmtTime(b.start_hour+b.duration)}`+(b.status==="cpsa_review_needed"&&r.length?`\n⚠ CPSA inconsistencies:\n${r.join("\n")}`:b.status==="cpsa_confirmed"?"\n🌐 CPSA confirmed":"");})()}
                       style={{ background:chipBg, borderRadius:4, padding:"2px 4px", fontSize:10, fontWeight:700, color:"#fff", overflow:"hidden", whiteSpace:"nowrap", borderLeft:chipLeft, outline:chipOutline, opacity:isDimmed?dimOpacity:REVIEW_STATUSES.has(b.status)?0.75:1, cursor:isDimmed?"default":"pointer", pointerEvents:isDimmed?"none":"auto", display:"flex", alignItems:"center", gap:3 }}>
                       {!isAdmin_bk&&<span style={{width:6,height:6,borderRadius:"50%",background:ec,flexShrink:0,display:"inline-block",boxShadow:"0 0 0 1px rgba(255,255,255,0.35)"}}/>}
+                      {b.status==="cpsa_review_needed"&&<span style={{fontSize:8,flexShrink:0,lineHeight:1}}>⚠</span>}
+                      {b.status==="cpsa_confirmed"&&<span style={{fontSize:8,flexShrink:0,lineHeight:1}}>🌐</span>}
                       <span style={{overflow:"hidden",textOverflow:"ellipsis",flex:1}}>{fmtTime(b.start_hour)} {b.purpose||b.name}</span>
                       {b.invoiced&&<span style={{fontSize:8,flexShrink:0}}>🧾</span>}
                     </div>
@@ -2292,7 +2294,7 @@ function InvoicePill({active, onClick, children}) {
   );
 }
 
-function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = false, approxPlayers = {}, onUpdateApproxPlayers, approxDurations = {}, onUpdateApproxDuration, onUpdateFacilityRate, pricingMode = "hourly", onSetPricingMode, onProposeMerge, onBulkApply, onMarkInvoiced, bookerFilter=new Set() }) {
+function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = false, approxPlayers = {}, onUpdateApproxPlayers, approxDurations = {}, onUpdateApproxDuration, onUpdateFacilityRate, pricingMode = "hourly", onSetPricingMode, onProposeMerge, onBulkApply, onMarkInvoiced, onMarkAdjustmentSettled, bookerFilter=new Set() }) {
   const now = new Date();
   const thisYear = now.getFullYear();
 
@@ -3669,6 +3671,41 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
                   ))}
                 </div>
               </div>
+              {/* Settle pending mismatch billing adjustments */}
+              {isAdmin && invIncludeAdjustments && mismatchAdjustments.length>0 && onMarkAdjustmentSettled && (()=>{
+                const visibleAdj = mismatchAdjustments.filter(b=>{
+                  const sel=[...invSelectedEmails];
+                  return sel.length===0 || sel.some(e=>b.email?.toLowerCase()===e.toLowerCase());
+                });
+                if (!visibleAdj.length) return null;
+                const BILLING_COLOR = { credit_pending:"#ca8a04", invoice_pending:"#2563eb" };
+                const SETTLE_LABEL = { credit_pending:"Mark credited", invoice_pending:"Mark invoiced" };
+                const SETTLE_STYLE = { credit_pending:{background:"#f0fdf4",color:"#15803d",border:"1px solid #bbf7d0"}, invoice_pending:{background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe"} };
+                return (
+                  <div style={{background:"#fffbeb",border:"1.5px solid #fde68a",borderRadius:10,padding:"10px 14px",display:"flex",flexDirection:"column",gap:8}}>
+                    <div style={{fontSize:12,fontWeight:700,color:"#a16207"}}>⚡ Pending billing adjustments — mark as settled after export</div>
+                    {visibleAdj.map((b,i)=>{
+                      const res=parseCpsaResolution(b.system_notes);
+                      const bs=res?.billingState||"none";
+                      const snap=parseBilledSnapshot(b.system_notes,b.notes);
+                      const fac=FACILITIES.find(f=>f.id===b.facility_id);
+                      if (bs!=="credit_pending"&&bs!=="invoice_pending") return null;
+                      return (
+                        <div key={i} style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",fontSize:12,background:"#fff",border:"1px solid #fde68a",borderRadius:6,padding:"6px 10px"}}>
+                          <span style={{fontWeight:600,color:"#0f172a"}}>{b.name}</span>
+                          <span style={{color:"#94a3b8"}}>{fmtDate(b.date)} · {fac?.name||b.facility_id}</span>
+                          <span style={{fontSize:11,fontWeight:700,color:BILLING_COLOR[bs]}}>{bs==="credit_pending"?"Credit":"Invoice"} pending</span>
+                          {snap&&<span style={{color:"#94a3b8",fontSize:11}}>billed {snap.duration}h → now {b.duration}h</span>}
+                          <button onClick={()=>onMarkAdjustmentSettled(b, bs==="credit_pending"?"credited":"invoiced")}
+                            style={S.btn({...SETTLE_STYLE[bs],fontSize:11,padding:"3px 10px",fontWeight:700,marginLeft:"auto"})}>
+                            ✓ {SETTLE_LABEL[bs]}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
             </div>
           </div>
         );
@@ -3680,7 +3717,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
 
 
 // ─── Admin Panel with action queue, bulk approve, facility rates ──────────────
-function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,clashes=[],deleteIds=new Set(),facilityRates={},onUpdateFacilityRate,onClearOldUnapproved,silentMode=false,approxPlayers={},onUpdateApproxPlayers,approxDurations={},onUpdateApproxDuration,onSyncDB,onShowSchedule,onBulkApply,onSaveMismatch}) {
+function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,clashes=[],deleteIds=new Set(),facilityRates={},onUpdateFacilityRate,onClearOldUnapproved,silentMode=false,approxPlayers={},onUpdateApproxPlayers,approxDurations={},onUpdateApproxDuration,onSyncDB,onShowSchedule,onBulkApply,onSaveMismatch,onMarkAdjustmentSettled}) {
   const [sf,setSf]=useState("all"), [ff,setFf]=useState("all"), [q,setQ]=useState("");
   const [adminBookerFilter,setAdminBookerFilter]=useState("all");
   const [showBookerFilter,setShowBookerFilter]=useState(false);
@@ -3904,27 +3941,48 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
           <div style={{fontWeight:700,fontSize:14,color:"#5b21b6"}}>🧾 Billed-booking changes</div>
           {trackedChanges.length===0
             ? <div style={{fontSize:12,color:"#7c6aa8"}}>No changes detected since invoicing. Edits to an invoiced booking's time, duration or field will appear here as owing (excess) or credit (reduced).</div>
-            : <div style={{display:"flex",flexDirection:"column",gap:8,maxHeight:300,overflowY:"auto"}}>
-                {trackedChanges.map(({booking:b,rows,hoursDelta},i)=>(
-                  <div key={i} style={{background:"#fff",border:"1px solid #e9d5ff",borderRadius:8,padding:"8px 12px",fontSize:12}}>
-                    <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",marginBottom:6}}>
-                      <EmailChip email={b.email}/>
-                      <span style={{fontWeight:600,color:"#0f172a"}}>{b.name}</span>
-                      <span style={{color:"#94a3b8"}}>{fmtDate(b.date)} · {b.purpose}</span>
-                      <span style={{marginLeft:"auto",fontWeight:800,fontSize:12,color:hoursDelta>0?"#b91c1c":hoursDelta<0?"#15803d":"#64748b",background:hoursDelta>0?"#fef2f2":hoursDelta<0?"#f0fdf4":"#f8fafc",border:`1px solid ${hoursDelta>0?"#fecaca":hoursDelta<0?"#bbf7d0":"#e2e8f0"}`,borderRadius:6,padding:"2px 8px",whiteSpace:"nowrap"}}>
-                        {hoursDelta>0?`+${hoursDelta}h owing`:hoursDelta<0?`${Math.abs(hoursDelta)}h credit`:"field changed"}
-                      </span>
+            : <div style={{display:"flex",flexDirection:"column",gap:8,maxHeight:360,overflowY:"auto"}}>
+                {trackedChanges.map(({booking:b,rows,hoursDelta},i)=>{
+                  const cpsaRes = parseCpsaResolution(b.system_notes);
+                  const isCpsaAmend = cpsaRes?.resolution === "amended";
+                  const billingState = cpsaRes?.billingState || "none";
+                  const BILLING_COLOR = { credit_pending:"#ca8a04", invoice_pending:"#2563eb", credited:"#15803d", invoiced:"#5b21b6", none:"#64748b" };
+                  const BILLING_LABEL = { credit_pending:"Credit pending", invoice_pending:"Invoice pending", credited:"Credited ✓", invoiced:"Invoiced ✓", none:"—" };
+                  return (
+                    <div key={i} style={{background:"#fff",border:`1px solid ${isCpsaAmend?"#fde68a":"#e9d5ff"}`,borderRadius:8,padding:"8px 12px",fontSize:12}}>
+                      <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",marginBottom:6}}>
+                        <EmailChip email={b.email}/>
+                        <span style={{fontWeight:600,color:"#0f172a"}}>{b.name}</span>
+                        <span style={{color:"#94a3b8"}}>{fmtDate(b.date)} · {b.purpose}</span>
+                        {isCpsaAmend&&<span style={{fontSize:10,fontWeight:700,background:"#fef9c3",color:"#a16207",border:"1px solid #fde68a",borderRadius:4,padding:"1px 5px"}}>⚠ CPSA amendment</span>}
+                        <span style={{marginLeft:"auto",fontWeight:800,fontSize:12,color:hoursDelta>0?"#b91c1c":hoursDelta<0?"#15803d":"#64748b",background:hoursDelta>0?"#fef2f2":hoursDelta<0?"#f0fdf4":"#f8fafc",border:`1px solid ${hoursDelta>0?"#fecaca":hoursDelta<0?"#bbf7d0":"#e2e8f0"}`,borderRadius:6,padding:"2px 8px",whiteSpace:"nowrap"}}>
+                          {hoursDelta>0?`+${hoursDelta}h owing`:hoursDelta<0?`${Math.abs(hoursDelta)}h credit`:"field changed"}
+                        </span>
+                      </div>
+                      <div style={{display:"grid",gridTemplateColumns:"auto auto auto auto",gap:"2px 10px",alignItems:"center",marginBottom:isCpsaAmend?6:0}}>
+                        {rows.map((p,ri)=>(<Fragment key={ri}>
+                          <span style={{fontWeight:600,color:"#5b21b6"}}>{p.label}</span>
+                          <span style={{color:"#6b7280"}}>{p.old}</span>
+                          <span style={{color:"#a78bfa"}}>→</span>
+                          <span style={{color:"#0f172a",fontWeight:600}}>{p.next}</span>
+                        </Fragment>))}
+                      </div>
+                      {isCpsaAmend&&(
+                        <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",borderTop:"1px solid #fde68a",paddingTop:6,marginTop:2}}>
+                          <span style={{fontSize:11,color:BILLING_COLOR[billingState],fontWeight:700}}>{BILLING_LABEL[billingState]}</span>
+                          {billingState==="credit_pending"&&onMarkAdjustmentSettled&&(
+                            <button onClick={()=>onMarkAdjustmentSettled(b,"credited")}
+                              style={S.btn({background:"#f0fdf4",color:"#15803d",border:"1px solid #bbf7d0",fontSize:11,padding:"3px 10px",fontWeight:700})}>✓ Mark credited</button>
+                          )}
+                          {billingState==="invoice_pending"&&onMarkAdjustmentSettled&&(
+                            <button onClick={()=>onMarkAdjustmentSettled(b,"invoiced")}
+                              style={S.btn({background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",fontSize:11,padding:"3px 10px",fontWeight:700})}>✓ Mark invoiced</button>
+                          )}
+                        </div>
+                      )}
                     </div>
-                    <div style={{display:"grid",gridTemplateColumns:"auto auto auto auto",gap:"2px 10px",alignItems:"center"}}>
-                      {rows.map((p,ri)=>(<Fragment key={ri}>
-                        <span style={{fontWeight:600,color:"#5b21b6"}}>{p.label}</span>
-                        <span style={{color:"#6b7280"}}>{p.old}</span>
-                        <span style={{color:"#a78bfa"}}>→</span>
-                        <span style={{color:"#0f172a",fontWeight:600}}>{p.next}</span>
-                      </Fragment>))}
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
           }
         </div>
@@ -5222,6 +5280,29 @@ export default function App() {
     showToast("Merge proposal added — commit your cart to notify bookers.");
   }
 
+  // Advance billing_state for a CPSA-amended booking (credit_pending→credited, invoice_pending→invoiced).
+  async function handleMarkAdjustmentSettled(booking, newBillingState) {
+    const res = parseCpsaResolution(booking.system_notes);
+    if (!res) return;
+    const sysNotes = setCpsaResolution(booking.system_notes, res.resolution, newBillingState);
+    const patch = { system_notes: sysNotes, updated_at: new Date().toISOString() };
+    if (configured) {
+      try {
+        await sb.update("bookings", booking.id, patch);
+        sb.insert("mismatch_log", {
+          booking_id: booking.id,
+          resolution: res.resolution,
+          billing_state: newBillingState,
+        }).catch(()=>{});
+        await loadBookings();
+      } catch(e) { showToast("Update failed: "+e.message, "error"); return; }
+    } else {
+      setBookings(prev => prev.map(b => b.id === booking.id ? { ...b, ...patch } : b));
+    }
+    logActivity("mismatch_billing_settled", { booking_id: booking.id, billing_state: newBillingState });
+    showToast(newBillingState === "credited" ? "Marked as credited." : "Marked as invoiced.");
+  }
+
   // Persist a mismatch resolution — called from AdminPanel via onSaveMismatch prop.
   // Returns true on success so AdminPanel can clear its local pending state.
   async function handleSaveMismatch(booking, patch, logPayload) {
@@ -5808,7 +5889,7 @@ export default function App() {
           </div>
         )}
 
-        {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<SummaryTab bookings={bookings} loggedInEmail={loggedInEmail} facilityRates={facilityRates} isAdmin={isAdmin} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onUpdateFacilityRate={updateFacilityRate} pricingMode={pricingMode} onSetPricingMode={setPricingMode} onProposeMerge={handleProposeMerge} onBulkApply={handleBulkApply} onMarkInvoiced={handleMarkInvoiced} bookerFilter={listBookerFilter}/>}</div>}
+        {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<SummaryTab bookings={bookings} loggedInEmail={loggedInEmail} facilityRates={facilityRates} isAdmin={isAdmin} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onUpdateFacilityRate={updateFacilityRate} pricingMode={pricingMode} onSetPricingMode={setPricingMode} onProposeMerge={handleProposeMerge} onBulkApply={handleBulkApply} onMarkInvoiced={handleMarkInvoiced} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} bookerFilter={listBookerFilter}/>}</div>}
         {tab==="about"&&<div style={{padding:"8px 0"}}><AboutTab/></div>}
         {tab==="admin"&&isAdmin&&<div style={S.card}>
           {/* Silent mode banner */}
@@ -5824,7 +5905,7 @@ export default function App() {
             </label>
             {silentMode&&<span style={{fontSize:12,color:"#92400e"}}>All status changes, approvals, deletions and edits will be processed without notifying bookers.</span>}
           </div>
-          {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onView={setViewing} onQueueDelete={queueForRemovalSilent} clashes={allClashes} deleteIds={new Set(deleteQueue.map(b=>b.id))} facilityRates={facilityRates} onUpdateFacilityRate={updateFacilityRate} onClearOldUnapproved={handleClearOldUnapproved} silentMode={silentMode} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onSyncDB={handleSyncDB} onShowSchedule={()=>setShowAdminScheduleModal(true)} onBulkApply={handleBulkApply} onSaveMismatch={handleSaveMismatch}/>}
+          {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onView={setViewing} onQueueDelete={queueForRemovalSilent} clashes={allClashes} deleteIds={new Set(deleteQueue.map(b=>b.id))} facilityRates={facilityRates} onUpdateFacilityRate={updateFacilityRate} onClearOldUnapproved={handleClearOldUnapproved} silentMode={silentMode} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onSyncDB={handleSyncDB} onShowSchedule={()=>setShowAdminScheduleModal(true)} onBulkApply={handleBulkApply} onSaveMismatch={handleSaveMismatch} onMarkAdjustmentSettled={handleMarkAdjustmentSettled}/>}
         </div>}
       </div>
 
