@@ -684,10 +684,21 @@ function BookingRow({ row, idx, onChange, onRemove, isOnly, isAdmin, isEditing, 
 // ─── Cart Modal ───────────────────────────────────────────────────────────────
 function CartModal({ cart, setCart, onClose, onSubmit, openNew, cartIdsSet }) {
   const [editingDraft, setEditingDraft] = useState(null); // {gi, di, draft}
+  const [expandedNotify, setExpandedNotify] = useState(new Set()); // email keys that are open
   const totalNew  = cart.filter(i=>!i.isEdit&&!i.isMultiEdit&&!i.notifyOnly).reduce((s,i)=>s+i.drafts.length,0);
   const totalEdits = cart.filter(i=>i.isEdit||i.isMultiEdit).reduce((s,i)=>s+i.drafts.length,0);
   const totalNotify = cart.filter(i=>i.notifyOnly).reduce((s,i)=>s+i.drafts.length,0);
   const totalCount = totalNew + totalEdits + totalNotify;
+
+  // Group notifyOnly cart items by booker email so the cart doesn't explode
+  // into one row per booking when a sync produces many CPSA notifications.
+  const notifyByEmail = {};
+  cart.forEach((item, gi) => {
+    if (!item.notifyOnly) return;
+    const key = item.email;
+    if (!notifyByEmail[key]) notifyByEmail[key] = { name: item.name, email: item.email, newStatus: item.newStatus, entries: [] };
+    item.drafts.forEach((d, di) => notifyByEmail[key].entries.push({ d, gi, di }));
+  });
 
   function removeDraft(gi, di) {
     setCart(prev => prev.map((item,i) => {
@@ -741,54 +752,24 @@ function CartModal({ cart, setCart, onClose, onSubmit, openNew, cartIdsSet }) {
             <div style={{fontSize:13,color:'#64748b',marginBottom:12}}>
               {[totalNew>0&&`${totalNew} new booking${totalNew>1?'s':''}`, totalEdits>0&&`${totalEdits} edit${totalEdits>1?'s':''}`, totalNotify>0&&`${totalNotify} CPSA notification${totalNotify>1?'s':''}`].filter(Boolean).join(' · ')} ready to submit.
             </div>
-            <div style={{flex:1,overflowY:'auto',maxHeight:'55vh',display:'flex',flexDirection:'column',gap:10,paddingRight:2}}>
+            <div style={{flex:1,overflowY:'auto',maxHeight:'60vh',display:'flex',flexDirection:'column',gap:10,paddingRight:2}}>
+              {/* Regular (non-notify) cart items */}
               {cart.map((item,gi)=>{
+                if(item.notifyOnly) return null;
                 const groups = groupDrafts(item.drafts);
                 return (
                   <div key={gi} style={{border:'1.5px solid #e2e8f0',borderRadius:12,overflow:'hidden'}}>
-                    <div style={{background:item.notifyOnly?'#fef9c3':item.isEdit||item.isMultiEdit?'#eff6ff':'#f8fafc',padding:'10px 14px',display:'flex',alignItems:'center',borderBottom:'1px solid #e2e8f0'}}>
+                    <div style={{background:item.isEdit||item.isMultiEdit?'#eff6ff':'#f8fafc',padding:'10px 14px',display:'flex',alignItems:'center',borderBottom:'1px solid #e2e8f0'}}>
                       <div style={{display:'flex',alignItems:'center',gap:8,flex:1,flexWrap:'wrap'}}>
                         <EmailChip email={item.email}/>
                         <span style={{fontSize:13,fontWeight:600,color:'#0f172a'}}>{item.name}</span>
-                        {item.notifyOnly
-                          ? <span style={{fontSize:11,fontWeight:700,color:'#854d0e',background:'#fef08a',border:'1px solid #fde047',borderRadius:4,padding:'1px 7px'}}>🔔 notify · {item.newStatus==='cpsa_confirmed'?'CPSA confirmed':'CPSA mismatch'}</span>
-                          : (item.isEdit||item.isMultiEdit)
+                        {(item.isEdit||item.isMultiEdit)
                           ? <span style={{fontSize:11,fontWeight:700,color:'#1d4ed8',background:'#dbeafe',border:'1px solid #93c5fd',borderRadius:4,padding:'1px 7px'}}>✏ edit</span>
                           : <span style={{fontSize:12,color:'#94a3b8'}}>· {item.drafts.length} booking{item.drafts.length>1?'s':''}</span>
                         }
                       </div>
                     </div>
-                    {item.notifyOnly
-                      ? item.drafts.map((d,di)=>{
-                          const f=FACILITIES.find(x=>x.id===d.facility_id);
-                          const reasons=parseMismatchNote(d.system_notes,d.notes);
-                          return (
-                            <div key={di} style={{padding:'10px 14px',borderBottom:di<item.drafts.length-1?'1px solid #f1f5f9':'none'}}>
-                              <div style={{display:'flex',gap:10,alignItems:'center'}}>
-                                <span style={{width:8,height:8,borderRadius:'50%',background:f?.color,flexShrink:0,display:'inline-block'}}/>
-                                <div style={{flex:1}}>
-                                  <div style={{fontSize:13,fontWeight:600,color:'#0f172a'}}>{f?.name||d.facility_id}</div>
-                                  <div style={{fontSize:12,color:'#64748b'}}>{fmtDate(d.date)} · {fmtTime(d.start_hour)}–{fmtTime(d.start_hour+d.duration)} · {d.purpose}</div>
-                                </div>
-                                <button onClick={()=>removeDraft(gi,di)} title="Remove from cart" style={{background:'none',border:'none',cursor:'pointer',color:'#f43f5e',fontSize:16,padding:'2px 5px',lineHeight:1}}>✕</button>
-                              </div>
-                              {reasons.length>0&&(
-                                <div style={{marginTop:8,marginLeft:18,display:'grid',gridTemplateColumns:'auto auto auto auto',gap:'2px 8px',alignItems:'center'}}>
-                                  {reasons.map((r,ri)=>{const p=splitReason(r);return(<Fragment key={ri}>
-                                    <span style={{fontSize:11,fontWeight:600,color:'#713f12'}}>{p.label}</span>
-                                    <span style={{fontSize:11,color:'#854d0e'}}>{p.old||'—'}</span>
-                                    <span style={{fontSize:10,color:'#a16207'}}>→</span>
-                                    <span style={{fontSize:11,color:'#854d0e',fontWeight:600}}>{p.next||'—'}</span>
-                                  </Fragment>);})}
-                                </div>
-                              )}
-                              <div style={{marginTop:6,marginLeft:18,fontSize:11,color:'#a16207'}}>
-                                Booker will be emailed that this booking is now {item.newStatus==='cpsa_confirmed'?'CPSA-confirmed':'flagged for AMUA review'}.
-                              </div>
-                            </div>
-                          );
-                        })
-                      : groups.map((g,gi2)=>{
+                    {groups.map((g,gi2)=>{
                       if(g.type==='recur') {
                         const f=FACILITIES.find(x=>x.id===g.drafts[0].facility_id);
                         const first=g.drafts[0], last=g.drafts[g.drafts.length-1];
@@ -844,6 +825,42 @@ function CartModal({ cart, setCart, onClose, onSubmit, openNew, cartIdsSet }) {
                               <button onClick={()=>removeDraft(gi,di)} title="Remove" style={{background:'none',border:'none',cursor:'pointer',color:'#f43f5e',fontSize:16,padding:'2px 5px',lineHeight:1}}>✕</button>
                             </div>
                           )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+
+              {/* CPSA notification groups — one collapsible card per booker */}
+              {Object.entries(notifyByEmail).map(([email, group])=>{
+                const isExpanded = expandedNotify.has(email);
+                const isMismatch = group.newStatus === 'cpsa_review_needed';
+                const toggleExpand = ()=>setExpandedNotify(prev=>{const s=new Set(prev);s.has(email)?s.delete(email):s.add(email);return s;});
+                return (
+                  <div key={email} style={{border:'1.5px solid #fde047',borderRadius:12,overflow:'hidden'}}>
+                    <div onClick={toggleExpand} style={{background:'#fef9c3',padding:'10px 14px',display:'flex',alignItems:'center',gap:8,cursor:'pointer',userSelect:'none'}}>
+                      <EmailChip email={email}/>
+                      <span style={{fontSize:13,fontWeight:600,color:'#0f172a',flex:1}}>{group.name}</span>
+                      <span style={{fontSize:11,fontWeight:700,color:'#854d0e',background:'#fef08a',border:'1px solid #fde047',borderRadius:4,padding:'1px 7px'}}>
+                        🔔 {group.entries.length} {isMismatch?'mismatch':'confirmed'} notification{group.entries.length!==1?'s':''}
+                      </span>
+                      <span style={{fontSize:12,color:'#a16207',marginLeft:4}}>{isExpanded?'▲':'▼'}</span>
+                    </div>
+                    {isExpanded && group.entries.map(({d, gi, di}, ei)=>{
+                      const f=FACILITIES.find(x=>x.id===d.facility_id);
+                      const reasons=parseMismatchNote(d.system_notes,d.notes);
+                      return (
+                        <div key={ei} style={{padding:'8px 14px',borderTop:'1px solid #fde047',background:'#fffbeb'}}>
+                          <div style={{display:'flex',gap:10,alignItems:'center'}}>
+                            <span style={{width:7,height:7,borderRadius:'50%',background:f?.color,flexShrink:0,display:'inline-block'}}/>
+                            <div style={{flex:1,fontSize:12,color:'#64748b'}}>
+                              <span style={{fontWeight:600,color:'#0f172a',marginRight:6}}>{f?.name||d.facility_id}</span>
+                              {fmtDate(d.date)} · {fmtTime(d.start_hour)}–{fmtTime(d.start_hour+d.duration)}
+                            </div>
+                            <button onClick={()=>removeDraft(gi,di)} title="Remove" style={{background:'none',border:'none',cursor:'pointer',color:'#f43f5e',fontSize:15,padding:'2px 4px',lineHeight:1}}>✕</button>
+                          </div>
+                          {reasons.length>0&&<div style={{marginTop:4,marginLeft:13,fontSize:11,color:'#a16207'}}>{reasons.join(' · ')}</div>}
                         </div>
                       );
                     })}
@@ -3533,7 +3550,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
 
 
 // ─── Admin Panel with action queue, bulk approve, facility rates ──────────────
-function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[],deleteIds=new Set(),facilityRates={},onUpdateFacilityRate,onClearOldUnapproved,silentMode=false,approxPlayers={},onUpdateApproxPlayers,approxDurations={},onUpdateApproxDuration,onSyncDB,onShowSchedule,onBulkApply}) {
+function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,clashes=[],deleteIds=new Set(),facilityRates={},onUpdateFacilityRate,onClearOldUnapproved,silentMode=false,approxPlayers={},onUpdateApproxPlayers,approxDurations={},onUpdateApproxDuration,onSyncDB,onShowSchedule,onBulkApply}) {
   const [sf,setSf]=useState("all"), [ff,setFf]=useState("all"), [q,setQ]=useState("");
   const [adminBookerFilter,setAdminBookerFilter]=useState("all");
   const [adminDateFrom,setAdminDateFrom]=useState(""), [adminDateTo,setAdminDateTo]=useState("");
@@ -4093,73 +4110,55 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onQueueDelete,clashes=[]
                 const rowBg=isDeleteQueued?"#fff1f2":queued?"#f0fdf4":selected.has(b.id)?"#f5f3ff":"#fff";
                 const queueLabel = queued ? {queued_cpsa:"→ Queue for CPSA",approved:"✓ CPSA Approved",rejected:"✗ Reject"}[queued.newStatus]||queued.newStatus : null;
                 return (
-                  <tr key={b.id} style={{background:rowBg,borderTop:ri>0?"1px solid #f1f5f9":"none",transition:"background 0.1s"}}>
-                    <td style={{padding:"8px 10px",textAlign:"center"}}>
-                      {isPending&&<input type="checkbox" checked={selected.has(b.id)} onChange={()=>toggleSelect(b.id)} style={{width:14,height:14,accentColor:"#6366f1"}}/>}
+                  <tr key={b.id} onClick={()=>onView&&onView(b)} style={{background:rowBg,borderTop:ri>0?"1px solid #f1f5f9":"none",transition:"background 0.1s",cursor:"pointer"}}
+                    onMouseEnter={e=>{if(!rowBg||rowBg==="#fff")e.currentTarget.style.background="#f8fafc";}}
+                    onMouseLeave={e=>e.currentTarget.style.background=rowBg}>
+                    <td style={{padding:"3px 8px",textAlign:"center"}} onClick={e=>e.stopPropagation()}>
+                      {isPending&&<input type="checkbox" checked={selected.has(b.id)} onChange={()=>toggleSelect(b.id)} style={{width:13,height:13,accentColor:"#6366f1"}}/>}
                     </td>
-                    <td style={{padding:"8px 10px",whiteSpace:"nowrap"}}>{fmtDate(b.date)}</td>
-                    <td style={{padding:"8px 10px"}} onClick={e=>{e.stopPropagation();setAdminBookerFilter(p=>p===b.email.toLowerCase()?"all":b.email.toLowerCase());}}>
-                      <span style={{display:"inline-block",padding:"3px 10px",borderRadius:10,background:emailColor(b.email),color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer",outline:adminBookerFilter===b.email.toLowerCase()?"2px solid #0f172a":"none",outlineOffset:1}}>
+                    <td style={{padding:"3px 8px",whiteSpace:"nowrap",fontSize:12,color:"#475569"}}>{fmtDate(b.date)}</td>
+                    <td style={{padding:"3px 8px"}}>
+                      <span onClick={e=>{e.stopPropagation();setAdminBookerFilter(p=>p===b.email.toLowerCase()?"all":b.email.toLowerCase());}}
+                        style={{display:"inline-block",padding:"2px 8px",borderRadius:10,background:emailColor(b.email),color:"#fff",fontSize:11,fontWeight:600,cursor:"pointer",outline:adminBookerFilter===b.email.toLowerCase()?"2px solid #0f172a":"none",outlineOffset:1}}>
                         {b.email.split("@")[0]}
                       </span>
                     </td>
-                    <td style={{padding:"8px 10px"}}>
+                    <td style={{padding:"3px 8px",fontSize:12}}>
                       <div style={{display:"flex",alignItems:"center",gap:4}}>
-                        <span style={{width:8,height:8,borderRadius:"50%",background:f?.color,display:"inline-block",flexShrink:0}}/>
-                        <span style={{color:"#0f172a"}}>{f?.name}</span>
+                        <span style={{width:7,height:7,borderRadius:"50%",background:f?.color,display:"inline-block",flexShrink:0}}/>
+                        <span style={{color:"#0f172a"}}>{f?.name.replace("Field ","Fld ")}</span>
                       </div>
                     </td>
-                    <td style={{padding:"8px 10px"}}>
+                    <td style={{padding:"3px 8px"}}>
                       <Badge status={b.status}/>
-                      {queueLabel&&<div style={{fontSize:10,fontWeight:700,color:queued.newStatus==="rejected"?"#991b1b":"#166534",marginTop:2}}>{queueLabel}</div>}
-                      {isDeleteQueued&&<div style={{fontSize:10,fontWeight:700,color:"#991b1b",marginTop:2}}>🗑 queued: delete</div>}
+                      {b.invoiced&&<span style={{fontSize:9,fontWeight:700,background:INVOICED_META.bg,color:INVOICED_META.text,border:`1px solid ${INVOICED_META.border}`,borderRadius:4,padding:"1px 5px",marginLeft:3}}>🧾</span>}
+                      {queueLabel&&<div style={{fontSize:10,fontWeight:700,color:queued.newStatus==="rejected"?"#991b1b":"#166534"}}>{queueLabel}</div>}
+                      {isDeleteQueued&&<div style={{fontSize:10,fontWeight:700,color:"#991b1b"}}>🗑 queued</div>}
                     </td>
-                    <td style={{padding:"8px 10px",color:"#475569"}}>
+                    <td style={{padding:"3px 8px",color:"#475569",fontSize:12}}>
                       {fmtTime(b.start_hour)}–{fmtTime(b.start_hour+b.duration)}
-                      <div style={{fontSize:12,color:"#94a3b8",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:200}}>{b.purpose}</div>
+                      <span style={{fontSize:11,color:"#94a3b8",marginLeft:4}}>{b.duration}h</span>
+                      <div style={{fontSize:11,color:"#94a3b8",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:180}}>{b.purpose}</div>
                     </td>
-                    <td style={{padding:"8px 10px"}}>
-                      <div style={{display:"flex",gap:4,justifyContent:"flex-end",flexWrap:"wrap"}}>
+                    <td style={{padding:"3px 8px"}} onClick={e=>e.stopPropagation()}>
+                      <div style={{display:"flex",gap:3,justifyContent:"flex-end",flexWrap:"wrap"}}>
                         {isPending&&!isDeleteQueued&&<>
-                          {isAmuaStage&&<button
-                            onClick={()=>queueAction(b.id,"queued_cpsa")}
-                            title="Queue for CPSA"
-                            style={S.btn({padding:"4px 8px",fontSize:11,
-                              background:queued?.newStatus==="queued_cpsa"?"#1d4ed8":"#3b82f6",color:"#fff",
-                              outline:queued?.newStatus==="queued_cpsa"?"2px solid #1d4ed8":"none"})}>CPSA →</button>}
-                          {(b.status==="queued_cpsa"||b.status==="amua_submit")&&<button
-                            onClick={()=>queueAction(b.id,"pending_cpsa")}
-                            title="Mark as Pending CPSA Review (no email)"
-                            style={S.btn({padding:"4px 8px",fontSize:11,
-                              background:queued?.newStatus==="pending_cpsa"?"#0369a1":"#0ea5e9",color:"#fff",
-                              outline:queued?.newStatus==="pending_cpsa"?"2px solid #0369a1":"none"})}>⏳ CPSA</button>}
-                          {isCpsaStage&&<button
-                            onClick={()=>queueAction(b.id,"approved")}
-                            title="Mark CPSA Approved"
-                            style={S.btn({padding:"4px 8px",fontSize:11,
-                              background:queued?.newStatus==="approved"?"#15803d":"#22c55e",color:"#fff",
-                              outline:queued?.newStatus==="approved"?"2px solid #15803d":"none"})}>✓ Approved</button>}
-                          <button
-                            onClick={()=>queueAction(b.id,"rejected")}
-                            title="Reject"
-                            style={S.btn({padding:"4px 8px",fontSize:11,
-                              background:queued?.newStatus==="rejected"?"#be123c":"#f43f5e",color:"#fff",
-                              outline:queued?.newStatus==="rejected"?"2px solid #be123c":"none"})}>✗</button>
+                          {isAmuaStage&&<button onClick={()=>queueAction(b.id,"queued_cpsa")} title="Queue for CPSA"
+                            style={S.btn({padding:"3px 7px",fontSize:10,background:queued?.newStatus==="queued_cpsa"?"#1d4ed8":"#3b82f6",color:"#fff",outline:queued?.newStatus==="queued_cpsa"?"2px solid #1d4ed8":"none"})}>CPSA →</button>}
+                          {(b.status==="queued_cpsa"||b.status==="amua_submit")&&<button onClick={()=>queueAction(b.id,"pending_cpsa")} title="Mark as Pending CPSA Review (no email)"
+                            style={S.btn({padding:"3px 7px",fontSize:10,background:queued?.newStatus==="pending_cpsa"?"#0369a1":"#0ea5e9",color:"#fff",outline:queued?.newStatus==="pending_cpsa"?"2px solid #0369a1":"none"})}>⏳</button>}
+                          {isCpsaStage&&<button onClick={()=>queueAction(b.id,"approved")} title="Mark CPSA Approved"
+                            style={S.btn({padding:"3px 7px",fontSize:10,background:queued?.newStatus==="approved"?"#15803d":"#22c55e",color:"#fff",outline:queued?.newStatus==="approved"?"2px solid #15803d":"none"})}>✓</button>}
+                          <button onClick={()=>queueAction(b.id,"rejected")} title="Reject"
+                            style={S.btn({padding:"3px 7px",fontSize:10,background:queued?.newStatus==="rejected"?"#be123c":"#f43f5e",color:"#fff",outline:queued?.newStatus==="rejected"?"2px solid #be123c":"none"})}>✗</button>
                         </>}
                         {b.status==="clash"&&!isDeleteQueued&&(
                           <button onClick={()=>queueAction(b.id,"approved")} title="Resolve clash — approve booking"
-                            style={S.btn({padding:"4px 8px",fontSize:11,
-                              background:queued?.newStatus==="approved"?"#15803d":"#22c55e",color:"#fff",
-                              outline:queued?.newStatus==="approved"?"2px solid #15803d":"none"})}>
-                            ✓ Resolve
-                          </button>
+                            style={S.btn({padding:"3px 7px",fontSize:10,background:queued?.newStatus==="approved"?"#15803d":"#22c55e",color:"#fff",outline:queued?.newStatus==="approved"?"2px solid #15803d":"none"})}>✓ Resolve</button>
                         )}
-                        <button onClick={()=>onEdit(b)} style={S.btn({padding:"4px 8px",fontSize:11,border:"1.5px solid #e2e8f0",background:"#fff",color:"#475569"})}>Edit</button>
+                        <button onClick={()=>onEdit(b)} style={S.btn({padding:"3px 7px",fontSize:10,border:"1.5px solid #e2e8f0",background:"#fff",color:"#475569"})}>Edit</button>
                         <button onClick={()=>!isDeleteQueued&&onQueueDelete(b.id)}
-                          style={S.btn({padding:"4px 8px",fontSize:11,
-                            border:isDeleteQueued?"1.5px solid #dc2626":"1.5px solid #fca5a5",
-                            background:isDeleteQueued?"#fee2e2":"#fff",
-                            color:isDeleteQueued?"#dc2626":"#f43f5e"})}>🗑</button>
+                          style={S.btn({padding:"3px 7px",fontSize:10,border:isDeleteQueued?"1.5px solid #dc2626":"1.5px solid #fca5a5",background:isDeleteQueued?"#fee2e2":"#fff",color:isDeleteQueued?"#dc2626":"#f43f5e"})}>🗑</button>
                       </div>
                     </td>
                   </tr>
@@ -5262,8 +5261,8 @@ export default function App() {
 
         {(tab==="calendar"||tab==="month"||tab==="list")&&<FacilityPills/>}
 
-        {tab==="calendar"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<WeekCalendar bookings={bookings} selectedFacility={selFac} onNewBooking={openNew} onBookingClick={setViewing} cartSourceIds={new Set(cart.flatMap(i=>i.sourceIds||[]))} deleteIds={new Set(deleteQueue.map(b=>b.id))} cartNewDrafts={cart.flatMap(i=>(i.sourceIds||[]).length===0?i.drafts:[])} focusedDate={focusedDate} setFocusedDate={setFocusedDate} onOpenDay={openDay} bookerFilter={listBookerFilter}/>}</div>}
-        {tab==="month"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<MonthCalendar bookings={bookings} selectedFacility={selFac} onBookingClick={setViewing} onNewBooking={openNew} onMultiDelete={queueMultiForRemoval} onMultiAddToCart={handleMultiAddToCart} loggedInEmail={loggedInEmail} isAdmin={isAdmin} cartSourceIds={new Set(cart.flatMap(i=>i.sourceIds||[]))} deleteIds={new Set(deleteQueue.map(b=>b.id))} cartNewDrafts={cart.flatMap(i=>(i.sourceIds||[]).length===0?i.drafts:[])} onOpenDay={openDay} onGotoWeek={dk=>{ setFocusedDate(new Date(dk+"T00:00:00")); setTab("calendar"); }} bookerFilter={listBookerFilter}/>}</div>}
+        {tab==="calendar"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<WeekCalendar bookings={bookings} selectedFacility={selFac} onNewBooking={openNew} onBookingClick={setViewing} cartSourceIds={new Set(cart.flatMap(i=>i.sourceIds||[]))} deleteIds={new Set(deleteQueue.map(b=>b.id))} cartNewDrafts={cart.flatMap(i=>!i.notifyOnly&&(i.sourceIds||[]).length===0?i.drafts:[])} focusedDate={focusedDate} setFocusedDate={setFocusedDate} onOpenDay={openDay} bookerFilter={listBookerFilter}/>}</div>}
+        {tab==="month"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<MonthCalendar bookings={bookings} selectedFacility={selFac} onBookingClick={setViewing} onNewBooking={openNew} onMultiDelete={queueMultiForRemoval} onMultiAddToCart={handleMultiAddToCart} loggedInEmail={loggedInEmail} isAdmin={isAdmin} cartSourceIds={new Set(cart.flatMap(i=>i.sourceIds||[]))} deleteIds={new Set(deleteQueue.map(b=>b.id))} cartNewDrafts={cart.flatMap(i=>!i.notifyOnly&&(i.sourceIds||[]).length===0?i.drafts:[])} onOpenDay={openDay} onGotoWeek={dk=>{ setFocusedDate(new Date(dk+"T00:00:00")); setTab("calendar"); }} bookerFilter={listBookerFilter}/>}</div>}
 
         {tab==="list"&&(
           <div style={S.card}>
@@ -5395,10 +5394,10 @@ export default function App() {
                                   onMouseEnter={e=>e.currentTarget.style.background=isAdmin_bk?"#f1f5f9":"#f8fafc"}
                                   onMouseLeave={e=>e.currentTarget.style.background=isAdmin_bk?"#f8fafc":isClash?"#fff5f5":"#fff"}>
                                   <td style={{padding:"4px 8px",whiteSpace:"nowrap",color:"#475569",fontSize:11}}>{dateShort}</td>
-                                  <td style={{padding:"4px 8px"}} onClick={isAdmin_bk?undefined:e=>{e.stopPropagation();toggleBooker(b.email.toLowerCase());}}>
+                                  <td style={{padding:"4px 8px"}}>
                                     {isAdmin_bk
                                       ? <span style={{fontSize:10,fontWeight:700,color:"#94a3b8",background:"#f1f5f9",borderRadius:10,padding:"2px 7px"}}>🔒 admin</span>
-                                      : <span style={{display:"inline-block",padding:"2px 9px",borderRadius:10,background:emailColor(b.email),color:"#fff",fontSize:11,fontWeight:600,cursor:"pointer",outline:listBookerFilter.has(b.email.toLowerCase())?"2px solid #0f172a":"none",outlineOffset:1}}>
+                                      : <span onClick={e=>{e.stopPropagation();toggleBooker(b.email.toLowerCase());}} style={{display:"inline-block",padding:"2px 9px",borderRadius:10,background:emailColor(b.email),color:"#fff",fontSize:11,fontWeight:600,cursor:"pointer",outline:listBookerFilter.has(b.email.toLowerCase())?"2px solid #0f172a":"none",outlineOffset:1}}>
                                           {b.email.split("@")[0]}
                                         </span>
                                     }
@@ -5415,7 +5414,14 @@ export default function App() {
                                   <td style={{padding:"4px 8px",fontSize:11,maxWidth:170}}>{(()=>{
                                     const reasons=parseMismatchNote(b.system_notes,b.notes);
                                     const drift=getBillingDrift(b);
-                                    if(b.status==="cpsa_confirmed") return <span style={{color:"#0891b2",fontWeight:600}}>✓ confirmed</span>;
+                                    // Parse CPSA submission URL from system_notes (or legacy notes)
+                                    const cpsaUrlMatch=(b.system_notes||b.notes||"").match(/\[CPSA [^\]]+\]\s*Ref\s+(\S+)\s*·\s*(https?:\/\/\S+)/);
+                                    const cpsaUrl=cpsaUrlMatch?cpsaUrlMatch[2]:null;
+                                    if(b.status==="cpsa_confirmed"){
+                                      return cpsaUrl
+                                        ? <a href={cpsaUrl} target="_blank" rel="noopener noreferrer" style={{color:"#0891b2",fontWeight:600,textDecoration:"none"}} title="View CPSA booking">🌐 confirmed ↗</a>
+                                        : <span style={{color:"#0891b2",fontWeight:600}}>✓ confirmed</span>;
+                                    }
                                     if(b.status==="cpsa_review_needed"&&reasons.length){
                                       return <span title={reasons.join("\n")} style={{color:"#a16207",cursor:"help",display:"inline-block",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:160}}>⚠ {reasons.join(", ")}</span>;
                                     }
@@ -5456,7 +5462,7 @@ export default function App() {
             </label>
             {silentMode&&<span style={{fontSize:12,color:"#92400e"}}>All status changes, approvals, deletions and edits will be processed without notifying bookers.</span>}
           </div>
-          {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onQueueDelete={queueForRemovalSilent} clashes={allClashes} deleteIds={new Set(deleteQueue.map(b=>b.id))} facilityRates={facilityRates} onUpdateFacilityRate={updateFacilityRate} onClearOldUnapproved={handleClearOldUnapproved} silentMode={silentMode} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onSyncDB={handleSyncDB} onShowSchedule={()=>setShowAdminScheduleModal(true)} onBulkApply={handleBulkApply}/>}
+          {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onView={setViewing} onQueueDelete={queueForRemovalSilent} clashes={allClashes} deleteIds={new Set(deleteQueue.map(b=>b.id))} facilityRates={facilityRates} onUpdateFacilityRate={updateFacilityRate} onClearOldUnapproved={handleClearOldUnapproved} silentMode={silentMode} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onSyncDB={handleSyncDB} onShowSchedule={()=>setShowAdminScheduleModal(true)} onBulkApply={handleBulkApply}/>}
         </div>}
       </div>
 
@@ -5533,7 +5539,7 @@ export default function App() {
         <DayTimelinePopup date={dayPopupDate} focusHour={dayPopupFocus} bookings={bookings} onClose={()=>{setDayPopupDate(null);setDayPopupFocus(null);}}
           onBookingClick={b=>{ setDayPopupDate(null);setDayPopupFocus(null); setViewing(b); }}
           onNewBooking={openNew}
-          cartNewDrafts={cart.flatMap(i=>(i.sourceIds||[]).length===0?i.drafts:[])}
+          cartNewDrafts={cart.flatMap(i=>!i.notifyOnly&&(i.sourceIds||[]).length===0?i.drafts:[])}
           deleteIds={new Set(deleteQueue.map(b=>b.id))} cartSourceIds={new Set(cart.flatMap(i=>i.sourceIds||[]))}/>
       )}
     </div>
