@@ -595,7 +595,7 @@ function Modal({title,onClose,children,width=560}) {
     </div>
   );
 }
-function ActivityLogModal({onClose}) {
+function ActivityLogModal({onClose, inline=false}) {
   const [rows, setRows] = useState(null);
   const [error, setError] = useState("");
   const [filter, setFilter] = useState("sync"); // sync | all
@@ -637,8 +637,11 @@ function ActivityLogModal({onClose}) {
     if (a==="sign_in"||a==="sign_out") return {color:"#475569",bg:"#f8fafc",border:"#e2e8f0"};
     return {color:"#475569",bg:"#fff",border:"#e2e8f0"};
   };
+  const ALWrapper = inline
+    ? ({children}) => <div style={{background:"#fff",border:"1.5px solid #e2e8f0",borderRadius:12,padding:16,maxHeight:520,display:"flex",flexDirection:"column"}}><div style={{fontSize:14,fontWeight:700,color:"#0f172a",marginBottom:10}}>📜 Activity Log</div>{children}</div>
+    : ({children}) => <Modal title="📜 Activity Log" onClose={onClose} width={780}>{children}</Modal>;
   return (
-    <Modal title="📜 Activity Log" onClose={onClose} width={780}>
+    <ALWrapper>
       <div style={{display:"flex",flexDirection:"column",gap:10,minHeight:0,flex:1}}>
         <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0}}>
           <button onClick={()=>setFilter("sync")} style={{padding:"4px 10px",borderRadius:14,border:`1.5px solid ${filter==="sync"?"#0f172a":"#e2e8f0"}`,background:filter==="sync"?"#0f172a":"#fff",color:filter==="sync"?"#fff":"#475569",fontSize:12,fontWeight:600,fontFamily:"inherit",cursor:"pointer"}}>Sync & CPSA</button>
@@ -673,7 +676,7 @@ function ActivityLogModal({onClose}) {
           </table>
         </div>
       </div>
-    </Modal>
+    </ALWrapper>
   );
 }
 
@@ -842,7 +845,6 @@ function UserMgmtModal({ bookings, aliases, aliasNames, onChange, onChangeNames,
                 <span style={{width:9,height:9,borderRadius:"50%",background:emailColor(primary),flexShrink:0}}/>
                 <span style={{fontSize:13,fontWeight:700,color:"#0f172a",flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{primary}</span>
                 <span style={{fontSize:10,fontWeight:700,padding:"1px 6px",borderRadius:10,background:`${PTYPE_COLOR[ptype]}18`,color:PTYPE_COLOR[ptype],border:`1px solid ${PTYPE_COLOR[ptype]}40`,flexShrink:0}}>{ptype}</span>
-                {prof.fullName&&<span style={{fontSize:11,color:"#475569",flexShrink:0,maxWidth:120,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{prof.fullName}</span>}
                 {onViewAs && primary !== adminEmail?.toLowerCase() && (
                   <button onClick={e=>{e.stopPropagation(); onViewAs(primary);}}
                     title={`View interface as ${primary}`}
@@ -2734,7 +2736,7 @@ function OneOffModal({ email, name, bkgs, isAdmin, onClose }) {
   );
 }
 
-function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkApply, onClose }) {
+function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkApply, onClose, inline=false }) {
   const [facSensitive, setFacSensitive] = useState(false);
   const [splitPatterns, setSplitPatterns] = useState(new Set());
   const [patternModal, setPatternModal] = useState(null);
@@ -2805,9 +2807,12 @@ function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkApply, o
     return chips;
   }
 
+  const Wrapper = inline
+    ? ({children}) => <div style={{background:"#f0f9ff",border:"1.5px solid #bae6fd",borderRadius:12,padding:16}}><div style={{fontSize:14,fontWeight:700,color:"#0369a1",marginBottom:10}}>📅 Schedule Summary</div>{children}</div>
+    : ({children}) => <Modal title="📅 Schedule Summary" onClose={onClose}>{children}</Modal>;
   return (
     <>
-      <Modal title="📅 Schedule Summary" onClose={onClose}>
+      <Wrapper>
         <div style={{marginBottom:10}}>
           <label style={{display:"flex",alignItems:"center",gap:6,fontSize:12,cursor:"pointer"}}>
             <input type="checkbox" checked={facSensitive} onChange={e=>setFacSensitive(e.target.checked)}/>
@@ -2852,7 +2857,7 @@ function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkApply, o
             </tbody>
           </table>
         </div>
-      </Modal>
+      </Wrapper>
       {patternModal&&(
         <PatternModal {...patternModal} isAdmin={isAdmin}
           onClose={()=>setPatternModal(null)}
@@ -2900,8 +2905,7 @@ function BillingTab({ billingRecords=[], onUpdateRecord, isAdmin=false, loggedIn
   const displayName = em => {
     if (!em || em === "combined") return em || "—";
     const k = canonEmail(em);
-    const prof = profiles[k] || {};
-    return prof.fullName || aliasNames[k] || em.split("@")[0];
+    return aliasNames[k] || k.split("@")[0];
   };
 
   const visibleRecords = isAdmin
@@ -3247,8 +3251,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
   function summaryAlias(em) {
     if (!em) return em;
     const primary = (emailAliases[em.toLowerCase()] || em).toLowerCase();
-    const prof = (profiles||{})[primary] || {};
-    return prof.fullName || (aliasNames||{})[primary] || primary.split("@")[0];
+    return (aliasNames||{})[primary] || primary.split("@")[0];
   }
 
   // Categorize a booking as "day" or "evening" by which side of 5:30 pm has
@@ -4703,9 +4706,24 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
 
 
 // ─── Admin Panel with action queue, bulk approve, facility rates ──────────────
-function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,clashes=[],deleteIds=new Set(),facilityRates={},onUpdateFacilityRate,onClearOldUnapproved,silentMode=false,approxPlayers={},onUpdateApproxPlayers,approxDurations={},onUpdateApproxDuration,onSyncDB,onShowSchedule,onBulkApply,onSaveMismatch,onMarkAdjustmentSettled,onShowActivityLog,syncResults=[],onClearSyncResults,showSyncResults=false,onToggleSyncResults}) {
+function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,clashes=[],deleteIds=new Set(),facilityRates={},onUpdateFacilityRate,onClearOldUnapproved,silentMode=false,approxPlayers={},onUpdateApproxPlayers,approxDurations={},onUpdateApproxDuration,onSyncDB,onBulkApply,onSaveMismatch,onMarkAdjustmentSettled,loggedInEmail,syncResults=[],onClearSyncResults,showSyncResults=false,onToggleSyncResults,aliasNames={},emailAliases={}}) {
+  const [showSchedulePanel, setShowSchedulePanel] = useState(false);
+  const [showActivityPanel, setShowActivityPanel] = useState(false);
+  const adminAlias = em => {
+    if (!em) return em;
+    const primary = (emailAliases[em.toLowerCase()] || em).toLowerCase();
+    return aliasNames[primary] || primary.split("@")[0];
+  };
   const [sf,setSf]=useState("all"), [ff,setFf]=useState("all"), [q,setQ]=useState("");
-  const [adminBookerFilter,setAdminBookerFilter]=useState("all");
+  // Multi-select booker filter (empty Set = all)
+  const [adminBookerFilter,setAdminBookerFilter]=useState(new Set());
+  function toggleAdminBooker(em) {
+    setAdminBookerFilter(prev => {
+      const s = new Set(prev); const k = em.toLowerCase();
+      if (s.has(k)) s.delete(k); else s.add(k);
+      return s;
+    });
+  }
   const [showBookerFilter,setShowBookerFilter]=useState(false);
   const [adminDateFrom,setAdminDateFrom]=useState(""), [adminDateTo,setAdminDateTo]=useState("");
   const [adminColPurpose,setAdminColPurpose]=useState("");
@@ -4777,7 +4795,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
     if(isAdminBooking(b)) return false;
     if(sf!=="all"&&b.status!==sf) return false;
     if(ff!=="all"&&b.facility_id!==ff) return false;
-    if(adminBookerFilter!=="all"&&b.email?.toLowerCase()!==adminBookerFilter) return false;
+    if(adminBookerFilter.size>0&&!adminBookerFilter.has(b.email?.toLowerCase())) return false;
     if(adminDateFrom&&b.date<adminDateFrom) return false;
     if(adminDateTo&&b.date>adminDateTo) return false;
     if(adminColPurpose&&!(b.purpose||"").toLowerCase().includes(adminColPurpose.toLowerCase())) return false;
@@ -4895,12 +4913,12 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
             🧹 Clear old unapproved ({oldUnapproved.length})
           </button>
         )}
-        {onShowSchedule&&<button onClick={onShowSchedule} style={S.btn({background:"#f0f9ff",color:"#0369a1",border:"1.5px solid #bae6fd",fontSize:12,fontWeight:700})}>
-          📅 Schedule
-        </button>}
-        {onShowActivityLog&&<button onClick={onShowActivityLog} style={S.btn({background:"#fff",color:"#475569",border:"1.5px solid #e2e8f0",fontSize:12,fontWeight:700})}>
-          📜 Activity Log
-        </button>}
+        <button onClick={()=>setShowSchedulePanel(v=>!v)} style={S.btn({background:showSchedulePanel?"#f0f9ff":"#fff",color:"#0369a1",border:`1.5px solid ${showSchedulePanel?"#7dd3fc":"#bae6fd"}`,fontSize:12,fontWeight:700})}>
+          📅 Schedule {showSchedulePanel?"▴":"▾"}
+        </button>
+        <button onClick={()=>setShowActivityPanel(v=>!v)} style={S.btn({background:showActivityPanel?"#f8fafc":"#fff",color:"#475569",border:`1.5px solid ${showActivityPanel?"#94a3b8":"#e2e8f0"}`,fontSize:12,fontWeight:700})}>
+          📜 Activity Log {showActivityPanel?"▴":"▾"}
+        </button>
         {syncResults.length>0&&<button onClick={onToggleSyncResults} style={S.btn({background:showSyncResults?"#ecfeff":"#fff",color:"#0e7490",border:`1.5px solid ${showSyncResults?"#a5f3fc":"#e2e8f0"}`,fontSize:12,fontWeight:700})}>
           🔄 Sync Results ({syncResults.length}) {showSyncResults?"▴":"▾"}
         </button>}
@@ -4953,6 +4971,16 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
             );
           })}
         </div>
+      )}
+
+      {/* Schedule Summary — inline */}
+      {showSchedulePanel && (
+        <ScheduleSummaryModal bookings={bookings} isAdmin={true} loggedInEmail={loggedInEmail} onBulkApply={onBulkApply} inline onClose={()=>setShowSchedulePanel(false)}/>
+      )}
+
+      {/* Activity Log — inline */}
+      {showActivityPanel && (
+        <ActivityLogModal inline onClose={()=>setShowActivityPanel(false)}/>
       )}
 
       {/* Track-changes panel: invoiced bookings whose billed dimensions drifted */}
@@ -5583,8 +5611,8 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                 <th style={{padding:"8px 10px",textAlign:"center",width:32}}>
                   <input type="checkbox" checked={allSelected} onChange={toggleAll} style={{width:14,height:14,accentColor:"#6366f1"}}/>
                 </th>
-                {[["date","Date"],["name","Booker"],["facility","Fac"],["status","Status"]].map(([col,label])=>(
-                  <th key={col} onClick={()=>toggleSort(col)} style={{padding:"5px 8px",textAlign:"left",cursor:"pointer",userSelect:"none",fontWeight:700,color:"#475569",whiteSpace:"nowrap",fontSize:11}}>
+                {[["date","Date",null],["name","Booker",null],["facility","Fac",90],["status","Status",100]].map(([col,label,w])=>(
+                  <th key={col} onClick={()=>toggleSort(col)} style={{padding:"5px 8px",textAlign:"left",cursor:"pointer",userSelect:"none",fontWeight:700,color:"#475569",whiteSpace:"nowrap",fontSize:11,...(w?{width:w}:{})}}>
                     {label}{sortArrow(col)}
                   </th>
                 ))}
@@ -5593,48 +5621,59 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
               </tr>
               <tr style={{background:"#f1f5f9"}}>
                 <th style={{padding:"3px 4px"}}/>
-                <th style={{padding:"3px 4px"}}>
-                  <div style={{display:"flex",gap:2,alignItems:"center"}}>
-                    <input type="date" value={adminDateFrom} onChange={e=>setAdminDateFrom(e.target.value)} title="From date"
-                      style={{padding:"2px 4px",fontSize:10,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",width:"100%",minWidth:90}}/>
-                    <span style={{fontSize:9,color:"#94a3b8",flexShrink:0}}>–</span>
-                    <input type="date" value={adminDateTo} onChange={e=>setAdminDateTo(e.target.value)} title="To date"
-                      style={{padding:"2px 4px",fontSize:10,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",width:"100%",minWidth:90}}/>
-                  </div>
+                <th style={{padding:"3px 4px",position:"relative"}}>
+                  <DateRangePicker from={adminDateFrom} to={adminDateTo}
+                    onApply={(f,t)=>{setAdminDateFrom(f);setAdminDateTo(t);}}/>
                 </th>
                 <th style={{padding:"3px 4px",position:"relative"}}>
-                  <button onClick={()=>setShowBookerFilter(v=>!v)}
-                    style={{display:"flex",alignItems:"center",gap:4,padding:"2px 8px",fontSize:10,borderRadius:10,border:`1.5px solid ${adminBookerFilter==="all"?"#e2e8f0":emailColor(adminBookerFilter)}`,background:adminBookerFilter==="all"?"#fff":emailColor(adminBookerFilter),color:adminBookerFilter==="all"?"#475569":"#fff",cursor:"pointer",fontWeight:600,lineHeight:1.6,whiteSpace:"nowrap",maxWidth:"100%"}}>
-                    <span style={{overflow:"hidden",textOverflow:"ellipsis"}}>{adminBookerFilter==="all"?"All bookers":adminBookerFilter.split("@")[0]}</span>
-                    <span style={{flexShrink:0,opacity:0.7}}>▾</span>
-                  </button>
-                  {showBookerFilter&&(
-                    <>
-                      <div onClick={()=>setShowBookerFilter(false)} style={{position:"fixed",inset:0,zIndex:40}}/>
-                      <div style={{position:"absolute",top:"100%",left:4,marginTop:2,background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,boxShadow:"0 6px 24px rgba(0,0,0,0.12)",padding:8,zIndex:41,display:"flex",flexDirection:"column",gap:3,maxHeight:260,overflowY:"auto",minWidth:160}}>
-                        <button onClick={()=>{setAdminBookerFilter("all");setShowBookerFilter(false);}}
-                          style={{padding:"4px 9px",fontSize:11,borderRadius:8,border:"1.5px solid #e2e8f0",background:adminBookerFilter==="all"?"#0f172a":"#fff",color:adminBookerFilter==="all"?"#fff":"#475569",cursor:"pointer",fontWeight:adminBookerFilter==="all"?700:400,textAlign:"left",whiteSpace:"nowrap"}}>All bookers</button>
-                        {adminBookerEmails.map(em=>(
-                          <button key={em} onClick={()=>{setAdminBookerFilter(p=>p===em?"all":em);setShowBookerFilter(false);}}
-                            style={{padding:"4px 9px",fontSize:11,borderRadius:8,border:`1.5px solid ${adminBookerFilter===em?emailColor(em):"#e2e8f0"}`,background:adminBookerFilter===em?emailColor(em):"#fff",color:adminBookerFilter===em?"#fff":"#475569",cursor:"pointer",fontWeight:adminBookerFilter===em?700:400,textAlign:"left",whiteSpace:"nowrap"}}>
-                            {em.split("@")[0]}
-                          </button>
-                        ))}
+                  {(()=>{
+                    const allSel = adminBookerFilter.size>0 && adminBookerEmails.every(e=>adminBookerFilter.has(e));
+                    return (
+                      <div style={{display:"flex",gap:3,alignItems:"center",flexWrap:"wrap"}}>
+                        <button onClick={()=>setAdminBookerFilter(allSel?new Set():new Set(adminBookerEmails))}
+                          title={allSel?"Clear all bookers":"Select all bookers"}
+                          style={{padding:"1px 7px",fontSize:10,borderRadius:10,border:"1.5px solid #e2e8f0",background:adminBookerFilter.size===0?"#0f172a":"#fff",color:adminBookerFilter.size===0?"#fff":"#475569",cursor:"pointer",fontWeight:adminBookerFilter.size===0?700:400,lineHeight:1.6}}>{allSel?"None":"All"}</button>
+                        <button onClick={()=>setShowBookerFilter(v=>!v)}
+                          style={{display:"inline-flex",alignItems:"center",gap:4,padding:"1px 7px",fontSize:10,borderRadius:10,border:`1.5px solid ${adminBookerFilter.size>0?"#0f172a":"#e2e8f0"}`,background:"#fff",color:"#475569",cursor:"pointer",fontWeight:600,lineHeight:1.6}}>
+                          <span>👥</span>
+                          {adminBookerFilter.size>0&&<span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",minWidth:14,height:14,padding:"0 4px",borderRadius:7,background:"#0f172a",color:"#fff",fontSize:9,fontWeight:700}}>{adminBookerFilter.size}</span>}
+                          <span style={{fontSize:8,color:"#94a3b8"}}>▾</span>
+                        </button>
+                        {showBookerFilter&&(
+                          <>
+                            <div onClick={()=>setShowBookerFilter(false)} style={{position:"fixed",inset:0,zIndex:30}}/>
+                            <div style={{position:"absolute",top:"100%",left:0,zIndex:31,marginTop:4,background:"#fff",border:"1.5px solid #e2e8f0",borderRadius:10,boxShadow:"0 8px 24px rgba(15,23,42,0.12)",padding:8,minWidth:200,maxWidth:340,maxHeight:300,overflowY:"auto"}}>
+                              <div style={{fontSize:10,fontWeight:700,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:6,padding:"0 2px"}}>Filter bookers</div>
+                              <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                                {adminBookerEmails.map(em=>{
+                                  const active=adminBookerFilter.has(em);
+                                  const c=emailColor(em);
+                                  return(
+                                    <button key={em} onClick={()=>toggleAdminBooker(em)}
+                                      style={{padding:"3px 8px",fontSize:11,borderRadius:14,border:`1.5px solid ${active?c:"#e2e8f0"}`,background:active?c:"#fff",color:active?"#fff":"#475569",cursor:"pointer",fontWeight:600,fontFamily:"inherit"}}>
+                                      {adminAlias(em)}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          </>
+                        )}
                       </div>
-                    </>
-                  )}
+                    );
+                  })()}
                 </th>
-                <th style={{padding:"3px 4px"}}>
+                <th style={{padding:"3px 4px",width:90}}>
                   <select value={ff} onChange={e=>setFf(e.target.value)}
-                    style={{padding:"3px 4px",fontSize:11,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",width:"100%"}}>
-                    <option value="all">All facilities</option>
-                    {FACILITIES.map(f=><option key={f.id} value={f.id}>{f.name}</option>)}
+                    style={{padding:"3px 4px",fontSize:10,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",width:"100%"}}>
+                    <option value="all">All</option>
+                    {FACILITIES.map(f=><option key={f.id} value={f.id}>{f.name.includes("Field")?f.name.replace("Field ","F"):f.name.split(" ")[0]}</option>)}
                   </select>
                 </th>
-                <th style={{padding:"3px 4px"}}>
+                <th style={{padding:"3px 4px",width:100}}>
                   <select value={sf} onChange={e=>setSf(e.target.value)}
-                    style={{padding:"3px 4px",fontSize:11,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",width:"100%"}}>
-                    <option value="all">All statuses</option>
+                    style={{padding:"3px 4px",fontSize:10,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",width:"100%"}}>
+                    <option value="all">All</option>
                     {Object.entries(STATUS_META).filter(([k])=>!["pending","amua_submit"].includes(k)).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
                   </select>
                 </th>
@@ -5643,8 +5682,8 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                     style={{padding:"3px 6px",fontSize:11,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",width:"100%"}}/>
                 </th>
                 <th style={{padding:"3px 4px"}}>
-                  {(adminBookerFilter!=="all"||sf!=="all"||ff!=="all"||adminDateFrom||adminDateTo||adminColPurpose)&&(
-                    <button onClick={()=>{setAdminBookerFilter("all");setSf("all");setFf("all");setAdminDateFrom("");setAdminDateTo("");setAdminColPurpose("");}}
+                  {(adminBookerFilter.size>0||sf!=="all"||ff!=="all"||adminDateFrom||adminDateTo||adminColPurpose)&&(
+                    <button onClick={()=>{setAdminBookerFilter(new Set());setSf("all");setFf("all");setAdminDateFrom("");setAdminDateTo("");setAdminColPurpose("");}}
                       style={{padding:"2px 7px",fontSize:10,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",color:"#64748b",cursor:"pointer",whiteSpace:"nowrap"}}>
                       ✕ Clear
                     </button>
@@ -5671,9 +5710,9 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                     </td>
                     <td style={{padding:"3px 6px",whiteSpace:"nowrap",fontSize:11,color:"#475569"}}>{fmtDateShort(b.date)}</td>
                     <td style={{padding:"3px 6px"}}>
-                      <span onClick={e=>{e.stopPropagation();setAdminBookerFilter(p=>p===b.email.toLowerCase()?"all":b.email.toLowerCase());}}
-                        style={{display:"inline-block",padding:"2px 8px",borderRadius:10,background:emailColor(b.email),color:"#fff",fontSize:11,fontWeight:600,cursor:"pointer",outline:adminBookerFilter===b.email.toLowerCase()?"2px solid #0f172a":"none",outlineOffset:1}}>
-                        {b.email.split("@")[0]}
+                      <span onClick={e=>{e.stopPropagation();toggleAdminBooker(b.email.toLowerCase());}}
+                        style={{display:"inline-block",padding:"2px 8px",borderRadius:10,background:emailColor(b.email),color:"#fff",fontSize:11,fontWeight:600,cursor:"pointer",outline:adminBookerFilter.has(b.email.toLowerCase())?"2px solid #0f172a":"none",outlineOffset:1}}>
+                        {adminAlias(b.email)}
                       </span>
                     </td>
                     <td style={{padding:"3px 6px",fontSize:11}}>
@@ -6884,7 +6923,7 @@ export default function App() {
       {realIsAdmin && viewAsEmail && (
         <div style={{background:"#4338ca",color:"#fff",padding:"8px 16px",display:"flex",alignItems:"center",gap:10,fontSize:12,fontWeight:600,boxShadow:"0 1px 4px rgba(0,0,0,0.15)"}}>
           <span style={{fontSize:14}}>👁</span>
-          <span>Viewing as <strong>{(profiles[viewAsEmail]?.fullName)||(aliasNames[viewAsEmail])||viewAsEmail}</strong> ({viewAsEmail})</span>
+          <span>Viewing as <strong>{aliasNames[viewAsEmail]||viewAsEmail.split("@")[0]}</strong> ({viewAsEmail})</span>
           <span style={{fontSize:11,opacity:0.8,fontWeight:400}}>— interface and settings reflect this profile</span>
           <button onClick={()=>{ setViewAsEmail(null); showToast("Exited profile view"); }}
             style={{marginLeft:"auto",background:"#fff",color:"#4338ca",border:"none",borderRadius:6,padding:"4px 12px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"}}>
@@ -7240,7 +7279,7 @@ export default function App() {
         {tab==="billing"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<BillingTab billingRecords={billingRecords} onUpdateRecord={patch=>setBillingRecords(prev=>prev.map(r=>r.id===patch.id?{...r,...patch}:r))} isAdmin={isAdmin} loggedInEmail={loggedInEmail} emailAliases={emailAliases} aliasNames={aliasNames} profiles={profiles}/>}</div>}
         {tab==="about"&&<div style={{padding:"8px 0"}}><AboutTab/></div>}
         {tab==="admin"&&isAdmin&&<div style={S.card}>
-          {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onView={setViewing} onQueueDelete={queueForRemovalSilent} clashes={allClashes} deleteIds={new Set(deleteQueue.map(b=>b.id))} facilityRates={facilityRates} onUpdateFacilityRate={updateFacilityRate} onClearOldUnapproved={handleClearOldUnapproved} silentMode={silentMode} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onSyncDB={handleSyncDB} onShowSchedule={()=>setShowAdminScheduleModal(true)} onBulkApply={handleBulkApply} onSaveMismatch={handleSaveMismatch} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} onShowActivityLog={()=>setShowActivityLog(true)} syncResults={syncResults} onClearSyncResults={()=>setSyncResults([])} showSyncResults={showSyncPanel} onToggleSyncResults={()=>setShowSyncPanel(v=>!v)}/>}
+          {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onView={setViewing} onQueueDelete={queueForRemovalSilent} clashes={allClashes} deleteIds={new Set(deleteQueue.map(b=>b.id))} facilityRates={facilityRates} onUpdateFacilityRate={updateFacilityRate} onClearOldUnapproved={handleClearOldUnapproved} silentMode={silentMode} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onSyncDB={handleSyncDB} onBulkApply={handleBulkApply} onSaveMismatch={handleSaveMismatch} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} loggedInEmail={loggedInEmail} syncResults={syncResults} onClearSyncResults={()=>setSyncResults([])} showSyncResults={showSyncPanel} onToggleSyncResults={()=>setShowSyncPanel(v=>!v)} aliasNames={aliasNames} emailAliases={emailAliases}/>}
         </div>}
       </div>
 
