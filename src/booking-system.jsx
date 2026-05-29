@@ -3037,7 +3037,7 @@ const PIPELINE_STATES = [
 ];
 const PIPELINE_KEYS = PIPELINE_STATES.map(s=>s.key);
 
-function BillingTab({ billingRecords=[], onUpdateRecord, isAdmin=false, loggedInEmail="", emailAliases={}, aliasNames={}, profiles={} }) {
+function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onLoadToSummary, isAdmin=false, loggedInEmail="", emailAliases={}, aliasNames={}, profiles={} }) {
   const [filterStatus, setFilterStatus] = useState("all");
   const [expandedId, setExpandedId] = useState(null);
 
@@ -3057,6 +3057,102 @@ function BillingTab({ billingRecords=[], onUpdateRecord, isAdmin=false, loggedIn
 
   const fmtDate = d => d ? new Date(d+"T00:00:00").toLocaleDateString("en-NZ",{day:"numeric",month:"short",year:"numeric"}) : "—";
   const fmtMoney = n => n!=null ? `$${Number(n).toFixed(2)}` : "—";
+
+  // ─── Document download from stored billing record ──────────────────────────
+  // Builds invoice/PO HTML from the snapshot stored on the record. Falls back
+  // to "draft" formatting (no GST extraction) when fields are missing.
+  function buildRecordHtml(rec, docType, lines) {
+    const docLabel = docType === "purchase_order" ? "Purchase Order" : "Invoice";
+    const fmtC = n => "$" + Number(n||0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g,",");
+    const periodStr = rec.dateFrom&&rec.dateTo ? `${fmtDate(rec.dateFrom)} – ${fmtDate(rec.dateTo)}` : "All periods";
+    const docId = docType==="purchase_order" ? (rec.poId||rec.id) : rec.id;
+    const orderName = rec.orderName||"";
+    const rowsHtml = (lines||[]).map(l=>`
+      <tr>
+        <td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;font-size:13px;color:#0f172a">${l.desc||l.description||l.label||"—"}</td>
+        <td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;font-size:12px;color:#64748b">${l.detail||""}</td>
+        <td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;font-size:13px;color:#0f172a;text-align:right;white-space:nowrap">${fmtC(l.cost)}</td>
+      </tr>`).join("");
+    const pre = rec.subtotal!=null ? rec.subtotal : (lines||[]).reduce((s,l)=>s+(l.cost||0),0);
+    const gst = rec.gst!=null ? rec.gst : 0;
+    const total = rec.total!=null ? rec.total : pre + gst;
+    const gstLabel = rec.gstMode==="note"?"":rec.gstMode==="exclusive"?"excl. GST":"incl. GST";
+    const gstRows = rec.gstMode==="note"
+      ? `<tr><td colspan="2" style="padding:8px 16px;font-size:12px;color:#64748b;text-align:right">GST inclusive</td><td style="padding:8px 16px;font-size:13px;font-weight:700;color:#0f172a;text-align:right">${fmtC(total)}</td></tr>`
+      : `<tr style="background:#f8fafc"><td colspan="2" style="padding:8px 16px;font-size:12px;color:#64748b;text-align:right">Subtotal (${gstLabel})</td><td style="padding:8px 16px;font-size:13px;color:#0f172a;text-align:right">${fmtC(pre)}</td></tr>
+         <tr style="background:#f8fafc"><td colspan="2" style="padding:8px 16px;font-size:12px;color:#64748b;text-align:right">GST (15%)</td><td style="padding:8px 16px;font-size:13px;color:#0f172a;text-align:right">${fmtC(gst)}</td></tr>
+         <tr style="background:#f0fdf4"><td colspan="2" style="padding:10px 16px;font-size:14px;font-weight:700;color:#0f172a;text-align:right">Total</td><td style="padding:10px 16px;font-size:16px;font-weight:800;color:#15803d;text-align:right">${fmtC(total)}</td></tr>`;
+    const amuaLines = [AMUA_INFO.address, AMUA_INFO.gstNumber?`GST No: ${AMUA_INFO.gstNumber}`:"", AMUA_INFO.bank].filter(Boolean).map(l=>`<div>${l}</div>`).join("");
+    return `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>${docLabel} ${docId}</title><style>
+      @media print { body{margin:0} }
+      body{font-family:'Segoe UI',sans-serif;background:#f8fafc;margin:0;padding:32px 16px}
+      .page{max-width:700px;margin:0 auto;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 4px 32px rgba(0,0,0,0.08)}
+    </style></head><body>
+    <div class="page">
+      <div style="background:#0f172a;padding:32px 40px;display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:16px">
+        <div>
+          <div style="font-size:24px;font-weight:800;color:#fff;letter-spacing:-0.02em">${AMUA_INFO.name}</div>
+          <div style="font-size:13px;color:#94a3b8;margin-top:4px">${amuaLines}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:28px;font-weight:800;color:#fff">${docLabel}</div>
+          <div style="font-size:13px;color:#94a3b8;margin-top:4px">#${docId}</div>
+          <div style="font-size:13px;color:#94a3b8">Date: ${(rec.createdAt||"").slice(0,10)||new Date().toISOString().slice(0,10)}</div>
+          ${orderName?`<div style="font-size:13px;color:#94a3b8">Order: ${orderName}</div>`:""}
+        </div>
+      </div>
+      <div style="padding:28px 40px;display:grid;grid-template-columns:1fr 1fr;gap:24px;border-bottom:1px solid #f1f5f9">
+        <div>
+          <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px">Bill To</div>
+          <div style="font-size:15px;font-weight:700;color:#0f172a">${rec.bookerName||"(see email)"}</div>
+          <div style="font-size:13px;color:#475569">${rec.bookerEmail||""}</div>
+          ${rec.bookerAddress?`<div style="font-size:12px;color:#475569;margin-top:4px;white-space:pre-line">${rec.bookerAddress}</div>`:""}
+          ${rec.bookerGst?`<div style="font-size:12px;color:#94a3b8;margin-top:2px">GST: ${rec.bookerGst}</div>`:""}
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px">Period</div>
+          <div style="font-size:14px;font-weight:600;color:#0f172a">${periodStr}</div>
+        </div>
+      </div>
+      <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse">
+        <thead><tr style="background:#f8fafc">
+          <th style="padding:10px 16px;text-align:left;font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;border-bottom:2px solid #f1f5f9">Description</th>
+          <th style="padding:10px 16px;text-align:left;font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;border-bottom:2px solid #f1f5f9">Detail</th>
+          <th style="padding:10px 16px;text-align:right;font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;border-bottom:2px solid #f1f5f9">Amount</th>
+        </tr></thead>
+        <tbody>${rowsHtml}</tbody>
+        <tfoot>${gstRows}</tfoot>
+      </table>
+      <div style="padding:20px 40px 32px;font-size:12px;color:#94a3b8;text-align:center">
+        ${AMUA_INFO.bank?`Bank: ${AMUA_INFO.bank} · `:""}Generated by FacilityBook${rec.status==="draft"?" · DRAFT":""}
+      </div>
+    </div></body></html>`;
+  }
+  function downloadRecord(rec, format, docType, detail) {
+    const lines = detail==="individual" ? (rec.individualLines||rec.lines||[]) : (rec.lines||[]);
+    const docTag = docType==="purchase_order" ? "PO" : "Invoice";
+    const orderTag = rec.orderName ? ` - ${rec.orderName.replace(/[^\w- ]+/g,"")}` : "";
+    const baseName = `AMUA ${docTag}${orderTag} - ${(rec.dateFrom||"").replace(/-/g,"")}-${(rec.dateTo||"").replace(/-/g,"")}${detail==="individual"?" - itemised":""}`;
+    if (format==="csv") {
+      const esc = v => `"${String(v||"").replace(/"/g,'""')}"`;
+      const rowsCsv = lines.map(l=>[(docType==="purchase_order"?rec.poId:rec.id)||"", rec.bookerName||"", rec.bookerEmail||"", l.desc||l.description||l.label||"", l.detail||"", Number(l.cost||0).toFixed(2)].map(esc).join(","));
+      rowsCsv.push(["","","","","Subtotal",Number(rec.subtotal||0).toFixed(2)].map(esc).join(","));
+      rowsCsv.push(["","","","","GST (15%)",Number(rec.gst||0).toFixed(2)].map(esc).join(","));
+      rowsCsv.push(["","","","","Total",Number(rec.total||0).toFixed(2)].map(esc).join(","));
+      const csv = [[docType==="purchase_order"?"Purchase Order":"Invoice","Name","Email","Description","Detail","Amount"].map(esc).join(","), ...rowsCsv].join("\n");
+      const blob = new Blob([csv],{type:"text/csv"});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a"); a.href=url; a.download=`${baseName}.csv`; a.click();
+      URL.revokeObjectURL(url);
+      return;
+    }
+    const html = buildRecordHtml(rec, docType, lines);
+    const win = window.open("","_blank");
+    if (win) {
+      win.document.write(html); win.document.close();
+      if (format==="print") { win.focus(); win.print(); }
+    }
+  }
 
   const stateInfo = key => PIPELINE_STATES.find(s=>s.key===key) || { label: key, color:"#94a3b8" };
 
@@ -3126,6 +3222,13 @@ function BillingTab({ billingRecords=[], onUpdateRecord, isAdmin=false, loggedIn
                 <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
                   <span style={{fontSize:13,fontWeight:700,color:"#0f172a"}}>{fmtMoney(rec.total)}</span>
                   <StatusPill status={rec.status||"draft"}/>
+                  {onLoadToSummary && (
+                    <button onClick={e=>{e.stopPropagation();onLoadToSummary(rec);}}
+                      title="Load this record's date range + booker into the Summary view"
+                      style={{padding:"3px 9px",borderRadius:6,border:"1.5px solid #c7d2fe",background:"#eef2ff",color:"#4338ca",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"}}>
+                      ↗ Summary
+                    </button>
+                  )}
                   <span style={{fontSize:10,color:"#94a3b8"}}>{isExpanded?"▲":"▼"}</span>
                 </div>
               </div>
@@ -3173,6 +3276,14 @@ function BillingTab({ billingRecords=[], onUpdateRecord, isAdmin=false, loggedIn
                             ← Revert to {stateInfo(PIPELINE_KEYS[PIPELINE_KEYS.indexOf(rec.status||"draft")-1]).label}
                           </button>
                         )}
+                        {/* Delete — drafts only */}
+                        {(rec.status||"draft")==="draft" && onDeleteRecord && (
+                          <button onClick={()=>{
+                            if(window.confirm(`Delete draft record ${rec.id}${rec.poId?` / ${rec.poId}`:""}? This cannot be undone.`)) onDeleteRecord(rec.id);
+                          }} style={{padding:"5px 12px",borderRadius:8,border:"1px solid #fecaca",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit",background:"#fef2f2",color:"#b91c1c",marginLeft:"auto"}}>
+                            🗑 Delete draft
+                          </button>
+                        )}
                       </div>
                       {/* GTEC invoice number field */}
                       {["gtec_invoiced","club_invoiced","complete"].includes(rec.status)&&(
@@ -3192,6 +3303,39 @@ function BillingTab({ billingRecords=[], onUpdateRecord, isAdmin=false, loggedIn
                       </div>
                     </div>
                   )}
+
+                  {/* Document downloads — always available, including drafts */}
+                  <div style={{display:"flex",flexDirection:"column",gap:6,padding:"10px 0",borderTop:"1px solid #e2e8f0"}}>
+                    <div style={{fontSize:11,fontWeight:700,color:"#475569"}}>📥 Download Documents</div>
+                    <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+                      {[
+                        {dt:"invoice",  id:rec.id,    show:true},
+                        {dt:"purchase_order", id:rec.poId, show:!!rec.poId},
+                      ].filter(x=>x.show).map(({dt,id})=>(
+                        <div key={dt} style={{display:"flex",gap:0,border:"1px solid #e2e8f0",borderRadius:8,overflow:"hidden",alignItems:"stretch"}}>
+                          <span style={{padding:"5px 10px",fontSize:11,fontWeight:700,color:"#475569",background:"#f8fafc",borderRight:"1px solid #e2e8f0",display:"flex",alignItems:"center",gap:4}}>
+                            {dt==="purchase_order"?"📋 PO":"🧾 Invoice"} <span style={{fontFamily:"monospace",fontSize:10,color:"#94a3b8"}}>{id}</span>
+                          </span>
+                          {[
+                            {fmt:"html", label:"HTML", icon:"🌐"},
+                            {fmt:"print", label:"PDF",  icon:"🖨"},
+                            {fmt:"csv",  label:"CSV",  icon:"📊"},
+                          ].map(({fmt,label,icon})=>(
+                            <button key={fmt} onClick={()=>downloadRecord(rec,fmt,dt,"grouped")} title={`Grouped ${label}`}
+                              style={{padding:"5px 9px",border:"none",borderLeft:"1px solid #f1f5f9",background:"#fff",cursor:"pointer",fontSize:11,fontWeight:600,color:"#0f172a",fontFamily:"inherit"}}>
+                              {icon} {label}
+                            </button>
+                          ))}
+                          {(rec.individualLines||[]).length>0&&(
+                            <button onClick={()=>downloadRecord(rec,"html",dt,"individual")} title="Itemised HTML (one line per booking)"
+                              style={{padding:"5px 9px",border:"none",borderLeft:"1px solid #f1f5f9",background:"#f5f3ff",cursor:"pointer",fontSize:11,fontWeight:700,color:"#5b21b6",fontFamily:"inherit"}}>
+                              📑 Itemised
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
 
                   {/* Invoice lines */}
                   {(rec.lines||[]).length>0&&(
@@ -3228,7 +3372,7 @@ function BillingTab({ billingRecords=[], onUpdateRecord, isAdmin=false, loggedIn
   );
 }
 
-function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = false, approxPlayers = {}, onUpdateApproxPlayers, approxDurations = {}, onUpdateApproxDuration, onUpdateFacilityRate, pricingMode = "hourly", onSetPricingMode, onProposeMerge, onBulkApply, onMarkInvoiced, onMarkAdjustmentSettled, bookerFilter=new Set(), profiles={}, emailAliases={}, aliasNames={}, onCreateOfficialInvoice, onFilterChange=null }) {
+function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = false, approxPlayers = {}, onUpdateApproxPlayers, approxDurations = {}, onUpdateApproxDuration, onUpdateFacilityRate, pricingMode = "hourly", onSetPricingMode, onProposeMerge, onBulkApply, onMarkInvoiced, onMarkAdjustmentSettled, bookerFilter=new Set(), profiles={}, emailAliases={}, aliasNames={}, onCreateOfficialInvoice, onFilterChange=null, loadRequest=null }) {
   const now = new Date();
   const thisYear = now.getFullYear();
 
@@ -3258,6 +3402,16 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
       return s;
     });
   };
+  // Honour load-from-billing requests: switch to custom preset and stamp the
+  // record's date range. Tracked by version so re-loading the same record works.
+  const lastLoadVersionRef = useRef(null);
+  useEffect(()=>{
+    if (!loadRequest || loadRequest.version===lastLoadVersionRef.current) return;
+    lastLoadVersionRef.current = loadRequest.version;
+    setPreset("custom");
+    setCustomFrom(loadRequest.dateFrom||"");
+    setCustomTo(loadRequest.dateTo||"");
+  },[loadRequest]);
 
   // Invoice modal state
   const [showInvoice, setShowInvoice] = useState(false);
@@ -6309,6 +6463,21 @@ export default function App() {
     try{ return JSON.parse(localStorage.getItem("fb_billing_records")||"[]"); }catch{ return []; }
   });
   useEffect(()=>{ try{ localStorage.setItem("fb_billing_records", JSON.stringify(billingRecords)); }catch{} }, [billingRecords]);
+  // Bumped each time the user clicks "↗ Summary" on a billing row; SummaryTab
+  // reacts to the version change rather than the payload itself so repeated
+  // loads of the same record still take effect.
+  const [summaryLoadRequest, setSummaryLoadRequest] = useState(null);
+  function handleLoadBillingToSummary(rec) {
+    const em = (rec.bookerEmail||"").toLowerCase();
+    if (em && em!=="combined") {
+      const canon = (emailAliases[em] || em).toLowerCase();
+      setListBookerFilter(new Set([canon]));
+    } else {
+      setListBookerFilter(new Set());
+    }
+    setSummaryLoadRequest({ dateFrom: rec.dateFrom||"", dateTo: rec.dateTo||"", version: Date.now() });
+    setTab("summary");
+  }
   const [showBillingView, setShowBillingView] = useState(false);
   const [facilityRates, setFacilityRates] = useState(()=>{
     try{return JSON.parse(localStorage.getItem("fb_facility_rates")||"{}");}catch{return {};}
@@ -7469,8 +7638,8 @@ export default function App() {
           </div>
         )}
 
-        {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<SummaryTab bookings={bookings} loggedInEmail={loggedInEmail} facilityRates={facilityRates} isAdmin={isAdmin} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onUpdateFacilityRate={updateFacilityRate} pricingMode={pricingMode} onSetPricingMode={setPricingMode} onProposeMerge={handleProposeMerge} onBulkApply={handleBulkApply} onMarkInvoiced={handleMarkInvoiced} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} bookerFilter={listBookerFilter} profiles={profiles} emailAliases={emailAliases} aliasNames={aliasNames} onCreateOfficialInvoice={handleCreateOfficialInvoice} onFilterChange={s=>setListBookerFilter(s)}/>}</div>}
-        {tab==="billing"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<BillingTab billingRecords={billingRecords} onUpdateRecord={patch=>setBillingRecords(prev=>prev.map(r=>r.id===patch.id?{...r,...patch}:r))} isAdmin={isAdmin} loggedInEmail={loggedInEmail} emailAliases={emailAliases} aliasNames={aliasNames} profiles={profiles}/>}</div>}
+        {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<SummaryTab bookings={bookings} loggedInEmail={loggedInEmail} facilityRates={facilityRates} isAdmin={isAdmin} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onUpdateFacilityRate={updateFacilityRate} pricingMode={pricingMode} onSetPricingMode={setPricingMode} onProposeMerge={handleProposeMerge} onBulkApply={handleBulkApply} onMarkInvoiced={handleMarkInvoiced} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} bookerFilter={listBookerFilter} profiles={profiles} emailAliases={emailAliases} aliasNames={aliasNames} onCreateOfficialInvoice={handleCreateOfficialInvoice} onFilterChange={s=>setListBookerFilter(s)} loadRequest={summaryLoadRequest}/>}</div>}
+        {tab==="billing"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<BillingTab billingRecords={billingRecords} onUpdateRecord={patch=>setBillingRecords(prev=>prev.map(r=>r.id===patch.id?{...r,...patch}:r))} onDeleteRecord={id=>setBillingRecords(prev=>prev.filter(r=>r.id!==id))} onLoadToSummary={handleLoadBillingToSummary} isAdmin={isAdmin} loggedInEmail={loggedInEmail} emailAliases={emailAliases} aliasNames={aliasNames} profiles={profiles}/>}</div>}
         {tab==="about"&&<div style={{padding:"8px 0"}}><AboutTab/></div>}
         {tab==="admin"&&isAdmin&&<div style={S.card}>
           {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onView={setViewing} onQueueDelete={queueForRemovalSilent} clashes={allClashes} deleteIds={new Set(deleteQueue.map(b=>b.id))} facilityRates={facilityRates} onUpdateFacilityRate={updateFacilityRate} onClearOldUnapproved={handleClearOldUnapproved} silentMode={silentMode} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onSyncDB={handleSyncDB} onBulkApply={handleBulkApply} onSaveMismatch={handleSaveMismatch} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} loggedInEmail={loggedInEmail} syncResults={syncResults} onClearSyncResults={()=>setSyncResults([])} showSyncResults={showSyncPanel} onToggleSyncResults={()=>setShowSyncPanel(v=>!v)} aliasNames={aliasNames} emailAliases={emailAliases}/>}
