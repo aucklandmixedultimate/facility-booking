@@ -3452,7 +3452,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
   const [invName,     setInvName]     = useState("");                  // free-text label baked into the file name
   const [invOrderName, setInvOrderName] = useState("");               // official: order/project name (required)
   const [invMarkInvoiced, setInvMarkInvoiced] = useState(false);       // flag exported bookings as invoiced
-  const [invIncludeInvoiced, setInvIncludeInvoiced] = useState(false); // include already-invoiced bookings
+  const [invIncludeInvoiced, setInvIncludeInvoiced] = useState(true); // include previously-invoiced bookings (default on — summary always shows them)
   const [invIncludeAdjustments, setInvIncludeAdjustments] = useState(true); // include mismatch billing adjustments
   const [invSelectedEmails, setInvSelectedEmails] = useState(new Set()); // empty = all
   // Schedule Summary state
@@ -3521,11 +3521,14 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
     return true;
   });
 
-  // Date-filtered pool for invoice (no email filter — multi-select picks users independently)
+  // Pool for invoice popup — mirrors the summary view's filter (date + booker)
+  // so what appears in the popup matches what the user sees in the summary.
+  // invSelectedEmails further sub-filters within this pool.
   const activeForInvoice = bookings.filter(b => {
     if (isAdminBooking(b)) return false;
     if (["cancelled","rejected"].includes(b.status)) return false;
-    if (b.invoiced && !invIncludeInvoiced) return false; // previously-invoiced excluded by default
+    if (b.invoiced && !invIncludeInvoiced) return false;
+    if (emailFilterSet.size>0 && !emailFilterSet.has(b.email?.toLowerCase())) return false;
     if (dateFrom && b.date < dateFrom) return false;
     if (dateTo   && b.date > dateTo)   return false;
     return true;
@@ -3860,8 +3863,11 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
   }
 
   function openInvoice() {
-    // Pre-select exactly what's visible in the summary — if no filter, leave empty (= All).
-    setInvSelectedEmails(emailFilterSet.size>0 ? new Set(emailFilterSet) : new Set());
+    // The pool is already filtered by summary's emailFilterSet, so leave
+    // invSelectedEmails empty (= "All from the visible pool") by default.
+    // The chip list in the popup is the union of summary's filter; selecting
+    // a specific booker further narrows it.
+    setInvSelectedEmails(new Set());
     setShowInvoice(true);
   }
 
@@ -4950,12 +4956,23 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
               )}
 
               {/* Summary bar */}
-              <div style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:10,padding:"10px 14px",fontSize:13,color:"#475569",display:"flex",flexWrap:"wrap",gap:8,alignItems:"center"}}>
-                {invScope==="per_booker" && invSelectedEmails.size !== 1
-                  ? <span><strong>{scopes.length}</strong> booker{scopes.length!==1?"s":""} · <strong>{allBkgs.length}</strong> booking{allBkgs.length!==1?"s":""} · <strong style={{color:"#15803d"}}>{fmtCost(totalCostInv)}</strong></span>
-                  : <span>{docLabel} for <strong>{scopes[0]?.name||scopes[0]?.email}</strong> · <strong>{allBkgs.length}</strong> booking{allBkgs.length!==1?"s":""} · <strong style={{color:"#15803d"}}>{fmtCost(totalCostInv)}</strong></span>
-                }
-                {allBkgs.length===0&&<span style={{color:"#f43f5e",fontSize:11,fontWeight:600}}>No bookings in current range/filter. Check date preset or enable "Include previously-invoiced".</span>}
+              <div style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:10,padding:"10px 14px",fontSize:13,color:"#475569",display:"flex",flexDirection:"column",gap:6}}>
+                <div style={{display:"flex",flexWrap:"wrap",gap:8,alignItems:"center"}}>
+                  {invScope==="per_booker" && invSelectedEmails.size !== 1
+                    ? <span><strong>{scopes.length}</strong> booker{scopes.length!==1?"s":""} · <strong>{allBkgs.length}</strong> booking{allBkgs.length!==1?"s":""} · <strong style={{color:"#15803d"}}>{fmtCost(totalCostInv)}</strong></span>
+                    : <span>{docLabel} for <strong>{scopes[0]?.name||scopes[0]?.email}</strong> · <strong>{allBkgs.length}</strong> booking{allBkgs.length!==1?"s":""} · <strong style={{color:"#15803d"}}>{fmtCost(totalCostInv)}</strong></span>
+                  }
+                </div>
+                <div style={{fontSize:10,color:"#94a3b8"}}>
+                  From summary filter: {dateFrom||"…"} → {dateTo||"…"}
+                  {emailFilterSet.size>0?` · ${emailFilterSet.size} booker${emailFilterSet.size!==1?"s":""}`:" · all bookers"}
+                  {invIncludeInvoiced?"":" · invoiced bookings excluded"}
+                </div>
+                {allBkgs.length===0&&(
+                  <div style={{color:"#f43f5e",fontSize:11,fontWeight:600}}>
+                    No bookings match. {!invIncludeInvoiced&&"Try enabling \"Include previously-invoiced\" — "}adjust the date preset or booker filter in the summary view.
+                  </div>
+                )}
               </div>
 
               {invMode==="draft" && (
