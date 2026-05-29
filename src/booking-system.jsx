@@ -3042,6 +3042,9 @@ function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onLoadT
   const [expandedId, setExpandedId] = useState(null);
   const [expandedBatchId, setExpandedBatchId] = useState(null);
   const [expandedSubId, setExpandedSubId] = useState(null);
+  const [exportMode, setExportMode] = useState("grouped"); // "grouped" | "individual"
+
+  const SHORT_STATUS = { draft:"Draft", submitted:"Sent", gtec_invoiced:"GTEC", club_invoiced:"Club", complete:"Done" };
 
   const canonEmail = em => (emailAliases[(em||"").toLowerCase()] || em || "").toLowerCase();
   const displayName = em => {
@@ -3072,13 +3075,15 @@ function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onLoadT
     const bs = Object.entries(batchMap).map(([batchId, recs]) => {
       const invRecs = recs.filter(r => r.type !== "purchase_order");
       const poRec = recs.find(r => r.type === "purchase_order");
+      // Display order: PO → grouped INVs (future: GTEC receipt → club receipts)
+      const ordered = [poRec, ...invRecs].filter(Boolean);
       const worstStatus = recs.reduce((worst, r) => {
         const wi = PIPELINE_KEYS.indexOf(worst);
         const ri = PIPELINE_KEYS.indexOf(r.status || "draft");
         return ri < wi ? (r.status || "draft") : worst;
       }, "complete");
       return {
-        batchId, records: recs, invRecs, poRec,
+        batchId, records: ordered, invRecs, poRec,
         orderName: recs[0].orderName || "",
         createdAt: recs[0].createdAt || "",
         dateFrom: recs[0].dateFrom || "",
@@ -3294,17 +3299,12 @@ function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onLoadT
                   {dt==="purchase_order"?"📋 PO":"🧾 Invoice"} <span style={{fontFamily:"monospace",fontSize:10,color:"#94a3b8"}}>{id}</span>
                 </span>
                 {[{fmt:"html",label:"HTML",icon:"🌐"},{fmt:"print",label:"PDF",icon:"🖨"},{fmt:"csv",label:"CSV",icon:"📊"}].map(({fmt,label,icon})=>(
-                  <button key={fmt} onClick={()=>downloadRecord(rec,fmt,dt,"grouped")}
+                  <button key={fmt} onClick={()=>downloadRecord(rec,fmt,dt,exportMode)}
+                    title={`${exportMode==="individual"?"Itemised":"Grouped"} ${label}`}
                     style={{padding:"5px 9px",border:"none",borderLeft:"1px solid #f1f5f9",background:"#fff",cursor:"pointer",fontSize:11,fontWeight:600,color:"#0f172a",fontFamily:"inherit"}}>
                     {icon} {label}
                   </button>
                 ))}
-                {(rec.individualLines||[]).length>0&&(
-                  <button onClick={()=>downloadRecord(rec,"html",dt,"individual")}
-                    style={{padding:"5px 9px",border:"none",borderLeft:"1px solid #f1f5f9",background:"#f5f3ff",cursor:"pointer",fontSize:11,fontWeight:700,color:"#5b21b6",fontFamily:"inherit"}}>
-                    📑 Itemised
-                  </button>
-                )}
               </div>
             ))}
           </div>
@@ -3315,17 +3315,16 @@ function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onLoadT
             <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
               <thead>
                 <tr style={{background:"#f8fafc"}}>
-                  {["Description","Qty","Rate","Amount"].map(h=>(
-                    <th key={h} style={{padding:"4px 8px",textAlign:h==="Amount"||h==="Rate"||h==="Qty"?"right":"left",fontWeight:700,color:"#64748b",borderBottom:"1px solid #e2e8f0"}}>{h}</th>
+                  {["Description","Detail","Amount"].map(h=>(
+                    <th key={h} style={{padding:"4px 8px",textAlign:h==="Amount"?"right":"left",fontWeight:700,color:"#64748b",borderBottom:"1px solid #e2e8f0"}}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {rec.lines.map((l,i)=>(
                   <tr key={i} style={{borderBottom:"1px solid #f1f5f9"}}>
-                    <td style={{padding:"4px 8px",color:"#0f172a"}}>{l.description||l.label||"—"}</td>
-                    <td style={{padding:"4px 8px",textAlign:"right",color:"#475569"}}>{l.qty!=null?l.qty:"—"}</td>
-                    <td style={{padding:"4px 8px",textAlign:"right",color:"#475569"}}>{l.rate!=null?`$${Number(l.rate).toFixed(2)}`:"—"}</td>
+                    <td style={{padding:"4px 8px",color:"#0f172a"}}>{l.desc||l.description||l.label||"—"}</td>
+                    <td style={{padding:"4px 8px",color:"#64748b"}}>{l.detail||"—"}</td>
                     <td style={{padding:"4px 8px",textAlign:"right",fontWeight:600,color:"#0f172a"}}>{l.cost!=null?`$${Number(l.cost).toFixed(2)}`:"—"}</td>
                   </tr>
                 ))}
@@ -3404,32 +3403,47 @@ function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onLoadT
               <span style={{color:"#c4b5fd"}}>·</span>
               <span style={{color:"#475569"}}>{new Date(batch.createdAt).toLocaleDateString("en-NZ",{day:"numeric",month:"short",year:"numeric"})}</span>
             </div>
-            {/* Sub-record chips */}
+            {/* Sub-record chips — display order: PO → INVs. Click name expands; ↓ icon downloads */}
             <div style={{display:"flex",gap:5,flexWrap:"wrap",marginTop:6}}>
-              {batch.invRecs.map(r=>(
-                <button key={r.id} onClick={e=>{e.stopPropagation();setExpandedBatchId(batch.batchId);setExpandedSubId(r.id);}}
-                  style={{padding:"3px 8px",borderRadius:6,border:`1.5px solid ${activeSubRec?.id===r.id?"#4f46e5":"#c7d2fe"}`,
-                    background:activeSubRec?.id===r.id?"#4f46e5":"#eef2ff",
-                    color:activeSubRec?.id===r.id?"#fff":"#4338ca",
-                    cursor:"pointer",fontSize:10,fontWeight:700,fontFamily:"monospace"}}>
-                  INV · {displayName(r.bookerEmail)} <span style={{opacity:0.7,fontWeight:400}}>{r.id}</span>
-                </button>
-              ))}
-              {batch.poRec&&(
-                <button key={batch.poRec.id} onClick={e=>{e.stopPropagation();setExpandedBatchId(batch.batchId);setExpandedSubId(batch.poRec.id);}}
-                  style={{padding:"3px 8px",borderRadius:6,border:`1.5px solid ${activeSubRec?.id===batch.poRec.id?"#1d4ed8":"#bfdbfe"}`,
-                    background:activeSubRec?.id===batch.poRec.id?"#1d4ed8":"#dbeafe",
-                    color:activeSubRec?.id===batch.poRec.id?"#fff":"#1d4ed8",
-                    cursor:"pointer",fontSize:10,fontWeight:700,fontFamily:"monospace"}}>
-                  PO · GTEC <span style={{opacity:0.7,fontWeight:400}}>{batch.poRec.id}</span>
-                </button>
-              )}
+              {batch.records.map(r=>{
+                const isPOChip = r.type==="purchase_order";
+                const active = activeSubRec?.id===r.id;
+                const tone = isPOChip
+                  ? { borderActive:"#1d4ed8", borderIdle:"#bfdbfe", bgActive:"#1d4ed8", bgIdle:"#dbeafe", fgActive:"#fff", fgIdle:"#1d4ed8" }
+                  : { borderActive:"#4f46e5", borderIdle:"#c7d2fe", bgActive:"#4f46e5", bgIdle:"#eef2ff", fgActive:"#fff", fgIdle:"#4338ca" };
+                const dt = isPOChip ? "purchase_order" : "invoice";
+                const label = isPOChip ? "PO · GTEC" : `INV · ${displayName(r.bookerEmail)}`;
+                return (
+                  <div key={r.id} style={{display:"inline-flex",borderRadius:6,overflow:"hidden",border:`1.5px solid ${active?tone.borderActive:tone.borderIdle}`}}>
+                    <button onClick={e=>{e.stopPropagation();setExpandedBatchId(batch.batchId);setExpandedSubId(r.id);}}
+                      style={{padding:"3px 8px",border:"none",background:active?tone.bgActive:tone.bgIdle,color:active?tone.fgActive:tone.fgIdle,
+                        cursor:"pointer",fontSize:10,fontWeight:700,fontFamily:"monospace"}}>
+                      {label} <span style={{opacity:0.7,fontWeight:400}}>{r.id}</span>
+                    </button>
+                    <button onClick={e=>{e.stopPropagation();downloadRecord(r,"html",dt,exportMode);}}
+                      title={`Download ${exportMode} HTML`}
+                      style={{padding:"3px 7px",border:"none",borderLeft:`1px solid ${active?tone.borderActive:tone.borderIdle}`,
+                        background:active?tone.bgActive:tone.bgIdle,color:active?tone.fgActive:tone.fgIdle,cursor:"pointer",fontSize:11}}>
+                      ↓
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
             <span style={{fontSize:13,fontWeight:700,color:"#312e81"}}>{fmtMoney(batch.total)}</span>
             <StatusPill status={batch.status}/>
-            {onLoadToSummary&&isAdmin&&(
+            <button onClick={e=>{e.stopPropagation();
+              batch.records.forEach(r=>{
+                const dt = r.type==="purchase_order"?"purchase_order":"invoice";
+                downloadRecord(r,"html",dt,exportMode);
+              });
+            }} title={`Open HTML for all ${batch.records.length} records (${exportMode})`}
+              style={{padding:"3px 9px",borderRadius:6,border:"1.5px solid #c4b5fd",background:"#ede9fe",color:"#6d28d9",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"}}>
+              📥 Download all
+            </button>
+            {onLoadToSummary&&(
               <button onClick={e=>{e.stopPropagation();onLoadToSummary(summaryRec);}}
                 title="Load date range into Summary view"
                 style={{padding:"3px 9px",borderRadius:6,border:"1.5px solid #c7d2fe",background:"#eef2ff",color:"#4338ca",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"}}>
@@ -3469,19 +3483,34 @@ function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onLoadT
 
   return (
     <div style={{fontFamily:"'DM Sans','Segoe UI',system-ui,sans-serif"}}>
-      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:16,flexWrap:"wrap"}}>
-        <span style={{fontSize:15,fontWeight:800,color:"#0f172a"}}>🧾 Billing Records</span>
-        <div style={{marginLeft:"auto",display:"flex",gap:6,flexWrap:"wrap"}}>
-          {[{k:"all",l:"All"}, ...PIPELINE_STATES].map(s=>(
-            <button key={s.k||s.key} onClick={()=>setFilterStatus(s.k||s.key)}
-              style={{padding:"4px 10px",borderRadius:20,border:"1px solid",cursor:"pointer",fontSize:11,fontWeight:600,fontFamily:"inherit",
-                borderColor:filterStatus===(s.k||s.key)?"#0f172a":"#e2e8f0",
-                background:filterStatus===(s.k||s.key)?"#0f172a":"#fff",
-                color:filterStatus===(s.k||s.key)?"#fff":"#64748b"}}>
-              {s.l||s.label}
-            </button>
-          ))}
+      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12,flexWrap:"wrap"}}>
+        <span style={{fontSize:15,fontWeight:800,color:"#0f172a",whiteSpace:"nowrap"}}>🧾 Billing Records</span>
+        <div style={{marginLeft:"auto",display:"flex",gap:4,flexWrap:"nowrap",overflowX:"auto",scrollbarWidth:"none",maxWidth:"100%"}}>
+          {[{k:"all",l:"All"}, ...PIPELINE_STATES].map(s=>{
+            const key = s.k||s.key;
+            const label = s.l || SHORT_STATUS[s.key] || s.label;
+            const active = filterStatus===key;
+            return (
+              <button key={key} onClick={()=>setFilterStatus(key)} title={s.description||s.label||s.l}
+                style={{padding:"3px 9px",borderRadius:14,border:"1px solid",cursor:"pointer",fontSize:11,fontWeight:600,fontFamily:"inherit",whiteSpace:"nowrap",flexShrink:0,
+                  borderColor:active?"#0f172a":"#e2e8f0",background:active?"#0f172a":"#fff",color:active?"#fff":"#64748b"}}>
+                {label}
+              </button>
+            );
+          })}
         </div>
+      </div>
+      {/* Export mode toggle */}
+      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12,padding:"6px 10px",background:"#f8fafc",borderRadius:8,fontSize:11}}>
+        <span style={{color:"#64748b",fontWeight:600}}>Export mode:</span>
+        {[{k:"grouped",l:"Grouped"},{k:"individual",l:"Itemised"}].map(opt=>(
+          <button key={opt.k} onClick={()=>setExportMode(opt.k)}
+            style={{padding:"3px 10px",borderRadius:6,border:"1px solid",cursor:"pointer",fontSize:11,fontWeight:600,fontFamily:"inherit",
+              borderColor:exportMode===opt.k?"#4338ca":"#e2e8f0",background:exportMode===opt.k?"#4338ca":"#fff",color:exportMode===opt.k?"#fff":"#475569"}}>
+            {opt.l}
+          </button>
+        ))}
+        <span style={{color:"#94a3b8",marginLeft:"auto",fontSize:10}}>applies to chip + Download All clicks</span>
       </div>
 
       {batches.length===0&&ungrouped.length===0&&(
