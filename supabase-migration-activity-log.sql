@@ -22,7 +22,8 @@ create index if not exists activity_log_session_idx    on public.activity_log (s
 -- RLS — activity_log
 --   INSERT: any authenticated user may log their own rows (user_id = auth.uid()).
 --   SELECT: admins only (audit trail is not exposed to regular users).
---   UPDATE/DELETE: nobody (append-only).
+--   DELETE: admins only — used by the Log Retention purge to drop entries older
+--           than the configured window. UPDATE: nobody (entries are immutable).
 -- ============================================================
 alter table public.activity_log enable row level security;
 
@@ -35,5 +36,11 @@ create policy "activity insert own"
 drop policy if exists "activity select admin" on public.activity_log;
 create policy "activity select admin"
   on public.activity_log for select
+  to authenticated
+  using (public.is_admin());
+
+drop policy if exists "activity delete admin" on public.activity_log;
+create policy "activity delete admin"
+  on public.activity_log for delete
   to authenticated
   using (public.is_admin());

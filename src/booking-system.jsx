@@ -60,6 +60,12 @@ const sb = {
       headers: authHeaders() });
     if (!r.ok) throw new Error(await r.text());
   },
+  // Delete rows matching a raw PostgREST filter query (e.g. "created_at=lt.2025-01-01").
+  async removeWhere(table, query) {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${query}`, { method:"DELETE",
+      headers: authHeaders() });
+    if (!r.ok) throw new Error(await r.text());
+  },
   async upsert(table, data, onConflict="key") {
     const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}?on_conflict=${onConflict}`, { method:"POST",
       headers: authHeaders({ "Content-Type":"application/json", Prefer:"return=representation,resolution=merge-duplicates" }),
@@ -5398,6 +5404,9 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
 function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,clashes=[],deleteIds=new Set(),facilityRates={},onUpdateFacilityRate,onClearOldUnapproved,silentMode=false,approxPlayers={},onUpdateApproxPlayers,approxDurations={},onUpdateApproxDuration,onSyncDB,onBulkApply,onSaveMismatch,onMarkAdjustmentSettled,loggedInEmail,syncResults=[],onClearSyncResults,showSyncResults=false,onToggleSyncResults,aliasNames={},emailAliases={}}) {
   const [showSchedulePanel, setShowSchedulePanel] = useState(false);
   const [showActivityPanel, setShowActivityPanel] = useState(false);
+  // Which sync-result months are expanded in the grouped dropdown (monthKey set).
+  const [expandedSyncMonths, setExpandedSyncMonths] = useState(()=>new Set());
+  const toggleSyncMonth = mk => setExpandedSyncMonths(prev=>{ const s=new Set(prev); s.has(mk)?s.delete(mk):s.add(mk); return s; });
   const adminAlias = em => {
     if (!em) return em;
     const primary = (emailAliases[em.toLowerCase()] || em).toLowerCase();
@@ -5629,33 +5638,49 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
         <div style={{background:"#ecfeff",border:"1.5px solid #a5f3fc",borderRadius:12,padding:16,display:"flex",flexDirection:"column",gap:8}}>
           <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
             <span style={{fontWeight:700,fontSize:14,color:"#0e7490"}}>🔄 CPSA Sync Results</span>
-            <span style={{fontSize:11,color:"#0891b2",marginLeft:"auto"}}>{syncResults.length} month{syncResults.length!==1?"s":""} · months with no new items clear on next sync</span>
+            <span style={{fontSize:11,color:"#0891b2",marginLeft:"auto"}}>{syncResults.length} month{syncResults.length!==1?"s":""} · grouped by month, tap to expand</span>
             {onClearSyncResults&&<button onClick={onClearSyncResults} style={{padding:"3px 10px",borderRadius:6,border:"1px solid #a5f3fc",background:"#fff",color:"#0e7490",cursor:"pointer",fontSize:11,fontWeight:600,fontFamily:"inherit"}}>Clear all</button>}
           </div>
-          {[...syncResults].sort((a,b)=>(a.monthKey||"").localeCompare(b.monthKey||"")).map(r=>{
-            const hasChanges = (r.added||0)+(r.cpsaConfirmed||0)+(r.cpsaReviewNeeded||0)+(r.removed||0)+(r.clashes||0) > 0;
+          {/* Group by month (newest first); each month collapses to a one-line summary
+              and expands to the full breakdown + date of the latest exact new change. */}
+          {[...syncResults].sort((a,b)=>(b.monthKey||"").localeCompare(a.monthKey||"")).map(r=>{
+            const changeCount = (r.added||0)+(r.cpsaConfirmed||0)+(r.cpsaReviewNeeded||0)+(r.removed||0)+(r.clashes||0);
+            const hasChanges = changeCount > 0;
+            const open = expandedSyncMonths.has(r.monthKey);
+            const fmt = iso => iso ? new Date(iso).toLocaleString("en-NZ",{day:"numeric",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"}) : "—";
             return (
-              <div key={r.monthKey} style={{background:"#fff",border:`1px solid ${r.error?"#fecaca":hasChanges?"#7dd3fc":"#cffafe"}`,borderRadius:8,padding:"8px 14px"}}>
-                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:r.error?0:6}}>
+              <div key={r.monthKey} style={{background:"#fff",border:`1px solid ${r.error?"#fecaca":hasChanges?"#7dd3fc":"#cffafe"}`,borderRadius:8,overflow:"hidden"}}>
+                <button onClick={()=>toggleSyncMonth(r.monthKey)} style={{width:"100%",display:"flex",alignItems:"center",gap:8,padding:"8px 14px",background:"transparent",border:"none",cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
+                  <span style={{fontSize:11,color:"#0891b2",width:12,flexShrink:0}}>{open?"▾":"▸"}</span>
                   <span style={{fontWeight:700,fontSize:12,color:r.error?"#b91c1c":"#0c4a6e"}}>{r.label}</span>
-                  {hasChanges&&<span style={{fontSize:10,fontWeight:700,background:"#0ea5e9",color:"#fff",borderRadius:10,padding:"1px 6px"}}>changes</span>}
+                  {r.error
+                    ? <span style={{fontSize:10,fontWeight:700,background:"#fecaca",color:"#b91c1c",borderRadius:10,padding:"1px 6px"}}>error</span>
+                    : hasChanges
+                      ? <span style={{fontSize:10,fontWeight:700,background:"#0ea5e9",color:"#fff",borderRadius:10,padding:"1px 6px"}}>{changeCount} change{changeCount!==1?"s":""}</span>
+                      : <span style={{fontSize:10,fontWeight:600,color:"#94a3b8"}}>no new changes</span>}
                   <span style={{fontSize:10,color:"#94a3b8",marginLeft:"auto"}}>{r.syncedAt?new Date(r.syncedAt).toLocaleString("en-NZ",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}):"—"}</span>
-                </div>
-                {r.error
-                  ? <div style={{fontSize:12,color:"#b91c1c"}}>⚠ {r.error}</div>
-                  : <div style={{display:"flex",flexDirection:"column",gap:3,paddingLeft:12,borderLeft:"2px solid #e0f2fe"}}>
-                      {[
-                        r.added>0 && <span style={{color:"#0e7490",fontSize:12}}>＋ <strong>{r.added}</strong> booking{r.added!==1?"s":""} added</span>,
-                        r.skipped>0 && <span style={{color:"#64748b",fontSize:12}}>— <strong>{r.skipped}</strong> already existed</span>,
-                        r.cpsaConfirmed>0 && <span style={{color:"#0891b2",fontSize:12}}>🌐 <strong>{r.cpsaConfirmed}</strong> CPSA-confirmed</span>,
-                        r.cpsaReviewNeeded>0 && <span style={{color:"#b45309",fontSize:12}}>⚠ <strong>{r.cpsaReviewNeeded}</strong> need review</span>,
-                        r.clashes>0 && <span style={{color:"#c2410c",fontSize:12}}>⚡ <strong>{r.clashes}</strong> clash{r.clashes!==1?"es":""} flagged</span>,
-                        r.notified>0 && <span style={{color:"#7c3aed",fontSize:12}}>📧 <strong>{r.notified}</strong> queued to notify</span>,
-                        r.removed>0 && <span style={{color:"#94a3b8",fontSize:12}}>✕ <strong>{r.removed}</strong> stale removed</span>,
-                        !hasChanges && <span style={{color:"#94a3b8",fontSize:12,fontStyle:"italic"}}>No new changes — will clear on next sync</span>,
-                      ].filter(Boolean).map((el,i)=><div key={i}>{el}</div>)}
-                    </div>
-                }
+                </button>
+                {open&&(
+                  <div style={{padding:"0 14px 10px 38px"}}>
+                    {r.error
+                      ? <div style={{fontSize:12,color:"#b91c1c"}}>⚠ {r.error}</div>
+                      : <div style={{display:"flex",flexDirection:"column",gap:3,paddingLeft:12,borderLeft:"2px solid #e0f2fe"}}>
+                          {[
+                            r.added>0 && <span style={{color:"#0e7490",fontSize:12}}>＋ <strong>{r.added}</strong> booking{r.added!==1?"s":""} added</span>,
+                            r.skipped>0 && <span style={{color:"#64748b",fontSize:12}}>— <strong>{r.skipped}</strong> already existed</span>,
+                            r.cpsaConfirmed>0 && <span style={{color:"#0891b2",fontSize:12}}>🌐 <strong>{r.cpsaConfirmed}</strong> CPSA-confirmed</span>,
+                            r.cpsaReviewNeeded>0 && <span style={{color:"#b45309",fontSize:12}}>⚠ <strong>{r.cpsaReviewNeeded}</strong> need review</span>,
+                            r.clashes>0 && <span style={{color:"#c2410c",fontSize:12}}>⚡ <strong>{r.clashes}</strong> clash{r.clashes!==1?"es":""} flagged</span>,
+                            r.notified>0 && <span style={{color:"#7c3aed",fontSize:12}}>📧 <strong>{r.notified}</strong> queued to notify</span>,
+                            r.removed>0 && <span style={{color:"#94a3b8",fontSize:12}}>✕ <strong>{r.removed}</strong> stale removed</span>,
+                            !hasChanges && <span style={{color:"#94a3b8",fontSize:12,fontStyle:"italic"}}>No new changes in the latest sync.</span>,
+                          ].filter(Boolean).map((el,i)=><div key={i}>{el}</div>)}
+                          <div style={{marginTop:5,fontSize:11,color:"#64748b"}}>🕑 Latest new change: <strong>{r.lastChangeAt?fmt(r.lastChangeAt):"none yet"}</strong></div>
+                          <div style={{fontSize:11,color:"#94a3b8"}}>Last checked: {fmt(r.syncedAt)}</div>
+                        </div>
+                    }
+                  </div>
+                )}
               </div>
             );
           })}
@@ -6754,9 +6779,20 @@ export default function App() {
   const [prefill,  setPrefill]  =useState({date:null,startHour:9,duration:1});
   const [toast,    setToast]    =useState(null);
   const [syncingMonth, setSyncingMonth] = useState(false);
-  // Cumulative results across all months queried while the sync popup is open.
-  // Each entry: { month, label, added, skipped, removed, cpsaConfirmed, cpsaReviewNeeded, clashes, items: [...] }
-  const [syncResults, setSyncResults] = useState([]);
+  // Cumulative sync log across all months ever synced (persisted so the monthly
+  // log survives reloads; old entries are purged per the admin retention setting).
+  // Each entry: { monthKey, label, added, skipped, removed, cpsaConfirmed,
+  //   cpsaReviewNeeded, clashes, notified, syncedAt, lastChangeAt }
+  const [syncResults, setSyncResults] = useState(()=>{
+    try{ return JSON.parse(localStorage.getItem("fb_sync_results")||"[]"); }catch{ return []; }
+  });
+  useEffect(()=>{ try{ localStorage.setItem("fb_sync_results", JSON.stringify(syncResults)); }catch{} }, [syncResults]);
+  // Admin-configurable retention (in months) for activity & sync logs. 0 = keep forever.
+  const [logRetentionMonths, setLogRetentionMonthsState] = useState(()=>{
+    const v = parseInt(localStorage.getItem("fb_log_retention_months"),10);
+    return Number.isFinite(v) ? v : 1;
+  });
+  const [showRetentionModal, setShowRetentionModal] = useState(false);
   const [showSyncPanel, setShowSyncPanel] = useState(false);
   const [showActivityLog, setShowActivityLog] = useState(false);
   const [showRatesModal, setShowRatesModal] = useState(false);
@@ -6909,6 +6945,11 @@ export default function App() {
       if (map.approx_durations && typeof map.approx_durations === "object") {
         setApproxDurations(map.approx_durations);
         try{localStorage.setItem("fb_approx_durations",JSON.stringify(map.approx_durations));}catch{}
+      }
+      if (Number.isFinite(parseInt(map.log_retention_months,10))) {
+        const m = parseInt(map.log_retention_months,10);
+        setLogRetentionMonthsState(m);
+        try{localStorage.setItem("fb_log_retention_months",String(m));}catch{}
       }
     } catch(e) {
       // settings table may not yet exist; silent fallback to localStorage
@@ -7107,15 +7148,22 @@ export default function App() {
 
       const label = `${MONTHS[month]} ${year}`;
       const monthKey = `${year}-${String(month+1).padStart(2,"0")}`;
+      const syncedAt = new Date().toISOString();
+      const hadChanges = added + cpsaConfirmed + cpsaReviewNeeded + removed + clashUpdates > 0;
       setSyncResults(prev => {
+        const existing = prev.find(r => r.monthKey === monthKey);
         const without = prev.filter(r => r.monthKey !== monthKey);
-        return [...without, { monthKey, label, added, skipped, removed, cpsaConfirmed, cpsaReviewNeeded, clashes: clashUpdates, notified: cpsaNotifications.length, syncedAt: new Date().toISOString() }];
+        // lastChangeAt = when this month last produced an actual new change; preserved
+        // from the prior result when this sync turned up nothing new.
+        const lastChangeAt = hadChanges ? syncedAt : (existing?.lastChangeAt || null);
+        return [...without, { monthKey, label, added, skipped, removed, cpsaConfirmed, cpsaReviewNeeded, clashes: clashUpdates, notified: cpsaNotifications.length, syncedAt, lastChangeAt }];
       });
     } catch(e) {
       setSyncResults(prev => {
         const monthKey = `${year}-${String(month+1).padStart(2,"0")}`;
+        const existing = prev.find(r => r.monthKey === monthKey);
         const without = prev.filter(r => r.monthKey !== monthKey);
-        return [...without, { monthKey, label: `${MONTHS[month]} ${year}`, error: e.message, syncedAt: new Date().toISOString() }];
+        return [...without, { monthKey, label: `${MONTHS[month]} ${year}`, error: e.message, syncedAt: new Date().toISOString(), lastChangeAt: existing?.lastChangeAt || null }];
       });
     } finally {
       setSyncingMonth(false);
@@ -7133,17 +7181,15 @@ export default function App() {
       months.add(`${parseInt(y)}-${parseInt(m)-1}`);
     }
     const sorted = [...months].map(k=>k.split("-").map(Number)).sort((a,b)=>a[0]-b[0]||a[1]-b[1]);
-    // Pre-clean: remove months that had no changes on previous sync so they get a fresh result
-    setSyncResults(prev => prev.filter(r => {
-      const had = (r.added||0)+(r.cpsaConfirmed||0)+(r.cpsaReviewNeeded||0)+(r.removed||0)+(r.clashes||0);
-      return had > 0;
-    }));
+    // Drop months that have aged out of the retention window before re-syncing.
+    purgeOldLogs();
     logActivity("cpsa_sync_start", { months: sorted.length });
     for (const [y,m] of sorted) {
       await handleSyncMonth(y, m);
     }
     try{localStorage.setItem("fb_last_sync_at", String(Date.now()));}catch{}
     logActivity("cpsa_sync_complete", { months: sorted.length });
+    purgeOldLogs();
     // Notify with a non-intrusive toast
     setSyncResults(cur => {
       const total = cur.reduce((s,r)=>s+(r.added||0),0);
@@ -7174,7 +7220,10 @@ export default function App() {
     const pruned = [...listBookerFilter].filter(em=>present.has(em));
     if(pruned.length!==listBookerFilter.size) setListBookerFilter(new Set(pruned));
   },[bookings,loading,listBookerFilter]);
-  useEffect(()=>{ loadSettings(); /* eslint-disable-next-line */ },[]);
+  useEffect(()=>{
+    (async()=>{ await loadSettings(); purgeOldLogs(); })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[]);
 
   const openNew=useCallback((date,startHour,duration=1,facility=null)=>{setEditing(null);setPrefill({date,startHour,duration,facility});setDayPopupDate(null);setShowForm(true);},[]);
   const openDay=useCallback((dk,focusHour=null)=>{setDayPopupDate(dk);setDayPopupFocus(focusHour);},[]);
@@ -7254,6 +7303,28 @@ export default function App() {
     setPricingModeState(mode);
     try{localStorage.setItem("fb_pricing_mode", mode);}catch{}
   }
+  function setLogRetentionMonths(months) {
+    const m = Math.max(0, parseInt(months,10) || 0);
+    setLogRetentionMonthsState(m);
+    try{localStorage.setItem("fb_log_retention_months", String(m));}catch{}
+    persistSetting("log_retention_months", m);
+    purgeOldLogs(m);
+  }
+  // Purge activity-log rows and sync-log months older than the retention window.
+  // 0 months = keep forever. Activity-log deletes require the admin DELETE policy
+  // from supabase-migration-activity-log.sql.
+  async function purgeOldLogs(months = logRetentionMonths) {
+    const m = Math.max(0, parseInt(months,10) || 0);
+    if (!m) return;
+    const cutoff = new Date();
+    cutoff.setMonth(cutoff.getMonth() - m);
+    const cutoffISO = cutoff.toISOString();
+    setSyncResults(prev => prev.filter(r => !r.syncedAt || r.syncedAt >= cutoffISO));
+    if (configured && isAdmin) {
+      try { await sb.removeWhere("activity_log", `created_at=lt.${cutoffISO}`); }
+      catch(e) { console.warn("purgeOldLogs activity_log:", e.message); }
+    }
+  }
   function updateApproxPlayers(email, value) {
     const v = Math.max(0, parseInt(value) || 0);
     const next = { ...approxPlayers, [email.toLowerCase()]: v };
@@ -7275,6 +7346,7 @@ export default function App() {
     await persistSetting("facility_rates", facilityRates);
     await persistSetting("approx_players", approxPlayers);
     await persistSetting("approx_durations", approxDurations);
+    await persistSetting("log_retention_months", logRetentionMonths);
     showToast("Synced with database.");
   }
 
@@ -7749,6 +7821,7 @@ export default function App() {
                           <UserMenuItem icon="👥" label="Player Counts" onClick={()=>{setShowUserMenu(false);setShowPlayersModal(true);}}/>
                           <UserMenuItem icon="👤" label="User Management" onClick={()=>{setShowUserMenu(false);setShowUserMgmtModal(true);}}/>
                           <UserMenuItem icon="📜" label="Activity Log" onClick={()=>{setShowUserMenu(false);setShowActivityLog(true);}}/>
+                          <UserMenuItem icon="🗑" label="Log Retention" onClick={()=>{setShowUserMenu(false);setShowRetentionModal(true);}}/>
                           <UserMenuItem icon="⬇" label="Reload from DB" onClick={()=>{setShowUserMenu(false);handleSyncDB();}}/>
                         </div>
                       )}
@@ -8064,6 +8137,32 @@ export default function App() {
 
       {showActivityLog&&isAdmin&&(
         <ActivityLogModal onClose={()=>setShowActivityLog(false)}/>
+      )}
+
+      {showRetentionModal&&isAdmin&&(
+        <Modal title="🗑 Log Retention" onClose={()=>setShowRetentionModal(false)} width={460}>
+          <div style={{fontSize:12,color:"#64748b",marginBottom:14}}>
+            How long to keep <strong>activity-log entries</strong> and <strong>monthly sync results</strong> before
+            they're automatically purged. Purging runs when an admin loads the app and after each CPSA sync.
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+            <span style={{fontSize:13,color:"#0f172a",fontWeight:600}}>Keep logs for</span>
+            <input type="number" min="0" step="1" value={logRetentionMonths}
+              onChange={e=>setLogRetentionMonths(e.target.value)}
+              style={{width:80,padding:"5px 8px",borderRadius:6,border:"1.5px solid #e2e8f0",fontSize:14,textAlign:"right",fontFamily:"inherit",outline:"none"}}/>
+            <span style={{fontSize:13,color:"#64748b"}}>month{logRetentionMonths===1?"":"s"}</span>
+          </div>
+          <div style={{fontSize:11,color:"#94a3b8",marginTop:8}}>Set to 0 to keep logs forever (no automatic purge).</div>
+          {configured&&(
+            <div style={{fontSize:11,color:"#94a3b8",marginTop:10,background:"#f8fafc",border:"1px solid #f1f5f9",borderRadius:6,padding:"6px 10px"}}>
+              Activity-log purging needs the admin <code>DELETE</code> policy from <code>supabase-migration-activity-log.sql</code>.
+            </div>
+          )}
+          <div style={{marginTop:16,display:"flex",justifyContent:"flex-end",gap:8}}>
+            <button onClick={()=>{purgeOldLogs();setShowRetentionModal(false);showToast("Old logs purged.");}} style={S.btn({background:"#fff",color:"#0f172a",border:"1.5px solid #e2e8f0",fontSize:12})}>Purge now</button>
+            <button onClick={()=>setShowRetentionModal(false)} style={S.btn({background:"#0f172a",color:"#fff",fontSize:12})}>Done</button>
+          </div>
+        </Modal>
       )}
 
       {showRatesModal&&isAdmin&&(
