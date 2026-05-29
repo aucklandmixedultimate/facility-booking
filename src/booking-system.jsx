@@ -6082,18 +6082,18 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                       );
                     }
                     // Invoiced path — costDelta drives credit vs deficit.
-                    const overcharged = costDelta < 0; // we billed more than CPSA → owe credit
-                    const undercharged = costDelta > 0; // we billed less → owed deficit invoice
+                    const overcharged = costDelta > 0; // CPSA cost higher than billed → booker owes more → was undercharged from their side, but here treated as credit
+                    const undercharged = costDelta < 0; // CPSA cost lower than billed → booker owed less than charged → deficit
                     return (
                       <div style={{borderTop:"1px dashed #fde68a",paddingTop:4}}>
                         <div style={{fontSize:10,fontWeight:700,color:"#92400e",textTransform:"uppercase",letterSpacing:"0.04em",marginBottom:3}}>Billing</div>
                         {curBilling==="none"&&(
                           <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
                             {overcharged&&<button style={ghost("#15803d")}
-                              title={`Billed ${fmtCost(origCost)} (${b.duration}h) but CPSA shows ${cpsaVals.duration}h @ ${fmtCost(newCost)}. Overcharged by ${fmtCost(Math.abs(costDelta))}.`}
+                              title={`Billed ${fmtCost(origCost)} (${b.duration}h) but CPSA shows ${cpsaVals.duration}h @ ${fmtCost(newCost)}. Credit ${fmtCost(Math.abs(costDelta))} owed.`}
                               onClick={()=>setBilling("credit_pending")}>💚 Credit{absCostStr}</button>}
                             {undercharged&&<button style={ghost("#dc2626")}
-                              title={`Billed ${fmtCost(origCost)} (${b.duration}h) but CPSA shows ${cpsaVals.duration}h @ ${fmtCost(newCost)}. Undercharged by ${fmtCost(costDelta)}.`}
+                              title={`Billed ${fmtCost(origCost)} (${b.duration}h) but CPSA shows ${cpsaVals.duration}h @ ${fmtCost(newCost)}. Deficit ${fmtCost(Math.abs(costDelta))} owed.`}
                               onClick={()=>setBilling("invoice_pending")}>📨 Deficit{absCostStr}</button>}
                             {costDelta===0&&<span style={{fontSize:11,color:"#475569"}}>No billing impact.</span>}
                             <button style={ghost("#94a3b8")}
