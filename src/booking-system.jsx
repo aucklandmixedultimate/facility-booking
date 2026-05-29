@@ -2928,10 +2928,10 @@ function BillingTab({ billingRecords=[], onUpdateRecord, isAdmin=false, loggedIn
         {PIPELINE_STATES.map((s,i)=>{
           const done = i < idx, active = i === idx;
           return (
-            <React.Fragment key={s.key}>
+            <Fragment key={s.key}>
               {i>0&&<div style={{flex:1,height:2,background:done?"#22c55e":"#e2e8f0"}}/>}
               <div title={s.description} style={{width:14,height:14,borderRadius:"50%",background:done?"#22c55e":active?s.color:"#e2e8f0",border:`2px solid ${done?"#22c55e":active?s.color:"#cbd5e1"}`,flexShrink:0}}/>
-            </React.Fragment>
+            </Fragment>
           );
         })}
       </div>
@@ -3871,7 +3871,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
                     const isExpanded = expandedBookers.has(r.email.toLowerCase());
                     const bookerBkgs = bkgsByEmail[r.email.toLowerCase()] || [];
                     return (
-                    <React.Fragment key={r.email}>
+                    <Fragment key={r.email}>
                     <tr onMouseEnter={e=>e.currentTarget.style.background="#f8fafc"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
                       <td style={{...tdS,padding:"6px 4px",textAlign:"center"}}>
                         <button onClick={()=>toggleBookerExpand(r.email)} title={isExpanded?"Hide individual bookings":"Show individual bookings"}
@@ -4005,7 +4005,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
                         </tr>
                       );
                     })()}
-                    </React.Fragment>
+                    </Fragment>
                     );
                   })}
                 </tbody>
