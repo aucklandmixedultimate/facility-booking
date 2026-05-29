@@ -160,6 +160,13 @@ function fmtTime(h) {
   const hh=Math.floor(h), m=Math.round((h%1)*60), dh=hh>12?hh-12:hh===0?12:hh;
   return `${dh}:${m===0?"00":String(m).padStart(2,"0")} ${hh>=12?"PM":"AM"}`;
 }
+function fmt24(h) {
+  const hh=Math.floor(h), m=Math.round((h%1)*60);
+  return `${String(hh).padStart(2,"0")}:${m===0?"00":String(m).padStart(2,"0")}`;
+}
+function fmtDateShort(s) {
+  const d=new Date(s+"T00:00:00"); return `${d.getDate()} ${d.toLocaleDateString("en-NZ",{month:"short"})}`;
+}
 function fmtDate(s) { return new Date(s+"T00:00:00").toLocaleDateString("en-NZ",{weekday:"short",day:"numeric",month:"short",year:"numeric"}); }
 function fmtTimeShort(h) {
   const hh=Math.floor(h), m=Math.round((h%1)*60), dh=hh>12?hh-12:hh===0?12:hh;
@@ -1957,7 +1964,12 @@ function BookingDetail({booking,onEdit,onClose,onCancel,isAdmin,onStatusChange,l
   );
 }
 
-function WeekCalendar({ bookings, onNewBooking, onBookingClick, selectedFacility, cartSourceIds=new Set(), deleteIds=new Set(), cartNewDrafts=[], focusedDate, setFocusedDate, onOpenDay, bookerFilter=new Set() }) {
+function WeekCalendar({ bookings, onNewBooking, onBookingClick, selectedFacility, cartSourceIds=new Set(), deleteIds=new Set(), cartNewDrafts=[], focusedDate, setFocusedDate, onOpenDay, bookerFilter=new Set(), aliasNames={}, emailAliases={} }) {
+  function calAlias(em) {
+    if (!em) return "";
+    const primary = (emailAliases[em.toLowerCase()] || em).toLowerCase();
+    return aliasNames[primary] || primary.split("@")[0];
+  }
   const [localBase, setLocalBase] = useState(new Date());
   const weekBase    = focusedDate || localBase;
   const setWeekBase = setFocusedDate || setLocalBase;
@@ -2106,16 +2118,20 @@ function WeekCalendar({ bookings, onNewBooking, onBookingClick, selectedFacility
                           title={(()=>{const r=parseMismatchNote(b.system_notes,b.notes);return `${b.name} – ${fac?.name}`+(b.status==="cpsa_review_needed"&&r.length?`\n⚠ CPSA inconsistencies:\n${r.join("\n")}`:b.status==="cpsa_confirmed"?"\n🌐 CPSA confirmed":"");})()}
                           className={facSocial?(bkTxt==="#fff"?"fac-social-tex":"fac-social-tex-dark"):undefined}
                           style={{ position:"absolute", top:(b.start_hour-CAL_START)*HOUR_H, height:Math.max(b.duration*HOUR_H-2,20), background:bkBg, borderRadius:6, padding:"3px 6px", cursor:isDimmed?"default":"pointer", overflow:"hidden", opacity:isDimmed?dimOpacity:REVIEW_STATUSES.has(b.status)?0.75:1, pointerEvents:isDimmed?"none":"auto", border:deleteIds.has(b.id)?"2.5px solid #ef4444":cartSourceIds.has(b.id)?"2.5px solid #f59e0b":b.status==="clash"?"2px dashed #d97706":REVIEW_STATUSES.has(b.status)?`2px dashed ${bkTxt==="#fff"?"rgba(255,255,255,0.6)":"rgba(113,63,18,0.5)"}`:b.status==="rejected"?"2px solid rgba(244,63,94,0.8)":"none", boxShadow:deleteIds.has(b.id)?"0 0 0 3px rgba(239,68,68,0.25)":cartSourceIds.has(b.id)?"0 0 0 3px rgba(245,158,11,0.25)":"0 1px 4px rgba(0,0,0,0.15)", zIndex:2, borderLeft:bkBorderLeft, ...stk }}>
+                          {!isAdmin_bk&&b.email&&(
+                            <div style={{fontSize:9,fontWeight:700,color:bkTxt,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:3,opacity:0.92}}>
+                              <span style={{width:6,height:6,borderRadius:"50%",background:ec,flexShrink:0,boxShadow:"0 0 0 1px rgba(255,255,255,0.4)",display:"inline-block"}}/>
+                              {calAlias(b.email)}
+                            </div>
+                          )}
                           <div style={{display:"flex",alignItems:"center",gap:3,overflow:"hidden"}}>
-                            {!isAdmin_bk&&<span style={{width:7,height:7,borderRadius:"50%",background:ec,flexShrink:0,boxShadow:"0 0 0 1px rgba(255,255,255,0.4)",display:"inline-block"}}/>}
                             {b.status==="cpsa_review_needed"&&<span style={{fontSize:9,flexShrink:0,lineHeight:1}}>⚠</span>}
                             {b.status==="cpsa_confirmed"&&<span style={{fontSize:9,flexShrink:0,lineHeight:1}}>🌐</span>}
                             <div style={{ fontSize:11, fontWeight:700, color:bkTxt, lineHeight:1.3, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
                               {b.purpose||b.name}
-                              {!isAdmin_bk&&b.email&&<span style={{fontWeight:500,color:bkTxtMuted,marginLeft:4}}>· {b.email.split("@")[0]}</span>}
                             </div>
                           </div>
-                          {b.duration*HOUR_H>22&&!isAdmin_bk&&<div style={{ fontSize:9, color:bkTxtMuted, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", paddingLeft:10 }}>{b.name}</div>}
+                          {b.duration*HOUR_H>22&&!isAdmin_bk&&<div style={{ fontSize:9, color:bkTxtMuted, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", paddingLeft:0 }}>{b.name}</div>}
                           {b.duration*HOUR_H>32&&<div style={{display:"flex",alignItems:"center",gap:3,marginTop:1,paddingLeft:10}}>
                             {b.invoiced&&<span style={{fontSize:9,fontWeight:700,color:bkTxt==="#fff"?"rgba(255,255,255,0.9)":bkTxt,background:bkTxt==="#fff"?"rgba(124,58,237,0.5)":"rgba(124,58,237,0.15)",borderRadius:3,padding:"1px 4px",whiteSpace:"nowrap"}}>🧾</span>}
                           </div>}
@@ -2148,7 +2164,12 @@ function WeekCalendar({ bookings, onNewBooking, onBookingClick, selectedFacility
 }
 
 // ─── Month Calendar (multi-select + status chips) ───────────────────────────────
-function MonthCalendar({ bookings, onBookingClick, onNewBooking, selectedFacility, loggedInEmail, isAdmin, onMultiDelete, onMultiAddToCart, cartSourceIds=new Set(), deleteIds=new Set(), cartNewDrafts=[], onOpenDay, onGotoWeek, bookerFilter=new Set() }) {
+function MonthCalendar({ bookings, onBookingClick, onNewBooking, selectedFacility, loggedInEmail, isAdmin, onMultiDelete, onMultiAddToCart, cartSourceIds=new Set(), deleteIds=new Set(), cartNewDrafts=[], onOpenDay, onGotoWeek, bookerFilter=new Set(), aliasNames={}, emailAliases={} }) {
+  function calAlias(em) {
+    if (!em) return "";
+    const primary = (emailAliases[em.toLowerCase()] || em).toLowerCase();
+    return aliasNames[primary] || primary.split("@")[0];
+  }
   const now = new Date();
   const [year,   setYear]   = useState(now.getFullYear());
   const [month,  setMonth]  = useState(now.getMonth());
@@ -2244,7 +2265,7 @@ function MonthCalendar({ bookings, onBookingClick, onNewBooking, selectedFacilit
           const dk=dateKey(d), isToday=dk===today, isPast=dk<today;
           const dayBkgs=visible.filter(b=>b.date===dk)
             .sort((a,b)=>{
-              const ai=isAdminBooking(a)?0:1,bi=isAdminBooking(b)?0:1;
+              const ai=isAdminBooking(a)?1:0,bi=isAdminBooking(b)?1:0;
               if(ai!==bi) return ai-bi;
               if(bookerFilter.size>0){
                 const af=bookerFilter.has(a.email?.toLowerCase())?0:1;
@@ -2289,9 +2310,10 @@ function MonthCalendar({ bookings, onBookingClick, onNewBooking, selectedFacilit
                       {!isAdmin_bk&&<span style={{width:6,height:6,borderRadius:"50%",background:ec,flexShrink:0,display:"inline-block",boxShadow:"0 0 0 1px rgba(255,255,255,0.35)"}}/>}
                       {b.status==="cpsa_review_needed"&&<span style={{fontSize:8,flexShrink:0,lineHeight:1}}>⚠</span>}
                       {b.status==="cpsa_confirmed"&&<span style={{fontSize:8,flexShrink:0,lineHeight:1}}>🌐</span>}
-                      <span style={{overflow:"hidden",textOverflow:"ellipsis",flex:1}}>
-                        {fmtTime(b.start_hour)} {b.purpose||b.name}
-                        {!isAdmin_bk&&b.email&&<span style={{fontWeight:500,opacity:0.75,marginLeft:3}}>· {b.email.split("@")[0]}</span>}
+                      <span style={{overflow:"hidden",textOverflow:"ellipsis",flex:1,minWidth:0}}>
+                        {!isAdmin_bk&&b.email&&<span style={{fontWeight:700,opacity:0.9,marginRight:3}}>{calAlias(b.email)}</span>}
+                        <span style={{fontWeight:400,opacity:0.8,marginRight:3}}>{fmt24(b.start_hour)}</span>
+                        {b.purpose||b.name}
                       </span>
                       {b.invoiced&&<span style={{fontSize:8,flexShrink:0}}>🧾</span>}
                     </div>
@@ -5433,13 +5455,13 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                 <th style={{padding:"8px 10px",textAlign:"center",width:32}}>
                   <input type="checkbox" checked={allSelected} onChange={toggleAll} style={{width:14,height:14,accentColor:"#6366f1"}}/>
                 </th>
-                {[["date","Date"],["name","Booker"],["facility","Facility"],["status","Status"]].map(([col,label])=>(
-                  <th key={col} onClick={()=>toggleSort(col)} style={{padding:"8px 10px",textAlign:"left",cursor:"pointer",userSelect:"none",fontWeight:700,color:"#475569",whiteSpace:"nowrap"}}>
+                {[["date","Date"],["name","Booker"],["facility","Fac"],["status","Status"]].map(([col,label])=>(
+                  <th key={col} onClick={()=>toggleSort(col)} style={{padding:"5px 8px",textAlign:"left",cursor:"pointer",userSelect:"none",fontWeight:700,color:"#475569",whiteSpace:"nowrap",fontSize:11}}>
                     {label}{sortArrow(col)}
                   </th>
                 ))}
-                <th style={{padding:"8px 10px",textAlign:"left",fontWeight:700,color:"#475569"}}>Time · Purpose</th>
-                <th style={{padding:"8px 10px",textAlign:"right",fontWeight:700,color:"#475569"}}>Actions</th>
+                <th style={{padding:"5px 8px",textAlign:"left",fontWeight:700,color:"#475569",fontSize:11,whiteSpace:"nowrap"}}>Time · Purpose</th>
+                <th style={{padding:"5px 8px",textAlign:"right",fontWeight:700,color:"#475569",fontSize:11}}>Actions</th>
               </tr>
               <tr style={{background:"#f1f5f9"}}>
                 <th style={{padding:"3px 4px"}}/>
@@ -5519,28 +5541,27 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                     <td style={{padding:"3px 8px",textAlign:"center"}} onClick={e=>e.stopPropagation()}>
                       {isPending&&<input type="checkbox" checked={selected.has(b.id)} onChange={()=>toggleSelect(b.id)} style={{width:13,height:13,accentColor:"#6366f1"}}/>}
                     </td>
-                    <td style={{padding:"3px 8px",whiteSpace:"nowrap",fontSize:12,color:"#475569"}}>{fmtDate(b.date)}</td>
-                    <td style={{padding:"3px 8px"}}>
+                    <td style={{padding:"3px 6px",whiteSpace:"nowrap",fontSize:11,color:"#475569"}}>{fmtDateShort(b.date)}</td>
+                    <td style={{padding:"3px 6px"}}>
                       <span onClick={e=>{e.stopPropagation();setAdminBookerFilter(p=>p===b.email.toLowerCase()?"all":b.email.toLowerCase());}}
                         style={{display:"inline-block",padding:"2px 8px",borderRadius:10,background:emailColor(b.email),color:"#fff",fontSize:11,fontWeight:600,cursor:"pointer",outline:adminBookerFilter===b.email.toLowerCase()?"2px solid #0f172a":"none",outlineOffset:1}}>
                         {b.email.split("@")[0]}
                       </span>
                     </td>
-                    <td style={{padding:"3px 8px",fontSize:12}}>
-                      <div style={{display:"flex",alignItems:"center",gap:4}}>
-                        <span style={{width:7,height:7,borderRadius:"50%",background:f?.color,display:"inline-block",flexShrink:0}}/>
-                        <span style={{color:"#0f172a"}}>{f?.name.replace("Field ","Fld ")}</span>
-                      </div>
+                    <td style={{padding:"3px 6px",fontSize:11}}>
+                      <span style={{display:"inline-flex",alignItems:"center",gap:3}}>
+                        <span style={{width:6,height:6,borderRadius:"50%",background:f?.color,display:"inline-block",flexShrink:0}}/>
+                        <span style={{color:"#0f172a"}}>{f ? (f.name.includes("Field") ? f.name.replace("Field ","F") : f.name.split(" ")[0]) : "—"}</span>
+                      </span>
                     </td>
-                    <td style={{padding:"3px 8px"}}>
+                    <td style={{padding:"3px 6px"}}>
                       <Badge status={b.status}/>
-                      {b.invoiced&&<span style={{fontSize:9,fontWeight:700,background:INVOICED_META.bg,color:INVOICED_META.text,border:`1px solid ${INVOICED_META.border}`,borderRadius:4,padding:"1px 5px",marginLeft:3}}>🧾</span>}
-                      {queueLabel&&<div style={{fontSize:10,fontWeight:700,color:queued.newStatus==="rejected"?"#991b1b":"#166534"}}>{queueLabel}</div>}
-                      {isDeleteQueued&&<div style={{fontSize:10,fontWeight:700,color:"#991b1b"}}>🗑 queued</div>}
+                      {b.invoiced&&<span style={{fontSize:9,fontWeight:700,background:INVOICED_META.bg,color:INVOICED_META.text,border:`1px solid ${INVOICED_META.border}`,borderRadius:4,padding:"1px 4px",marginLeft:2}}>🧾</span>}
+                      {queueLabel&&<div style={{fontSize:9,fontWeight:700,color:queued.newStatus==="rejected"?"#991b1b":"#166634"}}>{queueLabel}</div>}
+                      {isDeleteQueued&&<div style={{fontSize:9,fontWeight:700,color:"#991b1b"}}>🗑</div>}
                     </td>
-                    <td style={{padding:"3px 8px",color:"#475569",fontSize:12}}>
-                      {fmtTime(b.start_hour)}–{fmtTime(b.start_hour+b.duration)}
-                      <span style={{fontSize:11,color:"#94a3b8",marginLeft:4}}>{b.duration}h</span>
+                    <td style={{padding:"3px 6px",color:"#475569",fontSize:11}}>
+                      {fmt24(b.start_hour)}–{fmt24(b.start_hour+b.duration)}
                       <div style={{fontSize:11,color:"#94a3b8",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:180}}>{b.purpose}</div>
                     </td>
                     <td style={{padding:"3px 8px"}} onClick={e=>e.stopPropagation()}>
@@ -6876,8 +6897,8 @@ export default function App() {
 
         {(tab==="calendar"||tab==="month"||tab==="list")&&<FacilityPills/>}
 
-        {tab==="calendar"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<WeekCalendar bookings={bookings} selectedFacility={selFac} onNewBooking={openNew} onBookingClick={setViewing} cartSourceIds={new Set(cart.flatMap(i=>i.sourceIds||[]))} deleteIds={new Set(deleteQueue.map(b=>b.id))} cartNewDrafts={cart.flatMap(i=>!i.notifyOnly&&(i.sourceIds||[]).length===0?i.drafts:[])} focusedDate={focusedDate} setFocusedDate={setFocusedDate} onOpenDay={openDay} bookerFilter={listBookerFilter}/>}</div>}
-        {tab==="month"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<MonthCalendar bookings={bookings} selectedFacility={selFac} onBookingClick={setViewing} onNewBooking={openNew} onMultiDelete={queueMultiForRemoval} onMultiAddToCart={handleMultiAddToCart} loggedInEmail={loggedInEmail} isAdmin={isAdmin} cartSourceIds={new Set(cart.flatMap(i=>i.sourceIds||[]))} deleteIds={new Set(deleteQueue.map(b=>b.id))} cartNewDrafts={cart.flatMap(i=>!i.notifyOnly&&(i.sourceIds||[]).length===0?i.drafts:[])} onOpenDay={openDay} onGotoWeek={dk=>{ setFocusedDate(new Date(dk+"T00:00:00")); setTab("calendar"); }} bookerFilter={listBookerFilter}/>}</div>}
+        {tab==="calendar"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<WeekCalendar bookings={bookings} selectedFacility={selFac} onNewBooking={openNew} onBookingClick={setViewing} cartSourceIds={new Set(cart.flatMap(i=>i.sourceIds||[]))} deleteIds={new Set(deleteQueue.map(b=>b.id))} cartNewDrafts={cart.flatMap(i=>!i.notifyOnly&&(i.sourceIds||[]).length===0?i.drafts:[])} focusedDate={focusedDate} setFocusedDate={setFocusedDate} onOpenDay={openDay} bookerFilter={listBookerFilter} aliasNames={aliasNames} emailAliases={emailAliases}/>}</div>}
+        {tab==="month"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<MonthCalendar bookings={bookings} selectedFacility={selFac} onBookingClick={setViewing} onNewBooking={openNew} onMultiDelete={queueMultiForRemoval} onMultiAddToCart={handleMultiAddToCart} loggedInEmail={loggedInEmail} isAdmin={isAdmin} cartSourceIds={new Set(cart.flatMap(i=>i.sourceIds||[]))} deleteIds={new Set(deleteQueue.map(b=>b.id))} cartNewDrafts={cart.flatMap(i=>!i.notifyOnly&&(i.sourceIds||[]).length===0?i.drafts:[])} onOpenDay={openDay} onGotoWeek={dk=>{ setFocusedDate(new Date(dk+"T00:00:00")); setTab("calendar"); }} bookerFilter={listBookerFilter} aliasNames={aliasNames} emailAliases={emailAliases}/>}</div>}
 
         {tab==="list"&&(
           <div style={S.card}>
@@ -6935,15 +6956,15 @@ export default function App() {
                         <table style={{width:"100%",borderCollapse:"collapse",background:"#fff",fontSize:12}}>
                           <thead>
                             <tr style={{background:"#f8fafc"}}>
-                              {[["date","Date"],["booker","Booker"],["facility","Facility"],["status","Status"]].map(([col,label])=>(
+                              {[["date","Date"],["booker","Booker"],["facility","Fac"],["status","Status"]].map(([col,label])=>(
                                 <th key={col} onClick={()=>lToggleSort(col)}
-                                  style={{padding:"5px 8px",textAlign:"left",cursor:"pointer",userSelect:"none",fontWeight:600,color:"#64748b",whiteSpace:"nowrap",borderBottom:"1px solid #e2e8f0",fontSize:11}}>
+                                  style={{padding:"4px 6px",textAlign:"left",cursor:"pointer",userSelect:"none",fontWeight:600,color:"#64748b",whiteSpace:"nowrap",borderBottom:"1px solid #e2e8f0",fontSize:11}}>
                                   {label}{lArrow(col)}
                                 </th>
                               ))}
-                              <th style={{padding:"5px 8px",textAlign:"left",fontWeight:600,color:"#64748b",borderBottom:"1px solid #e2e8f0",fontSize:11}}>Time · Dur</th>
-                              <th style={{padding:"5px 8px",textAlign:"left",fontWeight:600,color:"#64748b",borderBottom:"1px solid #e2e8f0",fontSize:11}}>CPSA</th>
-                              <th style={{padding:"5px 8px",textAlign:"left",fontWeight:600,color:"#64748b",borderBottom:"1px solid #e2e8f0",fontSize:11}}>Purpose</th>
+                              <th style={{padding:"4px 6px",textAlign:"left",fontWeight:600,color:"#64748b",borderBottom:"1px solid #e2e8f0",fontSize:11,whiteSpace:"nowrap"}}>Time</th>
+                              <th style={{padding:"4px 6px",textAlign:"left",fontWeight:600,color:"#64748b",borderBottom:"1px solid #e2e8f0",fontSize:11}}>CPSA</th>
+                              <th style={{padding:"4px 6px",textAlign:"left",fontWeight:600,color:"#64748b",borderBottom:"1px solid #e2e8f0",fontSize:11}}>Purpose</th>
                             </tr>
                             <tr style={{background:"#f1f5f9"}}>
                               <th style={{padding:"3px 4px",position:"relative"}}>
@@ -7024,32 +7045,32 @@ export default function App() {
                               const f=FACILITIES.find(x=>x.id===b.facility_id);
                               const isAdmin_bk=isAdminBooking(b);
                               const isClash=allClashIds.has(b.id);
-                              const facShort = f ? (f.name.includes("Field") ? f.name.replace("Field ","Fld ") : f.name.split("–")[0].trim()) : "—";
-                              const d = new Date(b.date+"T12:00");
-                              const dateShort = d.toLocaleDateString("en-NZ",{weekday:"short",day:"numeric",month:"short"});
+                              const facShort = f ? (f.name.includes("Field") ? f.name.replace("Field ","F") : f.name.split("–")[0].trim().split(" ")[0]) : "—";
                               return(
                                 <tr key={b.id} onClick={()=>setViewing(b)} style={{background:isAdmin_bk?"#f8fafc":isClash?"#fff5f5":"#fff",borderTop:ri>0?"1px solid #f1f5f9":"none",cursor:"pointer"}}
                                   onMouseEnter={e=>e.currentTarget.style.background=isAdmin_bk?"#f1f5f9":"#f8fafc"}
                                   onMouseLeave={e=>e.currentTarget.style.background=isAdmin_bk?"#f8fafc":isClash?"#fff5f5":"#fff"}>
-                                  <td style={{padding:"4px 8px",whiteSpace:"nowrap",color:"#475569",fontSize:11}}>{dateShort}</td>
-                                  <td style={{padding:"4px 8px"}}>
+                                  <td style={{padding:"3px 6px",whiteSpace:"nowrap",color:"#475569",fontSize:11}}>{fmtDateShort(b.date)}</td>
+                                  <td style={{padding:"3px 6px"}}>
                                     {isAdmin_bk
-                                      ? <span style={{fontSize:10,fontWeight:700,color:"#94a3b8",background:"#f1f5f9",borderRadius:10,padding:"2px 7px"}}>🔒 admin</span>
-                                      : <span onClick={e=>{e.stopPropagation();toggleBooker(b.email.toLowerCase());}} style={{display:"inline-block",padding:"2px 9px",borderRadius:10,background:emailColor(b.email),color:"#fff",fontSize:11,fontWeight:600,cursor:"pointer",outline:listBookerFilter.has(b.email.toLowerCase())?"2px solid #0f172a":"none",outlineOffset:1}}>
-                                          {b.email.split("@")[0]}
+                                      ? <span style={{fontSize:10,fontWeight:700,color:"#94a3b8",background:"#f1f5f9",borderRadius:10,padding:"2px 6px"}}>🔒</span>
+                                      : <span onClick={e=>{e.stopPropagation();toggleBooker(b.email.toLowerCase());}} style={{display:"inline-block",padding:"2px 8px",borderRadius:10,background:emailColor(b.email),color:"#fff",fontSize:11,fontWeight:600,cursor:"pointer",outline:listBookerFilter.has(b.email.toLowerCase())?"2px solid #0f172a":"none",outlineOffset:1}}>
+                                          {displayNameFor(b.email)}
                                         </span>
                                     }
                                   </td>
-                                  <td style={{padding:"4px 8px",whiteSpace:"nowrap"}}>
-                                    <span style={{width:7,height:7,borderRadius:"50%",background:f?.color,display:"inline-block",marginRight:4,verticalAlign:"middle",flexShrink:0}}/>
-                                    <span style={{fontSize:11,color:"#475569"}}>{facShort}</span>
+                                  <td style={{padding:"3px 6px",whiteSpace:"nowrap"}}>
+                                    <span style={{display:"inline-flex",alignItems:"center",gap:3}}>
+                                      <span style={{width:6,height:6,borderRadius:"50%",background:f?.color,display:"inline-block",flexShrink:0}}/>
+                                      <span style={{fontSize:11,color:"#475569"}}>{facShort}</span>
+                                    </span>
                                   </td>
-                                  <td style={{padding:"4px 8px"}}>
+                                  <td style={{padding:"3px 6px"}}>
                                     <Badge status={b.status}/>
-                                    {isClash&&<span style={{display:"block",fontSize:10,fontWeight:700,color:"#ef4444"}}>⚠️ clash</span>}
+                                    {isClash&&<span style={{display:"block",fontSize:9,fontWeight:700,color:"#ef4444"}}>⚡clash</span>}
                                   </td>
-                                  <td style={{padding:"4px 8px",whiteSpace:"nowrap",color:"#475569",fontSize:11}}>{fmtTime(b.start_hour)}–{fmtTime(b.start_hour+b.duration)}<span style={{color:"#94a3b8",marginLeft:4}}>{b.duration}h</span></td>
-                                  <td style={{padding:"4px 8px",fontSize:11,maxWidth:170}}>{(()=>{
+                                  <td style={{padding:"3px 6px",whiteSpace:"nowrap",color:"#475569",fontSize:11}}>{fmt24(b.start_hour)}–{fmt24(b.start_hour+b.duration)}</td>
+                                  <td style={{padding:"3px 6px",fontSize:11,maxWidth:150}}>{(()=>{
                                     const reasons=parseMismatchNote(b.system_notes,b.notes);
                                     const drift=getBillingDrift(b);
                                     // Parse CPSA submission URL from system_notes (or legacy notes)
@@ -7072,7 +7093,7 @@ export default function App() {
                                     }
                                     return <span style={{color:"#cbd5e1"}}>—</span>;
                                   })()}</td>
-                                  <td style={{padding:"4px 8px",color:"#64748b",maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",fontSize:11}}>{b.purpose}</td>
+                                  <td style={{padding:"3px 6px",color:"#64748b",maxWidth:180,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",fontSize:11}}>{b.purpose}</td>
                                 </tr>
                               );
                             })}
