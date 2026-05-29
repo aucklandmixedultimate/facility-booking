@@ -3043,6 +3043,7 @@ function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onLoadT
   const [expandedBatchId, setExpandedBatchId] = useState(null);
   const [expandedSubId, setExpandedSubId] = useState(null);
   const [exportMode, setExportMode] = useState("grouped"); // "grouped" | "individual"
+  const [viewMode, setViewMode] = useState("grouped"); // "grouped" = batch cards | "individual" = flat rows
 
   const SHORT_STATUS = { draft:"Draft", submitted:"Sent", gtec_invoiced:"GTEC", club_invoiced:"Club", complete:"Done" };
 
@@ -3500,17 +3501,31 @@ function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onLoadT
           })}
         </div>
       </div>
-      {/* Export mode toggle */}
-      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12,padding:"6px 10px",background:"#f8fafc",borderRadius:8,fontSize:11}}>
-        <span style={{color:"#64748b",fontWeight:600}}>Export mode:</span>
-        {[{k:"grouped",l:"Grouped"},{k:"individual",l:"Itemised"}].map(opt=>(
-          <button key={opt.k} onClick={()=>setExportMode(opt.k)}
-            style={{padding:"3px 10px",borderRadius:6,border:"1px solid",cursor:"pointer",fontSize:11,fontWeight:600,fontFamily:"inherit",
-              borderColor:exportMode===opt.k?"#4338ca":"#e2e8f0",background:exportMode===opt.k?"#4338ca":"#fff",color:exportMode===opt.k?"#fff":"#475569"}}>
-            {opt.l}
-          </button>
-        ))}
-        <span style={{color:"#94a3b8",marginLeft:"auto",fontSize:10}}>applies to chip + Download All clicks</span>
+      {/* View mode + export mode */}
+      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:12,padding:"6px 10px",background:"#f8fafc",borderRadius:8,fontSize:11,flexWrap:"wrap"}}>
+        <div style={{display:"flex",alignItems:"center",gap:6}}>
+          <span style={{color:"#64748b",fontWeight:600,whiteSpace:"nowrap"}}>View:</span>
+          {[{k:"grouped",l:"Grouped"},{k:"individual",l:"Individual"}].map(opt=>(
+            <button key={opt.k} onClick={()=>setViewMode(opt.k)}
+              title={opt.k==="grouped"?"Batch INV+PO sets shown as one card":"Every record shown as its own row"}
+              style={{padding:"3px 10px",borderRadius:6,border:"1px solid",cursor:"pointer",fontSize:11,fontWeight:600,fontFamily:"inherit",
+                borderColor:viewMode===opt.k?"#0f172a":"#e2e8f0",background:viewMode===opt.k?"#0f172a":"#fff",color:viewMode===opt.k?"#fff":"#475569"}}>
+              {opt.l}
+            </button>
+          ))}
+        </div>
+        <div style={{width:1,height:18,background:"#e2e8f0",flexShrink:0}}/>
+        <div style={{display:"flex",alignItems:"center",gap:6}}>
+          <span style={{color:"#64748b",fontWeight:600,whiteSpace:"nowrap"}}>Export:</span>
+          {[{k:"grouped",l:"Summary"},{k:"individual",l:"Itemised"}].map(opt=>(
+            <button key={opt.k} onClick={()=>setExportMode(opt.k)}
+              title={opt.k==="grouped"?"One line per booking pattern":"One line per individual booking"}
+              style={{padding:"3px 10px",borderRadius:6,border:"1px solid",cursor:"pointer",fontSize:11,fontWeight:600,fontFamily:"inherit",
+                borderColor:exportMode===opt.k?"#4338ca":"#e2e8f0",background:exportMode===opt.k?"#4338ca":"#fff",color:exportMode===opt.k?"#fff":"#475569"}}>
+              {opt.l}
+            </button>
+          ))}
+        </div>
       </div>
 
       {batches.length===0&&ungrouped.length===0&&(
@@ -3518,8 +3533,10 @@ function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onLoadT
       )}
 
       <div style={{display:"flex",flexDirection:"column",gap:10}}>
-        {batches.map(batch=>renderBatchGroup(batch))}
-        {ungrouped.map(rec=>renderSingleRecord(rec))}
+        {viewMode==="grouped"
+          ? <>{batches.map(batch=>renderBatchGroup(batch))}{ungrouped.map(rec=>renderSingleRecord(rec))}</>
+          : sorted.map(rec=>renderSingleRecord(rec))
+        }
       </div>
     </div>
   );
