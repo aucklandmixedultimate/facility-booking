@@ -853,7 +853,7 @@ function UserMgmtModal({ bookings, aliases, aliasNames, onChange, onChangeNames,
                     <div style={{display:"grid",gridTemplateColumns:"80px 1fr",gap:6,marginBottom:6,alignItems:"center"}}>
                       <span style={{fontSize:11,color:"#64748b",fontWeight:600}}>Type</span>
                       <div style={{display:"flex",gap:4}}>
-                        {["user","admin","vendor"].map(t=>(
+                        {["user","vendor"].map(t=>(
                           <button key={t} onClick={()=>upProfile(primary,"profileType",t)}
                             style={{padding:"2px 10px",borderRadius:10,border:`1.5px solid ${ptype===t?PTYPE_COLOR[t]:"#e2e8f0"}`,
                               background:ptype===t?PTYPE_COLOR[t]:"#f8fafc",color:ptype===t?"#fff":"#475569",
@@ -4553,7 +4553,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
 
 
 // ─── Admin Panel with action queue, bulk approve, facility rates ──────────────
-function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,clashes=[],deleteIds=new Set(),facilityRates={},onUpdateFacilityRate,onClearOldUnapproved,silentMode=false,approxPlayers={},onUpdateApproxPlayers,approxDurations={},onUpdateApproxDuration,onSyncDB,onShowSchedule,onBulkApply,onSaveMismatch,onMarkAdjustmentSettled,onShowActivityLog,onShowSyncResults,syncResultsCount=0}) {
+function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,clashes=[],deleteIds=new Set(),facilityRates={},onUpdateFacilityRate,onClearOldUnapproved,silentMode=false,approxPlayers={},onUpdateApproxPlayers,approxDurations={},onUpdateApproxDuration,onSyncDB,onShowSchedule,onBulkApply,onSaveMismatch,onMarkAdjustmentSettled,onShowActivityLog,syncResults=[],onClearSyncResults,showSyncResults=false,onToggleSyncResults}) {
   const [sf,setSf]=useState("all"), [ff,setFf]=useState("all"), [q,setQ]=useState("");
   const [adminBookerFilter,setAdminBookerFilter]=useState("all");
   const [showBookerFilter,setShowBookerFilter]=useState(false);
@@ -4751,8 +4751,8 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
         {onShowActivityLog&&<button onClick={onShowActivityLog} style={S.btn({background:"#fff",color:"#475569",border:"1.5px solid #e2e8f0",fontSize:12,fontWeight:700})}>
           📜 Activity Log
         </button>}
-        {onShowSyncResults&&syncResultsCount>0&&<button onClick={onShowSyncResults} style={S.btn({background:"#ecfeff",color:"#0e7490",border:"1.5px solid #a5f3fc",fontSize:12,fontWeight:700})}>
-          🔄 Sync Results ({syncResultsCount})
+        {syncResults.length>0&&<button onClick={onToggleSyncResults} style={S.btn({background:showSyncResults?"#ecfeff":"#fff",color:"#0e7490",border:`1.5px solid ${showSyncResults?"#a5f3fc":"#e2e8f0"}`,fontSize:12,fontWeight:700})}>
+          🔄 Sync Results ({syncResults.length}) {showSyncResults?"▴":"▾"}
         </button>}
         <button onClick={()=>setShowClashPanel(v=>!v)} style={S.btn({border:`1.5px solid ${clashes.length>0?"#fda4af":"#e2e8f0"}`,background:showClashPanel?"#fff1f2":"#fff",color:clashes.length>0?"#9f1239":"#94a3b8",fontSize:12,fontWeight:clashes.length>0?700:500})}>
           ⚠️ Clashes ({clashes.length}) {showClashPanel?"▴":"▾"}
@@ -4766,6 +4766,44 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
           🧾 Track Changes ({trackedChanges.length}) {showTrackChanges?"▴":"▾"}
         </button>
       </div>
+
+      {/* Inline sync results panel */}
+      {showSyncResults&&syncResults.length>0&&(
+        <div style={{background:"#ecfeff",border:"1.5px solid #a5f3fc",borderRadius:12,padding:16,display:"flex",flexDirection:"column",gap:8}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+            <span style={{fontWeight:700,fontSize:14,color:"#0e7490"}}>🔄 CPSA Sync Results</span>
+            <span style={{fontSize:11,color:"#0891b2",marginLeft:"auto"}}>{syncResults.length} month{syncResults.length!==1?"s":""} · months with no new items clear on next sync</span>
+            {onClearSyncResults&&<button onClick={onClearSyncResults} style={{padding:"3px 10px",borderRadius:6,border:"1px solid #a5f3fc",background:"#fff",color:"#0e7490",cursor:"pointer",fontSize:11,fontWeight:600,fontFamily:"inherit"}}>Clear all</button>}
+          </div>
+          {[...syncResults].sort((a,b)=>(a.monthKey||"").localeCompare(b.monthKey||"")).map(r=>{
+            const hasChanges = (r.added||0)+(r.cpsaConfirmed||0)+(r.cpsaReviewNeeded||0)+(r.removed||0)+(r.clashes||0) > 0;
+            return (
+              <div key={r.monthKey} style={{background:"#fff",border:`1px solid ${r.error?"#fecaca":hasChanges?"#7dd3fc":"#cffafe"}`,borderRadius:8,padding:"8px 14px"}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:r.error?0:6}}>
+                  <span style={{fontWeight:700,fontSize:12,color:r.error?"#b91c1c":"#0c4a6e"}}>{r.label}</span>
+                  {hasChanges&&<span style={{fontSize:10,fontWeight:700,background:"#0ea5e9",color:"#fff",borderRadius:10,padding:"1px 6px"}}>changes</span>}
+                  <span style={{fontSize:10,color:"#94a3b8",marginLeft:"auto"}}>{r.syncedAt?new Date(r.syncedAt).toLocaleString("en-NZ",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}):"—"}</span>
+                </div>
+                {r.error
+                  ? <div style={{fontSize:12,color:"#b91c1c"}}>⚠ {r.error}</div>
+                  : <div style={{display:"flex",flexDirection:"column",gap:3,paddingLeft:12,borderLeft:"2px solid #e0f2fe"}}>
+                      {[
+                        r.added>0 && <span style={{color:"#0e7490",fontSize:12}}>＋ <strong>{r.added}</strong> booking{r.added!==1?"s":""} added</span>,
+                        r.skipped>0 && <span style={{color:"#64748b",fontSize:12}}>— <strong>{r.skipped}</strong> already existed</span>,
+                        r.cpsaConfirmed>0 && <span style={{color:"#0891b2",fontSize:12}}>🌐 <strong>{r.cpsaConfirmed}</strong> CPSA-confirmed</span>,
+                        r.cpsaReviewNeeded>0 && <span style={{color:"#b45309",fontSize:12}}>⚠ <strong>{r.cpsaReviewNeeded}</strong> need review</span>,
+                        r.clashes>0 && <span style={{color:"#c2410c",fontSize:12}}>⚡ <strong>{r.clashes}</strong> clash{r.clashes!==1?"es":""} flagged</span>,
+                        r.notified>0 && <span style={{color:"#7c3aed",fontSize:12}}>📧 <strong>{r.notified}</strong> queued to notify</span>,
+                        r.removed>0 && <span style={{color:"#94a3b8",fontSize:12}}>✕ <strong>{r.removed}</strong> stale removed</span>,
+                        !hasChanges && <span style={{color:"#94a3b8",fontSize:12,fontStyle:"italic"}}>No new changes — will clear on next sync</span>,
+                      ].filter(Boolean).map((el,i)=><div key={i}>{el}</div>)}
+                    </div>
+                }
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* Track-changes panel: invoiced bookings whose billed dimensions drifted */}
       {showTrackChanges&&(
@@ -5842,7 +5880,7 @@ export default function App() {
   // Cumulative results across all months queried while the sync popup is open.
   // Each entry: { month, label, added, skipped, removed, cpsaConfirmed, cpsaReviewNeeded, clashes, items: [...] }
   const [syncResults, setSyncResults] = useState([]);
-  const [showSyncPopup, setShowSyncPopup] = useState(false);
+  const [showSyncPanel, setShowSyncPanel] = useState(false);
   const [showActivityLog, setShowActivityLog] = useState(false);
   const [showRatesModal, setShowRatesModal] = useState(false);
   const [showPlayersModal, setShowPlayersModal] = useState(false);
@@ -6174,10 +6212,12 @@ export default function App() {
         const without = prev.filter(r => r.monthKey !== monthKey);
         return [...without, { monthKey, label, added, skipped, removed, cpsaConfirmed, cpsaReviewNeeded, clashes: clashUpdates, notified: cpsaNotifications.length, syncedAt: new Date().toISOString() }];
       });
-      setShowSyncPopup(true);
     } catch(e) {
-      setSyncResults(prev => [...prev, { monthKey: `${year}-${String(month+1).padStart(2,"0")}`, label: `${MONTHS[month]} ${year}`, error: e.message, syncedAt: new Date().toISOString() }]);
-      setShowSyncPopup(true);
+      setSyncResults(prev => {
+        const monthKey = `${year}-${String(month+1).padStart(2,"0")}`;
+        const without = prev.filter(r => r.monthKey !== monthKey);
+        return [...without, { monthKey, label: `${MONTHS[month]} ${year}`, error: e.message, syncedAt: new Date().toISOString() }];
+      });
     } finally {
       setSyncingMonth(false);
     }
@@ -6194,12 +6234,25 @@ export default function App() {
       months.add(`${parseInt(y)}-${parseInt(m)-1}`);
     }
     const sorted = [...months].map(k=>k.split("-").map(Number)).sort((a,b)=>a[0]-b[0]||a[1]-b[1]);
+    // Pre-clean: remove months that had no changes on previous sync so they get a fresh result
+    setSyncResults(prev => prev.filter(r => {
+      const had = (r.added||0)+(r.cpsaConfirmed||0)+(r.cpsaReviewNeeded||0)+(r.removed||0)+(r.clashes||0);
+      return had > 0;
+    }));
     logActivity("cpsa_sync_start", { months: sorted.length });
     for (const [y,m] of sorted) {
       await handleSyncMonth(y, m);
     }
     try{localStorage.setItem("fb_last_sync_at", String(Date.now()));}catch{}
     logActivity("cpsa_sync_complete", { months: sorted.length });
+    // Notify with a non-intrusive toast
+    setSyncResults(cur => {
+      const total = cur.reduce((s,r)=>s+(r.added||0),0);
+      showToast(`🔄 Sync complete — ${sorted.length} month${sorted.length!==1?"s":""}, ${total} new booking${total!==1?"s":""}`);
+      return cur;
+    });
+    setShowSyncPanel(true);
+    setTab("admin");
   }
 
   // All hooks before any conditional return
@@ -7038,7 +7091,7 @@ export default function App() {
         {tab==="billing"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<BillingTab billingRecords={billingRecords} onUpdateRecord={patch=>setBillingRecords(prev=>prev.map(r=>r.id===patch.id?{...r,...patch}:r))} isAdmin={isAdmin} loggedInEmail={loggedInEmail} emailAliases={emailAliases} aliasNames={aliasNames} profiles={profiles}/>}</div>}
         {tab==="about"&&<div style={{padding:"8px 0"}}><AboutTab/></div>}
         {tab==="admin"&&isAdmin&&<div style={S.card}>
-          {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onView={setViewing} onQueueDelete={queueForRemovalSilent} clashes={allClashes} deleteIds={new Set(deleteQueue.map(b=>b.id))} facilityRates={facilityRates} onUpdateFacilityRate={updateFacilityRate} onClearOldUnapproved={handleClearOldUnapproved} silentMode={silentMode} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onSyncDB={handleSyncDB} onShowSchedule={()=>setShowAdminScheduleModal(true)} onBulkApply={handleBulkApply} onSaveMismatch={handleSaveMismatch} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} onShowActivityLog={()=>setShowActivityLog(true)} onShowSyncResults={()=>setShowSyncPopup(true)} syncResultsCount={syncResults.length}/>}
+          {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onView={setViewing} onQueueDelete={queueForRemovalSilent} clashes={allClashes} deleteIds={new Set(deleteQueue.map(b=>b.id))} facilityRates={facilityRates} onUpdateFacilityRate={updateFacilityRate} onClearOldUnapproved={handleClearOldUnapproved} silentMode={silentMode} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onSyncDB={handleSyncDB} onShowSchedule={()=>setShowAdminScheduleModal(true)} onBulkApply={handleBulkApply} onSaveMismatch={handleSaveMismatch} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} onShowActivityLog={()=>setShowActivityLog(true)} syncResults={syncResults} onClearSyncResults={()=>setSyncResults([])} showSyncResults={showSyncPanel} onToggleSyncResults={()=>setShowSyncPanel(v=>!v)}/>}
         </div>}
       </div>
 
@@ -7074,42 +7127,6 @@ export default function App() {
             </div>
             <div style={{borderTop:"1px solid #f1f5f9",paddingTop:12,display:"flex",gap:8,justifyContent:"flex-end"}}>
               <button onClick={()=>setShowExtensionModal(false)} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#475569"})}>Close</button>
-            </div>
-          </div>
-        </Modal>
-      )}
-
-      {showSyncPopup&&(
-        <Modal title="🔄 CPSA Sync Results" onClose={()=>setShowSyncPopup(false)} width={680}>
-          <div style={{display:"flex",flexDirection:"column",gap:12}}>
-            <div style={{fontSize:12,color:"#64748b"}}>Results accumulate across each month queried. Use <strong>Sync</strong> from the header to add another month, or <strong>Clear</strong> to reset.</div>
-            <div style={{maxHeight:"55vh",overflowY:"auto",display:"flex",flexDirection:"column",gap:8}}>
-              {syncResults.length===0
-                ? <div style={{textAlign:"center",padding:24,color:"#94a3b8",fontSize:13}}>No sync runs yet.</div>
-                : [...syncResults].sort((a,b)=>(b.syncedAt||"").localeCompare(a.syncedAt||"")).map(r=>(
-                    <div key={r.monthKey+r.syncedAt} style={{background:r.error?"#fef2f2":"#f8fafc",border:`1px solid ${r.error?"#fecaca":"#e2e8f0"}`,borderRadius:8,padding:"10px 14px"}}>
-                      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:r.error?0:6}}>
-                        <span style={{fontWeight:700,color:r.error?"#b91c1c":"#0f172a"}}>{r.label}</span>
-                        <span style={{fontSize:11,color:"#94a3b8"}}>{new Date(r.syncedAt).toLocaleTimeString("en-NZ",{hour:"2-digit",minute:"2-digit"})}</span>
-                      </div>
-                      {r.error
-                        ? <div style={{fontSize:12,color:"#b91c1c"}}>⚠ {r.error}</div>
-                        : <div style={{display:"flex",flexWrap:"wrap",gap:"4px 12px",fontSize:12,color:"#475569"}}>
-                            <span><strong style={{color:"#0f172a"}}>{r.added}</strong> added</span>
-                            <span><strong style={{color:"#0f172a"}}>{r.skipped}</strong> already existed</span>
-                            {r.cpsaConfirmed>0&&<span style={{color:"#0e7490"}}>🌐 <strong>{r.cpsaConfirmed}</strong> CPSA-confirmed</span>}
-                            {r.cpsaReviewNeeded>0&&<span style={{color:"#b45309"}}>⚠ <strong>{r.cpsaReviewNeeded}</strong> need review</span>}
-                            {r.clashes>0&&<span style={{color:"#c2410c"}}>⚡ <strong>{r.clashes}</strong> clash{r.clashes!==1?"es":""}</span>}
-                            {r.notified>0&&<span style={{color:"#7c3aed"}}>📧 <strong>{r.notified}</strong> queued to notify</span>}
-                            {r.removed>0&&<span style={{color:"#94a3b8"}}>{r.removed} stale removed</span>}
-                          </div>}
-                    </div>
-                  ))
-              }
-            </div>
-            <div style={{display:"flex",gap:8,justifyContent:"flex-end",paddingTop:8,borderTop:"1px solid #f1f5f9"}}>
-              {syncResults.length>0&&<button onClick={()=>setSyncResults([])} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#475569",fontSize:12})}>Clear</button>}
-              <button onClick={()=>setShowSyncPopup(false)} style={S.btn({background:"#0f172a",color:"#fff",fontSize:12})}>Close</button>
             </div>
           </div>
         </Modal>
