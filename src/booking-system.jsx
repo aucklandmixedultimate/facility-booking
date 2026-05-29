@@ -2744,6 +2744,8 @@ function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkApply, o
   const [schedDateFrom, setSchedDateFrom] = useState("");
   const [schedDateTo,   setSchedDateTo]   = useState("");
   const [schedStatusFilter, setSchedStatusFilter] = useState(new Set());
+  // Selected {email, status} groups for bulk action. Key = `${email}::${status}`.
+  const [selectedGroups, setSelectedGroups] = useState(new Set());
   const [bulkStatusTarget, setBulkStatusTarget] = useState("approved");
 
   const schedAlias = em => {
@@ -2838,7 +2840,27 @@ function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkApply, o
   const Wrapper = inline
     ? ({children}) => <div style={{background:"#f0f9ff",border:"1.5px solid #bae6fd",borderRadius:12,padding:16}}><div style={{fontSize:14,fontWeight:700,color:"#0369a1",marginBottom:10}}>📅 Schedule Summary</div>{children}</div>
     : ({children}) => <Modal title="📅 Schedule Summary" onClose={onClose}>{children}</Modal>;
-  const colCount = isAdmin && onBulkStatusChange ? 6 : 5;
+  const colCount = 5;
+  const groupSelectable = isAdmin && onBulkStatusChange;
+  function toggleGroup(email, status) {
+    const k = `${email}::${status}`;
+    setSelectedGroups(prev=>{
+      const s = new Set(prev);
+      if (s.has(k)) s.delete(k); else s.add(k);
+      return s;
+    });
+  }
+  // Resolve selected groups → all matching bookings
+  const selectedBkgs = (()=>{
+    if (selectedGroups.size===0) return [];
+    const out = [];
+    for (const row of rows) {
+      for (const b of row.filteredBkgs) {
+        if (selectedGroups.has(`${row.email}::${b.status}`)) out.push(b);
+      }
+    }
+    return out;
+  })();
   return (
     <>
       <Wrapper>
@@ -2867,18 +2889,12 @@ function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkApply, o
               {schedStatusFilter.size>0&&<button onClick={()=>setSchedStatusFilter(new Set())} style={{padding:"2px 7px",borderRadius:8,fontSize:10,fontWeight:600,cursor:"pointer",fontFamily:"inherit",border:"1.5px solid #e2e8f0",background:"#fff",color:"#94a3b8"}}>✕ clear</button>}
             </div>
           )}
-          {isAdmin&&onBulkStatusChange&&(
-            <div style={{display:"flex",gap:4,alignItems:"center",marginLeft:"auto",flexShrink:0}}>
-              <span style={{fontSize:11,fontWeight:600,color:"#64748b"}}>Bulk:</span>
-              <select value={bulkStatusTarget} onChange={e=>setBulkStatusTarget(e.target.value)}
-                style={{fontSize:11,padding:"3px 6px",borderRadius:6,border:"1.5px solid #e2e8f0",background:"#fff",color:"#0f172a",fontFamily:"inherit"}}>
-                {Object.entries(STATUS_META).filter(([k])=>!["pending","amua_submit","cancelled","rejected","clash"].includes(k)).map(([k,v])=>(
-                  <option key={k} value={k}>{v.label.replace(/^\(\d\/\d\) /,"")}</option>
-                ))}
-              </select>
-            </div>
-          )}
         </div>
+        {isAdmin&&onBulkStatusChange&&(
+          <div style={{fontSize:11,color:"#64748b",marginBottom:8,fontStyle:"italic"}}>
+            Tip: click status chips below to select groups, then apply a bulk action.
+          </div>
+        )}
         <div style={{overflowY:"auto",maxHeight:"60vh",overflowX:"auto"}}>
           <table style={{width:"100%",borderCollapse:"collapse",minWidth:560}}>
             <thead>
@@ -2891,10 +2907,9 @@ function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkApply, o
                     {(schedDateFrom||schedDateTo)&&<span style={{fontSize:9,background:"#0f172a",color:"#fff",borderRadius:4,padding:"0 3px"}}>filtered</span>}
                   </div>
                 </th>
-                <th style={{...thS2,minWidth:110}}>Status</th>
+                <th style={{...thS2,minWidth:110}}>Status {groupSelectable&&<span style={{fontWeight:400,fontSize:11,color:"#94a3b8"}}>(click to select)</span>}</th>
                 <th style={{...thS2,textAlign:"right"}}>One-offs</th>
                 <th style={{...thS2,textAlign:"right"}}>Total</th>
-                {isAdmin&&onBulkStatusChange&&<th style={{...thS2,textAlign:"center"}}>Actions</th>}
               </tr>
             </thead>
             <tbody>
@@ -2923,11 +2938,16 @@ function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkApply, o
                       <div style={{display:"flex",flexWrap:"wrap",gap:3}}>
                         {Object.entries(row.statusCounts).map(([st,cnt])=>{
                           const m=STATUS_META[st]||STATUS_META.pending_amua;
+                          const sel=selectedGroups.has(`${row.email}::${st}`);
+                          const Tag = groupSelectable ? "button" : "span";
                           return(
-                            <span key={st} title={m.label} style={{display:"inline-flex",alignItems:"center",gap:3,padding:"1px 6px",borderRadius:8,background:m.bg,color:m.text,border:`1px solid ${m.border}`,fontSize:10,fontWeight:600}}>
-                              <span style={{width:5,height:5,borderRadius:"50%",background:m.dot,flexShrink:0}}/>
+                            <Tag key={st} title={groupSelectable?`Click to select ${cnt} ${m.label.replace(/^\(\d\/\d\) /,"")}`:m.label}
+                              onClick={groupSelectable?()=>toggleGroup(row.email,st):undefined}
+                              style={{display:"inline-flex",alignItems:"center",gap:3,padding:"2px 7px",borderRadius:8,background:sel?m.dot:m.bg,color:sel?"#fff":m.text,border:`1.5px solid ${sel?m.dot:m.border}`,fontSize:10,fontWeight:700,cursor:groupSelectable?"pointer":"default",fontFamily:"inherit",outline:"none",boxShadow:sel?`0 0 0 2px ${m.dot}33`:"none"}}>
+                              {sel&&<span style={{fontSize:9}}>✓</span>}
+                              <span style={{width:5,height:5,borderRadius:"50%",background:sel?"#fff":m.dot,flexShrink:0}}/>
                               {m.label.replace(/^\(\d\/\d\) /,"").slice(0,10)} ×{cnt}
-                            </span>
+                            </Tag>
                           );
                         })}
                         {Object.keys(row.statusCounts).length===0&&<span style={{color:"#94a3b8",fontSize:12}}>—</span>}
@@ -2942,19 +2962,6 @@ function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkApply, o
                         : <span style={{color:"#94a3b8"}}>—</span>}
                     </td>
                     <td style={{...tdS2,textAlign:"right",fontWeight:700}}>{row.totalBkgs}</td>
-                    {isAdmin&&onBulkStatusChange&&(
-                      <td style={{...tdS2,textAlign:"center"}}>
-                        {row.filteredBkgs.length>0
-                          ? <button onClick={()=>{
-                              const ids=row.filteredBkgs.map(b=>b.id);
-                              onBulkStatusChange(ids,bulkStatusTarget);
-                            }} title={`Set ${row.filteredBkgs.length} bookings to ${bulkStatusTarget}`}
-                            style={{padding:"3px 10px",fontSize:11,borderRadius:6,border:"1.5px solid #e2e8f0",background:"#f8fafc",color:"#0f172a",cursor:"pointer",fontFamily:"inherit",fontWeight:700,whiteSpace:"nowrap"}}>
-                              ✓ {row.filteredBkgs.length}
-                            </button>
-                          : <span style={{color:"#94a3b8",fontSize:12}}>—</span>}
-                      </td>
-                    )}
                   </tr>
                 );
               })}
@@ -2962,6 +2969,34 @@ function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkApply, o
             </tbody>
           </table>
         </div>
+        {groupSelectable && selectedGroups.size>0 && (
+          <div style={{marginTop:10,padding:"10px 14px",background:"#0f172a",borderRadius:10,display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",color:"#fff"}}>
+            <span style={{fontSize:12,fontWeight:700}}>
+              {selectedGroups.size} group{selectedGroups.size!==1?"s":""} · {selectedBkgs.length} booking{selectedBkgs.length!==1?"s":""} selected
+            </span>
+            <button onClick={()=>setSelectedGroups(new Set())}
+              style={{padding:"3px 9px",fontSize:11,borderRadius:6,border:"1.5px solid #334155",background:"transparent",color:"#cbd5e1",cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>
+              Clear
+            </button>
+            <div style={{marginLeft:"auto",display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+              <span style={{fontSize:11,color:"#94a3b8"}}>Set status to:</span>
+              <select value={bulkStatusTarget} onChange={e=>setBulkStatusTarget(e.target.value)}
+                style={{fontSize:11,padding:"4px 8px",borderRadius:6,border:"1.5px solid #334155",background:"#1e293b",color:"#fff",fontFamily:"inherit",fontWeight:600}}>
+                {Object.entries(STATUS_META).filter(([k])=>!["pending","amua_submit","clash"].includes(k)).map(([k,v])=>(
+                  <option key={k} value={k}>{v.label.replace(/^\(\d\/\d\) /,"")}</option>
+                ))}
+              </select>
+              <button onClick={()=>{
+                if(selectedBkgs.length===0) return;
+                onBulkStatusChange(selectedBkgs.map(b=>b.id), bulkStatusTarget);
+                setSelectedGroups(new Set());
+              }} disabled={selectedBkgs.length===0}
+                style={{padding:"5px 14px",fontSize:11,borderRadius:6,border:"none",background:selectedBkgs.length?"#22c55e":"#475569",color:"#fff",cursor:selectedBkgs.length?"pointer":"not-allowed",fontFamily:"inherit",fontWeight:700}}>
+                ✓ Apply
+              </button>
+            </div>
+          </div>
+        )}
       </Wrapper>
       {patternModal&&(
         <PatternModal {...patternModal} isAdmin={isAdmin}
