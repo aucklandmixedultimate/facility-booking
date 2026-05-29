@@ -3203,20 +3203,32 @@ function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onLoadT
         {sorted.map(rec=>{
           const isExpanded = expandedId === rec.id;
           const si = stateInfo(rec.status);
+          const isPO = rec.type==="purchase_order" || rec.bookerEmail==="gtec";
+          const isInv = rec.type==="invoice" || (!isPO && rec.type!=="purchase_order");
+          // Find linked records for display
+          const linkedInvIds = rec.linkedInvoiceIds||[];
+          const linkedPoRec = isPO ? null : sorted.find(r=>(r.type==="purchase_order"||r.bookerEmail==="gtec") && (r.linkedInvoiceIds||[]).includes(rec.id));
+          const typeTag = isPO
+            ? <span style={{fontFamily:"monospace",fontSize:10,background:"#dbeafe",padding:"1px 6px",borderRadius:4,color:"#1d4ed8",fontWeight:700}}>PO</span>
+            : <span style={{fontFamily:"monospace",fontSize:10,background:"#e0f2fe",padding:"1px 6px",borderRadius:4,color:"#0369a1",fontWeight:700}}>INV</span>;
           return (
-            <div key={rec.id} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:12,overflow:"hidden",boxShadow:"0 1px 3px rgba(0,0,0,0.06)"}}>
+            <div key={rec.id} style={{background:"#fff",border:`1px solid ${isPO?"#bfdbfe":"#e2e8f0"}`,borderRadius:12,overflow:"hidden",boxShadow:"0 1px 3px rgba(0,0,0,0.06)"}}>
               {/* Summary row */}
               <div onClick={()=>setExpandedId(isExpanded?null:rec.id)}
                 style={{display:"flex",alignItems:"center",gap:10,padding:"12px 16px",cursor:"pointer",userSelect:"none",flexWrap:"wrap"}}>
                 <div style={{minWidth:0,flex:1}}>
                   <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                    {typeTag}
                     <span style={{fontSize:12,fontWeight:800,color:"#0f172a",fontFamily:"monospace"}}>{rec.id}</span>
-                    {rec.poId&&<span style={{fontSize:11,color:"#64748b",fontFamily:"monospace"}}>PO: {rec.poId}</span>}
-                    {rec.referenceId&&<span style={{fontSize:11,color:"#94a3b8",fontFamily:"monospace"}}>Ref: {rec.referenceId}</span>}
+                    {rec.orderName&&<span style={{fontSize:11,color:"#475569",fontWeight:600}}>{rec.orderName}</span>}
+                    {linkedInvIds.length>0&&<span style={{fontSize:10,color:"#64748b"}}>links: {linkedInvIds.join(", ")}</span>}
+                    {linkedPoRec&&<span style={{fontSize:10,color:"#94a3b8"}}>→ {linkedPoRec.id}</span>}
                   </div>
                   <div style={{fontSize:11,color:"#64748b",marginTop:2}}>
-                    {displayName(rec.bookerEmail)} · {fmtDate(rec.dateFrom)}{rec.dateTo&&rec.dateTo!==rec.dateFrom?` – ${fmtDate(rec.dateTo)}`:""}
-                    {" "}· {(rec.bookingIds||[]).length} booking{(rec.bookingIds||[]).length!==1?"s":""}
+                    {isPO ? <strong style={{color:"#1d4ed8"}}>{rec.bookerName||VENDOR_GTEC.name}</strong> : displayName(rec.bookerEmail)}
+                    {" · "}{fmtDate(rec.dateFrom)}{rec.dateTo&&rec.dateTo!==rec.dateFrom?` – ${fmtDate(rec.dateTo)}`:""}
+                    {" · "}{(rec.bookingIds||[]).length} booking{(rec.bookingIds||[]).length!==1?"s":""}
+                    {(rec.status||"draft")==="draft"&&isInv&&<span style={{marginLeft:6,fontSize:10,color:"#94a3b8",fontStyle:"italic"}}>bookings marked invoiced on advance</span>}
                   </div>
                 </div>
                 <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
@@ -3265,6 +3277,7 @@ function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onLoadT
                             onUpdateRecord({id:rec.id,status:next});
                           }} style={{padding:"5px 12px",borderRadius:8,border:"none",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit",background:"#0f172a",color:"#fff"}}>
                             → Mark as {stateInfo(PIPELINE_KEYS[PIPELINE_KEYS.indexOf(rec.status||"draft")+1]).label}
+                            {(rec.status||"draft")==="draft"&&isInv&&<span style={{fontWeight:400,marginLeft:4,opacity:0.7}}>(marks {(rec.bookingIds||[]).length} bookings invoiced)</span>}
                           </button>
                         )}
                         {/* Revert */}
@@ -3847,18 +3860,16 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
   }
 
   function openInvoice() {
-    // One-time init from header pill state; falls back to local summary filter.
-    if (bookerFilter.size > 0) setInvSelectedEmails(new Set([...bookerFilter]));
-    else setInvSelectedEmails(new Set(emailFilterSet));
+    // Pre-select exactly what's visible in the summary — if no filter, leave empty (= All).
+    setInvSelectedEmails(emailFilterSet.size>0 ? new Set(emailFilterSet) : new Set());
     setShowInvoice(true);
   }
 
   // Build an official invoice record (no side-effects) for one scope (one booker).
-  // Returns an object ready to be stored in fb_invoice_records.
-  function buildOfficialRecord(scope, existingRecords, extraRecords) {
-    const allRecs = [...(existingRecords||[]), ...(extraRecords||[])];
+  // Build one INV record per booker scope (AMUA → booker).
+  // Returns the record; caller accumulates into allRecs to keep IDs unique.
+  function buildInvoiceRecord(scope, allRecs) {
     const invId = generateDocId(allRecs.filter(r=>r.id?.startsWith("INV-")), "INV");
-    const poId  = generateDocId(allRecs.filter(r=>r.id?.startsWith("PO-")),  "PO");
     const canonKey = (emailAliases[scope.email] || scope.email).toLowerCase();
     const prof = (profiles||{})[canonKey] || {};
     const groupedLines    = buildInvoiceLines(scope.bkgs, "grouped");
@@ -3867,10 +3878,10 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
     const { pre, gst, total } = gstAmounts(subtotal, invGst);
     const dates = scope.bkgs.map(b=>b.date).filter(Boolean).sort();
     return {
-      id: invId, poId,
-      referenceId: `REF-${invId.slice(4)}`,
+      id: invId,
+      type: "invoice",
+      orderName: invOrderName || "",
       createdAt: new Date().toISOString(),
-      orderName: scope.orderName || invOrderName || "",
       dateFrom: dateFrom || dates[0] || todayKey(),
       dateTo:   dateTo   || dates[dates.length-1] || todayKey(),
       bookerEmail: scope.email,
@@ -3878,12 +3889,54 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
       bookerAddress: prof.address || "",
       bookerGst:   prof.gstNumber || "",
       bookingIds:  scope.bkgs.map(b=>b.id),
-      lines:           groupedLines,
-      individualLines: individualLines,
+      lines: groupedLines,
+      individualLines,
       subtotal: pre, gst, total, gstMode: invGst,
       status: "draft",
       gtecInvoiceNumber: "",
-      vendorInvoiceNumber: "",
+      notes: "",
+    };
+  }
+
+  // Build one combined PO record (AMUA → GTEC) covering all booker scopes.
+  // Lines are one entry per booker showing their subtotal; references invoice IDs.
+  function buildGtecPoRecord(scopes, invoiceRecords, allRecs) {
+    const poId = generateDocId(allRecs.filter(r=>r.id?.startsWith("PO-")), "PO");
+    const allBkgsFlat = scopes.flatMap(s=>s.bkgs);
+    const allDates = allBkgsFlat.map(b=>b.date).filter(Boolean).sort();
+    const poLines = scopes.map(scope=>{
+      const canonKey = (emailAliases[scope.email] || scope.email).toLowerCase();
+      const prof = (profiles||{})[canonKey] || {};
+      const name = prof.fullName || bookerNameMap[scope.email?.toLowerCase()] || scope.email?.split("@")[0] || "Unknown";
+      const inv = invoiceRecords.find(r=>r.bookerEmail===scope.email);
+      const subtotal = (inv?.lines||[]).reduce((s,l)=>s+l.cost,0);
+      const { pre } = gstAmounts(subtotal, invGst);
+      return { desc:`${name}`, detail: inv?.id||"", cost: pre };
+    });
+    const poSubtotal = poLines.reduce((s,l)=>s+l.cost,0);
+    const { pre:poPreGst, gst:poGst, total:poTotal } = gstAmounts(poSubtotal*1.15, invGst); // reconstruct inclusive total
+    // Simpler: just sum totals directly
+    const sumTotal = invoiceRecords.reduce((s,r)=>s+(r.total||0),0);
+    const sumSubtotal = invoiceRecords.reduce((s,r)=>s+(r.subtotal||0),0);
+    const sumGst = invoiceRecords.reduce((s,r)=>s+(r.gst||0),0);
+    return {
+      id: poId,
+      type: "purchase_order",
+      orderName: invOrderName || "",
+      createdAt: new Date().toISOString(),
+      dateFrom: dateFrom || allDates[0] || todayKey(),
+      dateTo:   dateTo   || allDates[allDates.length-1] || todayKey(),
+      bookerEmail: "gtec",
+      bookerName:  VENDOR_GTEC.name,
+      bookerAddress: VENDOR_GTEC.address,
+      bookerGst:   VENDOR_GTEC.gstNumber,
+      bookingIds:  allBkgsFlat.map(b=>b.id),
+      linkedInvoiceIds: invoiceRecords.map(r=>r.id),
+      lines: poLines,
+      individualLines: [],
+      subtotal: sumSubtotal, gst: sumGst, total: sumTotal, gstMode: invGst,
+      status: "draft",
+      gtecInvoiceNumber: "",
       notes: "",
     };
   }
@@ -4972,37 +5025,57 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
                     <Pill active={invGst==="exclusive"} onClick={()=>setInvGst("exclusive")}>Exclusive (add on)</Pill>
                     <Pill active={invGst==="note"} onClick={()=>setInvGst("note")}>Note only</Pill>
                   </OptionRow>
-                  {invSelectedEmails.size !== 1 && allInvoiceEmails.length > 1 && (
-                    <OptionRow label="Output">
-                      <Pill active={invScope==="combined"} onClick={()=>setInvScope("combined")}>Combined record</Pill>
-                      <Pill active={invScope==="per_booker"} onClick={()=>setInvScope("per_booker")}>Per booker</Pill>
-                    </OptionRow>
-                  )}
-                  {/* Preview booker names that will be stamped on official records */}
-                  {scopes.length>0&&(
-                    <div style={{background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:8,padding:"8px 12px",fontSize:12,color:"#075985"}}>
-                      <strong>Bill to:</strong>{" "}
-                      {scopes.map(s=><span key={s.email} style={{marginRight:8}}>{officialBookerName(s.email)}</span>)}
-                    </div>
-                  )}
+                  {/* Document structure preview */}
+                  {(()=>{
+                    const sel = invSelectedEmails.size>0 ? [...invSelectedEmails] : allInvoiceEmails;
+                    return (
+                      <div style={{background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:8,padding:"10px 12px",fontSize:12,color:"#075985",display:"flex",flexDirection:"column",gap:6}}>
+                        <div style={{fontWeight:700,fontSize:11,color:"#0369a1",marginBottom:2}}>Documents to be created:</div>
+                        {sel.map(e=>(
+                          <div key={e} style={{display:"flex",gap:6,alignItems:"center"}}>
+                            <span style={{fontFamily:"monospace",fontSize:10,background:"#e0f2fe",padding:"1px 5px",borderRadius:4,color:"#0369a1"}}>INV</span>
+                            <span style={{fontWeight:600}}>{officialBookerName(e)}</span>
+                            <span style={{color:"#64748b",fontSize:11}}>← AMUA invoice to booker</span>
+                          </div>
+                        ))}
+                        <div style={{display:"flex",gap:6,alignItems:"center",marginTop:2,paddingTop:6,borderTop:"1px dashed #bae6fd"}}>
+                          <span style={{fontFamily:"monospace",fontSize:10,background:"#dbeafe",padding:"1px 5px",borderRadius:4,color:"#1d4ed8"}}>PO</span>
+                          <span style={{fontWeight:600}}>{VENDOR_GTEC.name}</span>
+                          <span style={{color:"#64748b",fontSize:11}}>← combined PO for all {sel.length} booker{sel.length!==1?"s":""}</span>
+                        </div>
+                        <div style={{fontSize:10,color:"#0369a1",marginTop:2}}>
+                          Bookings remain uninvoiced until this record advances from Draft → next stage.
+                        </div>
+                      </div>
+                    );
+                  })()}
                   {!invOrderName.trim()&&<div style={{fontSize:11,color:"#f43f5e",fontWeight:600}}>Order name is required before creating an official record.</div>}
                   <div style={{borderTop:"1px solid #e0e7ff",paddingTop:12}}>
                     <button onClick={()=>{
                       if(!invOrderName.trim()) return;
-                      const extra = [];
-                      const newRecords = scopes.map(s => {
-                        const rec = buildOfficialRecord({...s, orderName: invOrderName.trim()}, [], extra);
-                        extra.push(rec);
+                      const allRecs = [];
+                      const officialScopes = invSelectedEmails.size>0
+                        ? getInvoiceScopes()
+                        : allInvoiceEmails.map(e=>({
+                            email: e,
+                            name: officialBookerName(e),
+                            bkgs: activeForInvoice.filter(b=>b.email?.toLowerCase()===e.toLowerCase()),
+                          })).filter(s=>s.bkgs.length>0);
+                      const invoiceRecords = officialScopes.map(s=>{
+                        const rec = buildInvoiceRecord(s, allRecs);
+                        allRecs.push(rec);
                         return rec;
                       });
-                      onCreateOfficialInvoice(newRecords, scopes.flatMap(s=>s.bkgs));
+                      const poRecord = buildGtecPoRecord(officialScopes, invoiceRecords, allRecs);
+                      onCreateOfficialInvoice([...invoiceRecords, poRecord], null); // pass null — no immediate invoicing
                       setShowInvoice(false);
                     }} disabled={!officialReady}
                     style={S.btn({background:officialReady?"#4338ca":"#94a3b8",color:"#fff",gap:6,display:"flex",alignItems:"center",fontWeight:700,cursor:officialReady?"pointer":"not-allowed"})}>
-                      📋 Create Official Invoice + PO
+                      📋 Create Invoices + GTEC PO
                     </button>
                     <div style={{fontSize:10,color:"#94a3b8",marginTop:6}}>
-                      Generates grouped &amp; individual line records · Marks bookings invoiced · Saves to billing history · Links Invoice + PO.
+                      Creates {invSelectedEmails.size||allInvoiceEmails.length} booker invoice{(invSelectedEmails.size||allInvoiceEmails.length)!==1?"s":""} + 1 combined GTEC PO ·
+                      Bookings marked invoiced only when record leaves Draft status.
                     </div>
                   </div>
                 </div>
@@ -7029,11 +7102,29 @@ export default function App() {
     showToast(`${targets.length} booking${targets.length>1?"s":""} marked invoiced.`);
   }
 
-  function handleCreateOfficialInvoice(newRecords, bkgsToMark) {
+  function handleCreateOfficialInvoice(newRecords) {
+    // No immediate invoicing — bookings are marked invoiced when record leaves Draft.
     setBillingRecords(prev => [...prev, ...newRecords]);
-    if (bkgsToMark?.length) handleMarkInvoiced(bkgsToMark);
     logActivity("official_invoice_created", { count: newRecords.length, ids: newRecords.map(r=>r.id) });
-    showToast(`${newRecords.length} official invoice${newRecords.length>1?"s":""} created.`);
+    const invCount = newRecords.filter(r=>r.type==="invoice"||!r.type).length;
+    const poCount  = newRecords.filter(r=>r.type==="purchase_order").length;
+    showToast(`Created ${invCount} invoice${invCount!==1?"s":""} + ${poCount} PO.`);
+  }
+
+  // Update a billing record; when status advances from draft, mark linked bookings invoiced.
+  async function handleUpdateBillingRecord(patch) {
+    setBillingRecords(prev => {
+      const old = prev.find(r=>r.id===patch.id);
+      // If advancing out of draft, mark the linked bookings as invoiced.
+      if (old && (old.status||"draft")==="draft" && patch.status && patch.status!=="draft") {
+        const ids = new Set(old.bookingIds||[]);
+        if (ids.size) {
+          const targets = bookings.filter(b=>ids.has(b.id)&&!isAdminBooking(b)&&!b.invoiced);
+          if (targets.length) handleMarkInvoiced(targets);
+        }
+      }
+      return prev.map(r=>r.id===patch.id?{...r,...patch}:r);
+    });
   }
 
   // Bulk approve/reject — groups by email and sends one summary per person
@@ -7639,7 +7730,7 @@ export default function App() {
         )}
 
         {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<SummaryTab bookings={bookings} loggedInEmail={loggedInEmail} facilityRates={facilityRates} isAdmin={isAdmin} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onUpdateFacilityRate={updateFacilityRate} pricingMode={pricingMode} onSetPricingMode={setPricingMode} onProposeMerge={handleProposeMerge} onBulkApply={handleBulkApply} onMarkInvoiced={handleMarkInvoiced} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} bookerFilter={listBookerFilter} profiles={profiles} emailAliases={emailAliases} aliasNames={aliasNames} onCreateOfficialInvoice={handleCreateOfficialInvoice} onFilterChange={s=>setListBookerFilter(s)} loadRequest={summaryLoadRequest}/>}</div>}
-        {tab==="billing"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<BillingTab billingRecords={billingRecords} onUpdateRecord={patch=>setBillingRecords(prev=>prev.map(r=>r.id===patch.id?{...r,...patch}:r))} onDeleteRecord={id=>setBillingRecords(prev=>prev.filter(r=>r.id!==id))} onLoadToSummary={handleLoadBillingToSummary} isAdmin={isAdmin} loggedInEmail={loggedInEmail} emailAliases={emailAliases} aliasNames={aliasNames} profiles={profiles}/>}</div>}
+        {tab==="billing"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<BillingTab billingRecords={billingRecords} onUpdateRecord={handleUpdateBillingRecord} onDeleteRecord={id=>setBillingRecords(prev=>prev.filter(r=>r.id!==id))} onLoadToSummary={handleLoadBillingToSummary} isAdmin={isAdmin} loggedInEmail={loggedInEmail} emailAliases={emailAliases} aliasNames={aliasNames} profiles={profiles}/>}</div>}
         {tab==="about"&&<div style={{padding:"8px 0"}}><AboutTab/></div>}
         {tab==="admin"&&isAdmin&&<div style={S.card}>
           {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onView={setViewing} onQueueDelete={queueForRemovalSilent} clashes={allClashes} deleteIds={new Set(deleteQueue.map(b=>b.id))} facilityRates={facilityRates} onUpdateFacilityRate={updateFacilityRate} onClearOldUnapproved={handleClearOldUnapproved} silentMode={silentMode} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onSyncDB={handleSyncDB} onBulkApply={handleBulkApply} onSaveMismatch={handleSaveMismatch} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} loggedInEmail={loggedInEmail} syncResults={syncResults} onClearSyncResults={()=>setSyncResults([])} showSyncResults={showSyncPanel} onToggleSyncResults={()=>setShowSyncPanel(v=>!v)} aliasNames={aliasNames} emailAliases={emailAliases}/>}
