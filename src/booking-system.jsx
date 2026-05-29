@@ -3784,6 +3784,20 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
     const or = getFacRates(snap.facility_id), nr = getFacRates(b.facility_id);
     return (nd.day*nr.day + nd.evening*nr.evening) - (od.day*or.day + od.evening*or.evening);
   }
+  // Pending credit (will be discounted from next invoice) — negative number, only for credit_pending state
+  function bookingPendingCredit(b) {
+    const res = parseCpsaResolution(b.system_notes);
+    if (res?.billingState !== "credit_pending") return 0;
+    const delta = bookingAdjustment(b);
+    return delta < 0 ? delta : 0;
+  }
+  // Pending deficit (will be added to next invoice) — positive number, only for invoice_pending state
+  function bookingPendingDeficit(b) {
+    const res = parseCpsaResolution(b.system_notes);
+    if (res?.billingState !== "invoice_pending") return 0;
+    const delta = bookingAdjustment(b);
+    return delta > 0 ? delta : 0;
+  }
   // Bookings per booker, sorted by date
   const bkgsByEmail = {};
   active.forEach(b => {
@@ -3792,10 +3806,14 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
     bkgsByEmail[k].push(b);
   });
   Object.values(bkgsByEmail).forEach(arr => arr.sort((a,b)=>a.date.localeCompare(b.date)||a.start_hour-b.start_hour));
-  // Adjustment totals per booker
+  // Adjustment totals per booker — split pending credits (auto-discounted from
+  // next invoice) from pending deficits (still owed); the legacy `adjustment`
+  // field stays in sync with the displayed Adj column = deficits only.
   Object.values(byEmail).forEach(rec => {
     const list = bkgsByEmail[rec.email.toLowerCase()] || [];
-    rec.adjustment = list.reduce((s,b)=>s+bookingAdjustment(b), 0);
+    rec.pendingCredit  = list.reduce((s,b)=>s+bookingPendingCredit(b),  0); // ≤ 0
+    rec.pendingDeficit = list.reduce((s,b)=>s+bookingPendingDeficit(b), 0); // ≥ 0
+    rec.adjustment     = rec.pendingDeficit; // Adj column = only deficits owed
   });
   const rows          = Object.values(byEmail).sort((a,b)=>b.total-a.total);
   // In per-booking mode "displayed total" = bookings × approxDuration; in hourly mode = actual hours
@@ -4413,7 +4431,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
                     {anyRates&&!isPerBooking&&<th style={{ ...thS, textAlign:"right" }}>Day Cost</th>}
                     {anyRates&&!isPerBooking&&<th style={{ ...thS, textAlign:"right" }}>Eve Cost</th>}
                     {anyRates&&<th style={{ ...thS, textAlign:"right", color:"#15803d" }}>Total Cost</th>}
-                    {anyRates&&<th style={{ ...thS, textAlign:"right", color:"#b45309" }} title="Net billing adjustment from CPSA amendments to invoiced bookings. + means an additional invoice is owed; − means a credit is owed.">Adj.</th>}
+                    {anyRates&&<th style={{ ...thS, textAlign:"right", color:"#b45309" }} title="Pending deficit owed by booker from CPSA amendments (additional invoice). Pending credits are auto-discounted from the Total column.">Adj.</th>}
                     <th style={{ ...thS, textAlign:"right" }}>Players</th>
                     {isPerBooking&&<th style={{ ...thS, textAlign:"right", color:"#0369a1" }}>~Duration</th>}
                     {anyRates&&<th style={{ ...thS, textAlign:"right", color:"#7c3aed" }}>$/Player</th>}
@@ -4459,10 +4477,20 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
                       </td>
                       {anyRates&&!isPerBooking&&<td style={{ ...tdS, textAlign:"right", fontWeight:600, color:r.dayCost>0?"#15803d":"#94a3b8" }}>{r.dayCost>0?fmtCost(r.dayCost):"—"}</td>}
                       {anyRates&&!isPerBooking&&<td style={{ ...tdS, textAlign:"right", fontWeight:600, color:r.eveCost>0?"#15803d":"#94a3b8" }}>{r.eveCost>0?fmtCost(r.eveCost):"—"}</td>}
-                      {anyRates&&<td style={{ ...tdS, textAlign:"right", fontWeight:700, color:r.cost>0?"#15803d":"#94a3b8" }}>{r.cost>0?fmtCost(r.cost):"—"}</td>}
-                      {anyRates&&<td style={{ ...tdS, textAlign:"right", fontWeight:600, color:r.adjustment>0?"#b45309":r.adjustment<0?"#0891b2":"#cbd5e1" }}
-                          title={r.adjustment===0?"No CPSA billing adjustments":r.adjustment>0?`Booker undercharged — additional invoice owed: ${fmtCost(r.adjustment)}`:`Booker overcharged — credit owed: ${fmtCost(Math.abs(r.adjustment))}`}>
-                          {r.adjustment===0?"—":`${r.adjustment>0?"+":"−"}${fmtCost(Math.abs(r.adjustment))}`}
+                      {anyRates&&(()=>{
+                        const netCost = r.cost + r.pendingCredit; // credit is ≤0
+                        const hasCredit = r.pendingCredit < 0;
+                        return (
+                          <td style={{ ...tdS, textAlign:"right", fontWeight:700, color:netCost>0?"#15803d":"#94a3b8" }}
+                              title={hasCredit?`Cost ${fmtCost(r.cost)} − pending credit ${fmtCost(Math.abs(r.pendingCredit))} = ${fmtCost(netCost)}`:undefined}>
+                            {netCost>0?fmtCost(netCost):"—"}
+                            {hasCredit&&<div style={{fontSize:9,fontWeight:600,color:"#16a34a",marginTop:1}}>−{fmtCost(Math.abs(r.pendingCredit))} credit</div>}
+                          </td>
+                        );
+                      })()}
+                      {anyRates&&<td style={{ ...tdS, textAlign:"right", fontWeight:600, color:r.adjustment>0?"#b45309":"#cbd5e1" }}
+                          title={r.adjustment===0?"No deficit owed":`Booker undercharged — additional invoice owed: ${fmtCost(r.adjustment)}`}>
+                          {r.adjustment===0?"—":`+${fmtCost(r.adjustment)}`}
                       </td>}
                       <td style={{ ...tdS, textAlign:"right" }}>
                         {isEditingThis ? (
@@ -4545,7 +4573,9 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
                                 {bookerBkgs.map(b => {
                                   const fac = FACILITIES.find(x=>x.id===b.facility_id);
                                   const cost = getBookingCost(b);
-                                  const adj = bookingAdjustment(b);
+                                  const credit = bookingPendingCredit(b); // ≤ 0
+                                  const deficit = bookingPendingDeficit(b); // ≥ 0
+                                  const netCost = cost + credit;
                                   return (
                                     <tr key={b.id} style={{borderTop:"1px solid #f1f5f9"}}>
                                       <td style={{padding:"3px 8px",color:"#475569",whiteSpace:"nowrap"}}>{fmtDateShort(b.date)}</td>
@@ -4557,8 +4587,12 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
                                       </td>
                                       <td style={{padding:"3px 8px",color:"#475569",whiteSpace:"nowrap"}}>{fmt24(b.start_hour)}–{fmt24(b.start_hour+b.duration)}</td>
                                       <td style={{padding:"3px 8px",textAlign:"right",color:"#475569"}}>{fmtHrs(b.duration)}</td>
-                                      <td style={{padding:"3px 8px",textAlign:"right",fontWeight:600,color:cost>0?"#15803d":"#94a3b8"}}>{cost>0?fmtCost(cost):"—"}</td>
-                                      <td style={{padding:"3px 8px",textAlign:"right",fontWeight:600,color:adj>0?"#b45309":adj<0?"#0891b2":"#cbd5e1"}}>{adj===0?"—":`${adj>0?"+":"−"}${fmtCost(Math.abs(adj))}`}</td>
+                                      <td style={{padding:"3px 8px",textAlign:"right",fontWeight:600,color:netCost>0?"#15803d":"#94a3b8"}}
+                                          title={credit<0?`${fmtCost(cost)} − credit ${fmtCost(Math.abs(credit))} = ${fmtCost(netCost)}`:undefined}>
+                                        {netCost>0?fmtCost(netCost):"—"}
+                                        {credit<0&&<span style={{fontSize:9,color:"#16a34a",marginLeft:3,fontWeight:700}}>(−{fmtCost(Math.abs(credit))})</span>}
+                                      </td>
+                                      <td style={{padding:"3px 8px",textAlign:"right",fontWeight:600,color:deficit>0?"#b45309":"#cbd5e1"}}>{deficit===0?"—":`+${fmtCost(deficit)}`}</td>
                                       <td style={{padding:"3px 8px"}}><Badge status={b.status}/>{b.invoiced&&<span style={{marginLeft:3,fontSize:9,fontWeight:700,color:"#5b21b6"}}>🧾</span>}</td>
                                     </tr>
                                   );
@@ -4597,8 +4631,19 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
                       <td style={{ ...tdS, textAlign:"right", fontWeight:800 }}>{fmtHrs(totalApproxHrs)}</td>
                       {anyRates&&!isPerBooking&&<td style={{ ...tdS, textAlign:"right", fontWeight:800, color:"#15803d" }}>{fmtCost(totalDayCost)}</td>}
                       {anyRates&&!isPerBooking&&<td style={{ ...tdS, textAlign:"right", fontWeight:800, color:"#15803d" }}>{fmtCost(totalEveCost)}</td>}
-                      {anyRates&&<td style={{ ...tdS, textAlign:"right", fontWeight:800, color:"#15803d" }}>{fmtCost(totalCostAll)}</td>}
-                      {anyRates&&(()=>{ const tAdj=rows.reduce((s,r)=>s+(r.adjustment||0),0); return <td style={{ ...tdS, textAlign:"right", fontWeight:800, color:tAdj>0?"#b45309":tAdj<0?"#0891b2":"#cbd5e1" }}>{tAdj===0?"—":`${tAdj>0?"+":"−"}${fmtCost(Math.abs(tAdj))}`}</td>; })()}
+                      {anyRates&&(()=>{
+                        const totalCredit = rows.reduce((s,r)=>s+(r.pendingCredit||0),0);
+                        const netTotal = totalCostAll + totalCredit;
+                        const hasCredit = totalCredit < 0;
+                        return (
+                          <td style={{ ...tdS, textAlign:"right", fontWeight:800, color:"#15803d" }}
+                              title={hasCredit?`Cost ${fmtCost(totalCostAll)} − pending credits ${fmtCost(Math.abs(totalCredit))} = ${fmtCost(netTotal)}`:undefined}>
+                            {fmtCost(netTotal)}
+                            {hasCredit&&<div style={{fontSize:9,fontWeight:700,color:"#16a34a",marginTop:1}}>−{fmtCost(Math.abs(totalCredit))} credit</div>}
+                          </td>
+                        );
+                      })()}
+                      {anyRates&&(()=>{ const tAdj=rows.reduce((s,r)=>s+(r.adjustment||0),0); return <td style={{ ...tdS, textAlign:"right", fontWeight:800, color:tAdj>0?"#b45309":"#cbd5e1" }}>{tAdj===0?"—":`+${fmtCost(tAdj)}`}</td>; })()}
                       <td style={{ ...tdS, textAlign:"right", fontWeight:700, color:totalPlayers>0?"#0369a1":"#94a3b8" }}>{totalPlayers > 0 ? totalPlayers : "—"}</td>
                       {isPerBooking&&<td style={{ ...tdS }}/>}
                       {anyRates&&<td style={{ ...tdS, textAlign:"right", fontWeight:800, color:totalPerPlayer>0?"#7c3aed":"#94a3b8" }}>{totalPerPlayer>0?fmtCost(totalPerPlayer):"—"}</td>}
