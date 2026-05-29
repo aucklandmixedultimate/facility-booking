@@ -168,6 +168,7 @@ function fmtDateShort(s) {
   const d=new Date(s+"T00:00:00"); return `${d.getDate()} ${d.toLocaleDateString("en-NZ",{month:"short"})}`;
 }
 function fmtDate(s) { return new Date(s+"T00:00:00").toLocaleDateString("en-NZ",{weekday:"short",day:"numeric",month:"short",year:"numeric"}); }
+function fmtCost(n) { return "$" + Number(n).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g,","); }
 function fmtTimeShort(h) {
   const hh=Math.floor(h), m=Math.round((h%1)*60), dh=hh>12?hh-12:hh===0?12:hh;
   return `${dh}${m?":"+String(m).padStart(2,"0"):""}${hh>=12?"p":"a"}`;
@@ -3830,7 +3831,6 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
   const anyRates  = FACILITIES.some(f => { const r = getFacRates(f.id); return r.day > 0 || r.evening > 0; });
 
   function fmtHrs(h) { return h===0?"0h" : h%1===0?`${h}h`:`${Math.floor(h)}h ${Math.round((h%1)*60)}m`; }
-  function fmtCost(n) { return "$" + n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g,","); }
   function getPlayers(email) { return approxPlayers[email.toLowerCase()] || 0; }
   function canEditPlayers(email) { return isAdmin || (loggedInEmail && email.toLowerCase() === loggedInEmail.toLowerCase()); }
   function canEditDuration(email) { return isAdmin || (loggedInEmail && email.toLowerCase() === loggedInEmail.toLowerCase()); }
