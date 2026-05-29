@@ -583,7 +583,7 @@ function Modal({title,onClose,children,width=560}) {
           <h2 style={{margin:0,fontSize:18,fontWeight:700,color:"#0f172a"}}>{title}</h2>
           <button onClick={onClose} style={{background:"none",border:"none",cursor:"pointer",fontSize:20,color:"#94a3b8",lineHeight:1,padding:4}}>✕</button>
         </div>
-        <div style={{padding:24,flex:1,minHeight:0,display:"flex",flexDirection:"column",overflow:"hidden"}}>{children}</div>
+        <div style={{padding:24,flex:1,minHeight:0,display:"flex",flexDirection:"column",overflowY:"auto",overflowX:"hidden"}}>{children}</div>
       </div>
     </div>
   );
@@ -671,7 +671,7 @@ function ActivityLogModal({onClose}) {
 }
 
 // Admin UI: map secondary emails into a primary profile + manage profile details.
-function UserMgmtModal({ bookings, aliases, aliasNames, onChange, onChangeNames, profiles, onUpdateProfile, adminEmail, onClose }) {
+function UserMgmtModal({ bookings, aliases, aliasNames, onChange, onChangeNames, profiles, onUpdateProfile, adminEmail, onClose, onViewAs }) {
   const allEmails = useMemo(() => {
     const s = new Set();
     bookings.forEach(b => { if (b.email && !isAdminBooking(b)) s.add(b.email.toLowerCase()); });
@@ -744,12 +744,26 @@ function UserMgmtModal({ bookings, aliases, aliasNames, onChange, onChangeNames,
     </div>
   );
 
-  // All primaries including adminEmail even if they have no bookings yet.
+  // All primaries including adminEmail and any standalone profiles (e.g. vendors not linked to a Google account yet).
   const allPrimaries = useMemo(() => {
     const s = new Set(Object.keys(groups));
     if (adminEmail) s.add(adminEmail.toLowerCase());
+    Object.keys(profiles||{}).forEach(k => s.add(k));
     return [...s].sort();
-  }, [groups, adminEmail]);
+  }, [groups, adminEmail, profiles]);
+
+  // Create-vendor form state
+  const [newVendorEmail, setNewVendorEmail] = useState("");
+  const [newVendorName, setNewVendorName] = useState("");
+  function createVendor() {
+    const em = newVendorEmail.trim().toLowerCase();
+    if (!em) return;
+    const next = { ...(profiles||{}) };
+    next[em] = { ...(next[em]||{}), profileType:"vendor", fullName: newVendorName.trim() || next[em]?.fullName || "" };
+    onUpdateProfile(next);
+    setNewVendorEmail(""); setNewVendorName("");
+    setExpandedProfile(em);
+  }
 
   return (
     <Modal title="👤 User Management" onClose={onClose} width={680}>
@@ -781,9 +795,27 @@ function UserMgmtModal({ bookings, aliases, aliasNames, onChange, onChangeNames,
         <strong>Vendor (GTEC)</strong> — Grammar TEC Rugby Club Inc · GST 113-246-812 · PO BOX 42 210, Orakei, Auckland · pre-configured as PO recipient
       </div>
 
+      {/* Create standalone vendor profile (works without a linked Google login) */}
+      <div style={{background:"#f8fafc",border:"1.5px solid #e2e8f0",borderRadius:10,padding:12,marginBottom:14}}>
+        <div style={{fontSize:12,fontWeight:700,color:"#0f172a",marginBottom:6}}>Create vendor profile</div>
+        <div style={{fontSize:11,color:"#64748b",marginBottom:8}}>Vendor profiles can exist standalone — they show as a user before a Google account is linked.</div>
+        <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+          <input value={newVendorEmail} onChange={e=>setNewVendorEmail(e.target.value)}
+            placeholder="vendor email…"
+            style={{flex:"1 1 180px",padding:"6px 8px",borderRadius:6,border:"1.5px solid #e2e8f0",fontSize:12,fontFamily:"inherit",background:"#fff"}}/>
+          <input value={newVendorName} onChange={e=>setNewVendorName(e.target.value)}
+            placeholder="display name (optional)"
+            style={{flex:"1 1 180px",padding:"6px 8px",borderRadius:6,border:"1.5px solid #e2e8f0",fontSize:12,fontFamily:"inherit",background:"#fff"}}/>
+          <button onClick={createVendor} disabled={!newVendorEmail.trim()}
+            style={S.btn({background:newVendorEmail.trim()?"#15803d":"#cbd5e1",color:"#fff",fontSize:12,cursor:newVendorEmail.trim()?"pointer":"not-allowed"})}>
+            + Create
+          </button>
+        </div>
+      </div>
+
       {/* Profile cards */}
       <div style={{fontSize:12,fontWeight:700,color:"#0f172a",marginBottom:6}}>Profiles ({allPrimaries.length})</div>
-      <div style={{display:"flex",flexDirection:"column",gap:8,maxHeight:"52vh",overflowY:"auto",paddingRight:2}}>
+      <div style={{display:"flex",flexDirection:"column",gap:8,paddingRight:2}}>
         {allPrimaries.map(primary => {
           const secondaries = [...(groups[primary]||new Set())].filter(e=>e!==primary).sort();
           const dflt = primary.split("@")[0];
@@ -804,6 +836,13 @@ function UserMgmtModal({ bookings, aliases, aliasNames, onChange, onChangeNames,
                 <span style={{fontSize:13,fontWeight:700,color:"#0f172a",flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{primary}</span>
                 <span style={{fontSize:10,fontWeight:700,padding:"1px 6px",borderRadius:10,background:`${PTYPE_COLOR[ptype]}18`,color:PTYPE_COLOR[ptype],border:`1px solid ${PTYPE_COLOR[ptype]}40`,flexShrink:0}}>{ptype}</span>
                 {prof.fullName&&<span style={{fontSize:11,color:"#475569",flexShrink:0,maxWidth:120,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{prof.fullName}</span>}
+                {onViewAs && primary !== adminEmail?.toLowerCase() && (
+                  <button onClick={e=>{e.stopPropagation(); onViewAs(primary);}}
+                    title={`View interface as ${primary}`}
+                    style={{padding:"3px 8px",borderRadius:6,border:"1px solid #c7d2fe",background:"#eef2ff",color:"#4338ca",cursor:"pointer",fontSize:10,fontWeight:700,fontFamily:"inherit",flexShrink:0}}>
+                    👁 View as
+                  </button>
+                )}
                 <span style={{fontSize:11,color:"#94a3b8",flexShrink:0}}>{isExpanded?"▴":"▾"}</span>
               </div>
               {/* Expanded detail */}
@@ -5773,8 +5812,14 @@ async function fetchCJREvents(year, month) {
 export default function App() {
   // ALL hooks unconditional (Rules of Hooks)
   const [session,  setSession]  =useState(undefined); // undefined = loading, null = signed out
-  const loggedInEmail = session?.user?.email?.toLowerCase() || "";
-  const isAdmin       = session?.user?.app_metadata?.role === "admin";
+  const realLoggedInEmail = session?.user?.email?.toLowerCase() || "";
+  const realIsAdmin       = session?.user?.app_metadata?.role === "admin";
+  const [viewAsEmail, setViewAsEmail] = useState(null); // admin "view as" impersonation target
+  const loggedInEmail = (realIsAdmin && viewAsEmail) ? viewAsEmail : realLoggedInEmail;
+  // When viewing as another profile, admin powers are dropped unless the target is also admin
+  const isAdmin = (realIsAdmin && viewAsEmail)
+    ? false  // explicit: viewing AS another user means seeing what they see
+    : realIsAdmin;
   const userId        = session?.user?.id || null;
   const [bookings, setBookings] =useState([]);
   const [loading,  setLoading]  =useState(true);
@@ -6633,6 +6678,19 @@ export default function App() {
       <style>{MOBILE_STYLE}</style>
       {toast&&<div style={{position:"fixed",top:16,right:16,zIndex:2000,background:toast.type==="error"?"#f43f5e":"#22c55e",color:"#fff",padding:"10px 18px",borderRadius:10,fontWeight:600,fontSize:13,boxShadow:"0 4px 20px rgba(0,0,0,0.15)"}}>{toast.msg}</div>}
 
+      {/* View-as banner */}
+      {realIsAdmin && viewAsEmail && (
+        <div style={{background:"#4338ca",color:"#fff",padding:"8px 16px",display:"flex",alignItems:"center",gap:10,fontSize:12,fontWeight:600,boxShadow:"0 1px 4px rgba(0,0,0,0.15)"}}>
+          <span style={{fontSize:14}}>👁</span>
+          <span>Viewing as <strong>{(profiles[viewAsEmail]?.fullName)||(aliasNames[viewAsEmail])||viewAsEmail}</strong> ({viewAsEmail})</span>
+          <span style={{fontSize:11,opacity:0.8,fontWeight:400}}>— interface and settings reflect this profile</span>
+          <button onClick={()=>{ setViewAsEmail(null); showToast("Exited profile view"); }}
+            style={{marginLeft:"auto",background:"#fff",color:"#4338ca",border:"none",borderRadius:6,padding:"4px 12px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"}}>
+            ✕ Exit profile view
+          </button>
+        </div>
+      )}
+
       {/* Header */}
       <div style={{background:"#fff",borderBottom:"1px solid #f1f5f9",padding:"0 16px"}}>
         <div style={{maxWidth:1300,margin:"0 auto"}}>
@@ -7128,7 +7186,7 @@ export default function App() {
         </Modal>
       )}
 
-      {showUserMgmtModal&&isAdmin&&(
+      {showUserMgmtModal&&realIsAdmin&&(
         <UserMgmtModal
           bookings={bookings}
           aliases={emailAliases}
@@ -7137,7 +7195,8 @@ export default function App() {
           onChangeNames={setAliasNames}
           profiles={profiles}
           onUpdateProfile={setProfiles}
-          adminEmail={loggedInEmail}
+          adminEmail={realLoggedInEmail}
+          onViewAs={em=>{ setViewAsEmail(em); setShowUserMgmtModal(false); setTab("calendar"); showToast(`Viewing as ${em}`); }}
           onClose={()=>setShowUserMgmtModal(false)}
         />
       )}
