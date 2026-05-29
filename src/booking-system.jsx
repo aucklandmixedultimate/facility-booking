@@ -3244,6 +3244,13 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
     return (v && v > 0) ? v : 2;
   }
 
+  function summaryAlias(em) {
+    if (!em) return em;
+    const primary = (emailAliases[em.toLowerCase()] || em).toLowerCase();
+    const prof = (profiles||{})[primary] || {};
+    return prof.fullName || (aliasNames||{})[primary] || primary.split("@")[0];
+  }
+
   // Categorize a booking as "day" or "evening" by which side of 5:30 pm has
   // the larger portion. Evening wins on ties.
   function categoryOf(b) {
@@ -3844,7 +3851,6 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
                   <tr style={{ background:"#f8fafc" }}>
                     <th style={{...thS,width:24,padding:"8px 4px"}}/>
                     <th style={thS}>Booker</th>
-                    <th style={thS}>Email</th>
                     <th style={{ ...thS, textAlign:"right" }}>Bookings</th>
                     <th style={{ ...thS, textAlign:"right" }}>{isPerBooking ? "Day Bkgs" : "Daytime"}</th>
                     <th style={{ ...thS, textAlign:"right" }}>{isPerBooking ? "Eve Bkgs" : "Evening"}</th>
@@ -3877,8 +3883,11 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
                         <button onClick={()=>toggleBookerExpand(r.email)} title={isExpanded?"Hide individual bookings":"Show individual bookings"}
                           style={{background:"none",border:"none",cursor:"pointer",fontSize:11,color:"#94a3b8",padding:2,lineHeight:1,fontFamily:"inherit"}}>{isExpanded?"▼":"▶"}</button>
                       </td>
-                      <td style={tdS}><div style={{ fontWeight:600 }}>{r.name}</div></td>
-                      <td style={tdS}><EmailChip email={r.email}/></td>
+                      <td style={tdS}>
+                        <span style={{display:"inline-block",padding:"3px 10px",borderRadius:12,background:emailColor(r.email),color:"#fff",fontSize:12,fontWeight:700}}>
+                          {summaryAlias(r.email)}
+                        </span>
+                      </td>
                       <td style={{ ...tdS, textAlign:"right", fontWeight:600 }}>{r.bookings}</td>
                       <td style={{ ...tdS, textAlign:"right" }}>
                         {isPerBooking
@@ -3955,8 +3964,8 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
                       </td>}
                     </tr>
                     {isExpanded && bookerBkgs.length>0 && (() => {
-                      // Columns: chevron, booker, email, bookings, day, eve, total, [day$, eve$], total$, [adj], players, [dur], [$/player]
-                      const baseCols = 7;
+                      // Columns: chevron, booker, bookings, day, eve, total, [day$, eve$], total$, [adj], players, [dur], [$/player]
+                      const baseCols = 6;
                       const dayCostCol = anyRates && !isPerBooking ? 2 : 0;
                       const totalCostCol = anyRates ? 1 : 0;
                       const adjCol = anyRates ? 1 : 0;
@@ -4018,7 +4027,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
                     return (
                     <tr style={{ background:"#f8fafc", borderTop:"2px solid #f1f5f9" }}>
                       <td style={{...tdS}}/>
-                      <td style={{ ...tdS, fontWeight:700 }} colSpan={2}>Total</td>
+                      <td style={{ ...tdS, fontWeight:700 }}>Total</td>
                       <td style={{ ...tdS, textAlign:"right", fontWeight:700 }}>{active.length}</td>
                       <td style={{ ...tdS, textAlign:"right" }}>
                         {isPerBooking
@@ -4391,8 +4400,9 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
                       return (
                         <tr key={row.email} style={{borderBottom:"1px solid #f1f5f9"}}>
                           <td style={tdS}>
-                            <div style={{fontWeight:700,color:"#0f172a",fontSize:13}}>{row.nameDisplay}</div>
-                            <div style={{fontSize:11,color:"#94a3b8"}}>{row.email}</div>
+                            <span style={{display:"inline-block",padding:"3px 10px",borderRadius:12,background:emailColor(row.email),color:"#fff",fontSize:12,fontWeight:700}}>
+                              {summaryAlias(row.email)}
+                            </span>
                           </td>
                           <td style={tdS}>
                             <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
