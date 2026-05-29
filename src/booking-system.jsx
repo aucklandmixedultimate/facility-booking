@@ -2736,11 +2736,21 @@ function OneOffModal({ email, name, bkgs, isAdmin, onClose }) {
   );
 }
 
-function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkApply, onClose, inline=false }) {
+function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkApply, onBulkStatusChange, onClose, inline=false, aliasNames={}, emailAliases={} }) {
   const [facSensitive, setFacSensitive] = useState(false);
   const [splitPatterns, setSplitPatterns] = useState(new Set());
   const [patternModal, setPatternModal] = useState(null);
   const [oneOffModalData, setOneOffModalData] = useState(null);
+  const [schedDateFrom, setSchedDateFrom] = useState("");
+  const [schedDateTo,   setSchedDateTo]   = useState("");
+  const [schedStatusFilter, setSchedStatusFilter] = useState(new Set());
+  const [bulkStatusTarget, setBulkStatusTarget] = useState("approved");
+
+  const schedAlias = em => {
+    if (!em) return em;
+    const primary = (emailAliases[em.toLowerCase()] || em).toLowerCase();
+    return aliasNames[primary] || primary.split("@")[0];
+  };
 
   const active = bookings.filter(b=>(["approved","cpsa_confirmed","cpsa_review_needed","pending_cpsa","queued_cpsa","pending_amua","amua_submit","pending"].includes(b.status)||b.invoiced)&&!isAdminBooking(b));
   const patternMap = buildOverlapPatternMap(active, facSensitive);
@@ -2750,8 +2760,26 @@ function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkApply, o
     const recurring=Object.entries(pats).filter(([,bs])=>bs.length>=2);
     const oneOffs=Object.values(pats).filter(bs=>bs.length===1).flat();
     const totalBkgs=Object.values(pats).reduce((s,bs)=>s+bs.length,0);
-    return {email,nameDisplay,recurring,oneOffs,totalBkgs};
-  }).sort((a,b)=>b.totalBkgs-a.totalBkgs);
+    // Date-filtered bookings for this row
+    const allBkgs = Object.values(pats).flat();
+    const filteredBkgs = allBkgs.filter(b=>{
+      if(schedDateFrom && b.date < schedDateFrom) return false;
+      if(schedDateTo   && b.date > schedDateTo)   return false;
+      return true;
+    });
+    const dates = filteredBkgs.map(b=>b.date).filter(Boolean).sort();
+    const patternDateFrom = dates[0] || "";
+    const patternDateTo   = dates[dates.length-1] || "";
+    // Status counts for filtered bookings
+    const statusCounts = {};
+    filteredBkgs.forEach(b=>{ statusCounts[b.status] = (statusCounts[b.status]||0) + 1; });
+    // Apply status filter — skip row if filter is active and no bookings match
+    if(schedStatusFilter.size>0 && !filteredBkgs.some(b=>schedStatusFilter.has(b.status))) return null;
+    return {email,nameDisplay,recurring,oneOffs,totalBkgs,filteredBkgs,patternDateFrom,patternDateTo,statusCounts};
+  }).filter(Boolean).sort((a,b)=>b.totalBkgs-a.totalBkgs);
+
+  // All unique statuses present in the active pool for the status filter chips
+  const allStatuses = [...new Set(active.map(b=>b.status))];
 
   const thS2={textAlign:"left",padding:"6px 8px",fontWeight:600,color:"#64748b",fontSize:12,borderBottom:"1px solid #e2e8f0"};
   const tdS2={padding:"6px 8px",verticalAlign:"top",fontSize:13};
@@ -2810,50 +2838,127 @@ function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkApply, o
   const Wrapper = inline
     ? ({children}) => <div style={{background:"#f0f9ff",border:"1.5px solid #bae6fd",borderRadius:12,padding:16}}><div style={{fontSize:14,fontWeight:700,color:"#0369a1",marginBottom:10}}>📅 Schedule Summary</div>{children}</div>
     : ({children}) => <Modal title="📅 Schedule Summary" onClose={onClose}>{children}</Modal>;
+  const colCount = isAdmin && onBulkStatusChange ? 6 : 5;
   return (
     <>
       <Wrapper>
-        <div style={{marginBottom:10}}>
-          <label style={{display:"flex",alignItems:"center",gap:6,fontSize:12,cursor:"pointer"}}>
+        {/* Toolbar: facility-sensitive + date range filter + status filter */}
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",marginBottom:10}}>
+          <label style={{display:"flex",alignItems:"center",gap:6,fontSize:12,cursor:"pointer",color:"#475569"}}>
             <input type="checkbox" checked={facSensitive} onChange={e=>setFacSensitive(e.target.checked)}/>
-            Facility-sensitive patterns
+            Facility-sensitive
           </label>
+          <div style={{marginLeft:4}}>
+            <DateRangePicker from={schedDateFrom} to={schedDateTo} onApply={(f,t)=>{setSchedDateFrom(f);setSchedDateTo(t);}}/>
+          </div>
+          {allStatuses.length>0&&(
+            <div style={{display:"flex",gap:4,flexWrap:"wrap",alignItems:"center"}}>
+              <span style={{fontSize:11,fontWeight:600,color:"#64748b"}}>Status:</span>
+              {allStatuses.map(st=>{
+                const m=STATUS_META[st]||STATUS_META.pending_amua;
+                const active=schedStatusFilter.has(st);
+                return(
+                  <button key={st} onClick={()=>setSchedStatusFilter(prev=>{const s=new Set(prev);active?s.delete(st):s.add(st);return s;})}
+                    style={{padding:"2px 7px",borderRadius:8,fontSize:10,fontWeight:600,cursor:"pointer",fontFamily:"inherit",border:`1.5px solid ${active?m.border:"#e2e8f0"}`,background:active?m.bg:"#fff",color:active?m.text:"#64748b"}}>
+                    {m.label.replace(/^\(\d\/\d\) /,"")}
+                  </button>
+                );
+              })}
+              {schedStatusFilter.size>0&&<button onClick={()=>setSchedStatusFilter(new Set())} style={{padding:"2px 7px",borderRadius:8,fontSize:10,fontWeight:600,cursor:"pointer",fontFamily:"inherit",border:"1.5px solid #e2e8f0",background:"#fff",color:"#94a3b8"}}>✕ clear</button>}
+            </div>
+          )}
+          {isAdmin&&onBulkStatusChange&&(
+            <div style={{display:"flex",gap:4,alignItems:"center",marginLeft:"auto",flexShrink:0}}>
+              <span style={{fontSize:11,fontWeight:600,color:"#64748b"}}>Bulk:</span>
+              <select value={bulkStatusTarget} onChange={e=>setBulkStatusTarget(e.target.value)}
+                style={{fontSize:11,padding:"3px 6px",borderRadius:6,border:"1.5px solid #e2e8f0",background:"#fff",color:"#0f172a",fontFamily:"inherit"}}>
+                {Object.entries(STATUS_META).filter(([k])=>!["pending","amua_submit","cancelled","rejected","clash"].includes(k)).map(([k,v])=>(
+                  <option key={k} value={k}>{v.label.replace(/^\(\d\/\d\) /,"")}</option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
         <div style={{overflowY:"auto",maxHeight:"60vh",overflowX:"auto"}}>
-          <table style={{width:"100%",borderCollapse:"collapse",minWidth:480}}>
+          <table style={{width:"100%",borderCollapse:"collapse",minWidth:560}}>
             <thead>
               <tr style={{background:"#f8fafc"}}>
                 <th style={thS2}>Booker</th>
                 <th style={thS2}>Recurring Patterns <span style={{fontWeight:400,fontSize:11,color:"#94a3b8"}}>(click to edit)</span></th>
+                <th style={{...thS2,minWidth:100}}>
+                  <div style={{display:"flex",alignItems:"center",gap:4}}>
+                    Date Range
+                    {(schedDateFrom||schedDateTo)&&<span style={{fontSize:9,background:"#0f172a",color:"#fff",borderRadius:4,padding:"0 3px"}}>filtered</span>}
+                  </div>
+                </th>
+                <th style={{...thS2,minWidth:110}}>Status</th>
                 <th style={{...thS2,textAlign:"right"}}>One-offs</th>
                 <th style={{...thS2,textAlign:"right"}}>Total</th>
+                {isAdmin&&onBulkStatusChange&&<th style={{...thS2,textAlign:"center"}}>Actions</th>}
               </tr>
             </thead>
             <tbody>
-              {rows.map(row=>(
-                <tr key={row.email} style={{borderBottom:"1px solid #f1f5f9"}}>
-                  <td style={tdS2}>
-                    <div style={{fontWeight:700,color:"#0f172a",fontSize:13}}>{row.nameDisplay}</div>
-                    <div style={{fontSize:11,color:"#94a3b8"}}>{row.email}</div>
-                  </td>
-                  <td style={tdS2}>
-                    <div style={{display:"flex",flexWrap:"wrap",gap:4,alignItems:"center"}}>
-                      {row.recurring.length===0&&<span style={{fontSize:12,color:"#94a3b8"}}>—</span>}
-                      {renderChips(row.email, row.nameDisplay, row.recurring)}
-                    </div>
-                  </td>
-                  <td style={{...tdS2,textAlign:"right"}}>
-                    {row.oneOffs.length>0
-                      ? <span style={{cursor:"pointer",color:"#6366f1",textDecoration:"underline dotted",fontSize:13}}
-                          onClick={()=>setOneOffModalData({email:row.email,name:row.nameDisplay,bkgs:row.oneOffs,isAdmin})}>
-                          {row.oneOffs.length}
-                        </span>
-                      : <span style={{color:"#94a3b8"}}>—</span>}
-                  </td>
-                  <td style={{...tdS2,textAlign:"right",fontWeight:700}}>{row.totalBkgs}</td>
-                </tr>
-              ))}
-              {rows.length===0&&<tr><td colSpan={4} style={{...tdS2,textAlign:"center",color:"#94a3b8"}}>No active bookings.</td></tr>}
+              {rows.map(row=>{
+                const ec = emailColor(row.email);
+                return (
+                  <tr key={row.email} style={{borderBottom:"1px solid #f1f5f9"}}>
+                    <td style={tdS2}>
+                      <span style={{display:"inline-block",padding:"3px 10px",borderRadius:12,background:ec,color:"#fff",fontSize:12,fontWeight:700}}>
+                        {schedAlias(row.email)}
+                      </span>
+                    </td>
+                    <td style={tdS2}>
+                      <div style={{display:"flex",flexWrap:"wrap",gap:4,alignItems:"center"}}>
+                        {row.recurring.length===0&&<span style={{fontSize:12,color:"#94a3b8"}}>—</span>}
+                        {renderChips(row.email, row.nameDisplay, row.recurring)}
+                      </div>
+                    </td>
+                    <td style={{...tdS2,fontSize:12,color:"#475569",whiteSpace:"nowrap"}}>
+                      {row.patternDateFrom
+                        ? <>{fmtDateShort(row.patternDateFrom)}<span style={{color:"#94a3b8",margin:"0 3px"}}>–</span>{fmtDateShort(row.patternDateTo)}</>
+                        : <span style={{color:"#94a3b8"}}>—</span>}
+                      {row.filteredBkgs.length>0&&<div style={{fontSize:10,color:"#94a3b8",marginTop:2}}>{row.filteredBkgs.length} bookings</div>}
+                    </td>
+                    <td style={tdS2}>
+                      <div style={{display:"flex",flexWrap:"wrap",gap:3}}>
+                        {Object.entries(row.statusCounts).map(([st,cnt])=>{
+                          const m=STATUS_META[st]||STATUS_META.pending_amua;
+                          return(
+                            <span key={st} title={m.label} style={{display:"inline-flex",alignItems:"center",gap:3,padding:"1px 6px",borderRadius:8,background:m.bg,color:m.text,border:`1px solid ${m.border}`,fontSize:10,fontWeight:600}}>
+                              <span style={{width:5,height:5,borderRadius:"50%",background:m.dot,flexShrink:0}}/>
+                              {m.label.replace(/^\(\d\/\d\) /,"").slice(0,10)} ×{cnt}
+                            </span>
+                          );
+                        })}
+                        {Object.keys(row.statusCounts).length===0&&<span style={{color:"#94a3b8",fontSize:12}}>—</span>}
+                      </div>
+                    </td>
+                    <td style={{...tdS2,textAlign:"right"}}>
+                      {row.oneOffs.length>0
+                        ? <span style={{cursor:"pointer",color:"#6366f1",textDecoration:"underline dotted",fontSize:13}}
+                            onClick={()=>setOneOffModalData({email:row.email,name:row.nameDisplay,bkgs:row.oneOffs,isAdmin})}>
+                            {row.oneOffs.length}
+                          </span>
+                        : <span style={{color:"#94a3b8"}}>—</span>}
+                    </td>
+                    <td style={{...tdS2,textAlign:"right",fontWeight:700}}>{row.totalBkgs}</td>
+                    {isAdmin&&onBulkStatusChange&&(
+                      <td style={{...tdS2,textAlign:"center"}}>
+                        {row.filteredBkgs.length>0
+                          ? <button onClick={()=>{
+                              const ids=row.filteredBkgs.map(b=>b.id);
+                              onBulkStatusChange(ids,bulkStatusTarget);
+                            }} title={`Set ${row.filteredBkgs.length} bookings to ${bulkStatusTarget}`}
+                            style={{padding:"3px 10px",fontSize:11,borderRadius:6,border:"1.5px solid #e2e8f0",background:"#f8fafc",color:"#0f172a",cursor:"pointer",fontFamily:"inherit",fontWeight:700,whiteSpace:"nowrap"}}>
+                              ✓ {row.filteredBkgs.length}
+                            </button>
+                          : <span style={{color:"#94a3b8",fontSize:12}}>—</span>}
+                      </td>
+                    )}
+                  </tr>
+                );
+              })}
+              {rows.length===0&&<tr><td colSpan={colCount} style={{...tdS2,textAlign:"center",color:"#94a3b8"}}>No active bookings.</td></tr>}
             </tbody>
           </table>
         </div>
@@ -3088,7 +3193,7 @@ function BillingTab({ billingRecords=[], onUpdateRecord, isAdmin=false, loggedIn
   );
 }
 
-function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = false, approxPlayers = {}, onUpdateApproxPlayers, approxDurations = {}, onUpdateApproxDuration, onUpdateFacilityRate, pricingMode = "hourly", onSetPricingMode, onProposeMerge, onBulkApply, onMarkInvoiced, onMarkAdjustmentSettled, bookerFilter=new Set(), profiles={}, emailAliases={}, aliasNames={}, onCreateOfficialInvoice }) {
+function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = false, approxPlayers = {}, onUpdateApproxPlayers, approxDurations = {}, onUpdateApproxDuration, onUpdateFacilityRate, pricingMode = "hourly", onSetPricingMode, onProposeMerge, onBulkApply, onMarkInvoiced, onMarkAdjustmentSettled, bookerFilter=new Set(), profiles={}, emailAliases={}, aliasNames={}, onCreateOfficialInvoice, onFilterChange=null }) {
   const now = new Date();
   const thisYear = now.getFullYear();
 
@@ -3101,16 +3206,23 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
     if (bookerFilter.size>0) return new Set([...bookerFilter].map(e=>e.toLowerCase()));
     return loggedInEmail ? new Set([loggedInEmail.toLowerCase()]) : new Set();
   });
-  // Keep in sync with the global header booker pills.
+  // Keep in sync with the global header booker pills (parent → child only; avoid loop via content comparison).
   useEffect(()=>{
-    setEmailFilterSet(new Set([...bookerFilter].map(e=>e.toLowerCase())));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    const next = new Set([...bookerFilter].map(e=>e.toLowerCase()));
+    setEmailFilterSet(prev=>{
+      if(prev.size!==next.size) return next;
+      for(const e of next) if(!prev.has(e)) return next;
+      return prev;
+    });
   },[bookerFilter]);
-  const toggleEmailFilter = em => setEmailFilterSet(prev=>{
-    const s=new Set(prev); const lk=em.toLowerCase();
-    if(s.has(lk)) s.delete(lk); else s.add(lk);
-    return s;
-  });
+  const toggleEmailFilter = em => {
+    setEmailFilterSet(prev=>{
+      const s=new Set(prev); const lk=em.toLowerCase();
+      if(s.has(lk)) s.delete(lk); else s.add(lk);
+      if(onFilterChange) onFilterChange(new Set(s));
+      return s;
+    });
+  };
 
   // Invoice modal state
   const [showInvoice, setShowInvoice] = useState(false);
@@ -3130,11 +3242,13 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
       return s;
     });
   }
+  const [invMode,     setInvMode]     = useState("draft");            // "draft" | "official"
   const [invDetail,   setInvDetail]   = useState("grouped");        // "grouped" | "individual"
   const [invGst,      setInvGst]      = useState("inclusive");       // "inclusive" | "exclusive" | "note"
   const [invScope,    setInvScope]    = useState("combined");         // "combined" | "per_booker"
   const [invDocType,  setInvDocType]  = useState("invoice");          // "invoice" | "purchase_order"
   const [invName,     setInvName]     = useState("");                  // free-text label baked into the file name
+  const [invOrderName, setInvOrderName] = useState("");               // official: order/project name (required)
   const [invMarkInvoiced, setInvMarkInvoiced] = useState(false);       // flag exported bookings as invoiced
   const [invIncludeInvoiced, setInvIncludeInvoiced] = useState(false); // include already-invoiced bookings
   const [invIncludeAdjustments, setInvIncludeAdjustments] = useState(true); // include mismatch billing adjustments
@@ -3567,6 +3681,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
       id: invId, poId,
       referenceId: `REF-${invId.slice(4)}`,
       createdAt: new Date().toISOString(),
+      orderName: scope.orderName || invOrderName || "",
       dateFrom: dateFrom || dates[0] || todayKey(),
       dateTo:   dateTo   || dates[dates.length-1] || todayKey(),
       bookerEmail: scope.email,
@@ -3584,6 +3699,14 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
     };
   }
 
+  // Full name from profiles for official invoices; falls back to booking name then alias
+  function officialBookerName(email) {
+    if (!email || email === "combined") return email || "All Bookers";
+    const canon = (emailAliases[email.toLowerCase()] || email).toLowerCase();
+    const prof = (profiles||{})[canon] || {};
+    return prof.fullName || bookerNameMap[email.toLowerCase()] || email.split("@")[0];
+  }
+
   // Groups active bookings by booker for combined/per-booker export
   function getInvoiceScopes() {
     const sel = [...invSelectedEmails];
@@ -3591,12 +3714,12 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
       ? activeForInvoice.filter(b => sel.some(e => b.email.toLowerCase() === e.toLowerCase()))
       : activeForInvoice;
     if (invScope === "combined" || sel.length <= 1) {
-      const name = sel.length === 1 ? (bookerNameMap[sel[0].toLowerCase()] || sel[0]) : "All Bookers";
       const email = sel.length === 1 ? sel[0] : "combined";
+      const name = sel.length === 1 ? (invMode==="official" ? officialBookerName(sel[0]) : bookerNameMap[sel[0].toLowerCase()] || sel[0]) : "All Bookers";
       return [{ name, email, bkgs: pool }];
     }
     return sel.map(e => ({
-      name: bookerNameMap[e.toLowerCase()] || e,
+      name: invMode==="official" ? officialBookerName(e) : (bookerNameMap[e.toLowerCase()] || e),
       email: e,
       bkgs: pool.filter(b => b.email.toLowerCase() === e.toLowerCase()),
     }));
@@ -3650,7 +3773,13 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
         )}
         {/* Booker filter chips — additive multi-select, mirrors global pills */}
         <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
-          <button onClick={()=>setEmailFilterSet(prev=>prev.size===0?new Set(allEmails.map(e=>e.toLowerCase())):new Set())}
+          <button onClick={()=>{
+            setEmailFilterSet(prev=>{
+              const next=prev.size===0?new Set(allEmails.map(e=>e.toLowerCase())):new Set();
+              if(onFilterChange) onFilterChange(new Set(next));
+              return next;
+            });
+          }}
             title={emailFilterSet.size===0?"Select all bookers":"Clear selection"}
             style={{padding:"5px 12px",borderRadius:20,border:"1.5px solid",cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",flexShrink:0,borderColor:emailFilterSet.size===0?"#0f172a":"#e2e8f0",background:emailFilterSet.size===0?"#0f172a":"#fff",color:emailFilterSet.size===0?"#fff":"#475569"}}>
             {emailFilterSet.size===0?"All":"None"}
@@ -3661,7 +3790,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
             return(
               <button key={e} onClick={()=>toggleEmailFilter(e)}
                 style={{padding:"5px 12px",borderRadius:20,border:`1.5px solid ${active?c:"#e2e8f0"}`,cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",flexShrink:0,background:active?c:"#fff",color:active?"#fff":"#475569"}}>
-                {e.split("@")[0]}
+                {summaryAlias(e)}
               </button>
             );
           })}
@@ -4527,141 +4656,171 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
       {/* Invoice modal */}
       {showInvoice && (()=>{
         const scopes = getInvoiceScopes();
-        const docLabel = invDocType === "purchase_order" ? "Purchase Order" : "Invoice";
         const allBkgs = scopes.flatMap(s => s.bkgs);
-        const totalCostInv = allBkgs.reduce((s,b)=>{const {day,evening}=splitHours(b);const r=getFacRates(b.facility_id);return s+day*r.day+evening*r.evening;},0);
+        const totalCostInv = allBkgs.reduce((s,b)=>s+getBookingCost(b),0);
+        const docLabel = invMode==="official" ? "Invoice" : (invDocType === "purchase_order" ? "Purchase Order" : "Invoice");
         const OptionRow = InvoiceOptionRow;
         const Pill = InvoicePill;
+        const officialReady = invMode==="official" && invOrderName.trim().length>0 && allBkgs.length>0;
         return (
           <div style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.45)",zIndex:999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
-            <div style={{background:"#fff",borderRadius:16,padding:28,maxWidth:560,width:"100%",boxShadow:"0 8px 40px rgba(0,0,0,0.18)",display:"flex",flexDirection:"column",gap:18,maxHeight:"90vh",overflowY:"auto"}}>
+            <div style={{background:"#fff",borderRadius:16,padding:28,maxWidth:580,width:"100%",boxShadow:"0 8px 40px rgba(0,0,0,0.18)",display:"flex",flexDirection:"column",gap:16,maxHeight:"92vh",overflowY:"auto"}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <h3 style={{margin:0,fontSize:18,fontWeight:800,color:"#0f172a"}}>🧾 Export {docLabel}</h3>
+                <h3 style={{margin:0,fontSize:18,fontWeight:800,color:"#0f172a"}}>🧾 Export Invoice</h3>
                 <button onClick={()=>setShowInvoice(false)} style={{background:"none",border:"none",cursor:"pointer",fontSize:20,color:"#94a3b8",lineHeight:1}}>✕</button>
               </div>
 
-              <div style={{display:"flex",flexDirection:"column",gap:12}}>
-                {/* Document type */}
-                <OptionRow label="Document">
-                  <Pill active={invDocType==="invoice"} onClick={()=>setInvDocType("invoice")}>Invoice</Pill>
-                  <Pill active={invDocType==="purchase_order"} onClick={()=>setInvDocType("purchase_order")}>Purchase Order</Pill>
-                </OptionRow>
-
-                {/* File-name label */}
-                <OptionRow label="Name">
-                  <input value={invName} onChange={e=>setInvName(e.target.value)} placeholder="e.g. Pilot"
-                    style={{...S.inp,fontSize:12,maxWidth:200}}/>
-                  <span style={{fontSize:11,color:"#94a3b8",alignSelf:"center"}}>
-                    {`AMUA ${invDocType==="purchase_order"?"PO":"Invoice"}${invName.trim()?` - ${invName.trim()}`:""} - ${(dateFrom||"…").replace(/-/g,"")}-${(dateTo||"…").replace(/-/g,"")}`}
-                  </span>
-                </OptionRow>
-
-                {/* Booker multi-select */}
-                <OptionRow label="Bookers">
-                  <Pill active={invSelectedEmails.size===0} onClick={()=>setInvSelectedEmails(new Set())}>All</Pill>
-                  {allInvoiceEmails.map(e=>{
-                    const sel=invSelectedEmails.has(e.toLowerCase());
-                    const c=emailColor(e);
-                    return(
-                      <button key={e} onClick={()=>{
-                        setInvSelectedEmails(prev=>{
-                          const s=new Set(prev);
-                          if(s.has(e.toLowerCase())) s.delete(e.toLowerCase()); else s.add(e.toLowerCase());
-                          return s;
-                        });
-                      }} style={{padding:"4px 12px",borderRadius:8,border:`1.5px solid ${sel?c:"#e2e8f0"}`,background:sel?c:"#f8fafc",color:sel?"#fff":"#475569",fontWeight:600,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>
-                        {e.split("@")[0]}
-                      </button>
-                    );
-                  })}
-                </OptionRow>
-
-                {/* Output scope — only relevant when multiple users */}
-                {invSelectedEmails.size !== 1 && allInvoiceEmails.length > 1 && (
-                  <OptionRow label="Output">
-                    <Pill active={invScope==="combined"} onClick={()=>setInvScope("combined")}>Combined {docLabel}</Pill>
-                    <Pill active={invScope==="per_booker"} onClick={()=>setInvScope("per_booker")}>Per booker</Pill>
-                  </OptionRow>
-                )}
-
-                <OptionRow label="Line items">
-                  <Pill active={invDetail==="grouped"} onClick={()=>setInvDetail("grouped")}>Grouped</Pill>
-                  <Pill active={invDetail==="individual"} onClick={()=>setInvDetail("individual")}>Individual</Pill>
-                </OptionRow>
-                <OptionRow label="GST">
-                  <Pill active={invGst==="inclusive"} onClick={()=>setInvGst("inclusive")}>Inclusive (extract)</Pill>
-                  <Pill active={invGst==="exclusive"} onClick={()=>setInvGst("exclusive")}>Exclusive (add on)</Pill>
-                  <Pill active={invGst==="note"} onClick={()=>setInvGst("note")}>Note only</Pill>
-                </OptionRow>
-              </div>
-
-              {/* Summary */}
-              <div style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:10,padding:"12px 16px",fontSize:13,color:"#475569"}}>
-                {invScope==="per_booker" && invSelectedEmails.size !== 1
-                  ? <span><strong>{scopes.length}</strong> separate {docLabel.toLowerCase()}s — {scopes.map(s=>s.name||s.email.split("@")[0]).join(", ")} — <strong>{allBkgs.length}</strong> booking{allBkgs.length!==1?"s":""} total, <strong>{fmtCost(totalCostInv)}</strong></span>
-                  : <span>{docLabel} for <strong>{scopes[0]?.name||scopes[0]?.email}</strong> — <strong>{allBkgs.length}</strong> booking{allBkgs.length!==1?"s":""}, total <strong>{fmtCost(totalCostInv)}</strong></span>
-                }
-              </div>
-
-              {isAdmin&&(
-                <div style={{display:"flex",flexDirection:"column",gap:6}}>
-                  <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"#5b21b6",cursor:"pointer",background:"#f5f3ff",border:"1px solid #ddd6fe",borderRadius:8,padding:"8px 12px"}}>
-                    <input type="checkbox" checked={invMarkInvoiced} onChange={e=>setInvMarkInvoiced(e.target.checked)} style={{accentColor:"#7c3aed"}}/>
-                    Mark these {allBkgs.length} booking{allBkgs.length!==1?"s":""} as <strong>invoiced</strong> on export (snapshots billed time/field for change tracking)
-                  </label>
-                  <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"#475569",cursor:"pointer",background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:"8px 12px"}}>
-                    <input type="checkbox" checked={invIncludeInvoiced} onChange={e=>setInvIncludeInvoiced(e.target.checked)} style={{accentColor:"#64748b"}}/>
-                    Include previously-invoiced bookings (shows full original amount with mismatch detail)
-                  </label>
-                  {mismatchAdjustments.length>0&&(
-                    <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"#92400e",cursor:"pointer",background:"#fffbeb",border:"1px solid #fde68a",borderRadius:8,padding:"8px 12px"}}>
-                      <input type="checkbox" checked={invIncludeAdjustments} onChange={e=>setInvIncludeAdjustments(e.target.checked)} style={{accentColor:"#f59e0b"}}/>
-                      Include {mismatchAdjustments.length} CPSA mismatch adjustment{mismatchAdjustments.length!==1?"s":""} (credit/invoice pending)
-                    </label>
-                  )}
-                </div>
-              )}
-
-              <div style={{display:"flex",flexDirection:"column",gap:10,borderTop:"1px solid #f1f5f9",paddingTop:14}}>
-                <div style={{fontSize:12,fontWeight:600,color:"#64748b",marginBottom:2}}>Export as:</div>
-                <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                  {[
-                    {fmt:"html",  label:"Open HTML", icon:"🌐"},
-                    {fmt:"print", label:"Print / Save PDF", icon:"🖨"},
-                    {fmt:"csv",   label:"CSV", icon:"📊"},
-                  ].map(({fmt,label,icon})=>(
-                    <button key={fmt} onClick={()=>{
-                      scopes.forEach(s => exportInvoice(fmt, s.bkgs, s.name, s.email));
-                    }} style={S.btn({background:"#0f172a",color:"#fff",gap:6,display:"flex",alignItems:"center"})}>
-                      {icon} {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {isAdmin&&onCreateOfficialInvoice&&(
-                <div style={{borderTop:"1px solid #e0e7ff",paddingTop:14,display:"flex",flexDirection:"column",gap:8}}>
-                  <div style={{fontSize:12,fontWeight:700,color:"#4338ca",marginBottom:2}}>📋 Official record</div>
-                  <div style={{fontSize:11,color:"#64748b",lineHeight:1.5}}>
-                    Generates both grouped &amp; individual line records · Always marks bookings invoiced ·
-                    Saves to billing history · Links Invoice + PO under a shared reference ID.
-                  </div>
-                  <button onClick={()=>{
-                    const extra = [];
-                    const newRecords = scopes.map(s => {
-                      const rec = buildOfficialRecord(s, [], extra);
-                      extra.push(rec);
-                      return rec;
-                    });
-                    onCreateOfficialInvoice(newRecords, scopes.flatMap(s=>s.bkgs));
-                    setShowInvoice(false);
-                  }} style={S.btn({background:"#4338ca",color:"#fff",gap:6,display:"flex",alignItems:"center",fontWeight:700})}>
-                    📋 Create Official Invoice + PO
+              {/* Mode tabs */}
+              <div style={{display:"flex",gap:0,border:"1.5px solid #e2e8f0",borderRadius:10,overflow:"hidden"}}>
+                {[{k:"draft",label:"📄 Draft",desc:"Export HTML/PDF/CSV"},{k:"official",label:"📋 Official",desc:"Generate billing record"}].map(({k,label,desc})=>(
+                  <button key={k} onClick={()=>setInvMode(k)} style={{flex:1,padding:"10px 16px",border:"none",background:invMode===k?"#0f172a":"#f8fafc",color:invMode===k?"#fff":"#64748b",fontWeight:700,fontSize:13,cursor:"pointer",fontFamily:"inherit",textAlign:"center",transition:"background 0.15s"}}>
+                    {label}<div style={{fontSize:10,fontWeight:400,marginTop:2,opacity:0.75}}>{desc}</div>
                   </button>
+                ))}
+              </div>
+
+              {/* Booker filter — shared across both modes */}
+              <OptionRow label="Bookers">
+                <Pill active={invSelectedEmails.size===0} onClick={()=>setInvSelectedEmails(new Set())}>All</Pill>
+                {allInvoiceEmails.map(e=>{
+                  const sel=invSelectedEmails.has(e.toLowerCase());
+                  const c=emailColor(e);
+                  return(
+                    <button key={e} onClick={()=>{
+                      setInvSelectedEmails(prev=>{
+                        const s=new Set(prev);
+                        if(s.has(e.toLowerCase())) s.delete(e.toLowerCase()); else s.add(e.toLowerCase());
+                        return s;
+                      });
+                    }} style={{padding:"4px 12px",borderRadius:8,border:`1.5px solid ${sel?c:"#e2e8f0"}`,background:sel?c:"#f8fafc",color:sel?"#fff":"#475569",fontWeight:600,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>
+                      {summaryAlias(e)}
+                    </button>
+                  );
+                })}
+              </OptionRow>
+
+              {/* Include previously-invoiced bookings toggle (both modes) */}
+              {isAdmin&&(
+                <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"#475569",cursor:"pointer",background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:"8px 12px"}}>
+                  <input type="checkbox" checked={invIncludeInvoiced} onChange={e=>setInvIncludeInvoiced(e.target.checked)} style={{accentColor:"#64748b"}}/>
+                  Include previously-invoiced bookings
+                </label>
+              )}
+
+              {/* Summary bar */}
+              <div style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:10,padding:"10px 14px",fontSize:13,color:"#475569",display:"flex",flexWrap:"wrap",gap:8,alignItems:"center"}}>
+                {invScope==="per_booker" && invSelectedEmails.size !== 1
+                  ? <span><strong>{scopes.length}</strong> booker{scopes.length!==1?"s":""} · <strong>{allBkgs.length}</strong> booking{allBkgs.length!==1?"s":""} · <strong style={{color:"#15803d"}}>{fmtCost(totalCostInv)}</strong></span>
+                  : <span>{docLabel} for <strong>{scopes[0]?.name||scopes[0]?.email}</strong> · <strong>{allBkgs.length}</strong> booking{allBkgs.length!==1?"s":""} · <strong style={{color:"#15803d"}}>{fmtCost(totalCostInv)}</strong></span>
+                }
+                {allBkgs.length===0&&<span style={{color:"#f43f5e",fontSize:11,fontWeight:600}}>No bookings in current range/filter. Check date preset or enable "Include previously-invoiced".</span>}
+              </div>
+
+              {invMode==="draft" && (
+                <div style={{display:"flex",flexDirection:"column",gap:12}}>
+                  <OptionRow label="Document">
+                    <Pill active={invDocType==="invoice"} onClick={()=>setInvDocType("invoice")}>Invoice</Pill>
+                    <Pill active={invDocType==="purchase_order"} onClick={()=>setInvDocType("purchase_order")}>Purchase Order</Pill>
+                  </OptionRow>
+                  <OptionRow label="Name">
+                    <input value={invName} onChange={e=>setInvName(e.target.value)} placeholder="e.g. Pilot"
+                      style={{...S.inp,fontSize:12,maxWidth:200}}/>
+                    <span style={{fontSize:11,color:"#94a3b8",alignSelf:"center",wordBreak:"break-all"}}>
+                      {`AMUA ${invDocType==="purchase_order"?"PO":"Invoice"}${invName.trim()?` - ${invName.trim()}`:""} - ${(dateFrom||"…").replace(/-/g,"")}-${(dateTo||"…").replace(/-/g,"")}`}
+                    </span>
+                  </OptionRow>
+                  {invSelectedEmails.size !== 1 && allInvoiceEmails.length > 1 && (
+                    <OptionRow label="Output">
+                      <Pill active={invScope==="combined"} onClick={()=>setInvScope("combined")}>Combined</Pill>
+                      <Pill active={invScope==="per_booker"} onClick={()=>setInvScope("per_booker")}>Per booker</Pill>
+                    </OptionRow>
+                  )}
+                  <OptionRow label="Line items">
+                    <Pill active={invDetail==="grouped"} onClick={()=>setInvDetail("grouped")}>Grouped</Pill>
+                    <Pill active={invDetail==="individual"} onClick={()=>setInvDetail("individual")}>Individual</Pill>
+                  </OptionRow>
+                  <OptionRow label="GST">
+                    <Pill active={invGst==="inclusive"} onClick={()=>setInvGst("inclusive")}>Inclusive</Pill>
+                    <Pill active={invGst==="exclusive"} onClick={()=>setInvGst("exclusive")}>Exclusive (add on)</Pill>
+                    <Pill active={invGst==="note"} onClick={()=>setInvGst("note")}>Note only</Pill>
+                  </OptionRow>
+                  {isAdmin&&(
+                    <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                      <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"#5b21b6",cursor:"pointer",background:"#f5f3ff",border:"1px solid #ddd6fe",borderRadius:8,padding:"8px 12px"}}>
+                        <input type="checkbox" checked={invMarkInvoiced} onChange={e=>setInvMarkInvoiced(e.target.checked)} style={{accentColor:"#7c3aed"}}/>
+                        Mark {allBkgs.length} booking{allBkgs.length!==1?"s":""} as <strong>invoiced</strong> on export
+                      </label>
+                      {mismatchAdjustments.length>0&&(
+                        <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"#92400e",cursor:"pointer",background:"#fffbeb",border:"1px solid #fde68a",borderRadius:8,padding:"8px 12px"}}>
+                          <input type="checkbox" checked={invIncludeAdjustments} onChange={e=>setInvIncludeAdjustments(e.target.checked)} style={{accentColor:"#f59e0b"}}/>
+                          Include {mismatchAdjustments.length} CPSA mismatch adjustment{mismatchAdjustments.length!==1?"s":""}
+                        </label>
+                      )}
+                    </div>
+                  )}
+                  <div style={{borderTop:"1px solid #f1f5f9",paddingTop:12}}>
+                    <div style={{fontSize:12,fontWeight:600,color:"#64748b",marginBottom:8}}>Export as:</div>
+                    <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                      {[{fmt:"html",label:"Open HTML",icon:"🌐"},{fmt:"print",label:"Print / PDF",icon:"🖨"},{fmt:"csv",label:"CSV",icon:"📊"}].map(({fmt,label,icon})=>(
+                        <button key={fmt} onClick={()=>{ scopes.forEach(s => exportInvoice(fmt, s.bkgs, s.name, s.email)); }}
+                          style={S.btn({background:"#0f172a",color:"#fff",gap:6,display:"flex",alignItems:"center"})}>
+                          {icon} {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               )}
-              {/* Settle pending mismatch billing adjustments */}
-              {isAdmin && invIncludeAdjustments && mismatchAdjustments.length>0 && onMarkAdjustmentSettled && (()=>{
+
+              {invMode==="official" && isAdmin && onCreateOfficialInvoice && (
+                <div style={{display:"flex",flexDirection:"column",gap:12}}>
+                  <OptionRow label="Order name">
+                    <input value={invOrderName} onChange={e=>setInvOrderName(e.target.value)} placeholder="e.g. Term 1 2026 (required)"
+                      style={{...S.inp,fontSize:12,maxWidth:260,border:invOrderName.trim()?"1.5px solid #e2e8f0":"1.5px solid #f43f5e"}}/>
+                  </OptionRow>
+                  <OptionRow label="GST">
+                    <Pill active={invGst==="inclusive"} onClick={()=>setInvGst("inclusive")}>Inclusive (extract)</Pill>
+                    <Pill active={invGst==="exclusive"} onClick={()=>setInvGst("exclusive")}>Exclusive (add on)</Pill>
+                    <Pill active={invGst==="note"} onClick={()=>setInvGst("note")}>Note only</Pill>
+                  </OptionRow>
+                  {invSelectedEmails.size !== 1 && allInvoiceEmails.length > 1 && (
+                    <OptionRow label="Output">
+                      <Pill active={invScope==="combined"} onClick={()=>setInvScope("combined")}>Combined record</Pill>
+                      <Pill active={invScope==="per_booker"} onClick={()=>setInvScope("per_booker")}>Per booker</Pill>
+                    </OptionRow>
+                  )}
+                  {/* Preview booker names that will be stamped on official records */}
+                  {scopes.length>0&&(
+                    <div style={{background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:8,padding:"8px 12px",fontSize:12,color:"#075985"}}>
+                      <strong>Bill to:</strong>{" "}
+                      {scopes.map(s=><span key={s.email} style={{marginRight:8}}>{officialBookerName(s.email)}</span>)}
+                    </div>
+                  )}
+                  {!invOrderName.trim()&&<div style={{fontSize:11,color:"#f43f5e",fontWeight:600}}>Order name is required before creating an official record.</div>}
+                  <div style={{borderTop:"1px solid #e0e7ff",paddingTop:12}}>
+                    <button onClick={()=>{
+                      if(!invOrderName.trim()) return;
+                      const extra = [];
+                      const newRecords = scopes.map(s => {
+                        const rec = buildOfficialRecord({...s, orderName: invOrderName.trim()}, [], extra);
+                        extra.push(rec);
+                        return rec;
+                      });
+                      onCreateOfficialInvoice(newRecords, scopes.flatMap(s=>s.bkgs));
+                      setShowInvoice(false);
+                    }} disabled={!officialReady}
+                    style={S.btn({background:officialReady?"#4338ca":"#94a3b8",color:"#fff",gap:6,display:"flex",alignItems:"center",fontWeight:700,cursor:officialReady?"pointer":"not-allowed"})}>
+                      📋 Create Official Invoice + PO
+                    </button>
+                    <div style={{fontSize:10,color:"#94a3b8",marginTop:6}}>
+                      Generates grouped &amp; individual line records · Marks bookings invoiced · Saves to billing history · Links Invoice + PO.
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Settle pending mismatch billing adjustments (draft mode only) */}
+              {invMode==="draft" && isAdmin && invIncludeAdjustments && mismatchAdjustments.length>0 && onMarkAdjustmentSettled && (()=>{
                 const visibleAdj = mismatchAdjustments.filter(b=>{
                   const sel=[...invSelectedEmails];
                   return sel.length===0 || sel.some(e=>b.email?.toLowerCase()===e.toLowerCase());
@@ -4672,7 +4831,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
                 const SETTLE_STYLE = { credit_pending:{background:"#f0fdf4",color:"#15803d",border:"1px solid #bbf7d0"}, invoice_pending:{background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe"} };
                 return (
                   <div style={{background:"#fffbeb",border:"1.5px solid #fde68a",borderRadius:10,padding:"10px 14px",display:"flex",flexDirection:"column",gap:8}}>
-                    <div style={{fontSize:12,fontWeight:700,color:"#a16207"}}>⚡ Pending billing adjustments — mark as settled after export</div>
+                    <div style={{fontSize:12,fontWeight:700,color:"#a16207"}}>⚡ Pending billing adjustments</div>
                     {visibleAdj.map((b,i)=>{
                       const res=parseCpsaResolution(b.system_notes);
                       const bs=res?.billingState||"none";
@@ -4681,10 +4840,10 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
                       if (bs!=="credit_pending"&&bs!=="invoice_pending") return null;
                       return (
                         <div key={i} style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",fontSize:12,background:"#fff",border:"1px solid #fde68a",borderRadius:6,padding:"6px 10px"}}>
-                          <span style={{fontWeight:600,color:"#0f172a"}}>{b.name}</span>
+                          <span style={{fontWeight:600,color:"#0f172a"}}>{summaryAlias(b.email)}</span>
                           <span style={{color:"#94a3b8"}}>{fmtDate(b.date)} · {fac?.name||b.facility_id}</span>
                           <span style={{fontSize:11,fontWeight:700,color:BILLING_COLOR[bs]}}>{bs==="credit_pending"?"Credit":"Invoice"} pending</span>
-                          {snap&&<span style={{color:"#94a3b8",fontSize:11}}>billed {snap.duration}h → now {b.duration}h</span>}
+                          {snap&&<span style={{color:"#94a3b8",fontSize:11}}>{snap.duration}h → {b.duration}h</span>}
                           <button onClick={()=>onMarkAdjustmentSettled(b, bs==="credit_pending"?"credited":"invoiced")}
                             style={S.btn({...SETTLE_STYLE[bs],fontSize:11,padding:"3px 10px",fontWeight:700,marginLeft:"auto"})}>
                             ✓ {SETTLE_LABEL[bs]}
@@ -4975,7 +5134,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
 
       {/* Schedule Summary — inline */}
       {showSchedulePanel && (
-        <ScheduleSummaryModal bookings={bookings} isAdmin={true} loggedInEmail={loggedInEmail} onBulkApply={onBulkApply} inline onClose={()=>setShowSchedulePanel(false)}/>
+        <ScheduleSummaryModal bookings={bookings} isAdmin={true} loggedInEmail={loggedInEmail} onBulkApply={onBulkApply} onBulkStatusChange={onBulkStatusChange} aliasNames={aliasNames} emailAliases={emailAliases} inline onClose={()=>setShowSchedulePanel(false)}/>
       )}
 
       {/* Activity Log — inline */}
@@ -7275,7 +7434,7 @@ export default function App() {
           </div>
         )}
 
-        {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<SummaryTab bookings={bookings} loggedInEmail={loggedInEmail} facilityRates={facilityRates} isAdmin={isAdmin} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onUpdateFacilityRate={updateFacilityRate} pricingMode={pricingMode} onSetPricingMode={setPricingMode} onProposeMerge={handleProposeMerge} onBulkApply={handleBulkApply} onMarkInvoiced={handleMarkInvoiced} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} bookerFilter={listBookerFilter} profiles={profiles} emailAliases={emailAliases} aliasNames={aliasNames} onCreateOfficialInvoice={handleCreateOfficialInvoice}/>}</div>}
+        {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<SummaryTab bookings={bookings} loggedInEmail={loggedInEmail} facilityRates={facilityRates} isAdmin={isAdmin} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onUpdateFacilityRate={updateFacilityRate} pricingMode={pricingMode} onSetPricingMode={setPricingMode} onProposeMerge={handleProposeMerge} onBulkApply={handleBulkApply} onMarkInvoiced={handleMarkInvoiced} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} bookerFilter={listBookerFilter} profiles={profiles} emailAliases={emailAliases} aliasNames={aliasNames} onCreateOfficialInvoice={handleCreateOfficialInvoice} onFilterChange={s=>setListBookerFilter(s)}/>}</div>}
         {tab==="billing"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<BillingTab billingRecords={billingRecords} onUpdateRecord={patch=>setBillingRecords(prev=>prev.map(r=>r.id===patch.id?{...r,...patch}:r))} isAdmin={isAdmin} loggedInEmail={loggedInEmail} emailAliases={emailAliases} aliasNames={aliasNames} profiles={profiles}/>}</div>}
         {tab==="about"&&<div style={{padding:"8px 0"}}><AboutTab/></div>}
         {tab==="admin"&&isAdmin&&<div style={S.card}>
@@ -7284,8 +7443,8 @@ export default function App() {
       </div>
 
       {/* Modals */}
-      {showScheduleModal && <ScheduleSummaryModal bookings={bookings} isAdmin={isAdmin} loggedInEmail={loggedInEmail} onBulkApply={handleBulkApply} onClose={()=>setShowScheduleModal(false)}/>}
-      {showAdminScheduleModal && <ScheduleSummaryModal bookings={bookings} isAdmin={true} loggedInEmail={loggedInEmail} onBulkApply={handleBulkApply} onClose={()=>setShowAdminScheduleModal(false)}/>}
+      {showScheduleModal && <ScheduleSummaryModal bookings={bookings} isAdmin={isAdmin} loggedInEmail={loggedInEmail} onBulkApply={handleBulkApply} onBulkStatusChange={handleBulkStatusChange} aliasNames={aliasNames} emailAliases={emailAliases} onClose={()=>setShowScheduleModal(false)}/>}
+      {showAdminScheduleModal && <ScheduleSummaryModal bookings={bookings} isAdmin={true} loggedInEmail={loggedInEmail} onBulkApply={handleBulkApply} onBulkStatusChange={handleBulkStatusChange} aliasNames={aliasNames} emailAliases={emailAliases} onClose={()=>setShowAdminScheduleModal(false)}/>}
       {showExtensionModal&&(
         <Modal title="🧩 Install AMUA Booking Extension" onClose={()=>setShowExtensionModal(false)} width={560}>
           <div style={{display:"flex",flexDirection:"column",gap:16,fontSize:14,color:"#0f172a"}}>
