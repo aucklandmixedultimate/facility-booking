@@ -3784,19 +3784,19 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
     const or = getFacRates(snap.facility_id), nr = getFacRates(b.facility_id);
     return (nd.day*nr.day + nd.evening*nr.evening) - (od.day*or.day + od.evening*or.evening);
   }
-  // Pending credit (will be discounted from next invoice) — negative number, only for credit_pending state
+  // Pending credit (will be discounted from next invoice) — negative number.
+  // billing_state is the source of truth: credit_pending always treated as a credit
+  // regardless of the raw delta sign.
   function bookingPendingCredit(b) {
     const res = parseCpsaResolution(b.system_notes);
     if (res?.billingState !== "credit_pending") return 0;
-    const delta = bookingAdjustment(b);
-    return delta < 0 ? delta : 0;
+    return -Math.abs(bookingAdjustment(b));
   }
-  // Pending deficit (will be added to next invoice) — positive number, only for invoice_pending state
+  // Pending deficit (will be added to next invoice) — positive number.
   function bookingPendingDeficit(b) {
     const res = parseCpsaResolution(b.system_notes);
     if (res?.billingState !== "invoice_pending") return 0;
-    const delta = bookingAdjustment(b);
-    return delta > 0 ? delta : 0;
+    return Math.abs(bookingAdjustment(b));
   }
   // Bookings per booker, sorted by date
   const bkgsByEmail = {};
@@ -3896,7 +3896,8 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
   }
 
   // Build adjustment line items for mismatch-amended invoiced bookings.
-  // Each line is the delta between the [BILLED] snapshot and the current (CPSA-amended) values.
+  // Cost sign reflects billing_state (credit_pending → negative; invoice_pending → positive),
+  // not the raw delta. Magnitude comes from the snapshot↔current delta.
   function buildAdjustmentLines(adjustmentBkgs) {
     return adjustmentBkgs.flatMap(b => {
       const snap = parseBilledSnapshot(b.system_notes, b.notes);
@@ -3906,16 +3907,21 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
       const origRates = getFacRates(snap.facility_id), currRates = getFacRates(b.facility_id);
       const origCost = origDay.day*origRates.day + origDay.evening*origRates.evening;
       const currCost = currDay.day*currRates.day + currDay.evening*currRates.evening;
-      const delta = currCost - origCost;
-      if (delta === 0) return [];
+      const rawDelta = currCost - origCost;
+      if (rawDelta === 0) return [];
       const res = parseCpsaResolution(b.system_notes);
+      const bs = res?.billingState || "";
+      // Source of truth: billing_state. Credits are always negative, deficits always positive.
+      const signedCost = bs === "credit_pending" || bs === "credited"
+        ? -Math.abs(rawDelta)
+        : Math.abs(rawDelta);
       const fac = FACILITIES.find(f=>f.id===b.facility_id);
       const timeStr = `${fmtTime(b.start_hour)}–${fmtTime(b.start_hour+b.duration)}`;
       const origTimeStr = `${fmtTime(snap.start_hour)}–${fmtTime(snap.start_hour+snap.duration)}`;
       return [{
-        desc:    `[${delta>0?"Invoice adj.":"Credit adj."}] ${fmtDate(b.date)} · ${fac?.name||b.facility_id}`,
-        detail:  `CPSA amendment: billed ${origTimeStr} ${snap.duration}h → amended ${timeStr} ${b.duration}h (${res?.billingState||"pending"})`,
-        cost:    delta,
+        desc:    `[${signedCost>0?"Invoice adj.":"Credit adj."}] ${fmtDate(b.date)} · ${fac?.name||b.facility_id}`,
+        detail:  `CPSA amendment: billed ${origTimeStr} ${snap.duration}h → amended ${timeStr} ${b.duration}h (${bs||"pending"})`,
+        cost:    signedCost,
         isAdj:   true,
       }];
     });
