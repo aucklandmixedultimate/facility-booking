@@ -3445,8 +3445,11 @@ function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onLoadT
               📥 Download all
             </button>
             {onLoadToSummary&&(
-              <button onClick={e=>{e.stopPropagation();onLoadToSummary(summaryRec);}}
-                title="Load date range into Summary view"
+              <button onClick={e=>{e.stopPropagation();onLoadToSummary({
+                dateFrom: batch.dateFrom, dateTo: batch.dateTo,
+                emails: batch.invRecs.map(r=>r.bookerEmail).filter(Boolean),
+              });}}
+                title={`Load date range + all ${batch.invRecs.length} bookers into Summary`}
                 style={{padding:"3px 9px",borderRadius:6,border:"1.5px solid #c7d2fe",background:"#eef2ff",color:"#4338ca",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"}}>
                 ↗ Summary
               </button>
@@ -6715,13 +6718,20 @@ export default function App() {
   // loads of the same record still take effect.
   const [summaryLoadRequest, setSummaryLoadRequest] = useState(null);
   function handleLoadBillingToSummary(rec) {
-    const em = (rec.bookerEmail||"").toLowerCase();
-    if (em && em!=="combined") {
-      const canon = (emailAliases[em] || em).toLowerCase();
-      setListBookerFilter(new Set([canon]));
+    // Resolve which bookers to filter to. A batch payload may carry many emails;
+    // a single-record payload uses bookerEmail. PO records ("gtec"/"combined")
+    // fall back to all bookers covered by linked invoice records.
+    let emails = [];
+    if (Array.isArray(rec.emails) && rec.emails.length) {
+      emails = rec.emails;
+    } else if (Array.isArray(rec.linkedInvoiceIds) && rec.linkedInvoiceIds.length) {
+      emails = billingRecords.filter(r=>rec.linkedInvoiceIds.includes(r.id)).map(r=>r.bookerEmail).filter(Boolean);
     } else {
-      setListBookerFilter(new Set());
+      const em = (rec.bookerEmail||"").toLowerCase();
+      if (em && em!=="combined" && em!=="gtec") emails = [em];
     }
+    const canon = new Set(emails.map(e=>(emailAliases[e.toLowerCase()]||e).toLowerCase()).filter(Boolean));
+    setListBookerFilter(canon);
     setSummaryLoadRequest({ dateFrom: rec.dateFrom||"", dateTo: rec.dateTo||"", version: Date.now() });
     setTab("summary");
   }
