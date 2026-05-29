@@ -133,7 +133,28 @@ const AMUA_INFO = {
   gstNumber: "",
   bank:      "",
 };
+
+// Pre-configured vendor: Grammar TEC Rugby Club (the facility owner / invoice recipient for POs).
+const VENDOR_GTEC = {
+  id:        "gtec",
+  name:      "Grammar TEC Rugby Club Inc",
+  address:   "PO BOX 42 210\nOrakei\nAuckland\nNEW ZEALAND",
+  gstNumber: "113-246-812",
+};
+
+// fb_profiles schema (localStorage):
+// { [primaryEmail]: { fullName, officialName, address, gstNumber, accountNumber, accountName, profileType } }
+// profileType: "user" | "admin" | "vendor"
 const MONTHS=["January","February","March","April","May","June","July","August","September","October","November","December"];
+
+// Generate sequential IDs like "INV-20260528-001" for a given prefix.
+// Pass the full current records array to ensure uniqueness within a batch.
+function generateDocId(existingRecords, prefix) {
+  const today = new Date().toISOString().slice(0,10).replace(/-/g,"");
+  const todayRecs = (existingRecords||[]).filter(r => r.id && r.id.startsWith(`${prefix}-${today}-`));
+  const seq = String(todayRecs.length + 1).padStart(3,"0");
+  return `${prefix}-${today}-${seq}`;
+}
 
 function fmtTime(h) {
   const hh=Math.floor(h), m=Math.round((h%1)*60), dh=hh>12?hh-12:hh===0?12:hh;
@@ -649,9 +670,8 @@ function ActivityLogModal({onClose}) {
   );
 }
 
-// Admin UI: map secondary emails into a primary profile.
-// `aliases` is { secondaryEmail: primaryEmail } — both keys lowercase.
-function UserMgmtModal({ bookings, aliases, aliasNames, onChange, onChangeNames, onClose }) {
+// Admin UI: map secondary emails into a primary profile + manage profile details.
+function UserMgmtModal({ bookings, aliases, aliasNames, onChange, onChangeNames, profiles, onUpdateProfile, adminEmail, onClose }) {
   const allEmails = useMemo(() => {
     const s = new Set();
     bookings.forEach(b => { if (b.email && !isAdminBooking(b)) s.add(b.email.toLowerCase()); });
@@ -690,15 +710,15 @@ function UserMgmtModal({ bookings, aliases, aliasNames, onChange, onChangeNames,
   }
   const [linkSource, setLinkSource] = useState("");
   const [linkTarget, setLinkTarget] = useState("");
+  const [expandedProfile, setExpandedProfile] = useState(null);
+
   function link() {
     if (!linkSource || !linkTarget) return;
     const src = linkSource.toLowerCase().trim();
     const tgt = linkTarget.toLowerCase().trim();
     if (src === tgt) return;
     const next = { ...aliases };
-    // If target is itself an alias, resolve to its primary
     const realTarget = next[tgt] || tgt;
-    // Anyone currently aliasing to src now aliases to realTarget
     Object.keys(next).forEach(k => { if (next[k] === src) next[k] = realTarget; });
     next[src] = realTarget;
     onChange(next);
@@ -709,23 +729,43 @@ function UserMgmtModal({ bookings, aliases, aliasNames, onChange, onChangeNames,
     delete next[em];
     onChange(next);
   }
+  function upProfile(primary, field, value) {
+    const k = primary.toLowerCase();
+    const next = { ...(profiles||{}) };
+    next[k] = { ...(next[k]||{}), [field]: value };
+    onUpdateProfile(next);
+  }
+
+  const si = {padding:"4px 8px",fontSize:12,borderRadius:6,border:"1.5px solid #e2e8f0",fontFamily:"inherit",outline:"none",width:"100%"};
+  const fieldRow = (label, content) => (
+    <div style={{display:"grid",gridTemplateColumns:"80px 1fr",alignItems:"start",gap:6,marginBottom:6}}>
+      <span style={{fontSize:11,color:"#64748b",fontWeight:600,paddingTop:5}}>{label}</span>
+      {content}
+    </div>
+  );
+
+  // All primaries including adminEmail even if they have no bookings yet.
+  const allPrimaries = useMemo(() => {
+    const s = new Set(Object.keys(groups));
+    if (adminEmail) s.add(adminEmail.toLowerCase());
+    return [...s].sort();
+  }, [groups, adminEmail]);
+
   return (
-    <Modal title="👤 User Management — Email Aliases" onClose={onClose} width={620}>
-      <div style={{fontSize:12,color:"#64748b",marginBottom:12,lineHeight:1.5}}>
-        Map a secondary email onto a primary profile. Bookings, filters and
-        summaries will treat both as the same user.
-      </div>
+    <Modal title="👤 User Management" onClose={onClose} width={680}>
+      {/* Email alias linking */}
       <div style={{background:"#f8fafc",border:"1.5px solid #e2e8f0",borderRadius:10,padding:12,marginBottom:14}}>
-        <div style={{fontSize:12,fontWeight:700,color:"#0f172a",marginBottom:8}}>Link two emails</div>
+        <div style={{fontSize:12,fontWeight:700,color:"#0f172a",marginBottom:8}}>Link email aliases</div>
+        <div style={{fontSize:11,color:"#64748b",marginBottom:8}}>Map a secondary email onto a primary profile — bookings, filters and summaries treat both as the same user.</div>
         <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
           <select value={linkSource} onChange={e=>setLinkSource(e.target.value)}
-            style={{flex:"1 1 180px",padding:"6px 8px",borderRadius:6,border:"1.5px solid #e2e8f0",fontSize:13,fontFamily:"inherit",background:"#fff"}}>
+            style={{flex:"1 1 180px",padding:"6px 8px",borderRadius:6,border:"1.5px solid #e2e8f0",fontSize:12,fontFamily:"inherit",background:"#fff"}}>
             <option value="">Secondary email…</option>
             {allEmails.filter(em=>!aliases[em]).map(em=><option key={em} value={em}>{em}</option>)}
           </select>
-          <span style={{fontSize:12,color:"#64748b"}}>→ map to</span>
+          <span style={{fontSize:11,color:"#64748b"}}>→ maps to</span>
           <select value={linkTarget} onChange={e=>setLinkTarget(e.target.value)}
-            style={{flex:"1 1 180px",padding:"6px 8px",borderRadius:6,border:"1.5px solid #e2e8f0",fontSize:13,fontFamily:"inherit",background:"#fff"}}>
+            style={{flex:"1 1 180px",padding:"6px 8px",borderRadius:6,border:"1.5px solid #e2e8f0",fontSize:12,fontFamily:"inherit",background:"#fff"}}>
             <option value="">Primary email…</option>
             {allEmails.filter(em=>em!==linkSource).map(em=><option key={em} value={em}>{em}</option>)}
           </select>
@@ -735,55 +775,128 @@ function UserMgmtModal({ bookings, aliases, aliasNames, onChange, onChangeNames,
           </button>
         </div>
       </div>
-      <div style={{fontSize:12,fontWeight:700,color:"#0f172a",marginBottom:6}}>Profiles ({Object.keys(groups).length})</div>
-      <div style={{display:"flex",flexDirection:"column",gap:8,maxHeight:"45vh",overflowY:"auto"}}>
-        {Object.entries(groups).sort(([a],[b])=>a.localeCompare(b)).map(([primary, set])=>{
-          const secondaries = [...set].filter(e=>e!==primary).sort();
+
+      {/* Vendor pre-config */}
+      <div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:8,padding:"8px 12px",marginBottom:12,fontSize:11,color:"#166534"}}>
+        <strong>Vendor (GTEC)</strong> — Grammar TEC Rugby Club Inc · GST 113-246-812 · PO BOX 42 210, Orakei, Auckland · pre-configured as PO recipient
+      </div>
+
+      {/* Profile cards */}
+      <div style={{fontSize:12,fontWeight:700,color:"#0f172a",marginBottom:6}}>Profiles ({allPrimaries.length})</div>
+      <div style={{display:"flex",flexDirection:"column",gap:8,maxHeight:"52vh",overflowY:"auto",paddingRight:2}}>
+        {allPrimaries.map(primary => {
+          const secondaries = [...(groups[primary]||new Set())].filter(e=>e!==primary).sort();
           const dflt = primary.split("@")[0];
           const aliasName = (aliasNames||{})[primary] || "";
+          const prof = (profiles||{})[primary] || {};
+          const ptype = prof.profileType || (primary === adminEmail?.toLowerCase() ? "admin" : "user");
+          const isExpanded = expandedProfile === primary;
           // Gather all booker `name` values seen on either the primary or its secondaries.
           const allNames = new Set();
           [primary, ...secondaries].forEach(em => { (namesByEmail[em]||[]).forEach(n=>allNames.add(n)); });
+          const PTYPE_COLOR = { admin:"#7c3aed", user:"#0369a1", vendor:"#15803d" };
           return (
-            <div key={primary} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,padding:"8px 12px"}}>
-              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6,flexWrap:"wrap"}}>
+            <div key={primary} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,overflow:"hidden"}}>
+              {/* Header row — always visible */}
+              <div style={{display:"flex",alignItems:"center",gap:8,padding:"8px 12px",cursor:"pointer"}}
+                onClick={()=>setExpandedProfile(isExpanded?null:primary)}>
                 <span style={{width:9,height:9,borderRadius:"50%",background:emailColor(primary),flexShrink:0}}/>
-                <span style={{fontSize:13,fontWeight:700,color:"#0f172a"}}>{primary}</span>
-                <span style={{fontSize:10,fontWeight:700,padding:"1px 6px",borderRadius:10,background:"#f1f5f9",color:"#475569"}}>primary</span>
+                <span style={{fontSize:13,fontWeight:700,color:"#0f172a",flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{primary}</span>
+                <span style={{fontSize:10,fontWeight:700,padding:"1px 6px",borderRadius:10,background:`${PTYPE_COLOR[ptype]}18`,color:PTYPE_COLOR[ptype],border:`1px solid ${PTYPE_COLOR[ptype]}40`,flexShrink:0}}>{ptype}</span>
+                {prof.fullName&&<span style={{fontSize:11,color:"#475569",flexShrink:0,maxWidth:120,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{prof.fullName}</span>}
+                <span style={{fontSize:11,color:"#94a3b8",flexShrink:0}}>{isExpanded?"▴":"▾"}</span>
               </div>
-              <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:secondaries.length||allNames.size?8:0,flexWrap:"wrap"}}>
-                <span style={{fontSize:11,color:"#64748b",fontWeight:600,minWidth:60}}>Alias</span>
-                <input value={aliasName} onChange={e=>setAliasName(primary,e.target.value)}
-                  placeholder={dflt}
-                  style={{flex:"1 1 160px",minWidth:120,padding:"4px 8px",fontSize:12,borderRadius:6,border:"1.5px solid #e2e8f0",fontFamily:"inherit",outline:"none"}}/>
-                <span style={{fontSize:10,color:"#94a3b8"}}>defaults to <code style={{background:"#f1f5f9",padding:"1px 4px",borderRadius:3}}>{dflt}</code></span>
-              </div>
-              {allNames.size>0 && (
-                <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:secondaries.length?8:0,flexWrap:"wrap"}}>
-                  <span style={{fontSize:11,color:"#64748b",fontWeight:600,minWidth:60}}>Names</span>
-                  {[...allNames].sort().map(n=>(
-                    <span key={n} style={{fontSize:11,padding:"2px 8px",borderRadius:10,background:"#f8fafc",border:"1px solid #e2e8f0",color:"#475569"}}>{n}</span>
-                  ))}
-                </div>
-              )}
-              {secondaries.length>0 && (
-                <div style={{display:"flex",flexDirection:"column",gap:4,paddingLeft:18}}>
-                  {secondaries.map(s=>(
-                    <div key={s} style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"#475569"}}>
-                      <span style={{color:"#94a3b8"}}>↪</span>
-                      <span style={{flex:1,wordBreak:"break-all"}}>{s}</span>
-                      <button onClick={()=>unlink(s)}
-                        style={{background:"#fff1f2",border:"1px solid #fda4af",borderRadius:4,color:"#f43f5e",cursor:"pointer",fontSize:11,fontWeight:600,padding:"2px 8px"}}>
-                        ✕ Unlink
-                      </button>
+              {/* Expanded detail */}
+              {isExpanded && (
+                <div style={{padding:"0 12px 12px",borderTop:"1px solid #f1f5f9",display:"flex",flexDirection:"column",gap:0}}>
+                  <div style={{paddingTop:10}}>
+                    {/* Profile type */}
+                    <div style={{display:"grid",gridTemplateColumns:"80px 1fr",gap:6,marginBottom:6,alignItems:"center"}}>
+                      <span style={{fontSize:11,color:"#64748b",fontWeight:600}}>Type</span>
+                      <div style={{display:"flex",gap:4}}>
+                        {["user","admin","vendor"].map(t=>(
+                          <button key={t} onClick={()=>upProfile(primary,"profileType",t)}
+                            style={{padding:"2px 10px",borderRadius:10,border:`1.5px solid ${ptype===t?PTYPE_COLOR[t]:"#e2e8f0"}`,
+                              background:ptype===t?PTYPE_COLOR[t]:"#f8fafc",color:ptype===t?"#fff":"#475569",
+                              fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
+                            {t}
+                          </button>
+                        ))}
+                      </div>
                     </div>
-                  ))}
+                    {/* Alias / display name */}
+                    {fieldRow("Alias",
+                      <div style={{display:"flex",alignItems:"center",gap:6}}>
+                        <input value={aliasName} onChange={e=>setAliasName(primary,e.target.value)}
+                          placeholder={dflt}
+                          style={{...si,width:"auto",flex:1}}/>
+                        <span style={{fontSize:10,color:"#94a3b8",whiteSpace:"nowrap"}}>default: {dflt}</span>
+                      </div>
+                    )}
+                    {/* Full / official name */}
+                    {fieldRow("Full name",
+                      <input value={prof.fullName||""} onChange={e=>upProfile(primary,"fullName",e.target.value)}
+                        placeholder="Official name for invoices…"
+                        style={si}/>
+                    )}
+                    {/* Address */}
+                    {fieldRow("Address",
+                      <textarea value={prof.address||""} onChange={e=>upProfile(primary,"address",e.target.value)}
+                        placeholder={"Street\nCity\nNEW ZEALAND"}
+                        rows={3}
+                        style={{...si,resize:"vertical",minHeight:58,lineHeight:1.5}}/>
+                    )}
+                    {/* GST */}
+                    {fieldRow("GST no.",
+                      <input value={prof.gstNumber||""} onChange={e=>upProfile(primary,"gstNumber",e.target.value)}
+                        placeholder="e.g. 123-456-789"
+                        style={{...si,width:"auto",maxWidth:180}}/>
+                    )}
+                    {/* Admin-only: bank account */}
+                    {ptype==="admin" && <>
+                      {fieldRow("Account no.",
+                        <input value={prof.accountNumber||""} onChange={e=>upProfile(primary,"accountNumber",e.target.value)}
+                          placeholder="e.g. 01-1234-5678901-00"
+                          style={{...si,width:"auto",maxWidth:220}}/>
+                      )}
+                      {fieldRow("Account name",
+                        <input value={prof.accountName||""} onChange={e=>upProfile(primary,"accountName",e.target.value)}
+                          placeholder="Account name…"
+                          style={si}/>
+                      )}
+                    </>}
+                    {/* Booker names from bookings */}
+                    {allNames.size>0 && (
+                      <div style={{display:"flex",alignItems:"center",gap:6,marginTop:4,flexWrap:"wrap"}}>
+                        <span style={{fontSize:11,color:"#64748b",fontWeight:600,minWidth:80}}>Booking names</span>
+                        {[...allNames].sort().map(n=>(
+                          <span key={n} style={{fontSize:11,padding:"2px 8px",borderRadius:10,background:"#f8fafc",border:"1px solid #e2e8f0",color:"#475569"}}>{n}</span>
+                        ))}
+                      </div>
+                    )}
+                    {/* Linked secondaries */}
+                    {secondaries.length>0 && (
+                      <div style={{marginTop:8,display:"flex",flexDirection:"column",gap:4}}>
+                        <span style={{fontSize:10,fontWeight:700,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.05em"}}>Linked emails</span>
+                        {secondaries.map(s=>(
+                          <div key={s} style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"#475569"}}>
+                            <span style={{color:"#94a3b8"}}>↪</span>
+                            <span style={{flex:1,wordBreak:"break-all"}}>{s}</span>
+                            <button onClick={()=>unlink(s)}
+                              style={{background:"#fff1f2",border:"1px solid #fda4af",borderRadius:4,color:"#f43f5e",cursor:"pointer",fontSize:11,fontWeight:600,padding:"2px 8px"}}>
+                              ✕ Unlink
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
           );
         })}
-        {Object.keys(groups).length===0 && <div style={{color:"#94a3b8",fontSize:13,textAlign:"center",padding:20}}>No bookers yet.</div>}
+        {allPrimaries.length===0 && <div style={{color:"#94a3b8",fontSize:13,textAlign:"center",padding:20}}>No profiles yet.</div>}
       </div>
       <div style={{marginTop:12,display:"flex",justifyContent:"flex-end"}}>
         <button onClick={onClose} style={S.btn({background:"#0f172a",color:"#fff",fontSize:12})}>Done</button>
@@ -2709,7 +2822,208 @@ function InvoicePill({active, onClick, children}) {
   );
 }
 
-function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = false, approxPlayers = {}, onUpdateApproxPlayers, approxDurations = {}, onUpdateApproxDuration, onUpdateFacilityRate, pricingMode = "hourly", onSetPricingMode, onProposeMerge, onBulkApply, onMarkInvoiced, onMarkAdjustmentSettled, bookerFilter=new Set() }) {
+const PIPELINE_STATES = [
+  { key:"draft",         label:"Draft",           color:"#94a3b8", description:"Invoice created, not yet submitted" },
+  { key:"submitted",     label:"Submitted",        color:"#f59e0b", description:"Sent to Grammar TEC" },
+  { key:"gtec_invoiced", label:"GTEC Invoice Rcvd",color:"#3b82f6", description:"Received invoice from Grammar TEC" },
+  { key:"club_invoiced", label:"Invoiced to Club", color:"#8b5cf6", description:"Invoice sent to club for payment" },
+  { key:"complete",      label:"Complete",         color:"#22c55e", description:"All payments settled" },
+];
+const PIPELINE_KEYS = PIPELINE_STATES.map(s=>s.key);
+
+function BillingTab({ billingRecords=[], onUpdateRecord, isAdmin=false, loggedInEmail="", emailAliases={}, aliasNames={}, profiles={} }) {
+  const [filterStatus, setFilterStatus] = useState("all");
+  const [expandedId, setExpandedId] = useState(null);
+
+  const canonEmail = em => (emailAliases[(em||"").toLowerCase()] || em || "").toLowerCase();
+  const displayName = em => {
+    if (!em || em === "combined") return em || "—";
+    const k = canonEmail(em);
+    const prof = profiles[k] || {};
+    return prof.fullName || aliasNames[k] || em.split("@")[0];
+  };
+
+  const visibleRecords = isAdmin
+    ? billingRecords
+    : billingRecords.filter(r => canonEmail(r.bookerEmail) === canonEmail(loggedInEmail));
+
+  const filtered = filterStatus === "all" ? visibleRecords : visibleRecords.filter(r => r.status === filterStatus);
+  const sorted = [...filtered].sort((a,b) => (b.createdAt||"").localeCompare(a.createdAt||""));
+
+  const fmtDate = d => d ? new Date(d+"T00:00:00").toLocaleDateString("en-NZ",{day:"numeric",month:"short",year:"numeric"}) : "—";
+  const fmtMoney = n => n!=null ? `$${Number(n).toFixed(2)}` : "—";
+
+  const stateInfo = key => PIPELINE_STATES.find(s=>s.key===key) || { label: key, color:"#94a3b8" };
+
+  function StatusPill({ status }) {
+    const s = stateInfo(status);
+    return <span style={{display:"inline-block",padding:"2px 8px",borderRadius:999,fontSize:11,fontWeight:700,background:s.color+"22",color:s.color,border:`1px solid ${s.color}55`}}>{s.label}</span>;
+  }
+
+  function ProgressTrack({ status }) {
+    const idx = PIPELINE_KEYS.indexOf(status);
+    return (
+      <div style={{display:"flex",alignItems:"center",gap:0,marginBottom:10}}>
+        {PIPELINE_STATES.map((s,i)=>{
+          const done = i < idx, active = i === idx;
+          return (
+            <React.Fragment key={s.key}>
+              {i>0&&<div style={{flex:1,height:2,background:done?"#22c55e":"#e2e8f0"}}/>}
+              <div title={s.description} style={{width:14,height:14,borderRadius:"50%",background:done?"#22c55e":active?s.color:"#e2e8f0",border:`2px solid ${done?"#22c55e":active?s.color:"#cbd5e1"}`,flexShrink:0}}/>
+            </React.Fragment>
+          );
+        })}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{fontFamily:"'DM Sans','Segoe UI',system-ui,sans-serif"}}>
+      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:16,flexWrap:"wrap"}}>
+        <span style={{fontSize:15,fontWeight:800,color:"#0f172a"}}>🧾 Billing Records</span>
+        <div style={{marginLeft:"auto",display:"flex",gap:6,flexWrap:"wrap"}}>
+          {[{k:"all",l:"All"}, ...PIPELINE_STATES].map(s=>(
+            <button key={s.k||s.key} onClick={()=>setFilterStatus(s.k||s.key)}
+              style={{padding:"4px 10px",borderRadius:20,border:"1px solid",cursor:"pointer",fontSize:11,fontWeight:600,fontFamily:"inherit",
+                borderColor:filterStatus===(s.k||s.key)?"#0f172a":"#e2e8f0",
+                background:filterStatus===(s.k||s.key)?"#0f172a":"#fff",
+                color:filterStatus===(s.k||s.key)?"#fff":"#64748b"}}>
+              {s.l||s.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {sorted.length === 0 && (
+        <div style={{textAlign:"center",padding:48,color:"#94a3b8",fontSize:14}}>No billing records{filterStatus!=="all"?` with status "${stateInfo(filterStatus).label}"`:""}.</div>
+      )}
+
+      <div style={{display:"flex",flexDirection:"column",gap:10}}>
+        {sorted.map(rec=>{
+          const isExpanded = expandedId === rec.id;
+          const si = stateInfo(rec.status);
+          return (
+            <div key={rec.id} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:12,overflow:"hidden",boxShadow:"0 1px 3px rgba(0,0,0,0.06)"}}>
+              {/* Summary row */}
+              <div onClick={()=>setExpandedId(isExpanded?null:rec.id)}
+                style={{display:"flex",alignItems:"center",gap:10,padding:"12px 16px",cursor:"pointer",userSelect:"none",flexWrap:"wrap"}}>
+                <div style={{minWidth:0,flex:1}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                    <span style={{fontSize:12,fontWeight:800,color:"#0f172a",fontFamily:"monospace"}}>{rec.id}</span>
+                    {rec.poId&&<span style={{fontSize:11,color:"#64748b",fontFamily:"monospace"}}>PO: {rec.poId}</span>}
+                    {rec.referenceId&&<span style={{fontSize:11,color:"#94a3b8",fontFamily:"monospace"}}>Ref: {rec.referenceId}</span>}
+                  </div>
+                  <div style={{fontSize:11,color:"#64748b",marginTop:2}}>
+                    {displayName(rec.bookerEmail)} · {fmtDate(rec.dateFrom)}{rec.dateTo&&rec.dateTo!==rec.dateFrom?` – ${fmtDate(rec.dateTo)}`:""}
+                    {" "}· {(rec.bookingIds||[]).length} booking{(rec.bookingIds||[]).length!==1?"s":""}
+                  </div>
+                </div>
+                <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
+                  <span style={{fontSize:13,fontWeight:700,color:"#0f172a"}}>{fmtMoney(rec.total)}</span>
+                  <StatusPill status={rec.status||"draft"}/>
+                  <span style={{fontSize:10,color:"#94a3b8"}}>{isExpanded?"▲":"▼"}</span>
+                </div>
+              </div>
+
+              {isExpanded&&(
+                <div style={{borderTop:"1px solid #f1f5f9",padding:"14px 16px",background:"#fafafa"}}>
+                  <ProgressTrack status={rec.status||"draft"}/>
+
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:"10px 20px",marginBottom:14}}>
+                    {[
+                      ["Booker", displayName(rec.bookerEmail)],
+                      ["Booker Address", rec.bookerAddress||"—"],
+                      ["Booker GST", rec.bookerGst||"—"],
+                      ["Created", rec.createdAt?new Date(rec.createdAt).toLocaleDateString("en-NZ",{day:"numeric",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"}):"—"],
+                      ["Subtotal", fmtMoney(rec.subtotal)],
+                      ["GST", fmtMoney(rec.gst)],
+                      ["Total", fmtMoney(rec.total)],
+                    ].map(([k,v])=>(
+                      <div key={k}>
+                        <div style={{fontSize:10,fontWeight:600,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.05em"}}>{k}</div>
+                        <div style={{fontSize:12,color:"#0f172a",whiteSpace:"pre-wrap"}}>{v}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {isAdmin&&(
+                    <div style={{display:"flex",flexDirection:"column",gap:8,padding:"10px 0",borderTop:"1px solid #e2e8f0"}}>
+                      <div style={{fontSize:11,fontWeight:700,color:"#475569",marginBottom:2}}>Pipeline Actions</div>
+                      <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+                        {/* Status advancement */}
+                        {PIPELINE_KEYS.indexOf(rec.status||"draft") < PIPELINE_KEYS.length-1&&(
+                          <button onClick={()=>{
+                            const next = PIPELINE_KEYS[PIPELINE_KEYS.indexOf(rec.status||"draft")+1];
+                            onUpdateRecord({id:rec.id,status:next});
+                          }} style={{padding:"5px 12px",borderRadius:8,border:"none",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit",background:"#0f172a",color:"#fff"}}>
+                            → Mark as {stateInfo(PIPELINE_KEYS[PIPELINE_KEYS.indexOf(rec.status||"draft")+1]).label}
+                          </button>
+                        )}
+                        {/* Revert */}
+                        {PIPELINE_KEYS.indexOf(rec.status||"draft") > 0&&(
+                          <button onClick={()=>{
+                            const prev = PIPELINE_KEYS[PIPELINE_KEYS.indexOf(rec.status||"draft")-1];
+                            onUpdateRecord({id:rec.id,status:prev});
+                          }} style={{padding:"5px 12px",borderRadius:8,border:"1px solid #e2e8f0",cursor:"pointer",fontSize:11,fontWeight:600,fontFamily:"inherit",background:"#fff",color:"#64748b"}}>
+                            ← Revert to {stateInfo(PIPELINE_KEYS[PIPELINE_KEYS.indexOf(rec.status||"draft")-1]).label}
+                          </button>
+                        )}
+                      </div>
+                      {/* GTEC invoice number field */}
+                      {["gtec_invoiced","club_invoiced","complete"].includes(rec.status)&&(
+                        <div style={{display:"flex",alignItems:"center",gap:8,marginTop:4}}>
+                          <span style={{fontSize:11,color:"#475569",flexShrink:0}}>GTEC Invoice #:</span>
+                          <input value={rec.gtecInvoiceNumber||""} onChange={e=>onUpdateRecord({id:rec.id,gtecInvoiceNumber:e.target.value})}
+                            placeholder="e.g. GTEC-2026-001"
+                            style={{padding:"4px 8px",borderRadius:6,border:"1px solid #e2e8f0",fontSize:11,fontFamily:"inherit",width:160}}/>
+                        </div>
+                      )}
+                      {/* Notes */}
+                      <div style={{display:"flex",alignItems:"flex-start",gap:8,marginTop:4}}>
+                        <span style={{fontSize:11,color:"#475569",flexShrink:0,paddingTop:4}}>Notes:</span>
+                        <textarea value={rec.notes||""} onChange={e=>onUpdateRecord({id:rec.id,notes:e.target.value})}
+                          rows={2} placeholder="Internal notes…"
+                          style={{padding:"4px 8px",borderRadius:6,border:"1px solid #e2e8f0",fontSize:11,fontFamily:"inherit",flex:1,resize:"vertical"}}/>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Invoice lines */}
+                  {(rec.lines||[]).length>0&&(
+                    <div style={{marginTop:10}}>
+                      <div style={{fontSize:11,fontWeight:700,color:"#475569",marginBottom:4}}>Invoice Lines</div>
+                      <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+                        <thead>
+                          <tr style={{background:"#f8fafc"}}>
+                            {["Description","Qty","Rate","Amount"].map(h=>(
+                              <th key={h} style={{padding:"4px 8px",textAlign:h==="Amount"||h==="Rate"||h==="Qty"?"right":"left",fontWeight:700,color:"#64748b",borderBottom:"1px solid #e2e8f0"}}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {rec.lines.map((l,i)=>(
+                            <tr key={i} style={{borderBottom:"1px solid #f1f5f9"}}>
+                              <td style={{padding:"4px 8px",color:"#0f172a"}}>{l.description||l.label||"—"}</td>
+                              <td style={{padding:"4px 8px",textAlign:"right",color:"#475569"}}>{l.qty!=null?l.qty:"—"}</td>
+                              <td style={{padding:"4px 8px",textAlign:"right",color:"#475569"}}>{l.rate!=null?`$${Number(l.rate).toFixed(2)}`:"—"}</td>
+                              <td style={{padding:"4px 8px",textAlign:"right",fontWeight:600,color:"#0f172a"}}>{l.cost!=null?`$${Number(l.cost).toFixed(2)}`:"—"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = false, approxPlayers = {}, onUpdateApproxPlayers, approxDurations = {}, onUpdateApproxDuration, onUpdateFacilityRate, pricingMode = "hourly", onSetPricingMode, onProposeMerge, onBulkApply, onMarkInvoiced, onMarkAdjustmentSettled, bookerFilter=new Set(), profiles={}, emailAliases={}, aliasNames={}, onCreateOfficialInvoice }) {
   const now = new Date();
   const thisYear = now.getFullYear();
 
@@ -3131,6 +3445,40 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
     if (bookerFilter.size > 0) setInvSelectedEmails(new Set([...bookerFilter]));
     else setInvSelectedEmails(new Set(emailFilterSet));
     setShowInvoice(true);
+  }
+
+  // Build an official invoice record (no side-effects) for one scope (one booker).
+  // Returns an object ready to be stored in fb_invoice_records.
+  function buildOfficialRecord(scope, existingRecords, extraRecords) {
+    const allRecs = [...(existingRecords||[]), ...(extraRecords||[])];
+    const invId = generateDocId(allRecs.filter(r=>r.id?.startsWith("INV-")), "INV");
+    const poId  = generateDocId(allRecs.filter(r=>r.id?.startsWith("PO-")),  "PO");
+    const canonKey = (emailAliases[scope.email] || scope.email).toLowerCase();
+    const prof = (profiles||{})[canonKey] || {};
+    const groupedLines    = buildInvoiceLines(scope.bkgs, "grouped");
+    const individualLines = buildInvoiceLines(scope.bkgs, "individual");
+    const subtotal = groupedLines.reduce((s,l)=>s+l.cost, 0);
+    const { pre, gst, total } = gstAmounts(subtotal, invGst);
+    const dates = scope.bkgs.map(b=>b.date).filter(Boolean).sort();
+    return {
+      id: invId, poId,
+      referenceId: `REF-${invId.slice(4)}`,
+      createdAt: new Date().toISOString(),
+      dateFrom: dateFrom || dates[0] || todayKey(),
+      dateTo:   dateTo   || dates[dates.length-1] || todayKey(),
+      bookerEmail: scope.email,
+      bookerName:  prof.fullName || (aliasNames||{})[canonKey] || scope.email.split("@")[0],
+      bookerAddress: prof.address || "",
+      bookerGst:   prof.gstNumber || "",
+      bookingIds:  scope.bkgs.map(b=>b.id),
+      lines:           groupedLines,
+      individualLines: individualLines,
+      subtotal: pre, gst, total, gstMode: invGst,
+      status: "draft",
+      gtecInvoiceNumber: "",
+      vendorInvoiceNumber: "",
+      notes: "",
+    };
   }
 
   // Groups active bookings by booker for combined/per-booker export
@@ -4082,7 +4430,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
                 </div>
               )}
 
-              <div style={{display:"flex",flexDirection:"column",gap:10}}>
+              <div style={{display:"flex",flexDirection:"column",gap:10,borderTop:"1px solid #f1f5f9",paddingTop:14}}>
                 <div style={{fontSize:12,fontWeight:600,color:"#64748b",marginBottom:2}}>Export as:</div>
                 <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
                   {[
@@ -4098,6 +4446,28 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
                   ))}
                 </div>
               </div>
+
+              {isAdmin&&onCreateOfficialInvoice&&(
+                <div style={{borderTop:"1px solid #e0e7ff",paddingTop:14,display:"flex",flexDirection:"column",gap:8}}>
+                  <div style={{fontSize:12,fontWeight:700,color:"#4338ca",marginBottom:2}}>📋 Official record</div>
+                  <div style={{fontSize:11,color:"#64748b",lineHeight:1.5}}>
+                    Generates both grouped &amp; individual line records · Always marks bookings invoiced ·
+                    Saves to billing history · Links Invoice + PO under a shared reference ID.
+                  </div>
+                  <button onClick={()=>{
+                    const extra = [];
+                    const newRecords = scopes.map(s => {
+                      const rec = buildOfficialRecord(s, [], extra);
+                      extra.push(rec);
+                      return rec;
+                    });
+                    onCreateOfficialInvoice(newRecords, scopes.flatMap(s=>s.bkgs));
+                    setShowInvoice(false);
+                  }} style={S.btn({background:"#4338ca",color:"#fff",gap:6,display:"flex",alignItems:"center",fontWeight:700})}>
+                    📋 Create Official Invoice + PO
+                  </button>
+                </div>
+              )}
               {/* Settle pending mismatch billing adjustments */}
               {isAdmin && invIncludeAdjustments && mismatchAdjustments.length>0 && onMarkAdjustmentSettled && (()=>{
                 const visibleAdj = mismatchAdjustments.filter(b=>{
@@ -4201,8 +4571,8 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
     .map(b => { const d = getBillingDrift(b); return d ? { booking: b, ...d } : null; })
     .filter(Boolean);
 
-  // Old unapproved = bookings in any review state with past dates
-  const oldUnapproved=bookings.filter(b=>REVIEW_STATUSES.has(b.status)&&b.date<today);
+  // Old unapproved = bookings in any review state with past dates, excluding mismatches (those need resolution, not deletion)
+  const oldUnapproved=bookings.filter(b=>REVIEW_STATUSES.has(b.status)&&b.status!=="cpsa_review_needed"&&b.date<today);
 
   // Booker chip data
   const adminBookerMap = {};
@@ -4808,12 +5178,38 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                   )}
                   {/* Billing follow-up — only relevant when amended */}
                   {curRes==="amended"&&(()=>{
-                    const delta=cpsaVals.duration-b.duration;
+                    const delta=cpsaVals.duration-b.duration; // +ve = undercharged, -ve = overcharged
                     const ghost=(col)=>({fontFamily:"inherit",fontSize:11,fontWeight:700,borderRadius:5,padding:"3px 9px",cursor:"pointer",background:"transparent",border:`1.5px solid ${col}`,color:col});
-                    // For not-yet-invoiced bookings, the only follow-up is to update
-                    // the source record (no money has changed hands). For invoiced
-                    // bookings the duration drift implies a credit (overcharge) or
-                    // deficit invoice (undercharge).
+
+                    // Calculate the dollar value of the duration change at the booking's rate.
+                    // For facility-change amendments the rate also changes; account for that too.
+                    const CUTOFF = 17.5;
+                    function splitH(sh, dur) {
+                      const end = sh + dur;
+                      if (sh >= CUTOFF) return { day:0, evening:dur };
+                      if (end > CUTOFF) return { day:CUTOFF-sh, evening:end-CUTOFF };
+                      return { day:dur, evening:0 };
+                    }
+                    function getRates(facId) {
+                      const r = facilityRates[facId];
+                      if (!r) return { day:0, evening:0 };
+                      if (typeof r === "object") return { day:parseFloat(r.day)||0, evening:parseFloat(r.evening)||0 };
+                      return { day:parseFloat(r)||0, evening:0 };
+                    }
+                    // Cost at CPSA-amended values minus cost at our original values.
+                    const origSplit = splitH(b.start_hour, b.duration);
+                    const origRates = getRates(b.facility_id);
+                    const origCost = origSplit.day*origRates.day + origSplit.evening*origRates.evening;
+                    const newFacId = cpsaVals.facility_id || b.facility_id;
+                    const newSH = cpsaVals.start_hour ?? b.start_hour;
+                    const newSplit = splitH(newSH, cpsaVals.duration);
+                    const newRates = getRates(newFacId);
+                    const newCost = newSplit.day*newRates.day + newSplit.evening*newRates.evening;
+                    const costDelta = newCost - origCost; // +ve = we owe more, -ve = we owe a credit
+                    const hasCostInfo = origCost > 0 || newCost > 0;
+                    const costStr = hasCostInfo ? ` (${costDelta>=0?"+":""}${fmtCost(costDelta)})` : "";
+                    const absCostStr = hasCostInfo ? ` — ${fmtCost(Math.abs(costDelta))}` : "";
+
                     if (!b.invoiced) {
                       const settled = curBilling==="nochange";
                       return (
@@ -4832,21 +5228,21 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                         </div>
                       );
                     }
-                    // Invoiced path — duration delta picks credit vs deficit invoice.
-                    const overcharged = delta < 0; // booked > actual → we owe a credit
-                    const undercharged = delta > 0; // booked < actual → owed a deficit invoice
+                    // Invoiced path — costDelta drives credit vs deficit.
+                    const overcharged = costDelta < 0; // we billed more than CPSA → owe credit
+                    const undercharged = costDelta > 0; // we billed less → owed deficit invoice
                     return (
                       <div style={{borderTop:"1px dashed #fde68a",paddingTop:4}}>
                         <div style={{fontSize:10,fontWeight:700,color:"#92400e",textTransform:"uppercase",letterSpacing:"0.04em",marginBottom:3}}>Billing</div>
                         {curBilling==="none"&&(
                           <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
                             {overcharged&&<button style={ghost("#15803d")}
-                              title={`Booking was invoiced for ${b.duration}h but CPSA shows ${cpsaVals.duration}h. We owe the booker a credit for ${Math.abs(delta)}h.`}
-                              onClick={()=>setBilling("credit_pending")}>💚 Credit (pending)</button>}
+                              title={`Billed ${fmtCost(origCost)} (${b.duration}h) but CPSA shows ${cpsaVals.duration}h @ ${fmtCost(newCost)}. Overcharged by ${fmtCost(Math.abs(costDelta))}.`}
+                              onClick={()=>setBilling("credit_pending")}>💚 Credit{absCostStr}</button>}
                             {undercharged&&<button style={ghost("#dc2626")}
-                              title={`Booking was invoiced for ${b.duration}h but CPSA shows ${cpsaVals.duration}h. Booker owes a deficit invoice for ${delta}h.`}
-                              onClick={()=>setBilling("invoice_pending")}>📨 Deficit invoice (pending)</button>}
-                            {delta===0&&<span style={{fontSize:11,color:"#475569"}}>No hours changed — no billing impact.</span>}
+                              title={`Billed ${fmtCost(origCost)} (${b.duration}h) but CPSA shows ${cpsaVals.duration}h @ ${fmtCost(newCost)}. Undercharged by ${fmtCost(costDelta)}.`}
+                              onClick={()=>setBilling("invoice_pending")}>📨 Deficit{absCostStr}</button>}
+                            {costDelta===0&&<span style={{fontSize:11,color:"#475569"}}>No billing impact.</span>}
                             <button style={ghost("#94a3b8")}
                               title="No billing adjustment needed (already reconciled or intentional)."
                               onClick={()=>setBilling("nochange")}>No adj.</button>
@@ -4856,10 +5252,12 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                           <div style={{display:"flex",gap:4,alignItems:"center"}}>
                             <span
                               title={curBilling==="credit_pending"
-                                ? `Pending: issue credit for ${Math.abs(delta)}h to the booker.`
-                                : `Pending: send a deficit invoice for the extra ${delta}h.`}
+                                ? `Credit ${fmtCost(Math.abs(costDelta))} owed to booker (${Math.abs(delta)}h @ ${hasCostInfo?fmtCost(Math.abs(costDelta/delta))+"/h":"rate unknown"}).`
+                                : `Deficit invoice ${fmtCost(costDelta)} owed by booker (${delta}h @ ${hasCostInfo?fmtCost(costDelta/delta)+"/h":"rate unknown"}).`}
                               style={{fontSize:11,fontWeight:700,color:curBilling==="credit_pending"?"#15803d":"#dc2626",cursor:"help"}}>
-                              {curBilling==="credit_pending"?`💚 Credit (${Math.abs(delta)}h)`:`📨 Deficit invoice (+${delta}h)`}
+                              {curBilling==="credit_pending"
+                                ? `💚 Credit${absCostStr}`
+                                : `📨 Deficit${absCostStr}`}
                             </span>
                             <button style={{fontFamily:"inherit",fontSize:11,border:"1.5px solid #cbd5e1",borderRadius:4,background:"transparent",color:"#94a3b8",cursor:"pointer",padding:"1px 5px"}} onClick={()=>setBilling("none")} title="Undo">↩</button>
                           </div>
@@ -5426,6 +5824,27 @@ export default function App() {
   }, [canonEmail, aliasNames]);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [silentMode, setSilentMode] = useState(true); // admin: suppress all outgoing emails
+  // fb_profiles: { [primaryEmail]: { fullName, officialName, address, gstNumber,
+  //               accountNumber, accountName, profileType: "user"|"admin"|"vendor" } }
+  const [profiles, setProfiles] = useState(()=>{
+    try{ return JSON.parse(localStorage.getItem("fb_profiles")||"{}"); }catch{ return {}; }
+  });
+  useEffect(()=>{ try{ localStorage.setItem("fb_profiles", JSON.stringify(profiles)); }catch{} }, [profiles]);
+  function updateProfile(email, patch) {
+    const k = (email||"").toLowerCase();
+    setProfiles(prev => ({ ...prev, [k]: { ...(prev[k]||{}), ...patch } }));
+  }
+  function getProfile(email) {
+    const k = (email||"").toLowerCase();
+    return profiles[k] || {};
+  }
+  // fb_billing_records: official invoice history { id, referenceId, date, type, bookerEmails,
+  //   amount, gstMode, status, gtecInvoiceNumber, clubPayment, amuaPayment, bookingIds }
+  const [billingRecords, setBillingRecords] = useState(()=>{
+    try{ return JSON.parse(localStorage.getItem("fb_billing_records")||"[]"); }catch{ return []; }
+  });
+  useEffect(()=>{ try{ localStorage.setItem("fb_billing_records", JSON.stringify(billingRecords)); }catch{} }, [billingRecords]);
+  const [showBillingView, setShowBillingView] = useState(false);
   const [facilityRates, setFacilityRates] = useState(()=>{
     try{return JSON.parse(localStorage.getItem("fb_facility_rates")||"{}");}catch{return {};}
   });
@@ -5961,6 +6380,13 @@ export default function App() {
     showToast(`${targets.length} booking${targets.length>1?"s":""} marked invoiced.`);
   }
 
+  function handleCreateOfficialInvoice(newRecords, bkgsToMark) {
+    setBillingRecords(prev => [...prev, ...newRecords]);
+    if (bkgsToMark?.length) handleMarkInvoiced(bkgsToMark);
+    logActivity("official_invoice_created", { count: newRecords.length, ids: newRecords.map(r=>r.id) });
+    showToast(`${newRecords.length} official invoice${newRecords.length>1?"s":""} created.`);
+  }
+
   // Bulk approve/reject — groups by email and sends one summary per person
   async function handleBulkStatusChange(ids, newStatus, adminNote, skipEmail=false) {
     const affected=bookings.filter(b=>ids.includes(b.id));
@@ -6299,6 +6725,7 @@ export default function App() {
             <TabBtn id="month"    label={isMobile?"🗓 Month":"🗓 Month"}/>
             <TabBtn id="list"     label={isMobile?"📋 List":"📋 Bookings"} badge={myClashCount>0?myClashCount:undefined}/>
             <TabBtn id="summary"  label={isMobile?"📊":"📊 Summary"}/>
+            {(isAdmin||(()=>{const k=(emailAliases[loggedInEmail]||loggedInEmail||"").toLowerCase();return (profiles[k]||{}).profileType==="vendor";})())&&<TabBtn id="billing" label={isMobile?"🧾":"🧾 Billing"}/>}
             {isAdmin&&<TabBtn id="admin" label={isMobile?"⚙ Admin":"⚙ Admin"} badge={pendingCount}/>}
           </div>
         </div>
@@ -6549,7 +6976,8 @@ export default function App() {
           </div>
         )}
 
-        {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<SummaryTab bookings={bookings} loggedInEmail={loggedInEmail} facilityRates={facilityRates} isAdmin={isAdmin} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onUpdateFacilityRate={updateFacilityRate} pricingMode={pricingMode} onSetPricingMode={setPricingMode} onProposeMerge={handleProposeMerge} onBulkApply={handleBulkApply} onMarkInvoiced={handleMarkInvoiced} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} bookerFilter={listBookerFilter}/>}</div>}
+        {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<SummaryTab bookings={bookings} loggedInEmail={loggedInEmail} facilityRates={facilityRates} isAdmin={isAdmin} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onUpdateFacilityRate={updateFacilityRate} pricingMode={pricingMode} onSetPricingMode={setPricingMode} onProposeMerge={handleProposeMerge} onBulkApply={handleBulkApply} onMarkInvoiced={handleMarkInvoiced} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} bookerFilter={listBookerFilter} profiles={profiles} emailAliases={emailAliases} aliasNames={aliasNames} onCreateOfficialInvoice={handleCreateOfficialInvoice}/>}</div>}
+        {tab==="billing"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<BillingTab billingRecords={billingRecords} onUpdateRecord={patch=>setBillingRecords(prev=>prev.map(r=>r.id===patch.id?{...r,...patch}:r))} isAdmin={isAdmin} loggedInEmail={loggedInEmail} emailAliases={emailAliases} aliasNames={aliasNames} profiles={profiles}/>}</div>}
         {tab==="about"&&<div style={{padding:"8px 0"}}><AboutTab/></div>}
         {tab==="admin"&&isAdmin&&<div style={S.card}>
           {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onView={setViewing} onQueueDelete={queueForRemovalSilent} clashes={allClashes} deleteIds={new Set(deleteQueue.map(b=>b.id))} facilityRates={facilityRates} onUpdateFacilityRate={updateFacilityRate} onClearOldUnapproved={handleClearOldUnapproved} silentMode={silentMode} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onSyncDB={handleSyncDB} onShowSchedule={()=>setShowAdminScheduleModal(true)} onBulkApply={handleBulkApply} onSaveMismatch={handleSaveMismatch} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} onShowActivityLog={()=>setShowActivityLog(true)} onShowSyncResults={()=>setShowSyncPopup(true)} syncResultsCount={syncResults.length}/>}
@@ -6707,6 +7135,9 @@ export default function App() {
           aliasNames={aliasNames}
           onChange={setEmailAliases}
           onChangeNames={setAliasNames}
+          profiles={profiles}
+          onUpdateProfile={setProfiles}
+          adminEmail={loggedInEmail}
           onClose={()=>setShowUserMgmtModal(false)}
         />
       )}
