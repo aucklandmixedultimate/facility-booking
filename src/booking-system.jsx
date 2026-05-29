@@ -3040,6 +3040,8 @@ const PIPELINE_KEYS = PIPELINE_STATES.map(s=>s.key);
 function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onLoadToSummary, isAdmin=false, loggedInEmail="", emailAliases={}, aliasNames={}, profiles={} }) {
   const [filterStatus, setFilterStatus] = useState("all");
   const [expandedId, setExpandedId] = useState(null);
+  const [expandedBatchId, setExpandedBatchId] = useState(null);
+  const [expandedSubId, setExpandedSubId] = useState(null);
 
   const canonEmail = em => (emailAliases[(em||"").toLowerCase()] || em || "").toLowerCase();
   const displayName = em => {
@@ -3054,6 +3056,40 @@ function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onLoadT
 
   const filtered = filterStatus === "all" ? visibleRecords : visibleRecords.filter(r => r.status === filterStatus);
   const sorted = [...filtered].sort((a,b) => (b.createdAt||"").localeCompare(a.createdAt||""));
+
+  // Group records that share a batchId (created together as one Official invoice run)
+  const { batches, ungrouped } = useMemo(() => {
+    const batchMap = {};
+    const ung = [];
+    for (const rec of sorted) {
+      if (rec.batchId) {
+        if (!batchMap[rec.batchId]) batchMap[rec.batchId] = [];
+        batchMap[rec.batchId].push(rec);
+      } else {
+        ung.push(rec);
+      }
+    }
+    const bs = Object.entries(batchMap).map(([batchId, recs]) => {
+      const invRecs = recs.filter(r => r.type !== "purchase_order");
+      const poRec = recs.find(r => r.type === "purchase_order");
+      const worstStatus = recs.reduce((worst, r) => {
+        const wi = PIPELINE_KEYS.indexOf(worst);
+        const ri = PIPELINE_KEYS.indexOf(r.status || "draft");
+        return ri < wi ? (r.status || "draft") : worst;
+      }, "complete");
+      return {
+        batchId, records: recs, invRecs, poRec,
+        orderName: recs[0].orderName || "",
+        createdAt: recs[0].createdAt || "",
+        dateFrom: recs[0].dateFrom || "",
+        dateTo: recs[0].dateTo || "",
+        total: invRecs.reduce((s, r) => s + (r.total || 0), 0),
+        status: worstStatus,
+        allDraft: recs.every(r => (r.status || "draft") === "draft"),
+      };
+    }).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    return { batches: bs, ungrouped: ung };
+  }, [sorted]);
 
   const fmtDate = d => d ? new Date(d+"T00:00:00").toLocaleDateString("en-NZ",{day:"numeric",month:"short",year:"numeric"}) : "—";
   const fmtMoney = n => n!=null ? `$${Number(n).toFixed(2)}` : "—";
@@ -3178,6 +3214,259 @@ function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onLoadT
     );
   }
 
+  // Reusable expanded detail panel for any billing record
+  function renderRecordExpanded(rec) {
+    const isPO = rec.type==="purchase_order" || rec.bookerEmail==="gtec";
+    const isInv = !isPO;
+    return (
+      <div style={{borderTop:"1px solid #f1f5f9",padding:"14px 16px",background:"#fafafa"}}>
+        <ProgressTrack status={rec.status||"draft"}/>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:"10px 20px",marginBottom:14}}>
+          {[
+            ["Booker", isPO ? (rec.bookerName||VENDOR_GTEC.name) : displayName(rec.bookerEmail)],
+            ["Booker Address", rec.bookerAddress||"—"],
+            ["Booker GST", rec.bookerGst||"—"],
+            ["Created", rec.createdAt?new Date(rec.createdAt).toLocaleDateString("en-NZ",{day:"numeric",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"}):"—"],
+            ["Subtotal", fmtMoney(rec.subtotal)],
+            ["GST", fmtMoney(rec.gst)],
+            ["Total", fmtMoney(rec.total)],
+          ].map(([k,v])=>(
+            <div key={k}>
+              <div style={{fontSize:10,fontWeight:600,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.05em"}}>{k}</div>
+              <div style={{fontSize:12,color:"#0f172a",whiteSpace:"pre-wrap"}}>{v}</div>
+            </div>
+          ))}
+        </div>
+        {isAdmin&&(
+          <div style={{display:"flex",flexDirection:"column",gap:8,padding:"10px 0",borderTop:"1px solid #e2e8f0"}}>
+            <div style={{fontSize:11,fontWeight:700,color:"#475569",marginBottom:2}}>Pipeline Actions</div>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+              {PIPELINE_KEYS.indexOf(rec.status||"draft") < PIPELINE_KEYS.length-1&&(
+                <button onClick={()=>{
+                  const next = PIPELINE_KEYS[PIPELINE_KEYS.indexOf(rec.status||"draft")+1];
+                  onUpdateRecord({id:rec.id,status:next});
+                }} style={{padding:"5px 12px",borderRadius:8,border:"none",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit",background:"#0f172a",color:"#fff"}}>
+                  → Mark as {stateInfo(PIPELINE_KEYS[PIPELINE_KEYS.indexOf(rec.status||"draft")+1]).label}
+                  {(rec.status||"draft")==="draft"&&isInv&&<span style={{fontWeight:400,marginLeft:4,opacity:0.7}}>(marks {(rec.bookingIds||[]).length} bookings invoiced)</span>}
+                </button>
+              )}
+              {PIPELINE_KEYS.indexOf(rec.status||"draft") > 0&&(
+                <button onClick={()=>{
+                  const prev = PIPELINE_KEYS[PIPELINE_KEYS.indexOf(rec.status||"draft")-1];
+                  onUpdateRecord({id:rec.id,status:prev});
+                }} style={{padding:"5px 12px",borderRadius:8,border:"1px solid #e2e8f0",cursor:"pointer",fontSize:11,fontWeight:600,fontFamily:"inherit",background:"#fff",color:"#64748b"}}>
+                  ← Revert to {stateInfo(PIPELINE_KEYS[PIPELINE_KEYS.indexOf(rec.status||"draft")-1]).label}
+                </button>
+              )}
+              {(rec.status||"draft")==="draft" && onDeleteRecord && (
+                <button onClick={()=>{
+                  if(window.confirm(`Delete draft record ${rec.id}? This cannot be undone.`)) onDeleteRecord(rec.id);
+                }} style={{padding:"5px 12px",borderRadius:8,border:"1px solid #fecaca",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit",background:"#fef2f2",color:"#b91c1c",marginLeft:"auto"}}>
+                  🗑 Delete draft
+                </button>
+              )}
+            </div>
+            {["gtec_invoiced","club_invoiced","complete"].includes(rec.status)&&(
+              <div style={{display:"flex",alignItems:"center",gap:8,marginTop:4}}>
+                <span style={{fontSize:11,color:"#475569",flexShrink:0}}>GTEC Invoice #:</span>
+                <input value={rec.gtecInvoiceNumber||""} onChange={e=>onUpdateRecord({id:rec.id,gtecInvoiceNumber:e.target.value})}
+                  placeholder="e.g. GTEC-2026-001"
+                  style={{padding:"4px 8px",borderRadius:6,border:"1px solid #e2e8f0",fontSize:11,fontFamily:"inherit",width:160}}/>
+              </div>
+            )}
+            <div style={{display:"flex",alignItems:"flex-start",gap:8,marginTop:4}}>
+              <span style={{fontSize:11,color:"#475569",flexShrink:0,paddingTop:4}}>Notes:</span>
+              <textarea value={rec.notes||""} onChange={e=>onUpdateRecord({id:rec.id,notes:e.target.value})}
+                rows={2} placeholder="Internal notes…"
+                style={{padding:"4px 8px",borderRadius:6,border:"1px solid #e2e8f0",fontSize:11,fontFamily:"inherit",flex:1,resize:"vertical"}}/>
+            </div>
+          </div>
+        )}
+        <div style={{display:"flex",flexDirection:"column",gap:6,padding:"10px 0",borderTop:"1px solid #e2e8f0"}}>
+          <div style={{fontSize:11,fontWeight:700,color:"#475569"}}>📥 Download Documents</div>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+            {[
+              {dt:"invoice", id:rec.id, show:!isPO},
+              {dt:"purchase_order", id:rec.id, show:isPO},
+            ].filter(x=>x.show).map(({dt,id})=>(
+              <div key={dt} style={{display:"flex",gap:0,border:"1px solid #e2e8f0",borderRadius:8,overflow:"hidden",alignItems:"stretch"}}>
+                <span style={{padding:"5px 10px",fontSize:11,fontWeight:700,color:"#475569",background:"#f8fafc",borderRight:"1px solid #e2e8f0",display:"flex",alignItems:"center",gap:4}}>
+                  {dt==="purchase_order"?"📋 PO":"🧾 Invoice"} <span style={{fontFamily:"monospace",fontSize:10,color:"#94a3b8"}}>{id}</span>
+                </span>
+                {[{fmt:"html",label:"HTML",icon:"🌐"},{fmt:"print",label:"PDF",icon:"🖨"},{fmt:"csv",label:"CSV",icon:"📊"}].map(({fmt,label,icon})=>(
+                  <button key={fmt} onClick={()=>downloadRecord(rec,fmt,dt,"grouped")}
+                    style={{padding:"5px 9px",border:"none",borderLeft:"1px solid #f1f5f9",background:"#fff",cursor:"pointer",fontSize:11,fontWeight:600,color:"#0f172a",fontFamily:"inherit"}}>
+                    {icon} {label}
+                  </button>
+                ))}
+                {(rec.individualLines||[]).length>0&&(
+                  <button onClick={()=>downloadRecord(rec,"html",dt,"individual")}
+                    style={{padding:"5px 9px",border:"none",borderLeft:"1px solid #f1f5f9",background:"#f5f3ff",cursor:"pointer",fontSize:11,fontWeight:700,color:"#5b21b6",fontFamily:"inherit"}}>
+                    📑 Itemised
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+        {(rec.lines||[]).length>0&&(
+          <div style={{marginTop:10}}>
+            <div style={{fontSize:11,fontWeight:700,color:"#475569",marginBottom:4}}>Invoice Lines</div>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+              <thead>
+                <tr style={{background:"#f8fafc"}}>
+                  {["Description","Qty","Rate","Amount"].map(h=>(
+                    <th key={h} style={{padding:"4px 8px",textAlign:h==="Amount"||h==="Rate"||h==="Qty"?"right":"left",fontWeight:700,color:"#64748b",borderBottom:"1px solid #e2e8f0"}}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rec.lines.map((l,i)=>(
+                  <tr key={i} style={{borderBottom:"1px solid #f1f5f9"}}>
+                    <td style={{padding:"4px 8px",color:"#0f172a"}}>{l.description||l.label||"—"}</td>
+                    <td style={{padding:"4px 8px",textAlign:"right",color:"#475569"}}>{l.qty!=null?l.qty:"—"}</td>
+                    <td style={{padding:"4px 8px",textAlign:"right",color:"#475569"}}>{l.rate!=null?`$${Number(l.rate).toFixed(2)}`:"—"}</td>
+                    <td style={{padding:"4px 8px",textAlign:"right",fontWeight:600,color:"#0f172a"}}>{l.cost!=null?`$${Number(l.cost).toFixed(2)}`:"—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Render a single ungrouped billing record row
+  function renderSingleRecord(rec) {
+    const isExpanded = expandedId === rec.id;
+    const isPO = rec.type==="purchase_order" || rec.bookerEmail==="gtec";
+    const isInv = !isPO;
+    const typeTag = isPO
+      ? <span style={{fontFamily:"monospace",fontSize:10,background:"#dbeafe",padding:"1px 6px",borderRadius:4,color:"#1d4ed8",fontWeight:700}}>PO</span>
+      : <span style={{fontFamily:"monospace",fontSize:10,background:"#e0f2fe",padding:"1px 6px",borderRadius:4,color:"#0369a1",fontWeight:700}}>INV</span>;
+    return (
+      <div key={rec.id} style={{background:"#fff",border:`1px solid ${isPO?"#bfdbfe":"#e2e8f0"}`,borderRadius:12,overflow:"hidden",boxShadow:"0 1px 3px rgba(0,0,0,0.06)"}}>
+        <div onClick={()=>setExpandedId(isExpanded?null:rec.id)}
+          style={{display:"flex",alignItems:"center",gap:10,padding:"12px 16px",cursor:"pointer",userSelect:"none",flexWrap:"wrap"}}>
+          <div style={{minWidth:0,flex:1}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+              {typeTag}
+              <span style={{fontSize:12,fontWeight:800,color:"#0f172a",fontFamily:"monospace"}}>{rec.id}</span>
+              {rec.orderName&&<span style={{fontSize:11,color:"#475569",fontWeight:600}}>{rec.orderName}</span>}
+            </div>
+            <div style={{fontSize:11,color:"#64748b",marginTop:2}}>
+              {isPO ? <strong style={{color:"#1d4ed8"}}>{rec.bookerName||VENDOR_GTEC.name}</strong> : displayName(rec.bookerEmail)}
+              {" · "}{fmtDate(rec.dateFrom)}{rec.dateTo&&rec.dateTo!==rec.dateFrom?` – ${fmtDate(rec.dateTo)}`:""}
+              {" · "}{(rec.bookingIds||[]).length} booking{(rec.bookingIds||[]).length!==1?"s":""}
+              {(rec.status||"draft")==="draft"&&isInv&&<span style={{marginLeft:6,fontSize:10,color:"#94a3b8",fontStyle:"italic"}}>bookings marked invoiced on advance</span>}
+            </div>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
+            <span style={{fontSize:13,fontWeight:700,color:"#0f172a"}}>{fmtMoney(rec.total)}</span>
+            <StatusPill status={rec.status||"draft"}/>
+            {onLoadToSummary&&(
+              <button onClick={e=>{e.stopPropagation();onLoadToSummary(rec);}}
+                title="Load this record's date range + booker into the Summary view"
+                style={{padding:"3px 9px",borderRadius:6,border:"1.5px solid #c7d2fe",background:"#eef2ff",color:"#4338ca",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"}}>
+                ↗ Summary
+              </button>
+            )}
+            <span style={{fontSize:10,color:"#94a3b8"}}>{isExpanded?"▲":"▼"}</span>
+          </div>
+        </div>
+        {isExpanded&&renderRecordExpanded(rec)}
+      </div>
+    );
+  }
+
+  // Render a batch group card (INV×N + PO×1 created together)
+  function renderBatchGroup(batch) {
+    const isGroupExpanded = expandedBatchId === batch.batchId;
+    const activeSubRec = isGroupExpanded
+      ? (batch.records.find(r=>r.id===expandedSubId) || batch.records[0])
+      : null;
+    const si = stateInfo(batch.status);
+    const summaryRec = batch.invRecs[0] || batch.records[0];
+    return (
+      <div key={batch.batchId} style={{background:"#fff",border:"2px solid #e0e7ff",borderRadius:14,overflow:"hidden",boxShadow:"0 2px 8px rgba(99,102,241,0.08)"}}>
+        {/* Batch header */}
+        <div onClick={()=>{ setExpandedBatchId(isGroupExpanded?null:batch.batchId); if(!isGroupExpanded) setExpandedSubId(batch.records[0]?.id||null); }}
+          style={{display:"flex",alignItems:"center",gap:10,padding:"12px 16px",cursor:"pointer",userSelect:"none",flexWrap:"wrap",background:"#f5f3ff"}}>
+          <div style={{minWidth:0,flex:1}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+              <span style={{fontFamily:"monospace",fontSize:10,background:"#6366f1",padding:"2px 7px",borderRadius:4,color:"#fff",fontWeight:700,letterSpacing:"0.04em"}}>BATCH</span>
+              {batch.orderName&&<span style={{fontSize:12,fontWeight:800,color:"#312e81"}}>{batch.orderName}</span>}
+              <span style={{fontSize:11,color:"#6366f1",fontWeight:600}}>{batch.invRecs.length} invoice{batch.invRecs.length!==1?"s":""} + {batch.poRec?"1 PO":"no PO"}</span>
+            </div>
+            <div style={{fontSize:11,color:"#6b7280",marginTop:3,display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+              <span>{fmtDate(batch.dateFrom)}{batch.dateTo&&batch.dateTo!==batch.dateFrom?` – ${fmtDate(batch.dateTo)}`:""}</span>
+              <span style={{color:"#c4b5fd"}}>·</span>
+              <span style={{color:"#475569"}}>{new Date(batch.createdAt).toLocaleDateString("en-NZ",{day:"numeric",month:"short",year:"numeric"})}</span>
+            </div>
+            {/* Sub-record chips */}
+            <div style={{display:"flex",gap:5,flexWrap:"wrap",marginTop:6}}>
+              {batch.invRecs.map(r=>(
+                <button key={r.id} onClick={e=>{e.stopPropagation();setExpandedBatchId(batch.batchId);setExpandedSubId(r.id);}}
+                  style={{padding:"3px 8px",borderRadius:6,border:`1.5px solid ${activeSubRec?.id===r.id?"#4f46e5":"#c7d2fe"}`,
+                    background:activeSubRec?.id===r.id?"#4f46e5":"#eef2ff",
+                    color:activeSubRec?.id===r.id?"#fff":"#4338ca",
+                    cursor:"pointer",fontSize:10,fontWeight:700,fontFamily:"monospace"}}>
+                  INV · {displayName(r.bookerEmail)} <span style={{opacity:0.7,fontWeight:400}}>{r.id}</span>
+                </button>
+              ))}
+              {batch.poRec&&(
+                <button key={batch.poRec.id} onClick={e=>{e.stopPropagation();setExpandedBatchId(batch.batchId);setExpandedSubId(batch.poRec.id);}}
+                  style={{padding:"3px 8px",borderRadius:6,border:`1.5px solid ${activeSubRec?.id===batch.poRec.id?"#1d4ed8":"#bfdbfe"}`,
+                    background:activeSubRec?.id===batch.poRec.id?"#1d4ed8":"#dbeafe",
+                    color:activeSubRec?.id===batch.poRec.id?"#fff":"#1d4ed8",
+                    cursor:"pointer",fontSize:10,fontWeight:700,fontFamily:"monospace"}}>
+                  PO · GTEC <span style={{opacity:0.7,fontWeight:400}}>{batch.poRec.id}</span>
+                </button>
+              )}
+            </div>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
+            <span style={{fontSize:13,fontWeight:700,color:"#312e81"}}>{fmtMoney(batch.total)}</span>
+            <StatusPill status={batch.status}/>
+            {onLoadToSummary&&isAdmin&&(
+              <button onClick={e=>{e.stopPropagation();onLoadToSummary(summaryRec);}}
+                title="Load date range into Summary view"
+                style={{padding:"3px 9px",borderRadius:6,border:"1.5px solid #c7d2fe",background:"#eef2ff",color:"#4338ca",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"}}>
+                ↗ Summary
+              </button>
+            )}
+            {isAdmin&&batch.allDraft&&onDeleteRecord&&(
+              <button onClick={e=>{e.stopPropagation();if(window.confirm(`Delete all ${batch.records.length} draft records in this batch? This cannot be undone.`)) batch.records.forEach(r=>onDeleteRecord(r.id));}}
+                style={{padding:"3px 9px",borderRadius:6,border:"1.5px solid #fecaca",background:"#fef2f2",color:"#b91c1c",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"}}>
+                🗑 Delete batch
+              </button>
+            )}
+            <span style={{fontSize:10,color:"#94a3b8"}}>{isGroupExpanded?"▲":"▼"}</span>
+          </div>
+        </div>
+        {/* Expanded: sub-record detail */}
+        {isGroupExpanded&&activeSubRec&&(
+          <div>
+            <div style={{padding:"6px 16px 0",background:"#faf5ff",borderTop:"1px solid #e0e7ff",display:"flex",gap:5,flexWrap:"wrap"}}>
+              {batch.records.map(r=>(
+                <button key={r.id} onClick={()=>setExpandedSubId(r.id)}
+                  style={{padding:"4px 10px",borderRadius:"6px 6px 0 0",border:"1px solid",borderBottom:"none",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"monospace",
+                    borderColor:expandedSubId===r.id?"#6366f1":"#c4b5fd",
+                    background:expandedSubId===r.id?"#fff":"#ede9fe",
+                    color:expandedSubId===r.id?"#4f46e5":"#7c3aed"}}>
+                  {r.type==="purchase_order"?"PO":"INV"} {r.id}
+                  <StatusPill status={r.status||"draft"}/>
+                </button>
+              ))}
+            </div>
+            {renderRecordExpanded(activeSubRec)}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div style={{fontFamily:"'DM Sans','Segoe UI',system-ui,sans-serif"}}>
       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:16,flexWrap:"wrap"}}>
@@ -3195,191 +3484,13 @@ function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onLoadT
         </div>
       </div>
 
-      {sorted.length === 0 && (
+      {batches.length===0&&ungrouped.length===0&&(
         <div style={{textAlign:"center",padding:48,color:"#94a3b8",fontSize:14}}>No billing records{filterStatus!=="all"?` with status "${stateInfo(filterStatus).label}"`:""}.</div>
       )}
 
       <div style={{display:"flex",flexDirection:"column",gap:10}}>
-        {sorted.map(rec=>{
-          const isExpanded = expandedId === rec.id;
-          const si = stateInfo(rec.status);
-          const isPO = rec.type==="purchase_order" || rec.bookerEmail==="gtec";
-          const isInv = rec.type==="invoice" || (!isPO && rec.type!=="purchase_order");
-          // Find linked records for display
-          const linkedInvIds = rec.linkedInvoiceIds||[];
-          const linkedPoRec = isPO ? null : sorted.find(r=>(r.type==="purchase_order"||r.bookerEmail==="gtec") && (r.linkedInvoiceIds||[]).includes(rec.id));
-          const typeTag = isPO
-            ? <span style={{fontFamily:"monospace",fontSize:10,background:"#dbeafe",padding:"1px 6px",borderRadius:4,color:"#1d4ed8",fontWeight:700}}>PO</span>
-            : <span style={{fontFamily:"monospace",fontSize:10,background:"#e0f2fe",padding:"1px 6px",borderRadius:4,color:"#0369a1",fontWeight:700}}>INV</span>;
-          return (
-            <div key={rec.id} style={{background:"#fff",border:`1px solid ${isPO?"#bfdbfe":"#e2e8f0"}`,borderRadius:12,overflow:"hidden",boxShadow:"0 1px 3px rgba(0,0,0,0.06)"}}>
-              {/* Summary row */}
-              <div onClick={()=>setExpandedId(isExpanded?null:rec.id)}
-                style={{display:"flex",alignItems:"center",gap:10,padding:"12px 16px",cursor:"pointer",userSelect:"none",flexWrap:"wrap"}}>
-                <div style={{minWidth:0,flex:1}}>
-                  <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-                    {typeTag}
-                    <span style={{fontSize:12,fontWeight:800,color:"#0f172a",fontFamily:"monospace"}}>{rec.id}</span>
-                    {rec.orderName&&<span style={{fontSize:11,color:"#475569",fontWeight:600}}>{rec.orderName}</span>}
-                    {linkedInvIds.length>0&&<span style={{fontSize:10,color:"#64748b"}}>links: {linkedInvIds.join(", ")}</span>}
-                    {linkedPoRec&&<span style={{fontSize:10,color:"#94a3b8"}}>→ {linkedPoRec.id}</span>}
-                  </div>
-                  <div style={{fontSize:11,color:"#64748b",marginTop:2}}>
-                    {isPO ? <strong style={{color:"#1d4ed8"}}>{rec.bookerName||VENDOR_GTEC.name}</strong> : displayName(rec.bookerEmail)}
-                    {" · "}{fmtDate(rec.dateFrom)}{rec.dateTo&&rec.dateTo!==rec.dateFrom?` – ${fmtDate(rec.dateTo)}`:""}
-                    {" · "}{(rec.bookingIds||[]).length} booking{(rec.bookingIds||[]).length!==1?"s":""}
-                    {(rec.status||"draft")==="draft"&&isInv&&<span style={{marginLeft:6,fontSize:10,color:"#94a3b8",fontStyle:"italic"}}>bookings marked invoiced on advance</span>}
-                  </div>
-                </div>
-                <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
-                  <span style={{fontSize:13,fontWeight:700,color:"#0f172a"}}>{fmtMoney(rec.total)}</span>
-                  <StatusPill status={rec.status||"draft"}/>
-                  {onLoadToSummary && (
-                    <button onClick={e=>{e.stopPropagation();onLoadToSummary(rec);}}
-                      title="Load this record's date range + booker into the Summary view"
-                      style={{padding:"3px 9px",borderRadius:6,border:"1.5px solid #c7d2fe",background:"#eef2ff",color:"#4338ca",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"}}>
-                      ↗ Summary
-                    </button>
-                  )}
-                  <span style={{fontSize:10,color:"#94a3b8"}}>{isExpanded?"▲":"▼"}</span>
-                </div>
-              </div>
-
-              {isExpanded&&(
-                <div style={{borderTop:"1px solid #f1f5f9",padding:"14px 16px",background:"#fafafa"}}>
-                  <ProgressTrack status={rec.status||"draft"}/>
-
-                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:"10px 20px",marginBottom:14}}>
-                    {[
-                      ["Booker", displayName(rec.bookerEmail)],
-                      ["Booker Address", rec.bookerAddress||"—"],
-                      ["Booker GST", rec.bookerGst||"—"],
-                      ["Created", rec.createdAt?new Date(rec.createdAt).toLocaleDateString("en-NZ",{day:"numeric",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"}):"—"],
-                      ["Subtotal", fmtMoney(rec.subtotal)],
-                      ["GST", fmtMoney(rec.gst)],
-                      ["Total", fmtMoney(rec.total)],
-                    ].map(([k,v])=>(
-                      <div key={k}>
-                        <div style={{fontSize:10,fontWeight:600,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.05em"}}>{k}</div>
-                        <div style={{fontSize:12,color:"#0f172a",whiteSpace:"pre-wrap"}}>{v}</div>
-                      </div>
-                    ))}
-                  </div>
-
-                  {isAdmin&&(
-                    <div style={{display:"flex",flexDirection:"column",gap:8,padding:"10px 0",borderTop:"1px solid #e2e8f0"}}>
-                      <div style={{fontSize:11,fontWeight:700,color:"#475569",marginBottom:2}}>Pipeline Actions</div>
-                      <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
-                        {/* Status advancement */}
-                        {PIPELINE_KEYS.indexOf(rec.status||"draft") < PIPELINE_KEYS.length-1&&(
-                          <button onClick={()=>{
-                            const next = PIPELINE_KEYS[PIPELINE_KEYS.indexOf(rec.status||"draft")+1];
-                            onUpdateRecord({id:rec.id,status:next});
-                          }} style={{padding:"5px 12px",borderRadius:8,border:"none",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit",background:"#0f172a",color:"#fff"}}>
-                            → Mark as {stateInfo(PIPELINE_KEYS[PIPELINE_KEYS.indexOf(rec.status||"draft")+1]).label}
-                            {(rec.status||"draft")==="draft"&&isInv&&<span style={{fontWeight:400,marginLeft:4,opacity:0.7}}>(marks {(rec.bookingIds||[]).length} bookings invoiced)</span>}
-                          </button>
-                        )}
-                        {/* Revert */}
-                        {PIPELINE_KEYS.indexOf(rec.status||"draft") > 0&&(
-                          <button onClick={()=>{
-                            const prev = PIPELINE_KEYS[PIPELINE_KEYS.indexOf(rec.status||"draft")-1];
-                            onUpdateRecord({id:rec.id,status:prev});
-                          }} style={{padding:"5px 12px",borderRadius:8,border:"1px solid #e2e8f0",cursor:"pointer",fontSize:11,fontWeight:600,fontFamily:"inherit",background:"#fff",color:"#64748b"}}>
-                            ← Revert to {stateInfo(PIPELINE_KEYS[PIPELINE_KEYS.indexOf(rec.status||"draft")-1]).label}
-                          </button>
-                        )}
-                        {/* Delete — drafts only */}
-                        {(rec.status||"draft")==="draft" && onDeleteRecord && (
-                          <button onClick={()=>{
-                            if(window.confirm(`Delete draft record ${rec.id}${rec.poId?` / ${rec.poId}`:""}? This cannot be undone.`)) onDeleteRecord(rec.id);
-                          }} style={{padding:"5px 12px",borderRadius:8,border:"1px solid #fecaca",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit",background:"#fef2f2",color:"#b91c1c",marginLeft:"auto"}}>
-                            🗑 Delete draft
-                          </button>
-                        )}
-                      </div>
-                      {/* GTEC invoice number field */}
-                      {["gtec_invoiced","club_invoiced","complete"].includes(rec.status)&&(
-                        <div style={{display:"flex",alignItems:"center",gap:8,marginTop:4}}>
-                          <span style={{fontSize:11,color:"#475569",flexShrink:0}}>GTEC Invoice #:</span>
-                          <input value={rec.gtecInvoiceNumber||""} onChange={e=>onUpdateRecord({id:rec.id,gtecInvoiceNumber:e.target.value})}
-                            placeholder="e.g. GTEC-2026-001"
-                            style={{padding:"4px 8px",borderRadius:6,border:"1px solid #e2e8f0",fontSize:11,fontFamily:"inherit",width:160}}/>
-                        </div>
-                      )}
-                      {/* Notes */}
-                      <div style={{display:"flex",alignItems:"flex-start",gap:8,marginTop:4}}>
-                        <span style={{fontSize:11,color:"#475569",flexShrink:0,paddingTop:4}}>Notes:</span>
-                        <textarea value={rec.notes||""} onChange={e=>onUpdateRecord({id:rec.id,notes:e.target.value})}
-                          rows={2} placeholder="Internal notes…"
-                          style={{padding:"4px 8px",borderRadius:6,border:"1px solid #e2e8f0",fontSize:11,fontFamily:"inherit",flex:1,resize:"vertical"}}/>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Document downloads — always available, including drafts */}
-                  <div style={{display:"flex",flexDirection:"column",gap:6,padding:"10px 0",borderTop:"1px solid #e2e8f0"}}>
-                    <div style={{fontSize:11,fontWeight:700,color:"#475569"}}>📥 Download Documents</div>
-                    <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
-                      {[
-                        {dt:"invoice",  id:rec.id,    show:true},
-                        {dt:"purchase_order", id:rec.poId, show:!!rec.poId},
-                      ].filter(x=>x.show).map(({dt,id})=>(
-                        <div key={dt} style={{display:"flex",gap:0,border:"1px solid #e2e8f0",borderRadius:8,overflow:"hidden",alignItems:"stretch"}}>
-                          <span style={{padding:"5px 10px",fontSize:11,fontWeight:700,color:"#475569",background:"#f8fafc",borderRight:"1px solid #e2e8f0",display:"flex",alignItems:"center",gap:4}}>
-                            {dt==="purchase_order"?"📋 PO":"🧾 Invoice"} <span style={{fontFamily:"monospace",fontSize:10,color:"#94a3b8"}}>{id}</span>
-                          </span>
-                          {[
-                            {fmt:"html", label:"HTML", icon:"🌐"},
-                            {fmt:"print", label:"PDF",  icon:"🖨"},
-                            {fmt:"csv",  label:"CSV",  icon:"📊"},
-                          ].map(({fmt,label,icon})=>(
-                            <button key={fmt} onClick={()=>downloadRecord(rec,fmt,dt,"grouped")} title={`Grouped ${label}`}
-                              style={{padding:"5px 9px",border:"none",borderLeft:"1px solid #f1f5f9",background:"#fff",cursor:"pointer",fontSize:11,fontWeight:600,color:"#0f172a",fontFamily:"inherit"}}>
-                              {icon} {label}
-                            </button>
-                          ))}
-                          {(rec.individualLines||[]).length>0&&(
-                            <button onClick={()=>downloadRecord(rec,"html",dt,"individual")} title="Itemised HTML (one line per booking)"
-                              style={{padding:"5px 9px",border:"none",borderLeft:"1px solid #f1f5f9",background:"#f5f3ff",cursor:"pointer",fontSize:11,fontWeight:700,color:"#5b21b6",fontFamily:"inherit"}}>
-                              📑 Itemised
-                            </button>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Invoice lines */}
-                  {(rec.lines||[]).length>0&&(
-                    <div style={{marginTop:10}}>
-                      <div style={{fontSize:11,fontWeight:700,color:"#475569",marginBottom:4}}>Invoice Lines</div>
-                      <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
-                        <thead>
-                          <tr style={{background:"#f8fafc"}}>
-                            {["Description","Qty","Rate","Amount"].map(h=>(
-                              <th key={h} style={{padding:"4px 8px",textAlign:h==="Amount"||h==="Rate"||h==="Qty"?"right":"left",fontWeight:700,color:"#64748b",borderBottom:"1px solid #e2e8f0"}}>{h}</th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {rec.lines.map((l,i)=>(
-                            <tr key={i} style={{borderBottom:"1px solid #f1f5f9"}}>
-                              <td style={{padding:"4px 8px",color:"#0f172a"}}>{l.description||l.label||"—"}</td>
-                              <td style={{padding:"4px 8px",textAlign:"right",color:"#475569"}}>{l.qty!=null?l.qty:"—"}</td>
-                              <td style={{padding:"4px 8px",textAlign:"right",color:"#475569"}}>{l.rate!=null?`$${Number(l.rate).toFixed(2)}`:"—"}</td>
-                              <td style={{padding:"4px 8px",textAlign:"right",fontWeight:600,color:"#0f172a"}}>{l.cost!=null?`$${Number(l.cost).toFixed(2)}`:"—"}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        })}
+        {batches.map(batch=>renderBatchGroup(batch))}
+        {ungrouped.map(rec=>renderSingleRecord(rec))}
       </div>
     </div>
   );
@@ -7121,10 +7232,12 @@ export default function App() {
 
   function handleCreateOfficialInvoice(newRecords) {
     // No immediate invoicing — bookings are marked invoiced when record leaves Draft.
-    setBillingRecords(prev => [...prev, ...newRecords]);
-    logActivity("official_invoice_created", { count: newRecords.length, ids: newRecords.map(r=>r.id) });
-    const invCount = newRecords.filter(r=>r.type==="invoice"||!r.type).length;
-    const poCount  = newRecords.filter(r=>r.type==="purchase_order").length;
+    const batchId = `BATCH-${Date.now()}`;
+    const tagged = newRecords.map(r => ({ ...r, batchId }));
+    setBillingRecords(prev => [...prev, ...tagged]);
+    logActivity("official_invoice_created", { count: tagged.length, ids: tagged.map(r=>r.id) });
+    const invCount = tagged.filter(r=>r.type==="invoice"||!r.type).length;
+    const poCount  = tagged.filter(r=>r.type==="purchase_order").length;
     showToast(`Created ${invCount} invoice${invCount!==1?"s":""} + ${poCount} PO.`);
   }
 
@@ -7495,7 +7608,7 @@ export default function App() {
             <TabBtn id="month"    label={isMobile?"🗓 Month":"🗓 Month"}/>
             <TabBtn id="list"     label={isMobile?"📋 List":"📋 Bookings"} badge={myClashCount>0?myClashCount:undefined}/>
             <TabBtn id="summary"  label={isMobile?"📊":"📊 Summary"}/>
-            {(isAdmin||(()=>{const k=(emailAliases[loggedInEmail]||loggedInEmail||"").toLowerCase();return (profiles[k]||{}).profileType==="vendor";})())&&<TabBtn id="billing" label={isMobile?"🧾":"🧾 Billing"}/>}
+            {(isAdmin||!!loggedInEmail)&&<TabBtn id="billing" label={isMobile?"🧾":"🧾 Billing"}/>}
             {isAdmin&&<TabBtn id="admin" label={isMobile?"⚙ Admin":"⚙ Admin"} badge={pendingCount}/>}
           </div>
         </div>
