@@ -4031,16 +4031,30 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
     setShowInvoice(true);
   }
 
-  // Build an official invoice record (no side-effects) for one scope (one booker).
-  // Build one INV record per booker scope (AMUA → booker).
-  // Returns the record; caller accumulates into allRecs to keep IDs unique.
+  // Build official invoice record (no side-effects) for one scope (one booker).
+  // Appends any pending credit adjustments as negative line items so they are
+  // discounted from the booker's next invoice automatically.
   function buildInvoiceRecord(scope, allRecs) {
     const invId = generateDocId(allRecs.filter(r=>r.id?.startsWith("INV-")), "INV");
     const canonKey = (emailAliases[scope.email] || scope.email).toLowerCase();
     const prof = (profiles||{})[canonKey] || {};
     const groupedLines    = buildInvoiceLines(scope.bkgs, "grouped");
     const individualLines = buildInvoiceLines(scope.bkgs, "individual");
-    const subtotal = groupedLines.reduce((s,l)=>s+l.cost, 0);
+
+    // Pending credits for this booker — negative lines that discount the total
+    const creditBkgs = bookings.filter(b => {
+      if (b.email?.toLowerCase() !== scope.email.toLowerCase()) return false;
+      const res = parseCpsaResolution(b.system_notes);
+      return res?.billingState === "credit_pending";
+    });
+    const creditLines = buildAdjustmentLines(creditBkgs).filter(l => l.cost < 0).map(l => ({
+      ...l,
+      desc: l.desc.replace("[Credit adj.]","[Credit]"),
+      isCreditAdj: true,
+    }));
+
+    const allGroupedLines = [...groupedLines, ...creditLines];
+    const subtotal = allGroupedLines.reduce((s,l)=>s+l.cost, 0);
     const { pre, gst, total } = gstAmounts(subtotal, invGst);
     const dates = scope.bkgs.map(b=>b.date).filter(Boolean).sort();
     return {
@@ -4055,8 +4069,9 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
       bookerAddress: prof.address || "",
       bookerGst:   prof.gstNumber || "",
       bookingIds:  scope.bkgs.map(b=>b.id),
-      lines: groupedLines,
-      individualLines,
+      creditBookingIds: creditBkgs.map(b=>b.id),
+      lines: allGroupedLines,
+      individualLines: [...individualLines, ...creditLines],
       subtotal: pre, gst, total, gstMode: invGst,
       status: "draft",
       gtecInvoiceNumber: "",
@@ -5116,24 +5131,45 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
               )}
 
               {/* Summary bar */}
-              <div style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:10,padding:"10px 14px",fontSize:13,color:"#475569",display:"flex",flexDirection:"column",gap:6}}>
-                <div style={{display:"flex",flexWrap:"wrap",gap:8,alignItems:"center"}}>
-                  {invScope==="per_booker" && invSelectedEmails.size !== 1
-                    ? <span><strong>{scopes.length}</strong> booker{scopes.length!==1?"s":""} · <strong>{allBkgs.length}</strong> booking{allBkgs.length!==1?"s":""} · <strong style={{color:"#15803d"}}>{fmtCost(totalCostInv)}</strong></span>
-                    : <span>{docLabel} for <strong>{scopes[0]?.name||scopes[0]?.email}</strong> · <strong>{allBkgs.length}</strong> booking{allBkgs.length!==1?"s":""} · <strong style={{color:"#15803d"}}>{fmtCost(totalCostInv)}</strong></span>
-                  }
-                </div>
-                <div style={{fontSize:10,color:"#94a3b8"}}>
-                  From summary filter: {dateFrom||"…"} → {dateTo||"…"}
-                  {emailFilterSet.size>0?` · ${emailFilterSet.size} booker${emailFilterSet.size!==1?"s":""}`:" · all bookers"}
-                  {invIncludeInvoiced?"":" · invoiced bookings excluded"}
-                </div>
-                {allBkgs.length===0&&(
-                  <div style={{color:"#f43f5e",fontSize:11,fontWeight:600}}>
-                    No bookings match. {!invIncludeInvoiced&&"Try enabling \"Include previously-invoiced\" — "}adjust the date preset or booker filter in the summary view.
+              {(()=>{
+                // Pending credits across all scopes in this popup
+                const pendingCredits = scopes.flatMap(s =>
+                  bookings.filter(b => {
+                    if (b.email?.toLowerCase() !== s.email.toLowerCase()) return false;
+                    const res = parseCpsaResolution(b.system_notes);
+                    return res?.billingState === "credit_pending";
+                  })
+                );
+                const creditAmt = pendingCredits.length > 0
+                  ? buildAdjustmentLines(pendingCredits).filter(l=>l.cost<0).reduce((s,l)=>s+l.cost,0)
+                  : 0;
+                return (
+                  <div style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:10,padding:"10px 14px",fontSize:13,color:"#475569",display:"flex",flexDirection:"column",gap:6}}>
+                    <div style={{display:"flex",flexWrap:"wrap",gap:8,alignItems:"center"}}>
+                      {invScope==="per_booker" && invSelectedEmails.size !== 1
+                        ? <span><strong>{scopes.length}</strong> booker{scopes.length!==1?"s":""} · <strong>{allBkgs.length}</strong> booking{allBkgs.length!==1?"s":""} · <strong style={{color:"#15803d"}}>{fmtCost(totalCostInv)}</strong></span>
+                        : <span>{docLabel} for <strong>{scopes[0]?.name||scopes[0]?.email}</strong> · <strong>{allBkgs.length}</strong> booking{allBkgs.length!==1?"s":""} · <strong style={{color:"#15803d"}}>{fmtCost(totalCostInv)}</strong></span>
+                      }
+                      {creditAmt < 0 && (
+                        <span style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:700,color:"#15803d"}}>
+                          💚 {pendingCredits.length} credit{pendingCredits.length!==1?"s":""} → {fmtCost(creditAmt)} applied
+                        </span>
+                      )}
+                    </div>
+                    <div style={{fontSize:10,color:"#94a3b8"}}>
+                      From summary filter: {dateFrom||"…"} → {dateTo||"…"}
+                      {emailFilterSet.size>0?` · ${emailFilterSet.size} booker${emailFilterSet.size!==1?"s":""}`:" · all bookers"}
+                      {invIncludeInvoiced?"":" · invoiced bookings excluded"}
+                      {creditAmt<0?" · pending credits will be deducted from invoice total":""}
+                    </div>
+                    {allBkgs.length===0&&(
+                      <div style={{color:"#f43f5e",fontSize:11,fontWeight:600}}>
+                        No bookings match. {!invIncludeInvoiced&&"Try enabling \"Include previously-invoiced\" — "}adjust the date preset or booker filter in the summary view.
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
+                );
+              })()}
 
               {invMode==="draft" && (
                 <div style={{display:"flex",flexDirection:"column",gap:12}}>
@@ -7297,20 +7333,31 @@ export default function App() {
     showToast(`Created ${invCount} invoice${invCount!==1?"s":""} + ${poCount} PO.`);
   }
 
-  // Update a billing record; when status advances from draft, mark linked bookings invoiced.
+  // Update a billing record; when status advances from draft, mark linked bookings
+  // invoiced and settle any credit adjustments bundled into the invoice.
   async function handleUpdateBillingRecord(patch) {
+    let creditTargets = [];
     setBillingRecords(prev => {
       const old = prev.find(r=>r.id===patch.id);
-      // If advancing out of draft, mark the linked bookings as invoiced.
       if (old && (old.status||"draft")==="draft" && patch.status && patch.status!=="draft") {
+        // Mark regular bookings as invoiced
         const ids = new Set(old.bookingIds||[]);
         if (ids.size) {
           const targets = bookings.filter(b=>ids.has(b.id)&&!isAdminBooking(b)&&!b.invoiced);
           if (targets.length) handleMarkInvoiced(targets);
         }
+        // Collect credit bookings to settle (done outside setState to avoid async-in-setter)
+        const creditIds = new Set(old.creditBookingIds||[]);
+        if (creditIds.size) {
+          creditTargets = bookings.filter(b=>creditIds.has(b.id));
+        }
       }
       return prev.map(r=>r.id===patch.id?{...r,...patch}:r);
     });
+    // Settle credits — run after setState so booking state is consistent
+    for (const b of creditTargets) {
+      await handleMarkAdjustmentSettled(b, "credited");
+    }
   }
 
   // Bulk approve/reject — groups by email and sends one summary per person
