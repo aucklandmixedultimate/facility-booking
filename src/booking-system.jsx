@@ -517,34 +517,6 @@ function buildApprovalEmailHtml({ name, email, bookings: bkgs, newStatus, adminN
 </table></td></tr></table></body></html>`;
 }
 
-function buildDeletionEmailHtml({ name, email, bookings: bkgs, deletedBy }) {
-  const rows = bkgs.map(b => {
-    const facName = FACILITIES.find(x=>x.id===b.facility_id)?.name || b.facility_id;
-    return `<tr><td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;font-size:14px;color:#0f172a;">${facName}</td><td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;font-size:14px;color:#475569;">${fmtDate(b.date)}</td><td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;font-size:14px;color:#475569;">${fmtTime(b.start_hour)}–${fmtTime(b.start_hour+b.duration)}</td><td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;font-size:14px;color:#475569;">${b.purpose||""}</td></tr>`;
-  }).join("");
-  const byAdmin = deletedBy === "admin";
-  return `<!DOCTYPE html><html><body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
-<table width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:40px 20px;">
-<table width="600" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
-<tr><td style="background:#7f1d1d;padding:32px 40px;">
-  <h1 style="margin:0;font-size:24px;font-weight:800;color:#fff;">🗑 Booking${bkgs.length>1?"s":""} Removed</h1>
-  <p style="margin:8px 0 0;color:rgba(255,255,255,0.8);font-size:15px;">${byAdmin?"An administrator has removed":"You have removed"} ${bkgs.length} booking${bkgs.length>1?"s":""} from the system.</p>
-</td></tr>
-<tr><td style="padding:32px 40px;">
-  <p style="margin:0 0 16px;font-size:15px;color:#475569;">Hi <strong>${name}</strong>, the following booking${bkgs.length>1?"s have":" has"} been permanently removed${byAdmin?" by an administrator":""}.</p>
-  <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">
-    <tr style="background:#fef2f2;"><th style="padding:10px 14px;text-align:left;font-size:12px;font-weight:700;color:#7f1d1d;text-transform:uppercase;letter-spacing:0.05em;">Facility</th><th style="padding:10px 14px;text-align:left;font-size:12px;font-weight:700;color:#7f1d1d;text-transform:uppercase;letter-spacing:0.05em;">Date</th><th style="padding:10px 14px;text-align:left;font-size:12px;font-weight:700;color:#7f1d1d;text-transform:uppercase;letter-spacing:0.05em;">Time</th><th style="padding:10px 14px;text-align:left;font-size:12px;font-weight:700;color:#7f1d1d;text-transform:uppercase;letter-spacing:0.05em;">Purpose</th></tr>
-    ${rows}
-  </table>
-  <div style="margin-top:24px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:16px 20px;">
-    <p style="margin:0;font-size:14px;color:#991b1b;">These bookings have been permanently deleted and cannot be recovered. If you believe this was an error, please contact the facility administrator.</p>
-  </div>
-</td></tr>
-<tr><td style="background:#f8fafc;padding:20px 40px;text-align:center;font-size:12px;color:#94a3b8;">FacilityBook · This is an automated notification</td></tr>
-</table></td></tr></table></body></html>`;
-}
-
-
 const S = {
   inp:  {width:"100%",padding:"9px 12px",borderRadius:8,border:"1.5px solid #e2e8f0",fontSize:14,color:"#0f172a",background:"#f8fafc",outline:"none",boxSizing:"border-box",fontFamily:"inherit"},
   lbl:  {display:"block",fontSize:12,fontWeight:600,color:"#64748b",marginBottom:5,textTransform:"uppercase",letterSpacing:"0.05em"},
@@ -1134,7 +1106,7 @@ function InlineDayPicker({ date, bookings, onPick }) {
     </div>
   );
 }
-function BookingRow({ row, idx, onChange, onRemove, isOnly, isAdmin, isEditing, allBookings, loggedInEmail }) {
+function BookingRow({ row, idx, onChange, onRemove, isOnly, isAdmin, isEditing, allBookings }) {
   const isMobile = useMobile();
   const [recurMode, setRecurMode] = useState(row.recur?.mode || "none");
   const [recurWeeks, setRecurWeeks] = useState(row.recur?.weeks || 4);
@@ -1322,14 +1294,12 @@ function BookingRow({ row, idx, onChange, onRemove, isOnly, isAdmin, isEditing, 
 // The new dates are calculated by keeping each booking's original calendar week
 // but shifting to a new weekday if changed.
 // ─── Cart Modal ───────────────────────────────────────────────────────────────
-function CartModal({ cart, setCart, onClose, onSubmit, openNew, cartIdsSet }) {
+function CartModal({ cart, setCart, onClose, onSubmit, openNew }) {
   const [editingDraft, setEditingDraft] = useState(null); // {gi, di, draft}
   const [expandedNotify, setExpandedNotify] = useState(new Set()); // email keys that are open
   const totalNew  = cart.filter(i=>!i.isEdit&&!i.isMultiEdit&&!i.notifyOnly).reduce((s,i)=>s+i.drafts.length,0);
   const totalEdits = cart.filter(i=>i.isEdit||i.isMultiEdit).reduce((s,i)=>s+i.drafts.length,0);
   const totalNotify = cart.filter(i=>i.notifyOnly).reduce((s,i)=>s+i.drafts.length,0);
-  const totalCount = totalNew + totalEdits + totalNotify;
-
   // Group notifyOnly cart items by booker email so the cart doesn't explode
   // into one row per booking when a sync produces many CPSA notifications.
   const notifyByEmail = {};
@@ -1577,7 +1547,7 @@ function DeleteCartModal({ deleteQueue, setDeleteQueue, onClose, onSubmit, isAdm
         <div style={{fontSize:13,color:'#991b1b'}}>Review the bookings below before permanently removing them.</div>
       </div>
       <div style={{flex:1,overflowY:'auto',maxHeight:'45vh',display:'flex',flexDirection:'column',gap:6,paddingRight:2,marginBottom:12}}>
-        {deleteQueue.map((b,i)=>{
+        {deleteQueue.map((b)=>{
           const f=FACILITIES.find(x=>x.id===b.facility_id);
           return (
             <div key={b.id} style={{display:'flex',gap:10,alignItems:'center',padding:'10px 14px',background:'#fff',border:'1px solid #fee2e2',borderRadius:8}}>
@@ -1704,7 +1674,7 @@ function MultiEditForm({ bookings: srcBookings, onAddToCart, onClose, allBooking
 }
 
 
-function BookingForm({ booking, allBookings, onSave, onAddToCart, onClose, isAdmin, loggedInEmail }) {
+function BookingForm({ booking, allBookings, onAddToCart, onClose, isAdmin, loggedInEmail }) {
   const isMobile = useMobile();
   const isEditing  = !!booking?.id && !booking?._multiEdit;
   const isMultiEdit = !!booking?._multiEdit;
@@ -2361,7 +2331,7 @@ function MonthCalendar({ bookings, onBookingClick, onNewBooking, selectedFacilit
 // Bookings render as blocks; a plain click opens a booking, a click-drag (even
 // starting on a block) passes through to create a new booking — so overlapping /
 // same-facility bookings (e.g. for merges) are easy to create.
-function DayTimelinePopup({ date, bookings, onClose, onBookingClick, onNewBooking, cartNewDrafts=[], deleteIds=new Set(), cartSourceIds=new Set(), focusHour=null }) {
+function DayTimelinePopup({ date, bookings, onClose, onBookingClick, onNewBooking, cartNewDrafts=[], focusHour=null }) {
   const [dragState, setDragState] = useState(null); // {facility, startSlot, endSlot}
   const dragMoved   = useRef(false);
   const justDragged = useRef(false);
@@ -2429,7 +2399,6 @@ function DayTimelinePopup({ date, bookings, onClose, onBookingClick, onNewBookin
           </div>
           {/* Facility columns */}
           {FACILITIES.map(fac=>{
-            const facBkgs = dayBkgs.filter(b=>b.facility_id===fac.id || isAdminBooking(b));
             const isDragging = dragState?.facility===fac.id;
             const colTint = FACILITY_TINT[fac.id] || "#fff";
             return (
@@ -2613,7 +2582,7 @@ function buildOverlapPatternMap(active, facSensitive) {
   return patternMap;
 }
 
-function PatternModal({ email, name, pk, bkgs, isAdmin, canEdit: canEditProp, facilityRates, pricingMode, approxDurations, onClose, onBulkApply }) {
+function PatternModal({ email, name, pk, bkgs, isAdmin, canEdit: canEditProp, onClose, onBulkApply }) {
   const canEdit = canEditProp !== undefined ? canEditProp : isAdmin;
   const parts = pk.split("_");
   const startH = parseFloat(parts[parts.length-1]);
@@ -2712,7 +2681,7 @@ function PatternModal({ email, name, pk, bkgs, isAdmin, canEdit: canEditProp, fa
   );
 }
 
-function OneOffModal({ email, name, bkgs, isAdmin, onClose }) {
+function OneOffModal({ email, name, bkgs, onClose }) {
   const sorted = [...bkgs].sort((a,b)=>a.date.localeCompare(b.date));
   return (
     <Modal title={`One-off Bookings — ${name}`} onClose={onClose}>
@@ -3053,7 +3022,7 @@ const PIPELINE_STATES = [
 ];
 const PIPELINE_KEYS = PIPELINE_STATES.map(s=>s.key);
 
-function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onLoadToSummary, isAdmin=false, loggedInEmail="", emailAliases={}, aliasNames={}, profiles={} }) {
+function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onLoadToSummary, isAdmin=false, loggedInEmail="", emailAliases={}, aliasNames={} }) {
   const [filterStatus, setFilterStatus] = useState("all");
   const [expandedId, setExpandedId] = useState(null);
   const [expandedBatchId, setExpandedBatchId] = useState(null);
@@ -3402,8 +3371,6 @@ function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onLoadT
     const activeSubRec = isGroupExpanded
       ? (batch.records.find(r=>r.id===expandedSubId) || batch.records[0])
       : null;
-    const si = stateInfo(batch.status);
-    const summaryRec = batch.invRecs[0] || batch.records[0];
     return (
       <div key={batch.batchId} style={{background:"#fff",border:"2px solid #e0e7ff",borderRadius:14,overflow:"hidden",boxShadow:"0 2px 8px rgba(99,102,241,0.08)"}}>
         {/* Batch header */}
@@ -3632,7 +3599,6 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
   const [invIncludeAdjustments, setInvIncludeAdjustments] = useState(true); // include mismatch billing adjustments
   const [invSelectedEmails, setInvSelectedEmails] = useState(new Set()); // empty = all
   // Schedule Summary state
-  const [showSchedule,        setShowSchedule]        = useState(false);
   const [scheduleFacSensitive,setScheduleFacSensitive]= useState(false);
   const [sandboxMode,         setSandboxMode]         = useState(false);
   const [sandboxSelected,     setSandboxSelected]     = useState(new Set());
@@ -3831,16 +3797,11 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
     rec.adjustment     = rec.pendingDeficit; // Adj column = only deficits owed
   });
   const rows          = Object.values(byEmail).sort((a,b)=>b.total-a.total);
-  // In per-booking mode "displayed total" = bookings × approxDuration; in hourly mode = actual hours
-  const displayTotal  = r => isPerBooking ? r.bookings * getApproxDuration(r.email) : r.total;
-  const displayDaytime = r => isPerBooking ? r.dayBkgs : r.daytime;
-  const displayEvening = r => isPerBooking ? r.eveBkgs : r.evening;
   const totalEvening  = rows.reduce((s,r)=>s+r.evening,0);
   const totalDaytime  = rows.reduce((s,r)=>s+r.daytime,0);
   const totalHrs      = rows.reduce((s,r)=>s+r.total,0);
   const totalDayBkgs  = rows.reduce((s,r)=>s+r.dayBkgs,0);
   const totalEveBkgs  = rows.reduce((s,r)=>s+r.eveBkgs,0);
-  const totalBookerCost = rows.reduce((s,r)=>s+r.cost,0);
   const totalDayCost    = rows.reduce((s,r)=>s+r.dayCost,0);
   const totalEveCost    = rows.reduce((s,r)=>s+r.eveCost,0);
 
@@ -4133,8 +4094,6 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
       const { pre } = gstAmounts(subtotal, invGst);
       return { desc:`${name}`, detail: inv?.id||"", cost: pre };
     });
-    const poSubtotal = poLines.reduce((s,l)=>s+l.cost,0);
-    const { pre:poPreGst, gst:poGst, total:poTotal } = gstAmounts(poSubtotal*1.15, invGst); // reconstruct inclusive total
     // Simpler: just sum totals directly
     const sumTotal = invoiceRecords.reduce((s,r)=>s+(r.total||0),0);
     const sumSubtotal = invoiceRecords.reduce((s,r)=>s+(r.subtotal||0),0);
@@ -4708,7 +4667,6 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
           )}
         </div>
         {(()=>{
-          function dayName(d){return["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][new Date(d+"T12:00").getDay()];}
           // Build pattern groups per email using overlap-aware grouping
           const patternMap = buildOverlapPatternMap(active, scheduleFacSensitive);
 
@@ -5412,7 +5370,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
 
 
 // ─── Admin Panel with action queue, bulk approve, facility rates ──────────────
-function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,clashes=[],deleteIds=new Set(),facilityRates={},onUpdateFacilityRate,onClearOldUnapproved,silentMode=false,approxPlayers={},onUpdateApproxPlayers,approxDurations={},onUpdateApproxDuration,onSyncDB,onBulkApply,onSaveMismatch,onMarkAdjustmentSettled,loggedInEmail,syncResults=[],onClearSyncResults,showSyncResults=false,onToggleSyncResults,bookerFilter=new Set(),onToggleBooker,onSetBookerFilter,aliasNames={},emailAliases={}}) {
+function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,clashes=[],deleteIds=new Set(),facilityRates={},onClearOldUnapproved,silentMode=false,onBulkApply,onSaveMismatch,onMarkAdjustmentSettled,loggedInEmail,syncResults=[],onClearSyncResults,showSyncResults=false,onToggleSyncResults,bookerFilter=new Set(),onToggleBooker,onSetBookerFilter,aliasNames={},emailAliases={}}) {
   const [showSchedulePanel, setShowSchedulePanel] = useState(false);
   const [showActivityPanel, setShowActivityPanel] = useState(false);
   // Which sync-result months are expanded in the grouped dropdown (monthKey set).
@@ -5423,7 +5381,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
     const primary = (emailAliases[em.toLowerCase()] || em).toLowerCase();
     return aliasNames[primary] || primary.split("@")[0];
   };
-  const [sf,setSf]=useState("all"), [ff,setFf]=useState("all"), [q,setQ]=useState("");
+  const [sf,setSf]=useState("all"), [ff,setFf]=useState("all"), [q]=useState("");
   // Booker filter (empty Set = all). Shared with the global header pills so that
   // ALL admin content — queue, table, clashes, mismatches, track-changes — filters
   // to the selected booker(s) at once. Falls back to local state if used unwired.
@@ -6031,7 +5989,6 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
           if (!changedFields.length) return "to_correct";
           const allSelected=changedFields.every(f=>fieldSel[f]);
           if (!allSelected) return "pending";
-          const hasCpsa=changedFields.some(f=>fieldSel[f]==="cpsa");
           const allOurs=changedFields.every(f=>fieldSel[f]==="ours");
           return allOurs?"to_correct":"amended";
         }
@@ -6274,7 +6231,6 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                     const newCost = newSplit.day*newRates.day + newSplit.evening*newRates.evening;
                     const costDelta = newCost - origCost; // +ve = we owe more, -ve = we owe a credit
                     const hasCostInfo = origCost > 0 || newCost > 0;
-                    const costStr = hasCostInfo ? ` (${costDelta>=0?"+":""}${fmtCost(costDelta)})` : "";
                     const absCostStr = hasCostInfo ? ` — ${fmtCost(Math.abs(costDelta))}` : "";
 
                     if (!b.invoiced) {
@@ -6944,7 +6900,7 @@ export default function App() {
   const [syncResults, setSyncResults] = useState(()=>{
     try{ return JSON.parse(localStorage.getItem("fb_sync_results")||"[]"); }catch{ return []; }
   });
-  useEffect(()=>{ try{ localStorage.setItem("fb_sync_results", JSON.stringify(syncResults)); }catch{} }, [syncResults]);
+  useEffect(()=>{ try{ localStorage.setItem("fb_sync_results", JSON.stringify(syncResults)); }catch{ /* ignore */ } }, [syncResults]);
   // Admin-configurable retention (in months) for activity & sync logs. 0 = keep forever.
   const [logRetentionMonths, setLogRetentionMonthsState] = useState(()=>{
     const v = parseInt(localStorage.getItem("fb_log_retention_months"),10);
@@ -6960,12 +6916,12 @@ export default function App() {
   const [emailAliases, setEmailAliases] = useState(()=>{
     try{ return JSON.parse(localStorage.getItem("fb_email_aliases")||"{}"); }catch{ return {}; }
   });
-  useEffect(()=>{ try{ localStorage.setItem("fb_email_aliases", JSON.stringify(emailAliases)); }catch{} }, [emailAliases]);
+  useEffect(()=>{ try{ localStorage.setItem("fb_email_aliases", JSON.stringify(emailAliases)); }catch{ /* ignore */ } }, [emailAliases]);
   // aliasNames: { primaryEmail: displayName } — overrides the default email-prefix label.
   const [aliasNames, setAliasNames] = useState(()=>{
     try{ return JSON.parse(localStorage.getItem("fb_alias_names")||"{}"); }catch{ return {}; }
   });
-  useEffect(()=>{ try{ localStorage.setItem("fb_alias_names", JSON.stringify(aliasNames)); }catch{} }, [aliasNames]);
+  useEffect(()=>{ try{ localStorage.setItem("fb_alias_names", JSON.stringify(aliasNames)); }catch{ /* ignore */ } }, [aliasNames]);
   const canonEmail = useCallback(em => {
     if (!em) return em;
     const k = em.toLowerCase();
@@ -6983,21 +6939,13 @@ export default function App() {
   const [profiles, setProfiles] = useState(()=>{
     try{ return JSON.parse(localStorage.getItem("fb_profiles")||"{}"); }catch{ return {}; }
   });
-  useEffect(()=>{ try{ localStorage.setItem("fb_profiles", JSON.stringify(profiles)); }catch{} }, [profiles]);
-  function updateProfile(email, patch) {
-    const k = (email||"").toLowerCase();
-    setProfiles(prev => ({ ...prev, [k]: { ...(prev[k]||{}), ...patch } }));
-  }
-  function getProfile(email) {
-    const k = (email||"").toLowerCase();
-    return profiles[k] || {};
-  }
+  useEffect(()=>{ try{ localStorage.setItem("fb_profiles", JSON.stringify(profiles)); }catch{ /* ignore */ } }, [profiles]);
   // fb_billing_records: official invoice history { id, referenceId, date, type, bookerEmails,
   //   amount, gstMode, status, gtecInvoiceNumber, clubPayment, amuaPayment, bookingIds }
   const [billingRecords, setBillingRecords] = useState(()=>{
     try{ return JSON.parse(localStorage.getItem("fb_billing_records")||"[]"); }catch{ return []; }
   });
-  useEffect(()=>{ try{ localStorage.setItem("fb_billing_records", JSON.stringify(billingRecords)); }catch{} }, [billingRecords]);
+  useEffect(()=>{ try{ localStorage.setItem("fb_billing_records", JSON.stringify(billingRecords)); }catch{ /* ignore */ } }, [billingRecords]);
   // Bumped each time the user clicks "↗ Summary" on a billing row; SummaryTab
   // reacts to the version change rather than the payload itself so repeated
   // loads of the same record still take effect.
@@ -7020,7 +6968,6 @@ export default function App() {
     setSummaryLoadRequest({ dateFrom: rec.dateFrom||"", dateTo: rec.dateTo||"", version: Date.now() });
     setTab("summary");
   }
-  const [showBillingView, setShowBillingView] = useState(false);
   const [facilityRates, setFacilityRates] = useState(()=>{
     try{return JSON.parse(localStorage.getItem("fb_facility_rates")||"{}");}catch{return {};}
   });
@@ -7046,7 +6993,6 @@ export default function App() {
     try{return JSON.parse(localStorage.getItem("fb_approx_durations")||"{}");}catch{return {};}
   });
   const [pricingMode, setPricingModeState] = useState(()=>localStorage.getItem("fb_pricing_mode")||"hourly");
-  const [listNameSearch,  setListNameSearch]    = useState("");
   const [listDateFrom,    setListDateFrom]      = useState("");
   const [listDateTo,      setListDateTo]        = useState("");
   const [listStatusFilter,setListStatusFilter]  = useState("all");
@@ -7094,20 +7040,20 @@ export default function App() {
       rows.forEach(r => { map[r.key] = r.value; });
       if (map.facility_rates && typeof map.facility_rates === "object") {
         setFacilityRates(map.facility_rates);
-        try{localStorage.setItem("fb_facility_rates",JSON.stringify(map.facility_rates));}catch{}
+        try{localStorage.setItem("fb_facility_rates",JSON.stringify(map.facility_rates));}catch{ /* ignore */ }
       }
       if (map.approx_players && typeof map.approx_players === "object") {
         setApproxPlayers(map.approx_players);
-        try{localStorage.setItem("fb_approx_players",JSON.stringify(map.approx_players));}catch{}
+        try{localStorage.setItem("fb_approx_players",JSON.stringify(map.approx_players));}catch{ /* ignore */ }
       }
       if (map.approx_durations && typeof map.approx_durations === "object") {
         setApproxDurations(map.approx_durations);
-        try{localStorage.setItem("fb_approx_durations",JSON.stringify(map.approx_durations));}catch{}
+        try{localStorage.setItem("fb_approx_durations",JSON.stringify(map.approx_durations));}catch{ /* ignore */ }
       }
       if (Number.isFinite(parseInt(map.log_retention_months,10))) {
         const m = parseInt(map.log_retention_months,10);
         setLogRetentionMonthsState(m);
-        try{localStorage.setItem("fb_log_retention_months",String(m));}catch{}
+        try{localStorage.setItem("fb_log_retention_months",String(m));}catch{ /* ignore */ }
       }
     } catch(e) {
       // settings table may not yet exist; silent fallback to localStorage
@@ -7345,7 +7291,7 @@ export default function App() {
     for (const [y,m] of sorted) {
       await handleSyncMonth(y, m);
     }
-    try{localStorage.setItem("fb_last_sync_at", String(Date.now()));}catch{}
+    try{localStorage.setItem("fb_last_sync_at", String(Date.now()));}catch{ /* ignore */ }
     logActivity("cpsa_sync_complete", { months: sorted.length });
     purgeOldLogs();
     // Notify with a non-intrusive toast
@@ -7399,7 +7345,7 @@ export default function App() {
     skipEmail = skipEmail || silentMode;
     const draftsArr = Array.isArray(drafts) ? drafts : [drafts];
     // Strip client-only fields that don't exist in Supabase schema
-    const toDb = d => { const {recur, ...rest} = d; return rest; };
+    const toDb = d => Object.fromEntries(Object.entries(d).filter(([k]) => k !== 'recur'));
     const isNew = !bookings.find(b=>b.id===draftsArr[0].id);
     if(configured){
       try{
@@ -7453,18 +7399,18 @@ export default function App() {
     const existing = typeof facilityRates[facilityId] === "object" ? facilityRates[facilityId] : { day: 0, evening: 0 };
     const newRates = { ...facilityRates, [facilityId]: { ...existing, [type]: parseFloat(value) || 0 } };
     setFacilityRates(newRates);
-    try{localStorage.setItem("fb_facility_rates",JSON.stringify(newRates));}catch{}
+    try{localStorage.setItem("fb_facility_rates",JSON.stringify(newRates));}catch{ /* ignore */ }
     persistSetting("facility_rates", newRates);
   }
 
   function setPricingMode(mode) {
     setPricingModeState(mode);
-    try{localStorage.setItem("fb_pricing_mode", mode);}catch{}
+    try{localStorage.setItem("fb_pricing_mode", mode);}catch{ /* ignore */ }
   }
   function setLogRetentionMonths(months) {
     const m = Math.max(0, parseInt(months,10) || 0);
     setLogRetentionMonthsState(m);
-    try{localStorage.setItem("fb_log_retention_months", String(m));}catch{}
+    try{localStorage.setItem("fb_log_retention_months", String(m));}catch{ /* ignore */ }
     persistSetting("log_retention_months", m);
     purgeOldLogs(m);
   }
@@ -7487,14 +7433,14 @@ export default function App() {
     const v = Math.max(0, parseInt(value) || 0);
     const next = { ...approxPlayers, [email.toLowerCase()]: v };
     setApproxPlayers(next);
-    try{localStorage.setItem("fb_approx_players",JSON.stringify(next));}catch{}
+    try{localStorage.setItem("fb_approx_players",JSON.stringify(next));}catch{ /* ignore */ }
     persistSetting("approx_players", next);
   }
   function updateApproxDuration(email, value) {
     const v = Math.max(0, parseFloat(value) || 0);
     const next = { ...approxDurations, [email.toLowerCase()]: v };
     setApproxDurations(next);
-    try{localStorage.setItem("fb_approx_durations",JSON.stringify(next));}catch{}
+    try{localStorage.setItem("fb_approx_durations",JSON.stringify(next));}catch{ /* ignore */ }
     persistSetting("approx_durations", next);
   }
 
@@ -7508,7 +7454,7 @@ export default function App() {
     showToast("Synced with database.");
   }
 
-  async function handleBulkApply({email, bkgs, bulkTime, bulkDur, bulkFac, cancelFrom}) {
+  async function handleBulkApply({bkgs, bulkTime, bulkDur, bulkFac, cancelFrom}) {
     const toCancel = cancelFrom ? bkgs.filter(b=>b.date>=cancelFrom) : [];
     const toUpdate = bkgs.filter(b=>!cancelFrom||b.date<cancelFrom);
     if(configured){
@@ -7528,7 +7474,7 @@ export default function App() {
     showToast(parts.join(", ")||"Applied.");
   }
 
-  function handleProposeMerge(mergeLines) {
+  function handleProposeMerge() {
     showToast("Merge proposal added — commit your cart to notify bookers.");
   }
 
@@ -7756,29 +7702,6 @@ export default function App() {
     showToast(`${ids.length} old unapproved booking${ids.length>1?"s":""} cleared.`);
   }
 
-  async function handleCancel(id) {
-    const b=bookings.find(x=>x.id===id);if(!b)return;
-    if(!window.confirm("Cancel this booking?"))return;
-    const patch={status:"cancelled",updated_at:new Date().toISOString()};
-    if(configured){try{await sb.update("bookings",id,patch);await loadBookings();}
-      catch(e){showToast("Failed: "+e.message,"error");return;}}
-    else{setBookings(prev=>prev.map(x=>x.id===id?{...x,...patch}:x));}
-    setViewing(null);showToast("Booking cancelled.");
-    sendApprovalEmail({to:b.email,subject:"Booking Cancelled",
-      html:buildApprovalEmailHtml({name:b.name,email:b.email,bookings:[{...b,...patch}],newStatus:"cancelled",adminNote:""})});
-  }
-
-
-  // Multi-edit: open a single-row form pre-filled with shared time/day.
-  // The edited drafts are added to cart (they keep all other per-booking details).
-  function handleMultiEdit(selectedBookings) {
-    // Use the first booking as the template for time/weekday display
-    const ref = selectedBookings[0];
-    // Open a special edit session — we store the full set in editing state
-    setEditing({ _multiEdit: true, _bookings: selectedBookings, ...ref });
-    setShowForm(true);
-  }
-
   // Multi-edit from month view: create one edit-row per booking, add all to cart
   function handleMultiAddToCart(selectedBookings) {
     const ref = selectedBookings[0];
@@ -7797,20 +7720,6 @@ export default function App() {
     setShowForm(false);
     setEditing(null);
     showToast(isEdit ? "Edit added to cart." : `${drafts.length} booking${drafts.length>1?"s":""} added to cart!`);
-  }
-
-  function removeFromCart(idx) {
-    setCart(prev => prev.filter((_,i)=>i!==idx));
-  }
-  function removeBookingFromCart(groupIdx, bookingId) {
-    setCart(prev => {
-      const next = prev.map((item, i) => {
-        if (i !== groupIdx) return item;
-        const drafts = item.drafts.filter(d => d.id !== bookingId);
-        return { ...item, drafts };
-      }).filter(item => item.drafts.length > 0);
-      return next;
-    });
   }
 
   async function handleCartSubmit() {
