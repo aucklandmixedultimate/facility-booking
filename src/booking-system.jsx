@@ -5617,7 +5617,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
         <button onClick={()=>setShowActivityPanel(v=>!v)} style={S.btn({background:showActivityPanel?"#f8fafc":"#fff",color:"#475569",border:`1.5px solid ${showActivityPanel?"#94a3b8":"#e2e8f0"}`,fontSize:12,fontWeight:700})}>
           📜 Activity Log {showActivityPanel?"▴":"▾"}
         </button>
-        {syncResults.length>0&&<button onClick={onToggleSyncResults} style={S.btn({background:showSyncResults?"#ecfeff":"#fff",color:"#0e7490",border:`1.5px solid ${showSyncResults?"#a5f3fc":"#e2e8f0"}`,fontSize:12,fontWeight:700})}>
+        {<button onClick={onToggleSyncResults} style={S.btn({background:showSyncResults?"#ecfeff":"#fff",color:syncResults.length>0?"#0e7490":"#94a3b8",border:`1.5px solid ${showSyncResults?"#a5f3fc":"#e2e8f0"}`,fontSize:12,fontWeight:syncResults.length>0?700:500})}>
           🔄 Sync Results ({syncResults.length}) {showSyncResults?"▴":"▾"}
         </button>}
         <button onClick={()=>setShowClashPanel(v=>!v)} style={S.btn({border:`1.5px solid ${clashes.length>0?"#fda4af":"#e2e8f0"}`,background:showClashPanel?"#fff1f2":"#fff",color:clashes.length>0?"#9f1239":"#94a3b8",fontSize:12,fontWeight:clashes.length>0?700:500})}>
@@ -5634,13 +5634,18 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
       </div>
 
       {/* Inline sync results panel */}
-      {showSyncResults&&syncResults.length>0&&(
+      {showSyncResults&&(
         <div style={{background:"#ecfeff",border:"1.5px solid #a5f3fc",borderRadius:12,padding:16,display:"flex",flexDirection:"column",gap:8}}>
           <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
             <span style={{fontWeight:700,fontSize:14,color:"#0e7490"}}>🔄 CPSA Sync Results</span>
-            <span style={{fontSize:11,color:"#0891b2",marginLeft:"auto"}}>{syncResults.length} month{syncResults.length!==1?"s":""} · grouped by month, tap to expand</span>
-            {onClearSyncResults&&<button onClick={onClearSyncResults} style={{padding:"3px 10px",borderRadius:6,border:"1px solid #a5f3fc",background:"#fff",color:"#0e7490",cursor:"pointer",fontSize:11,fontWeight:600,fontFamily:"inherit"}}>Clear all</button>}
+            <span style={{fontSize:11,color:"#0891b2",marginLeft:"auto"}}>{syncResults.length>0?`${syncResults.length} month${syncResults.length!==1?"s":""} · grouped by month, tap to expand`:"No sync results yet"}</span>
+            {onClearSyncResults&&syncResults.length>0&&<button onClick={onClearSyncResults} style={{padding:"3px 10px",borderRadius:6,border:"1px solid #a5f3fc",background:"#fff",color:"#0e7490",cursor:"pointer",fontSize:11,fontWeight:600,fontFamily:"inherit"}}>Clear all</button>}
           </div>
+          {syncResults.length===0&&(
+            <div style={{background:"#fff",border:"1px dashed #a5f3fc",borderRadius:8,padding:"14px",fontSize:12,color:"#64748b",textAlign:"center"}}>
+              No CPSA syncs have run yet. Use <strong>Sync CPSA</strong> to pull the latest feed — results will appear here grouped by month.
+            </div>
+          )}
           {/* Group by month (newest first); each month collapses to a one-line summary
               and expands to the full breakdown + date of the latest exact new change. */}
           {[...syncResults].sort((a,b)=>(b.monthKey||"").localeCompare(a.monthKey||"")).map(r=>{
