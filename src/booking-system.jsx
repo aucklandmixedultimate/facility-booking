@@ -4318,27 +4318,29 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
           {showRatesEdit && isAdmin && onUpdateFacilityRate && (
             <div style={{ background:"#f8fafc", border:"1.5px solid #e0e7ff", borderRadius:12, padding:14, marginBottom:14 }}>
               <div style={{ fontSize:12, color:"#64748b", marginBottom:10 }}>Day rate = before 5:30 pm · Evening rate = 5:30 pm onwards</div>
-              <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))", gap:8 }}>
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))", gap:10 }}>
                 {FACILITIES.map(fac => {
                   const r = typeof facilityRates[fac.id]==="object" ? facilityRates[fac.id] : { day: facilityRates[fac.id]||0, evening: 50 };
                   const day = r.day ?? 0, evening = r.evening ?? 50;
+                  const rateRow = (label, color, type, val) => (
+                    <label style={{ display:"flex", alignItems:"center", gap:6 }}>
+                      <span style={{ fontSize:11, fontWeight:600, color, flex:1, whiteSpace:"nowrap" }}>{label}</span>
+                      <span style={{ fontSize:11, color:"#94a3b8" }}>$</span>
+                      <input type="number" min="0" step="0.5" value={val||""} placeholder="0"
+                        onChange={e=>onUpdateFacilityRate(fac.id,type,e.target.value)}
+                        style={{ width:60, padding:"3px 6px", borderRadius:6, border:"1.5px solid #e2e8f0", fontSize:13, textAlign:"right", fontFamily:"inherit", outline:"none" }}/>
+                      <span style={{ fontSize:11, color:"#94a3b8" }}>/hr</span>
+                    </label>
+                  );
                   return (
-                    <div key={fac.id} style={{ background:"#fff", border:"1px solid #e2e8f0", borderRadius:8, padding:"8px 12px" }}>
-                      <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:7 }}>
+                    <div key={fac.id} style={{ background:"#fff", border:"1px solid #e2e8f0", borderRadius:10, padding:"10px 12px" }}>
+                      <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:8 }}>
                         <span style={{ width:9, height:9, borderRadius:"50%", background:fac.color, flexShrink:0, display:"inline-block" }}/>
-                        <span style={{ fontSize:12, fontWeight:700, color:"#0f172a" }}>{fac.name}</span>
+                        <span style={{ fontSize:12, fontWeight:700, color:"#0f172a", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{fac.name}</span>
                       </div>
-                      <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
-                        <span style={{ fontSize:11, color:"#64748b", width:46 }}>Day $</span>
-                        <input type="number" min="0" step="0.5" value={day||""} placeholder="0"
-                          onChange={e=>onUpdateFacilityRate(fac.id,"day",e.target.value)}
-                          style={{ width:68, padding:"3px 6px", borderRadius:6, border:"1.5px solid #e2e8f0", fontSize:13, textAlign:"right", fontFamily:"inherit", outline:"none" }}/>
-                        <span style={{ fontSize:11, color:"#64748b" }}>/hr</span>
-                        <span style={{ fontSize:11, color:"#7c3aed", width:60, marginLeft:4 }}>Evening $</span>
-                        <input type="number" min="0" step="0.5" value={evening||""} placeholder="0"
-                          onChange={e=>onUpdateFacilityRate(fac.id,"evening",e.target.value)}
-                          style={{ width:68, padding:"3px 6px", borderRadius:6, border:"1.5px solid #e2e8f0", fontSize:13, textAlign:"right", fontFamily:"inherit", outline:"none" }}/>
-                        <span style={{ fontSize:11, color:"#64748b" }}>/hr</span>
+                      <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+                        {rateRow("Day", "#64748b", "day", day)}
+                        {rateRow("Evening", "#7c3aed", "evening", evening)}
                       </div>
                     </div>
                   );
