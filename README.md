@@ -5,8 +5,8 @@ approvals, CPSA sync reconciliation, and billing/invoicing. The entire app lives
 in one file: [`src/booking-system.jsx`](src/booking-system.jsx).
 
 Stack: **React 19 + Vite**, **Supabase** (Postgres + Google OAuth + Row Level
-Security) for data/auth, **EmailJS** for notification emails, deployed to
-**GitHub Pages** via GitHub Actions.
+Security) for data/auth, **EmailJS** for notification emails (sent server-side
+via a Supabase Edge Function), deployed to **GitHub Pages** via GitHub Actions.
 
 > Auth & data-contract details (RLS policies, the `system_notes` marker
 > catalogue, the CPSA browser extension) live in
@@ -17,7 +17,7 @@ Security) for data/auth, **EmailJS** for notification emails, deployed to
 
 ## Configuration (environment variables)
 
-All configuration is injected at build time from `VITE_*` env vars — nothing is
+The client reads two `VITE_*` env vars, injected at build time — nothing is
 hardcoded in source. Copy [`.env.example`](.env.example) to `.env.local` for
 local dev:
 
@@ -29,15 +29,16 @@ cp .env.example .env.local   # then fill in the values
 |---|---|---|
 | `VITE_SUPABASE_URL` | ✅ | Supabase project URL |
 | `VITE_SUPABASE_ANON` | ✅ | Supabase publishable anon key (safe to expose; protected by RLS) |
-| `VITE_EMAILJS_SERVICE` | optional | EmailJS service ID |
-| `VITE_EMAILJS_TEMPLATE_ORDER` | optional | Booking-confirmation template ID |
-| `VITE_EMAILJS_TEMPLATE_APPROVAL` | optional | Approval/rejection template ID |
-| `VITE_EMAILJS_PUBLIC_KEY` | optional | EmailJS public key |
 
-> ⚠️ Every `VITE_*` value is embedded in the shipped JS bundle, so treat them as
-> **publishable, not secret**. The real protections are server-side: Supabase
-> **RLS** and the **EmailJS dashboard** (allowed-origins + rate limits). If
-> EmailJS vars are unset, the app still runs — it just skips sending email.
+Both values are embedded in the shipped JS bundle, so treat them as
+**publishable, not secret** — Supabase **RLS** is what protects the data.
+
+**Email has no client-side keys.** It is sent server-side by the `send-email`
+Supabase Edge Function (see
+[`supabase/functions/send-email/README.md`](supabase/functions/send-email/README.md)),
+which holds the EmailJS credentials as Supabase secrets and only accepts calls
+from a signed-in user. If the function isn't deployed, the app simply skips
+sending email (no crash).
 
 ---
 
@@ -68,21 +69,27 @@ for the exact SQL). There is no client-side admin password.
 
 ---
 
-## Deployment (GitHub Pages)
+## Deployment
+
+### Web app → GitHub Pages
 
 Pushing to `main` triggers [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml),
 which builds the app and publishes `dist/` to the `gh-pages` branch.
 
-**Required one-time setup** — add the env vars as repo secrets under
+**Required one-time setup** — add these as repo secrets under
 **Settings → Secrets and variables → Actions**:
 
-- `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON` (required — the build fails fast without them)
-- `VITE_EMAILJS_*` (optional — the build warns and disables email if absent)
+- `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON` (the build fails fast without them)
 
 GitHub Pages source: **Deploy from branch → `gh-pages`**. Vite `base` is
 `/facility-booking/` (see `vite.config.js`) to match the repo-pages URL.
 
 Manual deploy fallback (uses your local `.env.local`): `npm run deploy`.
+
+### Email → Supabase Edge Function
+
+One-time: deploy the `send-email` function and set its EmailJS secrets — full
+steps in [`supabase/functions/send-email/README.md`](supabase/functions/send-email/README.md).
 
 ---
 

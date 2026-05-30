@@ -1,17 +1,13 @@
 name: Deploy to GitHub Pages
 
 # Builds the Vite app and publishes dist/ to the gh-pages branch on every push
-# to main. All VITE_* values are injected at build time from repo secrets so
-# deploys never depend on a local .env file.
+# to main. Supabase credentials are injected at build time from repo secrets so
+# deploys never depend on a local .env file. (Email is sent server-side by the
+# `send-email` Supabase Edge Function, so no email secrets are needed here.)
 #
 # Required repo secrets (Settings → Secrets and variables → Actions):
 #   VITE_SUPABASE_URL    e.g. https://YOUR_PROJECT.supabase.co
 #   VITE_SUPABASE_ANON   the public anon/publishable key (RLS-protected)
-# Optional (booking/approval emails are disabled if unset):
-#   VITE_EMAILJS_SERVICE
-#   VITE_EMAILJS_TEMPLATE_ORDER
-#   VITE_EMAILJS_TEMPLATE_APPROVAL
-#   VITE_EMAILJS_PUBLIC_KEY
 
 on:
   push:
@@ -47,17 +43,10 @@ jobs:
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON: ${{ secrets.VITE_SUPABASE_ANON }}
-          VITE_EMAILJS_SERVICE: ${{ secrets.VITE_EMAILJS_SERVICE }}
-          VITE_EMAILJS_TEMPLATE_ORDER: ${{ secrets.VITE_EMAILJS_TEMPLATE_ORDER }}
-          VITE_EMAILJS_TEMPLATE_APPROVAL: ${{ secrets.VITE_EMAILJS_TEMPLATE_APPROVAL }}
-          VITE_EMAILJS_PUBLIC_KEY: ${{ secrets.VITE_EMAILJS_PUBLIC_KEY }}
         run: |
           if [ -z "$VITE_SUPABASE_URL" ] || [ -z "$VITE_SUPABASE_ANON" ]; then
             echo "::error::Missing VITE_SUPABASE_URL / VITE_SUPABASE_ANON repo secrets — the build would ship without Supabase credentials and break sign-in."
             exit 1
-          fi
-          if [ -z "$VITE_EMAILJS_SERVICE" ] || [ -z "$VITE_EMAILJS_PUBLIC_KEY" ]; then
-            echo "::warning::EmailJS env not set (VITE_EMAILJS_*) — deploy will build, but booking/approval emails are disabled until these repo secrets are added."
           fi
           npm run build
 

@@ -364,38 +364,36 @@ function getClashes(allBookings) {
 
 
 // ─── EmailJS ──────────────────────────────────────────────────────────────────
-// Config from build-time env (publishable client IDs; protect via the EmailJS
-// dashboard allowed-origins + rate limits, not by hiding). Unset => email skipped.
-const EJ_SERVICE           = import.meta.env.VITE_EMAILJS_SERVICE;
-const EJ_TEMPLATE_ORDER    = import.meta.env.VITE_EMAILJS_TEMPLATE_ORDER;
-const EJ_TEMPLATE_APPROVAL = import.meta.env.VITE_EMAILJS_TEMPLATE_APPROVAL;
-const EJ_KEY               = import.meta.env.VITE_EMAILJS_PUBLIC_KEY;
-
-const EJ_CONFIGURED = Boolean(EJ_SERVICE && EJ_TEMPLATE_ORDER && EJ_KEY);
-async function sendEmail({ to, subject, html, templateId }) {
-  const tid = templateId || EJ_TEMPLATE_ORDER;
-  if (!EJ_CONFIGURED) {
-    console.warn("EmailJS not configured (VITE_EMAILJS_* env missing) - skipping email to", to);
-    logActivity("email_failed", { to, subject, error: "emailjs_not_configured" });
+// Email is sent server-side by the `send-email` Supabase Edge Function, so NO
+// EmailJS credentials ship in the browser bundle. The function authenticates the
+// caller's Supabase session (JWT) and holds the EmailJS keys as Supabase secrets.
+// If the function isn't reachable/deployed, sending is skipped (never throws).
+async function sendEmail({ to, subject, html, kind = "order" }) {
+  if (!supabase || !_accessToken) {
+    console.warn("Email skipped: no Supabase session for", to);
+    logActivity("email_failed", { to, subject, error: "no_session" });
     return;
   }
   try {
-    const res = await fetch("https://api.emailjs.com/api/v1.0/email/send", {
-      method:"POST", headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({ service_id:EJ_SERVICE, template_id:tid, user_id:EJ_KEY,
-        template_params:{ to_email:to, subject, message_html:html } }),
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/send-email`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", apikey: SUPABASE_ANON, Authorization: `Bearer ${_accessToken}` },
+      body: JSON.stringify({ to, subject, html, kind }),
     });
     if (!res.ok) {
-      const body = await res.text().catch(()=>"(no body)");
-      console.warn(`EmailJS ${res.status} for template ${tid}:`, body);
+      const body = await res.text().catch(() => "(no body)");
+      console.warn(`send-email ${res.status}:`, body);
       logActivity("email_failed", { to, subject, status: res.status });
     } else {
       logActivity("email_sent", { to, subject });
     }
-  } catch(e) { console.error("Email network error:", e); logActivity("email_failed", { to, subject, error: String(e?.message||e) }); }
+  } catch (e) {
+    console.error("Email network error:", e);
+    logActivity("email_failed", { to, subject, error: String(e?.message || e) });
+  }
 }
 async function sendApprovalEmail({ to, subject, html }) {
-  return sendEmail({ to, subject, html, templateId: EJ_TEMPLATE_APPROVAL });
+  return sendEmail({ to, subject, html, kind: "approval" });
 }
 
 // Build HTML for booking confirmation email
