@@ -5401,7 +5401,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
 
 
 // ─── Admin Panel with action queue, bulk approve, facility rates ──────────────
-function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,clashes=[],deleteIds=new Set(),facilityRates={},onUpdateFacilityRate,onClearOldUnapproved,silentMode=false,approxPlayers={},onUpdateApproxPlayers,approxDurations={},onUpdateApproxDuration,onSyncDB,onBulkApply,onSaveMismatch,onMarkAdjustmentSettled,loggedInEmail,syncResults=[],onClearSyncResults,showSyncResults=false,onToggleSyncResults,aliasNames={},emailAliases={}}) {
+function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,clashes=[],deleteIds=new Set(),facilityRates={},onUpdateFacilityRate,onClearOldUnapproved,silentMode=false,approxPlayers={},onUpdateApproxPlayers,approxDurations={},onUpdateApproxDuration,onSyncDB,onBulkApply,onSaveMismatch,onMarkAdjustmentSettled,loggedInEmail,syncResults=[],onClearSyncResults,showSyncResults=false,onToggleSyncResults,bookerFilter=new Set(),onToggleBooker,onSetBookerFilter,aliasNames={},emailAliases={}}) {
   const [showSchedulePanel, setShowSchedulePanel] = useState(false);
   const [showActivityPanel, setShowActivityPanel] = useState(false);
   // Which sync-result months are expanded in the grouped dropdown (monthKey set).
@@ -5413,15 +5413,21 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
     return aliasNames[primary] || primary.split("@")[0];
   };
   const [sf,setSf]=useState("all"), [ff,setFf]=useState("all"), [q,setQ]=useState("");
-  // Multi-select booker filter (empty Set = all)
-  const [adminBookerFilter,setAdminBookerFilter]=useState(new Set());
-  function toggleAdminBooker(em) {
-    setAdminBookerFilter(prev => {
-      const s = new Set(prev); const k = em.toLowerCase();
-      if (s.has(k)) s.delete(k); else s.add(k);
-      return s;
-    });
-  }
+  // Booker filter (empty Set = all). Shared with the global header pills so that
+  // ALL admin content — queue, table, clashes, mismatches, track-changes — filters
+  // to the selected booker(s) at once. Falls back to local state if used unwired.
+  const [localBookerFilter,setLocalBookerFilter]=useState(new Set());
+  const adminBookerFilter = onSetBookerFilter ? bookerFilter : localBookerFilter;
+  const setAdminBookerFilter = onSetBookerFilter || setLocalBookerFilter;
+  const toggleAdminBooker = onToggleBooker || (em => setLocalBookerFilter(prev => {
+    const s = new Set(prev); const k = em.toLowerCase();
+    if (s.has(k)) s.delete(k); else s.add(k);
+    return s;
+  }));
+  // True when a booking's email passes the active booker filter.
+  const inBookerFilter = em => adminBookerFilter.size===0 || adminBookerFilter.has((em||"").toLowerCase());
+  // Clashes/mismatches narrowed to the active booker filter (drives panels + counts).
+  const visibleClashes = clashes.filter(c=>inBookerFilter(c.user?.email));
   const [showBookerFilter,setShowBookerFilter]=useState(false);
   const [adminDateFrom,setAdminDateFrom]=useState(""), [adminDateTo,setAdminDateTo]=useState("");
   const [adminColPurpose,setAdminColPurpose]=useState("");
@@ -5434,6 +5440,9 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
   const [clashSending,setClashSending]=useState(false);
   const [showClashNotify,setShowClashNotify]=useState(false);
   const [clashNotifyUser,setClashNotifyUser]=useState(null);
+  const [mismatchSending,setMismatchSending]=useState(false);
+  const [showMismatchNotify,setShowMismatchNotify]=useState(false);
+  const [mismatchNotifyUser,setMismatchNotifyUser]=useState(null);
   // Per-row action queue: [{id, newStatus}]
   const [actionQueue,setActionQueue]=useState([]);
   const [actionNote,setActionNote]=useState("");
@@ -5472,7 +5481,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
   // Invoiced bookings whose current time/duration/field has drifted from the billed
   // snapshot — excess time is owing, reduced time is a credit.
   const trackedChanges = bookings
-    .filter(b => b.invoiced)
+    .filter(b => b.invoiced && inBookerFilter(b.email))
     .map(b => { const d = getBillingDrift(b); return d ? { booking: b, ...d } : null; })
     .filter(Boolean);
 
@@ -5592,6 +5601,61 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
     }
   }
 
+  // Mismatch notifications — mirrors the clash flow: email each affected booker the
+  // bookings whose CPSA values differ from ours, asking them to confirm/correct.
+  async function sendMismatchEmailToUser(email, name, userBkgs) {
+    const rows = userBkgs.map(b => {
+      const fac = FACILITIES.find(x => x.id === b.facility_id);
+      const reasons = parseMismatchNote(b.system_notes, b.notes);
+      const cv = extractCpsaAmendValues(reasons, b);
+      const cfac = FACILITIES.find(x => x.id === cv.facility_id);
+      const facNote = b.facility_id !== cv.facility_id ? " (" + (cfac?.name || cv.facility_id) + ")" : "";
+      return "<tr>"
+        + "<td style='padding:6px 8px'>" + (b.purpose || "Booking") + "</td>"
+        + "<td style='padding:6px 8px'>" + (fac?.name || b.facility_id) + "</td>"
+        + "<td style='padding:6px 8px'>" + fmtDate(b.date) + "</td>"
+        + "<td style='padding:6px 8px'><span style='text-decoration:line-through;color:#94a3b8'>" + fmtTime(b.start_hour) + "–" + fmtTime(b.start_hour + b.duration) + "</span> → <span style='color:#a16207;font-weight:700'>" + fmtTime(cv.start_hour) + "–" + fmtTime(cv.start_hour + cv.duration) + facNote + "</span></td>"
+        + "<td style='padding:6px 8px;color:#64748b'>" + reasons.join("; ") + "</td>"
+        + "</tr>";
+    }).join("");
+    const html = "<div style='font-family:sans-serif;max-width:640px'>"
+      + "<h2 style='color:#b45309'>⚡ CPSA Booking Mismatch — Please Review</h2>"
+      + "<p>Hi " + (name || email) + ",</p>"
+      + "<p>The details CPSA holds for the following booking(s) differ from what we have on record. Please review and let us know whether the CPSA values are correct.</p>"
+      + "<table style='width:100%;border-collapse:collapse;font-size:13px;margin:16px 0;border:1px solid #fde68a'><thead><tr style='background:#fef3c7'><th style='padding:8px;text-align:left'>Booking</th><th style='padding:8px'>Field</th><th style='padding:8px'>Date</th><th style='padding:8px'>Booked → CPSA</th><th style='padding:8px'>Changes</th></tr></thead><tbody>" + rows + "</tbody></table>"
+      + "<p>Please contact AMUA if any of these are incorrect.</p>"
+      + "<p style='color:#64748b;font-size:12px'>Automated notification from FacilityBook – AMUA.</p></div>";
+    await sendApprovalEmail({ to: email, subject: "⚡ CPSA Booking Mismatch – Please Review", html });
+  }
+
+  async function handleSendMismatchEmails(targetEmail) {
+    setMismatchSending(true);
+    const byUser = {};
+    bookings.filter(b => b.status === "cpsa_review_needed" && !isAdminBooking(b) && inBookerFilter(b.email)).forEach(b => {
+      const email = b.email?.toLowerCase();
+      if (!email) return;
+      if (!byUser[email]) byUser[email] = { name: b.name, bkgs: [] };
+      byUser[email].bkgs.push(b);
+    });
+    try {
+      if (targetEmail) {
+        const u = byUser[targetEmail];
+        if (u) await sendMismatchEmailToUser(targetEmail, u.name, u.bkgs);
+        alert("Mismatch notification sent to " + targetEmail + ".");
+      } else {
+        for (const [email, { name, bkgs }] of Object.entries(byUser)) {
+          await sendMismatchEmailToUser(email, name, bkgs);
+        }
+        alert("Mismatch notifications sent to " + Object.keys(byUser).length + " user(s).");
+      }
+      setShowMismatchNotify(false); setMismatchNotifyUser(null);
+    } catch(e) {
+      alert("Failed to send email: " + e.message);
+    } finally {
+      setMismatchSending(false);
+    }
+  }
+
   async function handleBulkAction() {
     const ids=[...selected].filter(id=>bookings.find(b=>b.id===id));
     if(ids.length===0) return;
@@ -5620,10 +5684,10 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
         {<button onClick={onToggleSyncResults} style={S.btn({background:showSyncResults?"#ecfeff":"#fff",color:syncResults.length>0?"#0e7490":"#94a3b8",border:`1.5px solid ${showSyncResults?"#a5f3fc":"#e2e8f0"}`,fontSize:12,fontWeight:syncResults.length>0?700:500})}>
           🔄 Sync Results ({syncResults.length}) {showSyncResults?"▴":"▾"}
         </button>}
-        <button onClick={()=>setShowClashPanel(v=>!v)} style={S.btn({border:`1.5px solid ${clashes.length>0?"#fda4af":"#e2e8f0"}`,background:showClashPanel?"#fff1f2":"#fff",color:clashes.length>0?"#9f1239":"#94a3b8",fontSize:12,fontWeight:clashes.length>0?700:500})}>
-          ⚠️ Clashes ({clashes.length}) {showClashPanel?"▴":"▾"}
+        <button onClick={()=>setShowClashPanel(v=>!v)} style={S.btn({border:`1.5px solid ${visibleClashes.length>0?"#fda4af":"#e2e8f0"}`,background:showClashPanel?"#fff1f2":"#fff",color:visibleClashes.length>0?"#9f1239":"#94a3b8",fontSize:12,fontWeight:visibleClashes.length>0?700:500})}>
+          ⚠️ Clashes ({visibleClashes.length}) {showClashPanel?"▴":"▾"}
         </button>
-        {(()=>{ const mc=bookings.filter(b=>b.status==="cpsa_review_needed"&&!isAdminBooking(b)).length; return (
+        {(()=>{ const mc=bookings.filter(b=>b.status==="cpsa_review_needed"&&!isAdminBooking(b)&&inBookerFilter(b.email)).length; return (
         <button onClick={()=>setShowMismatchPanel(v=>!v)} style={S.btn({border:`1.5px solid ${mc>0?"#fde68a":"#e2e8f0"}`,background:showMismatchPanel?"#fffbeb":"#fff",color:mc>0?"#b45309":"#94a3b8",fontSize:12,fontWeight:mc>0?700:500})}>
           ⚡ Mismatches ({mc}) {showMismatchPanel?"▴":"▾"}
         </button>
@@ -5641,6 +5705,20 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
             <span style={{fontSize:11,color:"#0891b2",marginLeft:"auto"}}>{syncResults.length>0?`${syncResults.length} month${syncResults.length!==1?"s":""} · grouped by month, tap to expand`:"No sync results yet"}</span>
             {onClearSyncResults&&syncResults.length>0&&<button onClick={onClearSyncResults} style={{padding:"3px 10px",borderRadius:6,border:"1px solid #a5f3fc",background:"#fff",color:"#0e7490",cursor:"pointer",fontSize:11,fontWeight:600,fontFamily:"inherit"}}>Clear all</button>}
           </div>
+          {(()=>{
+            // Emphasise sync runs that surfaced new clashes or mismatches — these need action.
+            const totClash = syncResults.reduce((s,r)=>s+(r.clashes||0),0);
+            const totMis = syncResults.reduce((s,r)=>s+(r.cpsaReviewNeeded||0),0);
+            if(totClash+totMis===0) return null;
+            return (
+              <div style={{background:"#fff7ed",border:"1.5px solid #fdba74",borderRadius:8,padding:"8px 12px",display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",fontSize:12,color:"#9a3412"}}>
+                <span style={{fontWeight:700}}>🚩 New issues from sync —</span>
+                {totClash>0&&<button onClick={()=>setShowClashPanel(true)} style={{cursor:"pointer",fontWeight:700,fontSize:11,background:"#fecdd3",color:"#9f1239",border:"1px solid #fda4af",borderRadius:10,padding:"2px 8px",fontFamily:"inherit"}}>⚡ {totClash} new clash{totClash!==1?"es":""}</button>}
+                {totMis>0&&<button onClick={()=>setShowMismatchPanel(true)} style={{cursor:"pointer",fontWeight:700,fontSize:11,background:"#fde68a",color:"#92400e",border:"1px solid #fcd34d",borderRadius:10,padding:"2px 8px",fontFamily:"inherit"}}>⚠ {totMis} new mismatch{totMis!==1?"es":""}</button>}
+                <span style={{fontWeight:500}}>— open the relevant panel to action them.</span>
+              </div>
+            );
+          })()}
           {syncResults.length===0&&(
             <div style={{background:"#fff",border:"1px dashed #a5f3fc",borderRadius:8,padding:"14px",fontSize:12,color:"#64748b",textAlign:"center"}}>
               No CPSA syncs have run yet. Use <strong>Sync CPSA</strong> to pull the latest feed — results will appear here grouped by month.
@@ -5651,11 +5729,13 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
           {[...syncResults].sort((a,b)=>(b.monthKey||"").localeCompare(a.monthKey||"")).map(r=>{
             const changeCount = (r.added||0)+(r.cpsaConfirmed||0)+(r.cpsaReviewNeeded||0)+(r.removed||0)+(r.clashes||0);
             const hasChanges = changeCount > 0;
+            // Months that surfaced new clashes/mismatches are emphasised (tinted card + badges).
+            const attention = !r.error && ((r.clashes||0)>0 || (r.cpsaReviewNeeded||0)>0);
             const open = expandedSyncMonths.has(r.monthKey);
             const fmt = iso => iso ? new Date(iso).toLocaleString("en-NZ",{day:"numeric",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"}) : "—";
             return (
-              <div key={r.monthKey} style={{background:"#fff",border:`1px solid ${r.error?"#fecaca":hasChanges?"#7dd3fc":"#cffafe"}`,borderRadius:8,overflow:"hidden"}}>
-                <button onClick={()=>toggleSyncMonth(r.monthKey)} style={{width:"100%",display:"flex",alignItems:"center",gap:8,padding:"8px 14px",background:"transparent",border:"none",cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
+              <div key={r.monthKey} style={{background:attention?"#fff7ed":"#fff",border:`${attention?"1.5px":"1px"} solid ${r.error?"#fecaca":attention?"#fb923c":hasChanges?"#7dd3fc":"#cffafe"}`,borderRadius:8,overflow:"hidden"}}>
+                <button onClick={()=>toggleSyncMonth(r.monthKey)} style={{width:"100%",display:"flex",alignItems:"center",gap:8,padding:"8px 14px",background:"transparent",border:"none",cursor:"pointer",fontFamily:"inherit",textAlign:"left",flexWrap:"wrap"}}>
                   <span style={{fontSize:11,color:"#0891b2",width:12,flexShrink:0}}>{open?"▾":"▸"}</span>
                   <span style={{fontWeight:700,fontSize:12,color:r.error?"#b91c1c":"#0c4a6e"}}>{r.label}</span>
                   {r.error
@@ -5663,6 +5743,8 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                     : hasChanges
                       ? <span style={{fontSize:10,fontWeight:700,background:"#0ea5e9",color:"#fff",borderRadius:10,padding:"1px 6px"}}>{changeCount} change{changeCount!==1?"s":""}</span>
                       : <span style={{fontSize:10,fontWeight:600,color:"#94a3b8"}}>no new changes</span>}
+                  {(r.clashes||0)>0&&<span style={{fontSize:10,fontWeight:700,background:"#fecdd3",color:"#9f1239",borderRadius:10,padding:"1px 6px"}}>⚡ {r.clashes} new clash{r.clashes!==1?"es":""}</span>}
+                  {(r.cpsaReviewNeeded||0)>0&&<span style={{fontSize:10,fontWeight:700,background:"#fde68a",color:"#92400e",borderRadius:10,padding:"1px 6px"}}>⚠ {r.cpsaReviewNeeded} new mismatch{r.cpsaReviewNeeded!==1?"es":""}</span>}
                   <span style={{fontSize:10,color:"#94a3b8",marginLeft:"auto"}}>{r.syncedAt?new Date(r.syncedAt).toLocaleString("en-NZ",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}):"—"}</span>
                 </button>
                 {open&&(
@@ -5694,7 +5776,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
 
       {/* Schedule Summary — inline */}
       {showSchedulePanel && (
-        <ScheduleSummaryModal bookings={bookings} isAdmin={true} loggedInEmail={loggedInEmail} onBulkApply={onBulkApply} onBulkStatusChange={onBulkStatusChange} aliasNames={aliasNames} emailAliases={emailAliases} inline onClose={()=>setShowSchedulePanel(false)}/>
+        <ScheduleSummaryModal bookings={bookings.filter(b=>inBookerFilter(b.email))} isAdmin={true} loggedInEmail={loggedInEmail} onBulkApply={onBulkApply} onBulkStatusChange={onBulkStatusChange} aliasNames={aliasNames} emailAliases={emailAliases} inline onClose={()=>setShowSchedulePanel(false)}/>
       )}
 
       {/* Activity Log — inline */}
@@ -5814,9 +5896,9 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
       )}
 
       {/* Clash notification panel */}
-      {showClashPanel&&clashes.length>0&&(()=>{
+      {showClashPanel&&visibleClashes.length>0&&(()=>{
         function clashDayName(d){return["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][new Date(d+"T12:00").getDay()];}
-        const filtered=clashes.filter(c=>matchesQ(c.user)||matchesQ(c.admin));
+        const filtered=visibleClashes.filter(c=>matchesQ(c.user)||matchesQ(c.admin));
         // Group by (userEmail + facilityId + dayOfWeek)
         const groupMap={};
         filtered.forEach(c=>{
@@ -5832,7 +5914,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
           <div style={{background:"#fff1f2",border:"1.5px solid #fda4af",borderRadius:12,padding:16,display:"flex",flexDirection:"column",gap:10}}>
             <div style={{display:"flex",alignItems:"center",gap:8,justifyContent:"space-between",flexWrap:"wrap"}}>
               <div>
-                <span style={{fontWeight:700,fontSize:14,color:"#9f1239"}}>⚠️ {clashes.length} scheduling clash{clashes.length>1?"es":""} detected</span>
+                <span style={{fontWeight:700,fontSize:14,color:"#9f1239"}}>⚠️ {visibleClashes.length} scheduling clash{visibleClashes.length>1?"es":""} detected</span>
                 {recurringGroups.length>0&&<span style={{marginLeft:8,fontSize:12,fontWeight:600,background:"#fda4af",color:"#9f1239",borderRadius:6,padding:"1px 7px"}}>{recurringGroups.length} recurring</span>}
                 <div style={{fontSize:12,color:"#be123c",marginTop:2}}>Future field bookings overlap with user bookings.</div>
               </div>
@@ -5894,7 +5976,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
 
       {/* Mismatch triage panel */}
       {showMismatchPanel&&(()=>{
-        const rawMismatches=bookings.filter(b=>b.status==="cpsa_review_needed"&&!isAdminBooking(b));
+        const rawMismatches=bookings.filter(b=>b.status==="cpsa_review_needed"&&!isAdminBooking(b)&&inBookerFilter(b.email));
         const sortKey=mismatchSort.key, sortDir=mismatchSort.dir;
         const facName = id => FACILITIES.find(f=>f.id===id)?.name || id;
         const valOf = (b, k) => {
@@ -6267,6 +6349,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                 <div style={{fontSize:12,color:"#92400e",marginTop:2}}>Click old or new values in each row to set resolution — amended bookings are updated to CPSA values.</div>
               </div>
               <div style={{display:"flex",gap:6}}>
+                {mismatches.length>0&&<button onClick={()=>setShowMismatchNotify(true)} disabled={mismatchSending} style={S.btn({background:"#b45309",color:"#fff",fontWeight:700,fontSize:12,opacity:mismatchSending?0.7:1})}>📧 Notify affected users</button>}
                 <button onClick={copyEmailFormat} style={S.btn({background:"#fff",border:"1.5px solid #fde68a",color:"#a16207",fontWeight:700,fontSize:12})}>📧 Copy email</button>
                 <button onClick={()=>{
                   const blob=new Blob([["Name,Email,Date,Field,Booked,CPSA Says,Changes",...mismatches.map(b=>{
@@ -6565,6 +6648,65 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                 {!selUser&&<button onClick={()=>handleSendClashEmails(null)} disabled={clashSending}
                   style={S.btn({background:"#9f1239",color:"#fff",fontWeight:700,opacity:clashSending?0.6:1})}>
                   {clashSending?"Sending…":`Notify all ${users.length} user${users.length>1?"s":""}`}
+                </button>}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {showMismatchNotify&&(()=>{
+        const byUser = {};
+        bookings.filter(b=>b.status==="cpsa_review_needed"&&!isAdminBooking(b)&&inBookerFilter(b.email)).forEach(b => {
+          const em = b.email?.toLowerCase();
+          if(!em) return;
+          if(!byUser[em]) byUser[em] = { name:b.name, email:em, bkgs:[] };
+          byUser[em].bkgs.push(b);
+        });
+        const users = Object.values(byUser);
+        const selUser = mismatchNotifyUser ? byUser[mismatchNotifyUser] : null;
+        return (
+          <div onClick={e=>e.target===e.currentTarget&&(setShowMismatchNotify(false),setMismatchNotifyUser(null))}
+            style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.55)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:2000,backdropFilter:"blur(2px)"}}>
+            <div style={{background:"#fff",borderRadius:16,padding:28,maxWidth:600,width:"92%",maxHeight:"88vh",overflowY:"auto",boxShadow:"0 8px 40px rgba(0,0,0,0.2)"}}>
+              <h2 style={{margin:"0 0 4px",fontSize:18,fontWeight:700,color:"#b45309"}}>📧 Notify Affected Users</h2>
+              <p style={{margin:"0 0 16px",fontSize:13,color:"#64748b"}}>Select a user to preview their mismatched bookings, then send. Or notify all at once.</p>
+              <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:16}}>
+                {users.map(u=>(
+                  <button key={u.email} onClick={()=>setMismatchNotifyUser(prev=>prev===u.email?null:u.email)}
+                    style={{...S.btn({background:mismatchNotifyUser===u.email?"#fffbeb":"#f8fafc",border:mismatchNotifyUser===u.email?"1.5px solid #f59e0b":"1.5px solid #e2e8f0",color:"#0f172a"}),textAlign:"left",display:"flex",alignItems:"center",gap:10,padding:"10px 14px"}}>
+                    <EmailChip email={u.email}/>
+                    <span style={{fontWeight:600,fontSize:13}}>{u.name}</span>
+                    <span style={{marginLeft:"auto",fontSize:12,color:"#94a3b8"}}>{u.bkgs.length} mismatch{u.bkgs.length>1?"es":""}</span>
+                  </button>
+                ))}
+                {users.length===0&&<div style={{fontSize:13,color:"#94a3b8",textAlign:"center",padding:16}}>No mismatched bookings to notify.</div>}
+              </div>
+              {selUser&&(
+                <div style={{background:"#fffbeb",border:"1px solid #fde68a",borderRadius:10,padding:14,marginBottom:16}}>
+                  <div style={{fontWeight:700,fontSize:13,color:"#b45309",marginBottom:8}}>Mismatches for {selUser.name}:</div>
+                  {selUser.bkgs.map((b,i)=>{
+                    const fa=FACILITIES.find(x=>x.id===b.facility_id);
+                    const reasons=parseMismatchNote(b.system_notes,b.notes);
+                    return(
+                      <div key={i} style={{fontSize:12,color:"#0f172a",padding:"6px 0",borderBottom:i<selUser.bkgs.length-1?"1px solid #fde68a":"none"}}>
+                        <span style={{fontWeight:600}}>{b.purpose||"Booking"}</span>
+                        <span style={{color:"#94a3b8",marginLeft:8}}>{fa?.name} · {fmtDate(b.date)} {fmtTime(b.start_hour)}–{fmtTime(b.start_hour+b.duration)}</span>
+                        {reasons.length>0&&<div style={{color:"#a16207",marginTop:2}}>{reasons.join("; ")}</div>}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              <div style={{display:"flex",gap:10,justifyContent:"flex-end",flexWrap:"wrap"}}>
+                <button onClick={()=>{setShowMismatchNotify(false);setMismatchNotifyUser(null);}} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#475569"})}>Cancel</button>
+                {selUser&&<button onClick={()=>handleSendMismatchEmails(selUser.email)} disabled={mismatchSending}
+                  style={S.btn({background:"#f59e0b",color:"#fff",fontWeight:700,opacity:mismatchSending?0.6:1})}>
+                  {mismatchSending?"Sending…":`Send to ${selUser.name}`}
+                </button>}
+                {!selUser&&users.length>0&&<button onClick={()=>handleSendMismatchEmails(null)} disabled={mismatchSending}
+                  style={S.btn({background:"#b45309",color:"#fff",fontWeight:700,opacity:mismatchSending?0.6:1})}>
+                  {mismatchSending?"Sending…":`Notify all ${users.length} user${users.length>1?"s":""}`}
                 </button>}
               </div>
             </div>
@@ -7855,7 +7997,7 @@ export default function App() {
         {dbError&&<Banner type="error" msg={dbError}/>}
         {!configured&&<Banner type="info" msg="⚙️  Demo Mode — add Supabase credentials to enable persistent storage."/>}
 
-        {emailLegend.length>0&&(tab==="calendar"||tab==="month"||tab==="list"||tab==="summary")&&(()=>{
+        {emailLegend.length>0&&(tab==="calendar"||tab==="month"||tab==="list"||tab==="summary"||(tab==="admin"&&isAdmin))&&(()=>{
           // Top header: always show every booker (by alias). The All/None chip toggles
           // between "everything selected" and "nothing selected" on each click.
           const allLower = emailLegend.map(e=>e.toLowerCase());
@@ -8099,7 +8241,7 @@ export default function App() {
         {tab==="billing"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<BillingTab billingRecords={billingRecords} onUpdateRecord={handleUpdateBillingRecord} onDeleteRecord={id=>setBillingRecords(prev=>prev.filter(r=>r.id!==id))} onLoadToSummary={handleLoadBillingToSummary} isAdmin={isAdmin} loggedInEmail={loggedInEmail} emailAliases={emailAliases} aliasNames={aliasNames} profiles={profiles}/>}</div>}
         {tab==="about"&&<div style={{padding:"8px 0"}}><AboutTab/></div>}
         {tab==="admin"&&isAdmin&&<div style={S.card}>
-          {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onView={setViewing} onQueueDelete={queueForRemovalSilent} clashes={allClashes} deleteIds={new Set(deleteQueue.map(b=>b.id))} facilityRates={facilityRates} onUpdateFacilityRate={updateFacilityRate} onClearOldUnapproved={handleClearOldUnapproved} silentMode={silentMode} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onSyncDB={handleSyncDB} onBulkApply={handleBulkApply} onSaveMismatch={handleSaveMismatch} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} loggedInEmail={loggedInEmail} syncResults={syncResults} onClearSyncResults={()=>setSyncResults([])} showSyncResults={showSyncPanel} onToggleSyncResults={()=>setShowSyncPanel(v=>!v)} aliasNames={aliasNames} emailAliases={emailAliases}/>}
+          {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onView={setViewing} onQueueDelete={queueForRemovalSilent} clashes={allClashes} deleteIds={new Set(deleteQueue.map(b=>b.id))} facilityRates={facilityRates} onUpdateFacilityRate={updateFacilityRate} onClearOldUnapproved={handleClearOldUnapproved} silentMode={silentMode} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onSyncDB={handleSyncDB} onBulkApply={handleBulkApply} onSaveMismatch={handleSaveMismatch} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} loggedInEmail={loggedInEmail} syncResults={syncResults} onClearSyncResults={()=>setSyncResults([])} showSyncResults={showSyncPanel} onToggleSyncResults={()=>setShowSyncPanel(v=>!v)} bookerFilter={listBookerFilter} onToggleBooker={toggleBooker} onSetBookerFilter={setListBookerFilter} aliasNames={aliasNames} emailAliases={emailAliases}/>}
         </div>}
       </div>
 
