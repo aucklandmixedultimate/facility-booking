@@ -1,185 +1,88 @@
-# FacilityBook — Setup Guide
+# Facility Booking (AMUA)
 
-## What's included
-| File | Purpose |
-|---|---|
-| `booking-system.jsx` | Full React app (single file, drop into Vite) |
-| `supabase-setup.sql` | Run once in Supabase SQL Editor to create the DB |
-| `email-template-order.html` | EmailJS template — order confirmations (`template_uk1ym9r`) |
-| `email-template-approval.html` | EmailJS template — approval/rejection outcomes (`template_kfbh12t`) |
-| `email-template-deletion.html` | EmailJS template — removal notifications (use `template_uk1ym9r` or a third template) |
+Single-page React app for booking AMUA facilities, with an admin workflow for
+approvals, CPSA sync reconciliation, and billing/invoicing. The entire app lives
+in one file: [`src/booking-system.jsx`](src/booking-system.jsx).
 
----
+Stack: **React 19 + Vite**, **Supabase** (Postgres + Google OAuth + Row Level
+Security) for data/auth, **EmailJS** for notification emails, deployed to
+**GitHub Pages** via GitHub Actions.
 
-## Step 1 — Supabase (database, ~5 min)
-
-1. Go to [supabase.com](https://supabase.com) → **New Project** → name it, set a DB password, pick a region (Sydney is closest to NZ)
-2. Once ready → **SQL Editor** → paste `supabase-setup.sql` → **Run**
-3. Go to **Settings → API** and copy:
-   - **Project URL** (`https://xxxx.supabase.co`)
-   - **anon / public key** (long `eyJ...` string)
-4. Open `booking-system.jsx` and replace lines 8–9:
-```js
-const SUPABASE_URL  = "https://YOUR_PROJECT.supabase.co";
-const SUPABASE_ANON = "YOUR_ANON_KEY";
-```
-
-> ⚠️ **Security:** Never commit these values to a public GitHub repo. Use a `.env` file instead (see Step 3).
+> Auth & data-contract details (RLS policies, the `system_notes` marker
+> catalogue, the CPSA browser extension) live in
+> [`HANDOFF_SUPABASE_AUTH.md`](HANDOFF_SUPABASE_AUTH.md). Read it before changing
+> anything that writes to Supabase.
 
 ---
 
-## Step 2 — Local dev (Vite + React)
+## Configuration (environment variables)
 
-You need [Node.js](https://nodejs.org) installed.
+All configuration is injected at build time from `VITE_*` env vars — nothing is
+hardcoded in source. Copy [`.env.example`](.env.example) to `.env.local` for
+local dev:
 
 ```bash
-# Run these commands inside your project folder (e.g. C:\Users\you\facility-booking)
-npm create vite@latest facility-booking -- --template react
-cd facility-booking
+cp .env.example .env.local   # then fill in the values
+```
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `VITE_SUPABASE_URL` | ✅ | Supabase project URL |
+| `VITE_SUPABASE_ANON` | ✅ | Supabase publishable anon key (safe to expose; protected by RLS) |
+| `VITE_EMAILJS_SERVICE` | optional | EmailJS service ID |
+| `VITE_EMAILJS_TEMPLATE_ORDER` | optional | Booking-confirmation template ID |
+| `VITE_EMAILJS_TEMPLATE_APPROVAL` | optional | Approval/rejection template ID |
+| `VITE_EMAILJS_PUBLIC_KEY` | optional | EmailJS public key |
+
+> ⚠️ Every `VITE_*` value is embedded in the shipped JS bundle, so treat them as
+> **publishable, not secret**. The real protections are server-side: Supabase
+> **RLS** and the **EmailJS dashboard** (allowed-origins + rate limits). If
+> EmailJS vars are unset, the app still runs — it just skips sending email.
+
+---
+
+## Local development
+
+```bash
 npm install
-```
-
-Replace `src/App.jsx` with the contents of `booking-system.jsx`.
-
-```bash
-npm run dev
-```
-
-Open http://localhost:5173 — bookings should save to Supabase.
-
----
-
-## Step 3 — Deploy to GitHub Pages
-
-### 3a. Keep secrets out of git (recommended)
-
-Create a `.env` file **inside your project folder**:
-```
-VITE_SUPABASE_URL=https://your-project.supabase.co
-VITE_SUPABASE_ANON=your-anon-key
-```
-
-Add to `.gitignore`:
-```
-.env
-```
-
-In `booking-system.jsx` change lines 8–9 to:
-```js
-const SUPABASE_URL  = import.meta.env.VITE_SUPABASE_URL;
-const SUPABASE_ANON = import.meta.env.VITE_SUPABASE_ANON;
-```
-
-### 3b. Configure Vite for GitHub Pages
-
-Edit `vite.config.js` (replace `facility-booking` with your actual repo name):
-```js
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
-
-export default defineConfig({
-  plugins: [react()],
-  base: '/facility-booking/',
-})
-```
-
-### 3c. Install gh-pages
-
-```bash
-# Make sure you're in your project folder first!
-cd C:\Users\you\facility-booking
-
-npm install --save-dev gh-pages
-```
-
-Add to `package.json` under `"scripts"`:
-```json
-"scripts": {
-  "dev": "vite",
-  "build": "vite build",
-  "preview": "vite preview",
-  "deploy": "gh-pages -d dist"
-}
-```
-
-### 3d. Create GitHub repo
-
-1. Go to [github.com/new](https://github.com/new)
-2. Name it `facility-booking`, set to **Public**, click **Create repository**
-
-### 3e. Push and deploy
-
-```bash
-# ⚠️ These commands must be run from INSIDE your project folder
-cd C:\Users\you\facility-booking
-
-git init
-git add .
-git commit -m "Initial commit"
-git remote add origin https://github.com/YOUR_USERNAME/facility-booking.git
-git push -u origin main
-
-npm run build
-npm run deploy
-```
-
-> **Common error:** `Missing script: "deploy"` means you ran `npm run deploy` from the wrong folder (e.g. `C:\Users\you`). Always `cd` into your project folder first.
-
-### 3f. Enable GitHub Pages
-
-- GitHub repo → **Settings** → **Pages**
-- Source: **Deploy from branch** → Branch: `gh-pages` → **Save**
-
-Your site will be live at:
-`https://YOUR_USERNAME.github.io/facility-booking/`
-
----
-
-## Step 4 — EmailJS (email notifications, free)
-
-### 4a. Create account & service
-1. Sign up at [emailjs.com](https://emailjs.com)
-2. **Email Services** → Add Service → connect Gmail (or other)
-3. Note your **Service ID** (e.g. `service_w2qamo7`)
-
-### 4b. Create templates
-
-You need **two** templates:
-
-**Template 1 — Order Confirmation** (`template_uk1ym9r` or create new)
-- Paste contents of `email-template-order.html` into the HTML body
-- Required variables: `{{to_email}}`, `{{to_name}}`, `{{order_ref}}`, `{{subject}}`, `{{message_html}}`
-- Set "To Email" field to `{{to_email}}`
-- Set "Subject" field to `{{subject}}`
-
-**Template 2 — Approval Outcome** (`template_kfbh12t` or create new)
-- Paste contents of `email-template-approval.html` into the HTML body
-- Same variable set as above
-- This template receives approve/reject/cancel notifications
-
-**Template 3 — Deletion Notice** (optional, or reuse Template 1)
-- Paste contents of `email-template-deletion.html`
-
-### 4c. Update constants in booking-system.jsx
-
-Around line 100:
-```js
-const EJ_SERVICE          = "service_w2qamo7";   // ← your Service ID
-const EJ_TEMPLATE_ORDER   = "template_uk1ym9r";  // ← Template 1 ID
-const EJ_TEMPLATE_APPROVAL= "template_kfbh12t";  // ← Template 2 ID
-const EJ_KEY              = "21HLBTcxCRtWaFyud"; // ← your Public Key
+npm run dev      # http://localhost:5173
+npm run lint     # ESLint
+npm run build    # production build into dist/
 ```
 
 ---
 
-## Customisation
+## Database (Supabase)
 
-| What | Where in booking-system.jsx |
-|---|---|
-| Facility names / colours | `FACILITIES` array (~line 15) |
-| Admin email | `ADMIN_PASSWORD` constant |
-| Opening hours | `CAL_START` / `CAL_END` constants |
-| Available durations | `DURATIONS` array |
+Run the SQL files in the Supabase **SQL Editor**, in order:
+
+1. `supabase-schema.sql` — base schema
+2. `supabase-migration-auth.sql` — OAuth + RLS + `is_admin()` helper
+3. `supabase-migration-invoiced-flag.sql` — `invoiced` boolean column
+4. `supabase-migration-system-notes.sql` — `system_notes` column + marker migration
+5. `supabase-migration-activity-log.sql` — append-only audit log + RLS
+6. `supabase-migration-mismatch-log.sql` — mismatch-resolution audit table
+
+Admin is granted via `app_metadata.role = 'admin'` (see `HANDOFF_SUPABASE_AUTH.md`
+for the exact SQL). There is no client-side admin password.
+
+---
+
+## Deployment (GitHub Pages)
+
+Pushing to `main` triggers [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml),
+which builds the app and publishes `dist/` to the `gh-pages` branch.
+
+**Required one-time setup** — add the env vars as repo secrets under
+**Settings → Secrets and variables → Actions**:
+
+- `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON` (required — the build fails fast without them)
+- `VITE_EMAILJS_*` (optional — the build warns and disables email if absent)
+
+GitHub Pages source: **Deploy from branch → `gh-pages`**. Vite `base` is
+`/facility-booking/` (see `vite.config.js`) to match the repo-pages URL.
+
+Manual deploy fallback (uses your local `.env.local`): `npm run deploy`.
 
 ---
 
@@ -189,46 +92,9 @@ const EJ_KEY              = "21HLBTcxCRtWaFyud"; // ← your Public Key
 |---|---|
 | Same facility, same time | ⚠️ Warning shown — user can proceed (shared use allowed) |
 | Different facility, same time | ⚠️ Warning shown — user can proceed |
-| New booking | Status starts as **Pending** until admin approves |
+| New booking | Status starts **Pending** until an admin approves |
 | Past booking (non-admin) | 🔒 Read-only — cannot be edited or cancelled |
-| Edit/cancel | Only available on your own bookings |
+| Edit / cancel | Only on your own bookings |
 
-
----
-
-## Troubleshooting
-
-### `Missing script: "deploy"`
-You ran `npm run deploy` from the wrong folder. Always `cd` into your project first:
-```bash
-cd C:\Users\you\facility-booking
-npm run deploy
-```
-
-### `Error: spawn git ENOENT` — Git not found
-Git is not installed or not on your system PATH.
-
-**Install Git for Windows:**
-1. Download from [git-scm.com/download/win](https://git-scm.com/download/win)
-2. Run the installer — keep all defaults, especially **"Git from the command line and also from 3rd-party software"**
-3. **Close and reopen** your terminal (cmd / PowerShell) after installing
-4. Verify: `git --version` should print a version number
-5. Then re-run your deploy commands
-
-**If git is installed but still not found:**
-```bash
-# Check if git is on PATH
-where git
-# If nothing appears, add C:\Program Files\Git\cmd to your system PATH
-# via: System Properties → Environment Variables → Path → Edit → New
-```
-
-### EmailJS 422 Unprocessable Content
-This means the template variable names in EmailJS don't match what the app sends.
-The app sends: `to_email`, `subject`, `message_html`
-
-In your EmailJS template settings, make sure:
-- **To** field is set to `{{to_email}}`  
-- **Subject** field is set to `{{subject}}`
-- **Body / Content** field is set to `{{message_html}}` with HTML mode enabled
-
+CPSA-confirmed bookings, mismatch review, and invoicing are admin-only flows;
+see the in-app Admin tab and `HANDOFF_SUPABASE_AUTH.md`.
