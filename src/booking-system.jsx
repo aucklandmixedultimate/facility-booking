@@ -1162,7 +1162,7 @@ function BookingRow({ row, idx, onChange, onRemove, isOnly, isAdmin, isEditing, 
       <div>
         <label style={S.lbl}>Duration *</label>
         <select style={S.inp} value={row.duration} onChange={e=>upd("duration",parseFloat(e.target.value))}>
-          {DURATIONS.map(d=><option key={d.value} value={d.value}>{d.label}</option>)}
+          {(DURATIONS.some(d=>d.value===row.duration)?DURATIONS:[...DURATIONS,{value:row.duration,label:row.duration+" hrs"}].sort((a,b)=>a.value-b.value)).map(d=><option key={d.value} value={d.value}>{d.label}</option>)}
         </select>
       </div>
 
@@ -2331,6 +2331,7 @@ function MonthCalendar({ bookings, onBookingClick, onNewBooking, selectedFacilit
 // same-facility bookings (e.g. for merges) are easy to create.
 function DayTimelinePopup({ date, bookings, onClose, onBookingClick, onNewBooking, cartNewDrafts=[], focusHour=null }) {
   const [dragState, setDragState] = useState(null); // {facility, startSlot, endSlot}
+  const [pendingSel, setPendingSel] = useState(null); // {facility, lo, hi} staged for the Create button
   const dragMoved   = useRef(false);
   const justDragged = useRef(false);
   const downBooking = useRef(false);
@@ -2356,6 +2357,7 @@ function DayTimelinePopup({ date, bookings, onClose, onBookingClick, onNewBookin
     const rect = e.currentTarget.getBoundingClientRect();
     const slot = yToSlot(e.clientY - rect.top);
     dragMoved.current = false;
+    setPendingSel(null);
     setDragState({ facility:facId, startSlot:slot, endSlot:slot });
   }
   function move(e, facId) {
@@ -2366,16 +2368,17 @@ function DayTimelinePopup({ date, bookings, onClose, onBookingClick, onNewBookin
   }
   function up(e, facId) {
     if (!dragState || dragState.facility!==facId) return;
-    const nd = norm(dragState);
+    const ndUp = norm(dragState);
     const moved = dragMoved.current;
     const wasOnBooking = downBooking.current;
     dragMoved.current = false; downBooking.current = false;
     setDragState(null);
+    // Stage the selection; the user confirms via the footer "Create booking" button.
     if (moved) {
-      justDragged.current = true; // suppress the click that follows a drag
-      onNewBooking(dk, slotToHour(nd.lo), (nd.hi-nd.lo+1)*0.5, facId);
+      justDragged.current = true;
+      setPendingSel({ facility:facId, lo:ndUp.lo, hi:ndUp.hi });
     } else if (!wasOnBooking) {
-      onNewBooking(dk, slotToHour(nd.lo), 1, facId);
+      setPendingSel({ facility:facId, lo:ndUp.lo, hi:Math.min(ndUp.lo+1, CAL_TOTAL*2-1) });
     }
   }
 
@@ -2383,7 +2386,7 @@ function DayTimelinePopup({ date, bookings, onClose, onBookingClick, onNewBookin
 
   return (
     <Modal title={`📅 ${dObj.toLocaleDateString("en-NZ",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}`} onClose={onClose} width={760}>
-      <div style={{fontSize:12,color:"#94a3b8",marginBottom:8}}>Click a booking to view it · click or drag an empty area (or across existing bookings) to create a new one.</div>
+      <div style={{fontSize:12,color:"#94a3b8",marginBottom:8}}>Click a booking to view it · click or drag an empty area to select a time, then press Create booking.</div>
       <div ref={scrollRef} style={{overflow:"auto",maxHeight:"60vh"}}>
         <div style={{display:"flex",minWidth:560}}>
           {/* Hour labels (sticky on horizontal scroll) */}
@@ -2398,6 +2401,7 @@ function DayTimelinePopup({ date, bookings, onClose, onBookingClick, onNewBookin
           {/* Facility columns */}
           {FACILITIES.map(fac=>{
             const isDragging = dragState?.facility===fac.id;
+            const colSel = (isDragging && nd) ? nd : (pendingSel?.facility===fac.id ? pendingSel : null);
             const colTint = FACILITY_TINT[fac.id] || "#fff";
             return (
               <div key={fac.id} style={{flex:1,minWidth:96}}>
@@ -2414,10 +2418,10 @@ function DayTimelinePopup({ date, bookings, onClose, onBookingClick, onNewBookin
                       <div style={{height:"50%",borderBottom:"1px dashed #f8fafc"}}/>
                     </div>
                   ))}
-                  {/* Drag preview */}
-                  {isDragging && nd && (
-                    <div style={{position:"absolute",left:2,right:2,top:nd.lo*SLOT_H,height:(nd.hi-nd.lo+1)*SLOT_H,background:"rgba(99,102,241,0.15)",border:"2px solid rgba(99,102,241,0.5)",borderRadius:6,pointerEvents:"none",zIndex:4}}>
-                      <div style={{position:"absolute",top:2,left:4,fontSize:9,fontWeight:700,color:"#4f46e5"}}>{fmtTime(slotToHour(nd.lo))}–{fmtTime(slotToHour(nd.hi+1))}</div>
+                  {/* Drag / staged-selection preview */}
+                  {colSel && (
+                    <div style={{position:"absolute",left:2,right:2,top:colSel.lo*SLOT_H,height:(colSel.hi-colSel.lo+1)*SLOT_H,background:"rgba(99,102,241,0.15)",border:"2px solid rgba(99,102,241,0.6)",borderRadius:6,pointerEvents:"none",zIndex:4}}>
+                      <div style={{position:"absolute",top:2,left:4,fontSize:9,fontWeight:700,color:"#4f46e5"}}>{fmtTime(slotToHour(colSel.lo))}-{fmtTime(slotToHour(colSel.hi+1))}</div>
                     </div>
                   )}
                   {/* Booking blocks (only this facility's own, non-admin shown in colour; admin as grey background) */}
@@ -2449,6 +2453,20 @@ function DayTimelinePopup({ date, bookings, onClose, onBookingClick, onNewBookin
           })}
         </div>
       </div>
+      {pendingSel && (() => {
+        const f = FACILITIES.find(x=>x.id===pendingSel.facility);
+        const sH = slotToHour(pendingSel.lo), eH = slotToHour(pendingSel.hi+1);
+        return (
+          <div style={{display:"flex",alignItems:"center",gap:10,marginTop:12,padding:"10px 14px",background:"#eef2ff",border:"1.5px solid #c7d2fe",borderRadius:10,flexWrap:"wrap"}}>
+            <span style={{width:9,height:9,borderRadius:"50%",background:f?.color,flexShrink:0}}/>
+            <div style={{fontSize:13,color:"#0f172a"}}><strong>{f?.name}</strong> &middot; {fmtTime(sH)}-{fmtTime(eH)} <span style={{color:"#64748b"}}>({+(eH-sH).toFixed(1)}h)</span></div>
+            <div style={{marginLeft:"auto",display:"flex",gap:8}}>
+              <button onClick={()=>setPendingSel(null)} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#64748b",fontSize:12,padding:"6px 12px"})}>Clear</button>
+              <button onClick={()=>{ onNewBooking(dk, sH, +(eH-sH).toFixed(2), pendingSel.facility); setPendingSel(null); }} style={S.btn({background:"#6366f1",color:"#fff",fontSize:12,padding:"6px 14px"})}>Create booking</button>
+            </div>
+          </div>
+        );
+      })()}
     </Modal>
   );
 }
