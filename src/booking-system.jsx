@@ -5610,9 +5610,9 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
     const html = "<div style='font-family:sans-serif;max-width:640px'>"
       + "<h2 style='color:#b45309'>⚡ CPSA Booking Mismatch — Please Review</h2>"
       + "<p>Hi " + (name || email) + ",</p>"
-      + "<p>The details CPSA holds for the following booking(s) differ from what we have on record. Please review and let us know whether the CPSA values are correct.</p>"
+      + "<p>The details CPSA holds for the following booking(s) currently differ from your original request. We're clarifying these with CPSA, so nothing is final yet.</p>"
       + "<table style='width:100%;border-collapse:collapse;font-size:13px;margin:16px 0;border:1px solid #fde68a'><thead><tr style='background:#fef3c7'><th style='padding:8px;text-align:left'>Booking</th><th style='padding:8px'>Field</th><th style='padding:8px'>Date</th><th style='padding:8px'>Booked → CPSA</th><th style='padding:8px'>Changes</th></tr></thead><tbody>" + rows + "</tbody></table>"
-      + "<p>Please contact AMUA if any of these are incorrect.</p>"
+      + "<p>AMUA will do its best to align each booking to your original request as closely as it can. If the booked time ends up reduced, the difference will be credited against a future invoice. If you have any questions, just reply to this email and we'll follow up.</p>"
       + "<p style='color:#64748b;font-size:12px'>Automated notification from FacilityBook – AMUA.</p></div>";
     await sendApprovalEmail({ to: email, subject: "⚡ CPSA Booking Mismatch – Please Review", html });
   }
