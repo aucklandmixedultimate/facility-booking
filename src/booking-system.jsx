@@ -3311,9 +3311,9 @@ function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onLoadT
             ))}
           </div>
         </div>
-        {(rec.lines||[]).length>0&&(
+        {((exportMode==="individual"?(rec.individualLines||rec.lines):rec.lines)||[]).length>0&&(
           <div style={{marginTop:10}}>
-            <div style={{fontSize:11,fontWeight:700,color:"#475569",marginBottom:4}}>Invoice Lines</div>
+            <div style={{fontSize:11,fontWeight:700,color:"#475569",marginBottom:4}}>Invoice Lines ({exportMode==="individual"?"Itemised — per booking":"Summary — grouped"})</div>
             <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
               <thead>
                 <tr style={{background:"#f8fafc"}}>
@@ -3323,7 +3323,7 @@ function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onLoadT
                 </tr>
               </thead>
               <tbody>
-                {rec.lines.map((l,i)=>(
+                {(exportMode==="individual"?(rec.individualLines||rec.lines):rec.lines).map((l,i)=>(
                   <tr key={i} style={{borderBottom:"1px solid #f1f5f9"}}>
                     <td style={{padding:"4px 8px",color:"#0f172a"}}>{l.desc||l.description||l.label||"—"}</td>
                     <td style={{padding:"4px 8px",color:"#64748b"}}>{l.detail||"—"}</td>
