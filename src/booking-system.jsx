@@ -6223,6 +6223,14 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                       {curRes==="amended"?"✓ Amended":"↩ CPSA to correct"}
                     </div>
                   )}
+                  {curRes==="to_correct"&&(
+                    <div style={{display:"flex",flexDirection:"column",gap:4,marginTop:2}}>
+                      <div style={{fontSize:10,color:"#64748b",fontWeight:700}}>CPSA follow-up:</div>
+                      <button onClick={()=>saveMismatchResolution(b,"confirmed","none")}
+                        title="CPSA verbally confirmed our original is correct - keep our values and mark the booking confirmed"
+                        style={{fontFamily:"inherit",fontSize:11,fontWeight:700,borderRadius:5,padding:"3px 9px",cursor:"pointer",background:"#ecfdf5",border:"1.5px solid #6ee7b7",color:"#047857",whiteSpace:"nowrap",textAlign:"left"}}>✓ Confirmed by CPSA</button>
+                    </div>
+                  )}
                   {curRes==="pending"&&changedFields.length>0&&(
                     <div style={{fontSize:10,color:"#94a3b8"}}>← Click values to resolve</div>
                   )}
