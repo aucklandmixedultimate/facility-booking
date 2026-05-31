@@ -5738,7 +5738,17 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                       ? <div style={{fontSize:12,color:"#b91c1c"}}>⚠ {r.error}</div>
                       : <div style={{display:"flex",flexDirection:"column",gap:3,paddingLeft:12,borderLeft:"2px solid #e0f2fe"}}>
                           {[
-                            r.added>0 && <span style={{color:"#0e7490",fontSize:12}}>＋ <strong>{r.added}</strong> booking{r.added!==1?"s":""} added</span>,
+                            r.added>0 && ((r.addedBookings&&r.addedBookings.length)
+                              ? <details><summary style={{color:"#0e7490",fontSize:12,cursor:"pointer"}}>＋ <strong>{r.added}</strong> booking{r.added!==1?"s":""} added</summary>
+                                  <div style={{margin:"4px 0 2px 14px",display:"flex",flexDirection:"column",gap:2}}>
+                                    {r.addedBookings.map((ab,abi)=>{ const af=FACILITIES.find(x=>x.id===ab.facility_id); return (
+                                      <div key={abi} style={{fontSize:11,color:"#475569",display:"flex",gap:6,alignItems:"center"}}>
+                                        <span style={{width:7,height:7,borderRadius:"50%",background:af?.color||"#94a3b8",flexShrink:0}}/>
+                                        {fmtDate(ab.date)} · {fmtTime(ab.start_hour)}-{fmtTime(ab.start_hour+ab.duration)} · {af?.name||ab.facility_id}{ab.purpose ? " · "+ab.purpose : ""}
+                                      </div> ); })}
+                                  </div>
+                                </details>
+                              : <span style={{color:"#0e7490",fontSize:12}}>＋ <strong>{r.added}</strong> booking{r.added!==1?"s":""} added</span>),
                             r.skipped>0 && <span style={{color:"#64748b",fontSize:12}}>— <strong>{r.skipped}</strong> already existed</span>,
                             r.cpsaConfirmed>0 && <span style={{color:"#0891b2",fontSize:12}}>🌐 <strong>{r.cpsaConfirmed}</strong> CPSA-confirmed</span>,
                             r.cpsaReviewNeeded>0 && <span style={{color:"#b45309",fontSize:12}}>⚠ <strong>{r.cpsaReviewNeeded}</strong> need review</span>,
@@ -7088,6 +7098,7 @@ export default function App() {
     try {
       const events = await fetchCJREvents(year, month);
       let added = 0, skipped = 0, removed = 0, cpsaConfirmed = 0, cpsaReviewNeeded = 0;
+      const addedBookings = []; // snapshots of bookings added this sync (for the expandable log)
       const currentBookings = configured ? (await sb.select("bookings")) : bookings;
       const matchedUserIds = new Set();
       const cpsaNotifications = []; // notify-only cart items for first-time CPSA status changes
@@ -7209,6 +7220,7 @@ export default function App() {
             setBookings(prev => [...prev, newBk]);
           }
           added++;
+          addedBookings.push({ facility_id, date, start_hour, duration, purpose });
           logActivity("cpsa_admin_booking_add", { date, facility_id, start_hour, duration, purpose });
         }
       }
@@ -7276,7 +7288,7 @@ export default function App() {
         // lastChangeAt = when this month last produced an actual new change; preserved
         // from the prior result when this sync turned up nothing new.
         const lastChangeAt = hadChanges ? syncedAt : (existing?.lastChangeAt || null);
-        return [...without, { monthKey, label, added, skipped, removed, cpsaConfirmed, cpsaReviewNeeded, clashes: clashUpdates, notified: cpsaNotifications.length, syncedAt, lastChangeAt }];
+        return [...without, { monthKey, label, added, skipped, removed, cpsaConfirmed, cpsaReviewNeeded, clashes: clashUpdates, notified: cpsaNotifications.length, addedBookings, syncedAt, lastChangeAt }];
       });
     } catch(e) {
       setSyncResults(prev => {
