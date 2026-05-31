@@ -5456,6 +5456,10 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
       sysNotes = setCpsaOrig(sysNotes, booking);
       Object.assign(patch, extractCpsaAmendValues(reasons, booking), { status: "cpsa_confirmed" });
       sysNotes = stripMismatchNote(sysNotes);
+    } else if (resolution === "confirmed") {
+      // CPSA verbally confirmed our original is correct: keep our values, mark confirmed, clear the mismatch.
+      patch.status = "cpsa_confirmed";
+      sysNotes = stripMismatchNote(sysNotes);
     }
     sysNotes = setCpsaResolution(sysNotes, resolution, billingState);
     patch.system_notes = sysNotes;
