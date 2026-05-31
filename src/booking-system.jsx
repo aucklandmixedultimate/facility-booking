@@ -2073,7 +2073,7 @@ function WeekCalendar({ bookings, onNewBooking, onBookingClick, selectedFacility
                   >
                     {/* Hour cells */}
                     {Array.from({length:CAL_TOTAL},(_,i)=>i).map(i=>(
-                      <div key={i} style={{ height:HOUR_H, borderBottom:"1px solid #f1f5f9" }}>
+                      <div key={i} style={{ height:HOUR_H, boxSizing:"border-box", borderBottom:"1px solid #f1f5f9" }}>
                         <div style={{ height:"50%", borderBottom:"1px dashed #f5f5f5" }}/>
                       </div>
                     ))}
@@ -2405,7 +2405,7 @@ function DayTimelinePopup({ date, bookings, onClose, onBookingClick, onNewBookin
             const colTint = FACILITY_TINT[fac.id] || "#fff";
             return (
               <div key={fac.id} style={{flex:1,minWidth:96}}>
-                <div style={{height:24,position:"sticky",top:0,zIndex:5,display:"flex",alignItems:"center",justifyContent:"center",gap:4,fontSize:10,fontWeight:700,color:fac.color,whiteSpace:"nowrap",overflow:"hidden",background:colTint,borderBottom:`2px solid ${fac.color}`}}>
+                <div style={{height:24,boxSizing:"border-box",position:"sticky",top:0,zIndex:5,display:"flex",alignItems:"center",justifyContent:"center",gap:4,fontSize:10,fontWeight:700,color:fac.color,whiteSpace:"nowrap",overflow:"hidden",background:colTint,borderBottom:`2px solid ${fac.color}`}}>
                   <span style={{width:7,height:7,borderRadius:"50%",background:fac.color,flexShrink:0}}/>
                   {fac.name.includes("Field")?fac.name.replace("Field ","Fld "):fac.name.split("–")[0].trim().slice(0,10)}
                 </div>
@@ -2414,7 +2414,7 @@ function DayTimelinePopup({ date, bookings, onClose, onBookingClick, onNewBookin
                   onMouseLeave={()=>{ if(isDragging){ dragMoved.current=false; setDragState(null);} }}>
                   {/* Hour cells */}
                   {Array.from({length:CAL_TOTAL},(_,i)=>i).map(i=>(
-                    <div key={i} style={{height:HOUR_H,borderBottom:"1px solid #f1f5f9"}}>
+                    <div key={i} style={{height:HOUR_H,boxSizing:"border-box",borderBottom:"1px solid #f1f5f9"}}>
                       <div style={{height:"50%",borderBottom:"1px dashed #f8fafc"}}/>
                     </div>
                   ))}
