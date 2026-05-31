@@ -2,11 +2,12 @@ name: Deploy to GitHub Pages
 
 # Builds the Vite app and publishes dist/ to the gh-pages branch on every push
 # to main. Supabase credentials are injected at build time from repo secrets so
-# deploys never depend on a local .env file.
+# deploys never depend on a local .env file. (Email is sent server-side by the
+# `send-email` Supabase Edge Function, so no email secrets are needed here.)
 #
 # Required repo secrets (Settings → Secrets and variables → Actions):
-#   VITE_SUPABASE_URL   e.g. https://YOUR_PROJECT.supabase.co
-#   VITE_SUPABASE_ANON  the public anon/publishable key (RLS-protected)
+#   VITE_SUPABASE_URL    e.g. https://YOUR_PROJECT.supabase.co
+#   VITE_SUPABASE_ANON   the public anon/publishable key (RLS-protected)
 
 on:
   push:
