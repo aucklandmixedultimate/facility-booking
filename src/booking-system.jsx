@@ -5456,6 +5456,10 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
       sysNotes = setCpsaOrig(sysNotes, booking);
       Object.assign(patch, extractCpsaAmendValues(reasons, booking), { status: "cpsa_confirmed" });
       sysNotes = stripMismatchNote(sysNotes);
+    } else if (resolution === "confirmed") {
+      // CPSA verbally confirmed our original is correct: keep our values, mark confirmed, clear the mismatch.
+      patch.status = "cpsa_confirmed";
+      sysNotes = stripMismatchNote(sysNotes);
     }
     sysNotes = setCpsaResolution(sysNotes, resolution, billingState);
     patch.system_notes = sysNotes;
@@ -5606,9 +5610,9 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
     const html = "<div style='font-family:sans-serif;max-width:640px'>"
       + "<h2 style='color:#b45309'>⚡ CPSA Booking Mismatch — Please Review</h2>"
       + "<p>Hi " + (name || email) + ",</p>"
-      + "<p>The details CPSA holds for the following booking(s) differ from what we have on record. Please review and let us know whether the CPSA values are correct.</p>"
+      + "<p>The details CPSA holds for the following booking(s) currently differ from your original request. We're clarifying these with CPSA, so nothing is final yet.</p>"
       + "<table style='width:100%;border-collapse:collapse;font-size:13px;margin:16px 0;border:1px solid #fde68a'><thead><tr style='background:#fef3c7'><th style='padding:8px;text-align:left'>Booking</th><th style='padding:8px'>Field</th><th style='padding:8px'>Date</th><th style='padding:8px'>Booked → CPSA</th><th style='padding:8px'>Changes</th></tr></thead><tbody>" + rows + "</tbody></table>"
-      + "<p>Please contact AMUA if any of these are incorrect.</p>"
+      + "<p>AMUA will do its best to align each booking to your original request as closely as it can. If the booked time ends up reduced, the difference will be credited against a future invoice. If you have any questions, just reply to this email and we'll follow up.</p>"
       + "<p style='color:#64748b;font-size:12px'>Automated notification from FacilityBook – AMUA.</p></div>";
     await sendApprovalEmail({ to: email, subject: "⚡ CPSA Booking Mismatch – Please Review", html });
   }
@@ -6217,6 +6221,14 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                         border:`1px solid ${curRes==="amended"?"#fde68a":"#ddd6fe"}`,
                         borderRadius:4,padding:"2px 7px",display:"inline-block",cursor:"help"}}>
                       {curRes==="amended"?"✓ Amended":"↩ CPSA to correct"}
+                    </div>
+                  )}
+                  {curRes==="to_correct"&&(
+                    <div style={{display:"flex",flexDirection:"column",gap:4,marginTop:2}}>
+                      <div style={{fontSize:10,color:"#64748b",fontWeight:700}}>CPSA follow-up:</div>
+                      <button onClick={()=>saveMismatchResolution(b,"confirmed","none")}
+                        title="CPSA verbally confirmed our original is correct - keep our values and mark the booking confirmed"
+                        style={{fontFamily:"inherit",fontSize:11,fontWeight:700,borderRadius:5,padding:"3px 9px",cursor:"pointer",background:"#ecfdf5",border:"1.5px solid #6ee7b7",color:"#047857",whiteSpace:"nowrap",textAlign:"left"}}>✓ Confirmed by CPSA</button>
                     </div>
                   )}
                   {curRes==="pending"&&changedFields.length>0&&(
