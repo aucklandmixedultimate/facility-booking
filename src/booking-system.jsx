@@ -5646,13 +5646,15 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
   const today=todayKey();
 
   // Build and persist a mismatch resolution for one booking.
-  async function saveMismatchResolution(booking, resolution, billingState) {
+  async function saveMismatchResolution(booking, resolution, billingState, effectiveVals) {
     const reasons = parseMismatchNote(booking.system_notes, booking.notes);
     let sysNotes = booking.system_notes || "";
     const patch = { updated_at: new Date().toISOString() };
     if (resolution === "amended") {
       sysNotes = setCpsaOrig(sysNotes, booking);
-      Object.assign(patch, extractCpsaAmendValues(reasons, booking), { status: "cpsa_confirmed" });
+      // Apply the per-field effective values (CPSA only where the admin switched that
+      // field; ours elsewhere). Falls back to all-CPSA values for legacy callers.
+      Object.assign(patch, effectiveVals || extractCpsaAmendValues(reasons, booking), { status: "cpsa_confirmed" });
       sysNotes = stripMismatchNote(sysNotes);
     } else if (resolution === "confirmed") {
       // CPSA verbally confirmed our original is correct: keep our values, mark confirmed, clear the mismatch.
@@ -6145,14 +6147,6 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
         const thS2={padding:"7px 10px",textAlign:"left",fontWeight:700,color:"#92400e",whiteSpace:"nowrap",borderBottom:"1px solid #fde68a",fontSize:11,textTransform:"uppercase",letterSpacing:"0.04em"};
         const tdS2={padding:"7px 10px",borderBottom:"1px solid #fde68a",verticalAlign:"top"};
 
-        // Suggest a billing state when "amended" is chosen for an invoiced booking.
-        function suggestBillingState(b, reasons) {
-          if (!b.invoiced) return "none";
-          const cv=extractCpsaAmendValues(reasons,b);
-          const delta=cv.duration-b.duration;
-          return delta>0?"invoice_pending":delta<0?"credit_pending":"none";
-        }
-
         // Derive overall resolution from per-field selections.
         // Returns "amended"|"to_correct"|"pending"
         function deriveResolution(changedFields, fieldSel) {
@@ -6240,11 +6234,39 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
           // Derive resolution from per-field selections
           const curRes=deriveResolution(changedFields, fieldSel);
 
+          // CPSA submission link(s) + ref ("submission id") for this booking.
+          const cpsaRefs=parseCpsaRefs(b.system_notes,b.notes);
+
+          // Effective resolution values: per changed field, take CPSA's value only
+          // where the admin switched that field to CPSA; otherwise keep ours. This is
+          // exactly what is saved on "amended", and what drives the cost delta — so a
+          // facility swap at the same rate (or a time shift within one rate band) shows
+          // no billing action because the effective cost is unchanged.
+          function effectiveFrom(sel) {
+            return {
+              facility_id: sel.facility==="cpsa" ? cpsaVals.facility_id : b.facility_id,
+              start_hour:  sel.time==="cpsa"     ? cpsaVals.start_hour  : b.start_hour,
+              duration:    sel.duration==="cpsa" ? cpsaVals.duration    : b.duration,
+            };
+          }
+          function rowCostOf(v) {
+            const CUTOFF=17.5, end=v.start_hour+v.duration;
+            const day = v.start_hour>=CUTOFF ? 0 : end>CUTOFF ? CUTOFF-v.start_hour : v.duration;
+            const evening = v.duration-day;
+            const r=facilityRates[v.facility_id];
+            const rates = !r ? {day:0,evening:0} : typeof r==="object" ? {day:parseFloat(r.day)||0,evening:parseFloat(r.evening)||0} : {day:parseFloat(r)||0,evening:0};
+            return day*rates.day + evening*rates.evening;
+          }
+          const origCost=rowCostOf(b);
+          const effectiveVals=effectiveFrom(fieldSel);
+          const costDelta=rowCostOf(effectiveVals)-origCost; // <0 ⇒ credit owed, >0 ⇒ deficit owed, 0 ⇒ no adjustment
+
           function pickField(field, who) {
             if (alreadySettled && who==="cpsa") setShowWarn(true);
             const newSel={...fieldSel,[field]:who};
             const newRes=deriveResolution(changedFields,newSel);
-            const auto=newRes==="amended"?suggestBillingState(b,reasons):"none";
+            const cd=rowCostOf(effectiveFrom(newSel))-origCost;
+            const auto=(newRes==="amended"&&b.invoiced)?(cd<0?"credit_pending":cd>0?"invoice_pending":"none"):"none";
             setMismatchResState(prev=>({
               ...prev,
               [b.id]:{
@@ -6266,7 +6288,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
           function setBilling(bs) {
             setMismatchResState(prev=>({...prev,[b.id]:{...prev[b.id],resolution:curRes,billingState:bs}}));
           }
-          function doSave() { saveMismatchResolution(b,curRes,curBilling); }
+          function doSave() { saveMismatchResolution(b,curRes,curBilling,effectiveVals); }
 
           const isDirty=!!local;
           const rowBg=rowIdx%2===0?"#fff":"#fffbeb";
@@ -6325,6 +6347,12 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                 <div style={{fontWeight:600,color:"#0f172a",whiteSpace:"nowrap"}}>{b.name}</div>
                 <div style={{color:"#64748b",fontSize:10}}>{b.email}</div>
                 {b.invoiced&&<span style={{fontSize:10,fontWeight:700,background:"#f5f3ff",color:"#5b21b6",border:"1px solid #ddd6fe",borderRadius:4,padding:"1px 4px",display:"inline-block",marginTop:2}}>🧾 invoiced</span>}
+                {cpsaRefs.map((r,i)=>(
+                  <a key={i} href={r.url} target="_blank" rel="noopener noreferrer" title={`CPSA submission ${r.ref} — open the booking on Sporty`}
+                    style={{display:"flex",alignItems:"center",gap:3,marginTop:3,fontSize:10,fontWeight:700,color:"#0369a1",textDecoration:"none",width:"fit-content",background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:4,padding:"1px 5px"}}>
+                    🔗 {r.ref} ↗
+                  </a>
+                ))}
               </td>
               {/* Date */}
               <td style={{...tdS2,whiteSpace:"nowrap",color:"#475569"}}>{fmtDate(b.date)}</td>
@@ -6383,34 +6411,8 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                   )}
                   {/* Billing follow-up — only relevant when amended */}
                   {curRes==="amended"&&(()=>{
-                    const delta=cpsaVals.duration-b.duration; // +ve = undercharged, -ve = overcharged
                     const ghost=(col)=>({fontFamily:"inherit",fontSize:11,fontWeight:700,borderRadius:5,padding:"3px 9px",cursor:"pointer",background:"transparent",border:`1.5px solid ${col}`,color:col});
-
-                    // Calculate the dollar value of the duration change at the booking's rate.
-                    // For facility-change amendments the rate also changes; account for that too.
-                    const CUTOFF = 17.5;
-                    function splitH(sh, dur) {
-                      const end = sh + dur;
-                      if (sh >= CUTOFF) return { day:0, evening:dur };
-                      if (end > CUTOFF) return { day:CUTOFF-sh, evening:end-CUTOFF };
-                      return { day:dur, evening:0 };
-                    }
-                    function getRates(facId) {
-                      const r = facilityRates[facId];
-                      if (!r) return { day:0, evening:0 };
-                      if (typeof r === "object") return { day:parseFloat(r.day)||0, evening:parseFloat(r.evening)||0 };
-                      return { day:parseFloat(r)||0, evening:0 };
-                    }
-                    // Cost at CPSA-amended values minus cost at our original values.
-                    const origSplit = splitH(b.start_hour, b.duration);
-                    const origRates = getRates(b.facility_id);
-                    const origCost = origSplit.day*origRates.day + origSplit.evening*origRates.evening;
-                    const newFacId = cpsaVals.facility_id || b.facility_id;
-                    const newSH = cpsaVals.start_hour ?? b.start_hour;
-                    const newSplit = splitH(newSH, cpsaVals.duration);
-                    const newRates = getRates(newFacId);
-                    const newCost = newSplit.day*newRates.day + newSplit.evening*newRates.evening;
-                    const costDelta = newCost - origCost; // +ve = we owe more, -ve = we owe a credit
+                    const newCost = rowCostOf(effectiveVals);
                     const hasCostInfo = origCost > 0 || newCost > 0;
                     const absCostStr = hasCostInfo ? ` — ${fmtCost(Math.abs(costDelta))}` : "";
 
@@ -6421,10 +6423,10 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                           <div style={{fontSize:10,fontWeight:700,color:"#92400e",textTransform:"uppercase",letterSpacing:"0.04em",marginBottom:3}}>Follow-up</div>
                           {!settled
                             ? <button style={ghost("#94a3b8")}
-                                title="Booking has not been invoiced yet — just update the stored record to match CPSA. No billing adjustment needed."
+                                title="Booking has not been invoiced yet — just update the stored record to the kept values. No billing adjustment needed."
                                 onClick={()=>setBilling("nochange")}>📝 Update record</button>
                             : <div style={{display:"flex",gap:4,alignItems:"center"}}>
-                                <span title="Record will be updated to CPSA values on save."
+                                <span title="Record will be updated to the kept values on save."
                                   style={{fontSize:11,fontWeight:700,color:"#475569",cursor:"help"}}>📝 Update record</span>
                                 <button style={{fontFamily:"inherit",fontSize:11,border:"1.5px solid #cbd5e1",borderRadius:4,background:"transparent",color:"#94a3b8",cursor:"pointer",padding:"1px 5px"}} onClick={()=>setBilling("none")} title="Undo">↩</button>
                               </div>
@@ -6432,32 +6434,35 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                         </div>
                       );
                     }
-                    // Invoiced path — costDelta drives credit vs deficit.
-                    const overcharged = costDelta > 0; // CPSA cost higher than billed → booker owes more → was undercharged from their side, but here treated as credit
-                    const undercharged = costDelta < 0; // CPSA cost lower than billed → booker owed less than charged → deficit
+                    // Invoiced path — the EFFECTIVE cost change drives the adjustment.
+                    // costDelta<0 ⇒ kept values cost less than billed ⇒ credit owed to booker;
+                    // costDelta>0 ⇒ cost more ⇒ deficit owed by booker; 0 ⇒ no adjustment.
+                    const isCredit  = costDelta < 0;
+                    const isDeficit = costDelta > 0;
                     return (
                       <div style={{borderTop:"1px dashed #fde68a",paddingTop:4}}>
                         <div style={{fontSize:10,fontWeight:700,color:"#92400e",textTransform:"uppercase",letterSpacing:"0.04em",marginBottom:3}}>Billing</div>
                         {curBilling==="none"&&(
-                          <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
-                            {overcharged&&<button style={ghost("#15803d")}
-                              title={`Billed ${fmtCost(origCost)} (${b.duration}h) but CPSA shows ${cpsaVals.duration}h @ ${fmtCost(newCost)}. Credit ${fmtCost(Math.abs(costDelta))} owed.`}
-                              onClick={()=>setBilling("credit_pending")}>💚 Credit{absCostStr}</button>}
-                            {undercharged&&<button style={ghost("#dc2626")}
-                              title={`Billed ${fmtCost(origCost)} (${b.duration}h) but CPSA shows ${cpsaVals.duration}h @ ${fmtCost(newCost)}. Deficit ${fmtCost(Math.abs(costDelta))} owed.`}
-                              onClick={()=>setBilling("invoice_pending")}>📨 Deficit{absCostStr}</button>}
-                            {costDelta===0&&<span style={{fontSize:11,color:"#475569"}}>No billing impact.</span>}
-                            <button style={ghost("#94a3b8")}
-                              title="No billing adjustment needed (already reconciled or intentional)."
-                              onClick={()=>setBilling("nochange")}>No adj.</button>
-                          </div>
+                          costDelta===0
+                            ? <span style={{fontSize:11,color:"#475569"}}>No cost change — no billing adjustment.</span>
+                            : <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
+                                {isCredit&&<button style={ghost("#15803d")}
+                                  title={`Billed ${fmtCost(origCost)} but the kept values cost ${fmtCost(newCost)} — credit ${fmtCost(Math.abs(costDelta))} owed to the booker.`}
+                                  onClick={()=>setBilling("credit_pending")}>💚 Credit{absCostStr}</button>}
+                                {isDeficit&&<button style={ghost("#dc2626")}
+                                  title={`Billed ${fmtCost(origCost)} but the kept values cost ${fmtCost(newCost)} — deficit ${fmtCost(Math.abs(costDelta))} owed by the booker.`}
+                                  onClick={()=>setBilling("invoice_pending")}>📨 Deficit{absCostStr}</button>}
+                                <button style={ghost("#94a3b8")}
+                                  title="No billing adjustment needed (already reconciled or intentional)."
+                                  onClick={()=>setBilling("nochange")}>No adj.</button>
+                              </div>
                         )}
                         {(curBilling==="credit_pending"||curBilling==="invoice_pending")&&(
                           <div style={{display:"flex",gap:4,alignItems:"center"}}>
                             <span
                               title={curBilling==="credit_pending"
-                                ? `Credit ${fmtCost(Math.abs(costDelta))} owed to booker (${Math.abs(delta)}h @ ${hasCostInfo?fmtCost(Math.abs(costDelta/delta))+"/h":"rate unknown"}).`
-                                : `Deficit invoice ${fmtCost(costDelta)} owed by booker (${delta}h @ ${hasCostInfo?fmtCost(costDelta/delta)+"/h":"rate unknown"}).`}
+                                ? `Credit ${fmtCost(Math.abs(costDelta))} owed to the booker.`
+                                : `Deficit ${fmtCost(Math.abs(costDelta))} owed by the booker.`}
                               style={{fontSize:11,fontWeight:700,color:curBilling==="credit_pending"?"#15803d":"#dc2626",cursor:"help"}}>
                               {curBilling==="credit_pending"
                                 ? `💚 Credit${absCostStr}`
@@ -6500,15 +6505,18 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                 {mismatches.length>0&&<button onClick={()=>setShowMismatchNotify(true)} style={S.btn({background:"#b45309",color:"#fff",fontWeight:700,fontSize:12})}>📧 Notify affected users</button>}
                 <button onClick={copyEmailFormat} style={S.btn({background:"#fff",border:"1.5px solid #fde68a",color:"#a16207",fontWeight:700,fontSize:12})}>📧 Copy email</button>
                 <button onClick={()=>{
-                  const blob=new Blob([["Name,Email,Date,Field,Booked,CPSA Says,Changes",...mismatches.map(b=>{
+                  const blob=new Blob([["Name,Email,Date,Field,Booked,CPSA Says,Changes,CPSA Ref,CPSA Link",...mismatches.map(b=>{
                     const fac=FACILITIES.find(x=>x.id===b.facility_id);
                     const reasons=parseMismatchNote(b.system_notes,b.notes);
                     const cv=extractCpsaAmendValues(reasons,b);
+                    const refs=parseCpsaRefs(b.system_notes,b.notes);
                     const esc=v=>`"${String(v).replace(/"/g,'""')}"`;
                     return [b.name,b.email,b.date,fac?.name||b.facility_id,
                       `${fmtTime(b.start_hour)}–${fmtTime(b.start_hour+b.duration)} ${b.duration}h`,
                       `${fmtTime(cv.start_hour)}–${fmtTime(cv.start_hour+cv.duration)} ${cv.duration}h`,
-                      reasons.join("; ")].map(esc).join(",");
+                      reasons.join("; "),
+                      refs.map(r=>r.ref).join(" "),
+                      refs.map(r=>r.url).join(" ")].map(esc).join(",");
                   })].join("\n")],{type:"text/csv"});
                   const url=URL.createObjectURL(blob);const a=document.createElement("a");
                   a.href=url;a.download="cpsa-mismatches.csv";a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
