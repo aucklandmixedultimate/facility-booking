@@ -6266,7 +6266,9 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
             if (alreadySettled && who==="cpsa") setShowWarn(true);
             const newSel={...fieldSel,[field]:who};
             const newRes=deriveResolution(changedFields,newSel);
-            const auto=(newRes==="amended"&&b.invoiced)?(cpsaCostDelta<0?"credit_pending":cpsaCostDelta>0?"invoice_pending":"none"):"none";
+            // Only a credit auto-applies; a deficit (CPSA's record costs more than we billed)
+            // is not charged to the booker, so it defaults to no adjustment.
+            const auto=(newRes==="amended"&&b.invoiced&&cpsaCostDelta<0)?"credit_pending":"none";
             setMismatchResState(prev=>({
               ...prev,
               [b.id]:{
@@ -6435,27 +6437,27 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                       );
                     }
                     // Invoiced path — reconcile what we billed against CPSA's confirmed record.
-                    // cpsaCostDelta<0 ⇒ CPSA's record costs less than billed ⇒ credit owed to
-                    // booker; >0 ⇒ deficit owed by booker; 0 ⇒ no adjustment.
+                    // cpsaCostDelta<0 ⇒ CPSA's record costs less than billed ⇒ credit owed to the
+                    // booker, offered as an adjustment. >0 ⇒ CPSA's record costs more, but we do
+                    // not charge the booker the difference; like a 0 delta it is just "No adj.".
                     const isCredit  = cpsaCostDelta < 0;
-                    const isDeficit = cpsaCostDelta > 0;
                     return (
                       <div style={{borderTop:"1px dashed #fde68a",paddingTop:4}}>
                         <div style={{fontSize:10,fontWeight:700,color:"#92400e",textTransform:"uppercase",letterSpacing:"0.04em",marginBottom:3}}>Billing</div>
                         {curBilling==="none"&&(
-                          cpsaCostDelta===0
-                            ? <span style={{fontSize:11,color:"#475569"}}>No cost change vs CPSA — no billing adjustment.</span>
-                            : <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
-                                {isCredit&&<button style={ghost("#15803d")}
-                                  title={`Billed ${fmtCost(origCost)} but CPSA's record is ${fmtCost(newCost)} — credit ${fmtCost(Math.abs(cpsaCostDelta))} owed to the booker.`}
-                                  onClick={()=>setBilling("credit_pending")}>💚 Credit{absCostStr}</button>}
-                                {isDeficit&&<button style={ghost("#dc2626")}
-                                  title={`Billed ${fmtCost(origCost)} but CPSA's record is ${fmtCost(newCost)} — deficit ${fmtCost(Math.abs(cpsaCostDelta))} owed by the booker.`}
-                                  onClick={()=>setBilling("invoice_pending")}>📨 Deficit{absCostStr}</button>}
-                                <button style={ghost("#94a3b8")}
-                                  title="No billing adjustment needed (already reconciled or intentional)."
-                                  onClick={()=>setBilling("nochange")}>No adj.</button>
-                              </div>
+                          <div style={{display:"flex",gap:3,flexWrap:"wrap",alignItems:"center"}}>
+                            {isCredit&&<button style={ghost("#15803d")}
+                              title={`Billed ${fmtCost(origCost)} but CPSA's record is ${fmtCost(newCost)} — credit ${fmtCost(Math.abs(cpsaCostDelta))} owed to the booker.`}
+                              onClick={()=>setBilling("credit_pending")}>💚 Credit{absCostStr}</button>}
+                            <button style={ghost("#94a3b8")}
+                              title={isCredit
+                                ? "Decline the credit — no billing adjustment."
+                                : cpsaCostDelta>0
+                                  ? `CPSA's record is ${fmtCost(newCost)} vs ${fmtCost(origCost)} billed — the extra is not charged to the booker.`
+                                  : "No cost change vs CPSA — no billing adjustment."}
+                              onClick={()=>setBilling("nochange")}>No adj.</button>
+                            {cpsaCostDelta>0&&<span style={{fontSize:10,color:"#94a3b8"}}>deficit {fmtCost(Math.abs(cpsaCostDelta))} — not charged</span>}
+                          </div>
                         )}
                         {(curBilling==="credit_pending"||curBilling==="invoice_pending")&&(
                           <div style={{display:"flex",gap:4,alignItems:"center"}}>
