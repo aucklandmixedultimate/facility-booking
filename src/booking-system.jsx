@@ -6256,19 +6256,20 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
           }
           const origCost=rowCostOf(b);
           const effectiveVals=effectiveFrom(fieldSel); // what we save to the booking
-          // Billing reconciles what we BILLED against CPSA's confirmed record (cpsaVals),
-          // not the values we keep — so a CPSA reduction credits the booker even when we
-          // keep the longer booking, and a same-cost change (e.g. a facility swap at the
-          // same rate) shows nothing. <0 ⇒ credit owed to booker, >0 ⇒ deficit owed by booker.
-          const cpsaCostDelta=rowCostOf(cpsaVals)-origCost;
+          // Billing follows the KEPT (effective) values, not CPSA's full record — the booker is
+          // billed for what we actually keep. A credit/deficit appears only when the kept booking
+          // costs less/more than originally billed; keeping the original duration & rate (even
+          // with a same-rate field swap) nets zero. <0 ⇒ credit owed, >0 ⇒ deficit owed.
+          const costDelta=rowCostOf(effectiveVals)-origCost;
 
           function pickField(field, who) {
             if (alreadySettled && who==="cpsa") setShowWarn(true);
             const newSel={...fieldSel,[field]:who};
             const newRes=deriveResolution(changedFields,newSel);
-            // Auto-arm the billing outcome from the fixed cost delta: credit when CPSA's record
-            // costs less than we billed, deficit when it costs more, else no adjustment.
-            const auto=(newRes==="amended"&&b.invoiced)?(cpsaCostDelta<0?"credit_pending":cpsaCostDelta>0?"invoice_pending":"none"):"none";
+            // Auto-arm the outcome from the cost of the values being kept (the new selection):
+            // credit when they cost less than billed, deficit when more, else no adjustment.
+            const cd=rowCostOf(effectiveFrom(newSel))-origCost;
+            const auto=(newRes==="amended"&&b.invoiced)?(cd<0?"credit_pending":cd>0?"invoice_pending":"none"):"none";
             setMismatchResState(prev=>({
               ...prev,
               [b.id]:{
@@ -6414,9 +6415,9 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                   {/* Billing follow-up — only relevant when amended */}
                   {curRes==="amended"&&(()=>{
                     const ghost=(col)=>({fontFamily:"inherit",fontSize:11,fontWeight:700,borderRadius:5,padding:"3px 9px",cursor:"pointer",background:"transparent",border:`1.5px solid ${col}`,color:col});
-                    const newCost = rowCostOf(cpsaVals);
+                    const newCost = rowCostOf(effectiveVals);
                     const hasCostInfo = origCost > 0 || newCost > 0;
-                    const absCostStr = hasCostInfo ? ` — ${fmtCost(Math.abs(cpsaCostDelta))}` : "";
+                    const absCostStr = hasCostInfo ? ` — ${fmtCost(Math.abs(costDelta))}` : "";
 
                     if (!b.invoiced) {
                       const settled = curBilling==="nochange";
@@ -6436,34 +6437,40 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                         </div>
                       );
                     }
-                    // Invoiced path — reconcile what we billed against CPSA's confirmed record.
-                    // The cost delta is fixed, so exactly one outcome applies: <0 ⇒ credit owed to
-                    // the booker, >0 ⇒ deficit owed by the booker, 0 ⇒ no adjustment. Offer only
-                    // the single button matching that outcome.
-                    const isCredit  = cpsaCostDelta < 0;
-                    const isDeficit = cpsaCostDelta > 0;
+                    // Invoiced path — compare the cost of the values we KEEP against what we billed.
+                    // <0 ⇒ kept booking costs less ⇒ credit owed to the booker; >0 ⇒ costs more ⇒
+                    // deficit owed by the booker; 0 ⇒ same price (e.g. a same-rate field swap) ⇒
+                    // no adjustment. Offer only the single button matching that outcome.
+                    const isCredit  = costDelta < 0;
+                    const isDeficit = costDelta > 0;
                     return (
                       <div style={{borderTop:"1px dashed #fde68a",paddingTop:4}}>
                         <div style={{fontSize:10,fontWeight:700,color:"#92400e",textTransform:"uppercase",letterSpacing:"0.04em",marginBottom:3}}>Billing</div>
                         {curBilling==="none"&&(
                           <div style={{display:"flex",gap:3,flexWrap:"wrap",alignItems:"center"}}>
                             {isCredit&&<button style={ghost("#15803d")}
-                              title={`Billed ${fmtCost(origCost)} but CPSA's record is ${fmtCost(newCost)} — credit ${fmtCost(Math.abs(cpsaCostDelta))} owed to the booker.`}
+                              title={`Billed ${fmtCost(origCost)} but the kept booking costs ${fmtCost(newCost)} — credit ${fmtCost(Math.abs(costDelta))} owed to the booker.`}
                               onClick={()=>setBilling("credit_pending")}>💚 Credit{absCostStr}</button>}
                             {isDeficit&&<button style={ghost("#dc2626")}
-                              title={`Billed ${fmtCost(origCost)} but CPSA's record is ${fmtCost(newCost)} — deficit ${fmtCost(Math.abs(cpsaCostDelta))} owed by the booker.`}
+                              title={`Billed ${fmtCost(origCost)} but the kept booking costs ${fmtCost(newCost)} — deficit ${fmtCost(Math.abs(costDelta))} owed by the booker.`}
                               onClick={()=>setBilling("invoice_pending")}>📨 Deficit{absCostStr}</button>}
-                            {!isCredit&&!isDeficit&&<button style={ghost("#94a3b8")}
-                              title="No cost change vs CPSA — no billing adjustment."
-                              onClick={()=>setBilling("nochange")}>No adj.</button>}
+                            {!isCredit&&!isDeficit&&(()=>{
+                              const facChg=effectiveVals.facility_id!==b.facility_id;
+                              const timeChg=effectiveVals.start_hour!==b.start_hour;
+                              const durChg=effectiveVals.duration!==b.duration;
+                              const lbl=!(facChg||timeChg||durChg)?"✓ Original — no change":(facChg&&!timeChg&&!durChg)?"✓ Field change only":"✓ No price change";
+                              return <button style={ghost("#94a3b8")}
+                                title={`Kept booking costs ${fmtCost(newCost)} — same as billed ${fmtCost(origCost)}. No billing adjustment.`}
+                                onClick={()=>setBilling("nochange")}>{lbl}</button>;
+                            })()}
                           </div>
                         )}
                         {(curBilling==="credit_pending"||curBilling==="invoice_pending")&&(
                           <div style={{display:"flex",gap:4,alignItems:"center"}}>
                             <span
                               title={curBilling==="credit_pending"
-                                ? `Credit ${fmtCost(Math.abs(cpsaCostDelta))} owed to the booker.`
-                                : `Deficit ${fmtCost(Math.abs(cpsaCostDelta))} owed by the booker.`}
+                                ? `Credit ${fmtCost(Math.abs(costDelta))} owed to the booker.`
+                                : `Deficit ${fmtCost(Math.abs(costDelta))} owed by the booker.`}
                               style={{fontSize:11,fontWeight:700,color:curBilling==="credit_pending"?"#15803d":"#dc2626",cursor:"help"}}>
                               {curBilling==="credit_pending"
                                 ? `💚 Credit${absCostStr}`
