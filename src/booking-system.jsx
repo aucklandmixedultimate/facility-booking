@@ -321,6 +321,18 @@ function extractCpsaAmendValues(reasons, booking) {
   }
   return { facility_id, start_hour, duration };
 }
+// Parse CPSA submission markers "[CPSA <date>] Ref <ref> · <url>" out of
+// system_notes (falls back to notes for pre-migration rows). Returns one
+// { date, ref, url } per marker — the link to CPSA's record of the booking.
+function parseCpsaRefs(sysNotes, notesLegacy) {
+  const src = sysNotes || notesLegacy || "";
+  const re = /\[CPSA ([^\]]+)\]\s*Ref\s+(\S+)\s*·\s*(https?:\/\/\S+)/g;
+  const out = [];
+  let m;
+  while ((m = re.exec(src)) !== null) out.push({ date: m[1], ref: m[2], url: m[3] });
+  return out;
+}
+
 // Compare the billed snapshot to a booking's current dimensions. Returns the
 // structured discrepancies (old → new) plus the net hours delta (owing if >0,
 // credit if <0), or null when there is no recorded snapshot / no drift.
@@ -474,12 +486,18 @@ function buildOrderEmailHtml({ name, email, bookings: bkgs=[], deletedBookings=[
 function buildApprovalEmailHtml({ name, email, bookings: bkgs, newStatus, adminNote }) {
   const isApproved = newStatus === "approved";
   const isQueued = newStatus === "queued_cpsa" || newStatus === "amua_submit";
-  const color = isApproved ? "#22c55e" : isQueued ? "#3b82f6" : "#f43f5e";
-  const label = isApproved ? "Approved ✓" : isQueued ? "Queued for CPSA Review" : "Rejected ✗";
+  const isCpsaConfirmed = newStatus === "cpsa_confirmed";
+  const isCpsaReview = newStatus === "cpsa_review_needed";
+  const color = isApproved ? "#22c55e" : isCpsaConfirmed ? "#0891b2" : isQueued ? "#3b82f6" : isCpsaReview ? "#d97706" : "#f43f5e";
+  const label = isApproved ? "Approved ✓" : isCpsaConfirmed ? "Confirmed by CPSA ✓" : isQueued ? "Queued for CPSA Review" : isCpsaReview ? "Needs Review — CPSA Mismatch" : "Rejected ✗";
   const bodyText = isApproved
     ? "Great news — your booking request has been approved!"
+    : isCpsaConfirmed
+    ? "Good news — CPSA has confirmed your booking. The details on CPSA's official schedule match what you booked, so nothing further is needed."
     : isQueued
     ? "Your booking request has been reviewed by AMUA and is now queued to be submitted to CPSA for final approval. We'll notify you once a decision has been made."
+    : isCpsaReview
+    ? "The details CPSA holds for your booking currently differ from your original request. AMUA is clarifying this with CPSA — nothing is final yet, and we'll do our best to align it to your original request."
     : "We're sorry — your booking request could not be approved.";
   const rows = bkgs.map(b => {
     const f = FACILITIES.find(x=>x.id===b.facility_id);
@@ -513,6 +531,84 @@ function buildApprovalEmailHtml({ name, email, bookings: bkgs, newStatus, adminN
   </td></tr>
   <tr><td style="padding:16px 32px 24px;background:#f8fafc;font-size:11px;color:#94a3b8;text-align:center">FacilityBook · Sent to ${email}</td></tr>
 </table></td></tr></table></body></html>`;
+}
+
+// Rich CPSA-mismatch email shown to the booker: each booking's booked → CPSA
+// diff plus reassurance that AMUA is clarifying with CPSA. Single source of truth
+// shared by the manual "Notify affected users" action and the automatic sync
+// notification, so both read identically.
+function buildMismatchEmailHtml({ name, email, bookings: bkgs }) {
+  const rows = bkgs.map(b => {
+    const fac = FACILITIES.find(x => x.id === b.facility_id);
+    const reasons = parseMismatchNote(b.system_notes, b.notes);
+    const cv = extractCpsaAmendValues(reasons, b);
+    const cfac = FACILITIES.find(x => x.id === cv.facility_id);
+    const facNote = b.facility_id !== cv.facility_id ? " (" + (cfac?.name || cv.facility_id) + ")" : "";
+    return "<tr>"
+      + "<td style='padding:6px 8px'>" + (b.purpose || "Booking") + "</td>"
+      + "<td style='padding:6px 8px'>" + (fac?.name || b.facility_id) + "</td>"
+      + "<td style='padding:6px 8px'>" + fmtDate(b.date) + "</td>"
+      + "<td style='padding:6px 8px'><span style='text-decoration:line-through;color:#94a3b8'>" + fmtTime(b.start_hour) + "–" + fmtTime(b.start_hour + b.duration) + "</span> → <span style='color:#a16207;font-weight:700'>" + fmtTime(cv.start_hour) + "–" + fmtTime(cv.start_hour + cv.duration) + facNote + "</span></td>"
+      + "<td style='padding:6px 8px;color:#64748b'>" + reasons.join("; ") + "</td>"
+      + "</tr>";
+  }).join("");
+  return "<div style='font-family:sans-serif;max-width:640px'>"
+    + "<h2 style='color:#b45309'>⚡ CPSA Booking Mismatch — Please Review</h2>"
+    + "<p>Hi " + (name || email) + ",</p>"
+    + "<p>The details CPSA holds for the following booking(s) currently differ from your original request. We're clarifying these with CPSA, so nothing is final yet.</p>"
+    + "<table style='width:100%;border-collapse:collapse;font-size:13px;margin:16px 0;border:1px solid #fde68a'><thead><tr style='background:#fef3c7'><th style='padding:8px;text-align:left'>Booking</th><th style='padding:8px'>Field</th><th style='padding:8px'>Date</th><th style='padding:8px'>Booked → CPSA</th><th style='padding:8px'>Changes</th></tr></thead><tbody>" + rows + "</tbody></table>"
+    + "<p>AMUA will do its best to align each booking to your original request as closely as it can. If the booked time ends up reduced, the difference will be credited against a future invoice. If you have any questions, just reply to this email and we'll follow up.</p>"
+    + "<p style='color:#64748b;font-size:12px'>Automated notification from FacilityBook – AMUA.</p></div>";
+}
+
+// Email to a vendor (e.g. a CPSA contact) asking them to correct CPSA's schedule
+// so it matches AMUA's record. Carries the booking's CPSA submission link(s) and
+// a notification reference. Sent by the "Inform CPSA" action; does not change the
+// booking.
+function buildInformCpsaEmailHtml({ vendorName, booking, refs = [], submissionId }) {
+  const fac = FACILITIES.find(x => x.id === booking.facility_id);
+  const reasons = parseMismatchNote(booking.system_notes, booking.notes);
+  const cv = extractCpsaAmendValues(reasons, booking);
+  const cfac = FACILITIES.find(x => x.id === cv.facility_id);
+  const facNote = booking.facility_id !== cv.facility_id ? " — CPSA shows " + (cfac?.name || cv.facility_id) : "";
+  const reasonRows = reasons.length
+    ? reasons.map(r => { const p = splitReason(r); return "<tr><td style='padding:4px 8px;font-weight:600;color:#0f172a'>" + p.label + "</td><td style='padding:4px 8px;color:#15803d;font-weight:700'>AMUA: " + (p.old || "—") + "</td><td style='padding:4px 8px;color:#b45309'>CPSA now: " + (p.next || "—") + "</td></tr>"; }).join("")
+    : "<tr><td colspan='3' style='padding:4px 8px;color:#64748b'>See booking details above.</td></tr>";
+  const linkRows = refs.length
+    ? refs.map(r => "<div style='margin:4px 0'><a href='" + r.url + "' style='color:#0369a1;font-weight:600'>" + (r.ref || "View on Sporty") + " ↗</a> <span style='color:#94a3b8;font-size:12px'>" + (r.date || "") + "</span></div>").join("")
+    : "<div style='color:#64748b;font-size:13px'>No CPSA submission link is on file for this booking.</div>";
+  return "<div style='font-family:sans-serif;max-width:640px'>"
+    + "<h2 style='color:#0369a1'>CPSA Booking Discrepancy — Correction Requested</h2>"
+    + "<p>Hi " + (vendorName || "there") + ",</p>"
+    + "<p>AMUA's record for the booking below differs from what CPSA currently holds. Please review and correct CPSA's schedule to match our record (the <strong>AMUA</strong> values).</p>"
+    + "<table style='width:100%;border-collapse:collapse;font-size:13px;margin:12px 0;border:1px solid #e2e8f0'><tbody>"
+    + "<tr><td style='padding:6px 8px;color:#64748b;width:96px'>Booker</td><td style='padding:6px 8px;color:#0f172a'>" + (booking.name || "") + "</td></tr>"
+    + "<tr><td style='padding:6px 8px;color:#64748b'>Field</td><td style='padding:6px 8px;color:#0f172a'>" + (fac?.name || booking.facility_id) + facNote + "</td></tr>"
+    + "<tr><td style='padding:6px 8px;color:#64748b'>Date</td><td style='padding:6px 8px;color:#0f172a'>" + fmtDate(booking.date) + "</td></tr>"
+    + "<tr><td style='padding:6px 8px;color:#64748b'>Time (AMUA)</td><td style='padding:6px 8px;color:#0f172a;font-weight:700'>" + fmtTime(booking.start_hour) + "–" + fmtTime(booking.start_hour + booking.duration) + " (" + booking.duration + "h)</td></tr>"
+    + "</tbody></table>"
+    + "<div style='font-size:12px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.04em;margin:14px 0 4px'>Discrepancies</div>"
+    + "<table style='width:100%;border-collapse:collapse;font-size:13px;border:1px solid #e2e8f0'><tbody>" + reasonRows + "</tbody></table>"
+    + "<div style='font-size:12px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.04em;margin:14px 0 4px'>CPSA record</div>"
+    + linkRows
+    + (submissionId ? "<p style='color:#94a3b8;font-size:12px;margin-top:14px'>Reference: " + submissionId + "</p>" : "")
+    + "<p style='color:#64748b;font-size:12px'>Sent from FacilityBook – AMUA.</p></div>";
+}
+
+// Scheduling-clash email shown to a booker whose booking overlaps an admin/field
+// reservation. Top-level so the cart outbox can send it on submit.
+function buildClashEmailHtml({ name, email, clashes }) {
+  const rows = (clashes || []).map(c => {
+    const f = FACILITIES.find(x => x.id === c.admin.facility_id);
+    return "<tr><td style='padding:6px 8px'>" + (c.admin.purpose || "Admin booking") + "</td><td style='padding:6px 8px'>" + (f?.name || "") + "</td><td style='padding:6px 8px'>" + fmtDate(c.admin.date) + "</td><td style='padding:6px 8px'>" + fmtTime(c.admin.start_hour) + "–" + fmtTime(c.admin.start_hour + c.admin.duration) + "</td><td style='padding:6px 8px'>" + (c.user.purpose || "Your booking") + "</td></tr>";
+  }).join("");
+  return "<div style='font-family:sans-serif;max-width:600px'>"
+    + "<h2 style='color:#9f1239'>⚠️ Scheduling Clash Notice</h2>"
+    + "<p>Hi " + (name || email) + ",</p>"
+    + "<p>One or more of your bookings at Cornwall Park clash with scheduled field bookings on the same facility at the same time.</p>"
+    + "<table style='width:100%;border-collapse:collapse;font-size:13px;margin:16px 0;border:1px solid #f1f5f9'><thead><tr style='background:#f8fafc'><th style='padding:8px;text-align:left'>Field Booking</th><th style='padding:8px'>Facility</th><th style='padding:8px'>Date</th><th style='padding:8px'>Time</th><th style='padding:8px'>Your Booking</th></tr></thead><tbody>" + rows + "</tbody></table>"
+    + "<p>Please contact AMUA to discuss rescheduling.</p>"
+    + "<p style='color:#64748b;font-size:12px'>Automated notification from FacilityBook – AMUA.</p></div>";
 }
 
 const S = {
@@ -1292,21 +1388,28 @@ function BookingRow({ row, idx, onChange, onRemove, isOnly, isAdmin, isEditing, 
 // The new dates are calculated by keeping each booking's original calendar week
 // but shifting to a new weekday if changed.
 // ─── Cart Modal ───────────────────────────────────────────────────────────────
-function CartModal({ cart, setCart, onClose, onSubmit, openNew }) {
+function CartModal({ cart, setCart, onClose, onSubmit, openNew, silentMode=false, onToggleSilent }) {
   const [editingDraft, setEditingDraft] = useState(null); // {gi, di, draft}
   const [expandedNotify, setExpandedNotify] = useState(new Set()); // email keys that are open
-  const totalNew  = cart.filter(i=>!i.isEdit&&!i.isMultiEdit&&!i.notifyOnly).reduce((s,i)=>s+i.drafts.length,0);
-  const totalEdits = cart.filter(i=>i.isEdit||i.isMultiEdit).reduce((s,i)=>s+i.drafts.length,0);
-  const totalNotify = cart.filter(i=>i.notifyOnly).reduce((s,i)=>s+i.drafts.length,0);
-  // Group notifyOnly cart items by booker email so the cart doesn't explode
-  // into one row per booking when a sync produces many CPSA notifications.
+  const totalNew    = cart.filter(i=>!i.isEdit&&!i.isMultiEdit&&!i.notifyOnly&&!i.statusChange).reduce((s,i)=>s+i.drafts.length,0);
+  const totalEdits  = cart.filter(i=>i.isEdit||i.isMultiEdit).reduce((s,i)=>s+i.drafts.length,0);
+  const totalStatus = cart.filter(i=>i.statusChange).reduce((s,i)=>s+(i.ids?.length||i.drafts?.length||0),0);
+  const totalNotify = cart.filter(i=>i.notifyOnly&&!i.informCpsa&&!i.clashNotify).reduce((s,i)=>s+(i.drafts?.length||0),0);
+  const totalClash  = cart.filter(i=>i.clashNotify).length;
+  const totalInform = cart.filter(i=>i.informCpsa).reduce((s,i)=>s+(i.drafts?.length||0),0);
+  // Group CPSA status notify-only items by booker email so the cart doesn't explode
+  // into one row per booking. Status-change, clash and inform-CPSA items are rendered
+  // separately below (clash/inform have no drafts to group).
   const notifyByEmail = {};
   cart.forEach((item, gi) => {
-    if (!item.notifyOnly) return;
+    if (!item.notifyOnly || item.informCpsa || item.clashNotify) return;
     const key = item.email;
     if (!notifyByEmail[key]) notifyByEmail[key] = { name: item.name, email: item.email, newStatus: item.newStatus, entries: [] };
     item.drafts.forEach((d, di) => notifyByEmail[key].entries.push({ d, gi, di }));
   });
+
+  function removeItem(gi) { setCart(prev => prev.filter((_,i)=>i!==gi)); }
+  function toggleItemSkip(gi) { setCart(prev => prev.map((it,i)=>i===gi?{...it,skipEmail:!it.skipEmail}:it)); }
 
   function removeDraft(gi, di) {
     setCart(prev => prev.map((item,i) => {
@@ -1358,12 +1461,12 @@ function CartModal({ cart, setCart, onClose, onSubmit, openNew }) {
         : (
           <>
             <div style={{fontSize:13,color:'#64748b',marginBottom:12}}>
-              {[totalNew>0&&`${totalNew} new booking${totalNew>1?'s':''}`, totalEdits>0&&`${totalEdits} edit${totalEdits>1?'s':''}`, totalNotify>0&&`${totalNotify} CPSA notification${totalNotify>1?'s':''}`].filter(Boolean).join(' · ')} ready to submit.
+              {[totalNew>0&&`${totalNew} new booking${totalNew>1?'s':''}`, totalEdits>0&&`${totalEdits} edit${totalEdits>1?'s':''}`, totalStatus>0&&`${totalStatus} status change${totalStatus>1?'s':''}`, totalClash>0&&`${totalClash} clash alert${totalClash>1?'s':''}`, totalNotify>0&&`${totalNotify} CPSA notification${totalNotify>1?'s':''}`, totalInform>0&&`${totalInform} Inform-CPSA email${totalInform>1?'s':''}`].filter(Boolean).join(' · ')} ready to submit.
             </div>
             <div style={{flex:1,minHeight:0,overflowY:'auto',display:'flex',flexDirection:'column',gap:10,paddingRight:2}}>
               {/* Regular (non-notify) cart items */}
               {cart.map((item,gi)=>{
-                if(item.notifyOnly) return null;
+                if(item.notifyOnly||item.statusChange) return null;
                 const groups = groupDrafts(item.drafts);
                 return (
                   <div key={gi} style={{border:'1.5px solid #e2e8f0',borderRadius:12,overflow:'hidden'}}>
@@ -1475,7 +1578,93 @@ function CartModal({ cart, setCart, onClose, onSubmit, openNew }) {
                   </div>
                 );
               })}
+
+              {/* Inform-CPSA vendor alerts — one card per selected vendor */}
+              {cart.map((item,gi)=>{
+                if(!item.informCpsa) return null;
+                const b=item.drafts[0]; if(!b) return null;
+                const f=FACILITIES.find(x=>x.id===b.facility_id);
+                const reasons=parseMismatchNote(b.system_notes,b.notes);
+                const refs=item.cpsaRefs||[];
+                return (
+                  <div key={'inform-'+gi} style={{border:'1.5px solid #7dd3fc',borderRadius:12,overflow:'hidden'}}>
+                    <div style={{background:'#f0f9ff',padding:'10px 14px',display:'flex',alignItems:'center',gap:8}}>
+                      <EmailChip email={item.email}/>
+                      <span style={{fontSize:13,fontWeight:600,color:'#0f172a',flex:1}}>{item.name}</span>
+                      <span style={{fontSize:11,fontWeight:700,color:'#0369a1',background:'#e0f2fe',border:'1px solid #7dd3fc',borderRadius:4,padding:'1px 7px'}}>📨 Inform CPSA</span>
+                      <button onClick={()=>removeDraft(gi,0)} title="Remove" style={{background:'none',border:'none',cursor:'pointer',color:'#f43f5e',fontSize:15,padding:'2px 4px',lineHeight:1}}>✕</button>
+                    </div>
+                    <div style={{padding:'8px 14px',fontSize:12,color:'#64748b',background:'#fff'}}>
+                      <div><span style={{fontWeight:600,color:'#0f172a',marginRight:6}}>{f?.name||b.facility_id}</span>{fmtDate(b.date)} · {fmtTime(b.start_hour)}–{fmtTime(b.start_hour+b.duration)}</div>
+                      {reasons.length>0&&<div style={{marginTop:4,color:'#0369a1'}}>{reasons.join(' · ')}</div>}
+                      {refs.length>0
+                        ? <div style={{marginTop:4,fontSize:11,color:'#0891b2'}}>🔗 {refs.map(r=>r.ref).join(', ')}</div>
+                        : <div style={{marginTop:4,fontSize:11,color:'#94a3b8'}}>No CPSA link on file</div>}
+                    </div>
+                  </div>
+                );
+              })}
+
+              {/* Queued status-change actions — applied on submit */}
+              {cart.map((item,gi)=>{
+                if(!item.statusChange) return null;
+                const meta=STATUS_META[item.newStatus]||{};
+                const willEmail=!item.skipEmail;
+                return (
+                  <div key={'status-'+gi} style={{border:`1.5px solid ${meta.border||'#e2e8f0'}`,borderRadius:12,overflow:'hidden'}}>
+                    <div style={{background:meta.bg||'#f8fafc',padding:'10px 14px',display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
+                      <EmailChip email={item.email}/>
+                      <span style={{fontSize:13,fontWeight:600,color:'#0f172a'}}>{item.name}</span>
+                      <Badge status={item.newStatus}/>
+                      <span style={{fontSize:12,color:'#94a3b8'}}>· {item.drafts.length} booking{item.drafts.length>1?'s':''}</span>
+                      <button onClick={()=>removeItem(gi)} title="Remove" style={{marginLeft:'auto',background:'none',border:'none',cursor:'pointer',color:'#f43f5e',fontSize:15,padding:'2px 4px',lineHeight:1}}>✕</button>
+                    </div>
+                    <div style={{padding:'8px 14px',background:'#fff',display:'flex',flexDirection:'column',gap:4}}>
+                      {item.drafts.map((d,k)=>{ const f=FACILITIES.find(x=>x.id===d.facility_id); return (
+                        <div key={k} style={{display:'flex',gap:8,alignItems:'center',fontSize:12,color:'#64748b'}}>
+                          <span style={{width:7,height:7,borderRadius:'50%',background:f?.color||'#94a3b8',flexShrink:0,display:'inline-block'}}/>
+                          <span style={{fontWeight:600,color:'#0f172a'}}>{f?.name||d.facility_id}</span>
+                          {fmtDate(d.date)} · {fmtTime(d.start_hour)}–{fmtTime(d.start_hour+d.duration)}
+                        </div>
+                      );})}
+                      {item.adminNote&&<div style={{fontSize:11,color:'#94a3b8',marginTop:2}}>Note: {item.adminNote}</div>}
+                      <label style={{display:'flex',alignItems:'center',gap:6,fontSize:11,color:willEmail?'#475569':'#94a3b8',marginTop:4,cursor:'pointer'}}>
+                        <input type="checkbox" checked={!willEmail} onChange={()=>toggleItemSkip(gi)} style={{width:13,height:13,accentColor:'#0f172a'}}/>
+                        Don&apos;t email this booker
+                      </label>
+                    </div>
+                  </div>
+                );
+              })}
+
+              {/* Clash alerts — one per affected booker */}
+              {cart.map((item,gi)=>{
+                if(!item.clashNotify) return null;
+                const n=(item.clashes||[]).length;
+                return (
+                  <div key={'clash-'+gi} style={{border:'1.5px solid #fda4af',borderRadius:12,overflow:'hidden'}}>
+                    <div style={{background:'#fff1f2',padding:'10px 14px',display:'flex',alignItems:'center',gap:8}}>
+                      <EmailChip email={item.email}/>
+                      <span style={{fontSize:13,fontWeight:600,color:'#0f172a',flex:1}}>{item.name}</span>
+                      <span style={{fontSize:11,fontWeight:700,color:'#9f1239',background:'#fecdd3',border:'1px solid #fda4af',borderRadius:4,padding:'1px 7px'}}>⚠️ {n} clash{n!==1?'es':''}</span>
+                      <button onClick={()=>removeItem(gi)} title="Remove" style={{background:'none',border:'none',cursor:'pointer',color:'#f43f5e',fontSize:15,padding:'2px 4px',lineHeight:1}}>✕</button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
+            {onToggleSilent&&(
+              <div style={{display:'flex',alignItems:'center',gap:10,padding:'10px 12px',borderRadius:10,marginTop:8,flexShrink:0,background:silentMode?'#fffbeb':'#ecfdf5',border:`1.5px solid ${silentMode?'#fde68a':'#6ee7b7'}`}}>
+                <span style={{fontSize:18}}>{silentMode?'🔇':'🔔'}</span>
+                <div style={{flex:1,fontSize:12,color:silentMode?'#92400e':'#047857'}}>
+                  <div style={{fontWeight:700}}>{silentMode?'Silent mode ON':'Emails will be sent on submit'}</div>
+                  <div>{silentMode?'Submitting applies changes/removals but sends no emails.':'Bookers and vendors are emailed when you submit.'}</div>
+                </div>
+                <button onClick={()=>onToggleSilent(!silentMode)} style={S.btn({background:silentMode?'#f59e0b':'#10b981',color:'#fff',fontSize:12,fontWeight:700})}>
+                  {silentMode?'Enable emails':'Mute emails'}
+                </button>
+              </div>
+            )}
             <div style={{display:'flex',gap:10,justifyContent:'space-between',paddingTop:12,marginTop:4,borderTop:'1px solid #f1f5f9',flexShrink:0}}>
               <button onClick={()=>setCart([])} style={S.btn({border:'1.5px solid #f43f5e',background:'#fff',color:'#f43f5e'})}>Clear All</button>
               <div style={{display:'flex',gap:10}}>
@@ -1535,7 +1724,7 @@ function InlineDraftEditor({ draft, onSave, onCancel }) {
   );
 }
 
-function DeleteCartModal({ deleteQueue, setDeleteQueue, onClose, onSubmit, isAdmin, silentMode=false }) {
+function DeleteCartModal({ deleteQueue, setDeleteQueue, onClose, onSubmit, isAdmin, silentMode=false, onToggleSilent }) {
   const [adminNote, setAdminNote] = useState('');
   const [skipEmail, setSkipEmail] = useState(false);
   return (
@@ -1564,10 +1753,22 @@ function DeleteCartModal({ deleteQueue, setDeleteQueue, onClose, onSubmit, isAdm
         <div style={{marginBottom:12,display:'flex',flexDirection:'column',gap:8}}>
           <label style={S.lbl}>Admin Note (optional — included in email)</label>
           <textarea style={{...S.inp,resize:'vertical',minHeight:52,fontSize:13}} value={adminNote} onChange={e=>setAdminNote(e.target.value)} placeholder="Reason for removal..."/>
-          <label style={{display:'flex',alignItems:'center',gap:8,cursor:silentMode?'default':'pointer',fontSize:13,color:silentMode?'#94a3b8':'#475569'}}>
-            <input type="checkbox" checked={silentMode||skipEmail} onChange={e=>!silentMode&&setSkipEmail(e.target.checked)} disabled={silentMode} style={{width:15,height:15,accentColor:'#0f172a'}}/>
-            {silentMode?"Silent mode: no email will be sent":"Remove without notifying bookers by email"}
+          <label style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer',fontSize:13,color:'#475569'}}>
+            <input type="checkbox" checked={skipEmail} onChange={e=>setSkipEmail(e.target.checked)} style={{width:15,height:15,accentColor:'#0f172a'}}/>
+            Remove without notifying bookers by email
           </label>
+        </div>
+      )}
+      {isAdmin&&onToggleSilent&&(
+        <div style={{display:'flex',alignItems:'center',gap:10,padding:'10px 12px',borderRadius:10,marginBottom:12,background:silentMode?'#fffbeb':'#ecfdf5',border:`1.5px solid ${silentMode?'#fde68a':'#6ee7b7'}`}}>
+          <span style={{fontSize:18}}>{silentMode?'🔇':'🔔'}</span>
+          <div style={{flex:1,fontSize:12,color:silentMode?'#92400e':'#047857'}}>
+            <div style={{fontWeight:700}}>{silentMode?'Silent mode ON':'Emails will be sent on submit'}</div>
+            <div>{silentMode?'Removal happens but no booker email is sent.':'Bookers are emailed their removal when you confirm.'}</div>
+          </div>
+          <button onClick={()=>onToggleSilent(!silentMode)} style={S.btn({background:silentMode?'#f59e0b':'#10b981',color:'#fff',fontSize:12,fontWeight:700})}>
+            {silentMode?'Enable emails':'Mute emails'}
+          </button>
         </div>
       )}
       <div style={{display:'flex',gap:10,justifyContent:'space-between',paddingTop:10,borderTop:'1px solid #f1f5f9',flexShrink:0}}>
@@ -5386,7 +5587,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
 
 
 // ─── Admin Panel with action queue, bulk approve, facility rates ──────────────
-function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,clashes=[],deleteIds=new Set(),facilityRates={},onClearOldUnapproved,silentMode=false,onBulkApply,onSaveMismatch,onMarkAdjustmentSettled,loggedInEmail,syncResults=[],onClearSyncResults,showSyncResults=false,onToggleSyncResults,bookerFilter=new Set(),onToggleBooker,onSetBookerFilter,aliasNames={},emailAliases={}}) {
+function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,clashes=[],deleteIds=new Set(),facilityRates={},onClearOldUnapproved,onBulkApply,onSaveMismatch,onInformCpsa,onQueueNotifications,onMarkAdjustmentSettled,loggedInEmail,syncResults=[],onClearSyncResults,showSyncResults=false,onToggleSyncResults,bookerFilter=new Set(),onToggleBooker,onSetBookerFilter,aliasNames={},emailAliases={}}) {
   const [showSchedulePanel, setShowSchedulePanel] = useState(false);
   const [showActivityPanel, setShowActivityPanel] = useState(false);
   // Which sync-result months are expanded in the grouped dropdown (monthKey set).
@@ -5422,10 +5623,8 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
   const [bulkSending,setBulkSending]=useState(false);
   const [bulkStatus,setBulkStatus]=useState("queued_cpsa");
   const [bulkSkipEmail,setBulkSkipEmail]=useState(false);
-  const [clashSending,setClashSending]=useState(false);
   const [showClashNotify,setShowClashNotify]=useState(false);
   const [clashNotifyUser,setClashNotifyUser]=useState(null);
-  const [mismatchSending,setMismatchSending]=useState(false);
   const [showMismatchNotify,setShowMismatchNotify]=useState(false);
   const [mismatchNotifyUser,setMismatchNotifyUser]=useState(null);
   // Per-row action queue: [{id, newStatus}]
@@ -5435,7 +5634,6 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
   const [actionSending,setActionSending]=useState(false);
   // Clear old unapproved modal
   const [showClearModal,setShowClearModal]=useState(false);
-  const [clearSkipEmail,setClearSkipEmail]=useState(false);
   const [clashGrouped,setClashGrouped]=useState(true);
   const [clashPatternModal,setClashPatternModal]=useState(null);
   const [showClashPanel,setShowClashPanel]=useState(false);
@@ -5448,13 +5646,15 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
   const today=todayKey();
 
   // Build and persist a mismatch resolution for one booking.
-  async function saveMismatchResolution(booking, resolution, billingState) {
+  async function saveMismatchResolution(booking, resolution, billingState, effectiveVals) {
     const reasons = parseMismatchNote(booking.system_notes, booking.notes);
     let sysNotes = booking.system_notes || "";
     const patch = { updated_at: new Date().toISOString() };
     if (resolution === "amended") {
       sysNotes = setCpsaOrig(sysNotes, booking);
-      Object.assign(patch, extractCpsaAmendValues(reasons, booking), { status: "cpsa_confirmed" });
+      // Apply the per-field effective values (CPSA only where the admin switched that
+      // field; ours elsewhere). Falls back to all-CPSA values for legacy callers.
+      Object.assign(patch, effectiveVals || extractCpsaAmendValues(reasons, booking), { status: "cpsa_confirmed" });
       sysNotes = stripMismatchNote(sysNotes);
     } else if (resolution === "confirmed") {
       // CPSA verbally confirmed our original is correct: keep our values, mark confirmed, clear the mismatch.
@@ -5541,29 +5741,15 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
         byStatus[a.newStatus].push(a.id);
       });
       for(const [status, ids] of Object.entries(byStatus)) {
-        await onBulkStatusChange(ids, status, actionNote, silentMode || actionSkipEmail);
+        await onBulkStatusChange(ids, status, actionNote, actionSkipEmail);
       }
       setActionQueue([]); setActionNote("");
     } finally { setActionSending(false); }
   }
 
-  async function sendClashEmailToUser(email, name, userClashes) {
-    const rows = userClashes.map(c => {
-      const f = FACILITIES.find(x => x.id === c.admin.facility_id);
-      return "<tr><td style='padding:6px 8px'>" + (c.admin.purpose||"Admin booking") + "</td><td style='padding:6px 8px'>" + (f?.name||"") + "</td><td style='padding:6px 8px'>" + fmtDate(c.admin.date) + "</td><td style='padding:6px 8px'>" + fmtTime(c.admin.start_hour) + "–" + fmtTime(c.admin.start_hour+c.admin.duration) + "</td><td style='padding:6px 8px'>" + (c.user.purpose||"Your booking") + "</td></tr>";
-    }).join("");
-    const html = "<div style='font-family:sans-serif;max-width:600px'>"
-      + "<h2 style='color:#9f1239'>⚠️ Scheduling Clash Notice</h2>"
-      + "<p>Hi " + (name||email) + ",</p>"
-      + "<p>One or more of your bookings at Cornwall Park clash with scheduled field bookings on the same facility at the same time.</p>"
-      + "<table style='width:100%;border-collapse:collapse;font-size:13px;margin:16px 0;border:1px solid #f1f5f9'><thead><tr style='background:#f8fafc'><th style='padding:8px;text-align:left'>Field Booking</th><th style='padding:8px'>Facility</th><th style='padding:8px'>Date</th><th style='padding:8px'>Time</th><th style='padding:8px'>Your Booking</th></tr></thead><tbody>" + rows + "</tbody></table>"
-      + "<p>Please contact AMUA to discuss rescheduling.</p>"
-      + "<p style='color:#64748b;font-size:12px'>Automated notification from FacilityBook – AMUA.</p></div>";
-    await sendApprovalEmail({ to: email, subject: "⚠️ Scheduling Clash – Action Required", html });
-  }
-
-  async function handleSendClashEmails(targetEmail) {
-    setClashSending(true);
+  // Queue clash notifications into the cart (one per affected booker); emails go
+  // out only when the cart is submitted.
+  function handleSendClashEmails(targetEmail) {
     const byUser = {};
     clashes.forEach(c => {
       const email = c.user.email?.toLowerCase();
@@ -5571,54 +5757,19 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
       if (!byUser[email]) byUser[email] = { name: c.user.name, clashes: [] };
       byUser[email].clashes.push(c);
     });
-    try {
-      if(targetEmail) {
-        const u = byUser[targetEmail];
-        if(u) await sendClashEmailToUser(targetEmail, u.name, u.clashes);
-        alert("Clash notification sent to " + targetEmail + ".");
-      } else {
-        for (const [email, { name, clashes: uc }] of Object.entries(byUser)) {
-          await sendClashEmailToUser(email, name, uc);
-        }
-        alert("Clash notifications sent to " + Object.keys(byUser).length + " user(s).");
-      }
-      setShowClashNotify(false); setClashNotifyUser(null);
-    } catch(e) {
-      alert("Failed to send email: " + e.message);
-    } finally {
-      setClashSending(false);
-    }
+    const entries = targetEmail
+      ? (byUser[targetEmail] ? [[targetEmail, byUser[targetEmail]]] : [])
+      : Object.entries(byUser);
+    const items = entries.map(([email, { name, clashes: uc }]) => ({
+      clashNotify:true, notifyOnly:true, email, name, clashes: uc,
+    }));
+    onQueueNotifications?.(items, "clash notification");
+    setShowClashNotify(false); setClashNotifyUser(null);
   }
 
-  // Mismatch notifications — mirrors the clash flow: email each affected booker the
-  // bookings whose CPSA values differ from ours, asking them to confirm/correct.
-  async function sendMismatchEmailToUser(email, name, userBkgs) {
-    const rows = userBkgs.map(b => {
-      const fac = FACILITIES.find(x => x.id === b.facility_id);
-      const reasons = parseMismatchNote(b.system_notes, b.notes);
-      const cv = extractCpsaAmendValues(reasons, b);
-      const cfac = FACILITIES.find(x => x.id === cv.facility_id);
-      const facNote = b.facility_id !== cv.facility_id ? " (" + (cfac?.name || cv.facility_id) + ")" : "";
-      return "<tr>"
-        + "<td style='padding:6px 8px'>" + (b.purpose || "Booking") + "</td>"
-        + "<td style='padding:6px 8px'>" + (fac?.name || b.facility_id) + "</td>"
-        + "<td style='padding:6px 8px'>" + fmtDate(b.date) + "</td>"
-        + "<td style='padding:6px 8px'><span style='text-decoration:line-through;color:#94a3b8'>" + fmtTime(b.start_hour) + "–" + fmtTime(b.start_hour + b.duration) + "</span> → <span style='color:#a16207;font-weight:700'>" + fmtTime(cv.start_hour) + "–" + fmtTime(cv.start_hour + cv.duration) + facNote + "</span></td>"
-        + "<td style='padding:6px 8px;color:#64748b'>" + reasons.join("; ") + "</td>"
-        + "</tr>";
-    }).join("");
-    const html = "<div style='font-family:sans-serif;max-width:640px'>"
-      + "<h2 style='color:#b45309'>⚡ CPSA Booking Mismatch — Please Review</h2>"
-      + "<p>Hi " + (name || email) + ",</p>"
-      + "<p>The details CPSA holds for the following booking(s) currently differ from your original request. We're clarifying these with CPSA, so nothing is final yet.</p>"
-      + "<table style='width:100%;border-collapse:collapse;font-size:13px;margin:16px 0;border:1px solid #fde68a'><thead><tr style='background:#fef3c7'><th style='padding:8px;text-align:left'>Booking</th><th style='padding:8px'>Field</th><th style='padding:8px'>Date</th><th style='padding:8px'>Booked → CPSA</th><th style='padding:8px'>Changes</th></tr></thead><tbody>" + rows + "</tbody></table>"
-      + "<p>AMUA will do its best to align each booking to your original request as closely as it can. If the booked time ends up reduced, the difference will be credited against a future invoice. If you have any questions, just reply to this email and we'll follow up.</p>"
-      + "<p style='color:#64748b;font-size:12px'>Automated notification from FacilityBook – AMUA.</p></div>";
-    await sendApprovalEmail({ to: email, subject: "⚡ CPSA Booking Mismatch – Please Review", html });
-  }
-
-  async function handleSendMismatchEmails(targetEmail) {
-    setMismatchSending(true);
+  // Queue mismatch notifications into the cart (one per affected booker). Reuses the
+  // cpsa_review_needed notify path, so the cart submit sends the proper amber email.
+  function handleSendMismatchEmails(targetEmail) {
     const byUser = {};
     bookings.filter(b => b.status === "cpsa_review_needed" && !isAdminBooking(b) && inBookerFilter(b.email)).forEach(b => {
       const email = b.email?.toLowerCase();
@@ -5626,23 +5777,14 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
       if (!byUser[email]) byUser[email] = { name: b.name, bkgs: [] };
       byUser[email].bkgs.push(b);
     });
-    try {
-      if (targetEmail) {
-        const u = byUser[targetEmail];
-        if (u) await sendMismatchEmailToUser(targetEmail, u.name, u.bkgs);
-        alert("Mismatch notification sent to " + targetEmail + ".");
-      } else {
-        for (const [email, { name, bkgs }] of Object.entries(byUser)) {
-          await sendMismatchEmailToUser(email, name, bkgs);
-        }
-        alert("Mismatch notifications sent to " + Object.keys(byUser).length + " user(s).");
-      }
-      setShowMismatchNotify(false); setMismatchNotifyUser(null);
-    } catch(e) {
-      alert("Failed to send email: " + e.message);
-    } finally {
-      setMismatchSending(false);
-    }
+    const entries = targetEmail
+      ? (byUser[targetEmail] ? [[targetEmail, byUser[targetEmail]]] : [])
+      : Object.entries(byUser);
+    const items = entries.map(([email, { name, bkgs }]) => ({
+      notifyOnly:true, newStatus:"cpsa_review_needed", email, name, drafts: bkgs,
+    }));
+    onQueueNotifications?.(items, "mismatch notification");
+    setShowMismatchNotify(false); setMismatchNotifyUser(null);
   }
 
   async function handleBulkAction() {
@@ -5650,7 +5792,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
     if(ids.length===0) return;
     setBulkSending(true);
     try {
-      await onBulkStatusChange(ids, bulkStatus, bulkNote, silentMode || bulkSkipEmail);
+      await onBulkStatusChange(ids, bulkStatus, bulkNote, bulkSkipEmail);
       setSelected(new Set()); setBulkNote("");
     } finally { setBulkSending(false); }
   }
@@ -5849,13 +5991,13 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
           </div>
           <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
             <input style={{...si,flex:1,minWidth:200}} placeholder="Optional note for emails…" value={actionNote} onChange={e=>setActionNote(e.target.value)}/>
-            <label style={{display:"flex",alignItems:"center",gap:6,cursor:silentMode?"default":"pointer",fontSize:12,color:silentMode?"#94a3b8":"#475569",flexShrink:0}}>
-              <input type="checkbox" checked={silentMode||actionSkipEmail} onChange={e=>!silentMode&&setActionSkipEmail(e.target.checked)} disabled={silentMode} style={{width:14,height:14,accentColor:"#0f172a"}}/>
-              {silentMode?"Silent mode active":"No email notifications"}
+            <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",fontSize:12,color:"#475569",flexShrink:0}}>
+              <input type="checkbox" checked={actionSkipEmail} onChange={e=>setActionSkipEmail(e.target.checked)} style={{width:14,height:14,accentColor:"#0f172a"}}/>
+              Don&apos;t email bookers for this action
             </label>
             <button onClick={submitActionQueue} disabled={actionSending}
               style={S.btn({background:"#166534",color:"#fff",fontWeight:700,opacity:actionSending?0.6:1})}>
-              {actionSending?"Processing…":`Submit ${actionQueue.length} action${actionQueue.length>1?"s":""}`}
+              {actionSending?"Adding…":`Add ${actionQueue.length} action${actionQueue.length>1?"s":""} to cart`}
             </button>
           </div>
         </div>
@@ -5882,12 +6024,12 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                 <input style={{...si,flex:1,minWidth:200}} placeholder="Optional note to include in email…" value={bulkNote} onChange={e=>setBulkNote(e.target.value)}/>
                 <button onClick={handleBulkAction} disabled={bulkSending}
                   style={S.btn({background:bulkStatus==="rejected"?"#f43f5e":bulkStatus==="approved"?"#22c55e":"#3b82f6",color:"#fff",opacity:bulkSending?0.6:1})}>
-                  {bulkSending?"Processing…":`Apply to ${selected.size}`}
+                  {bulkSending?"Adding…":`Add ${selected.size} to cart`}
                 </button>
               </div>
-              <label style={{display:"flex",alignItems:"center",gap:8,cursor:silentMode?"default":"pointer",fontSize:12,color:silentMode?"#94a3b8":"#64748b"}}>
-                <input type="checkbox" checked={silentMode||bulkSkipEmail} onChange={e=>!silentMode&&setBulkSkipEmail(e.target.checked)} disabled={silentMode} style={{width:14,height:14,accentColor:"#0f172a"}}/>
-                {silentMode?"Silent mode active":"Don't send email notifications to bookers"}
+              <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:12,color:"#64748b"}}>
+                <input type="checkbox" checked={bulkSkipEmail} onChange={e=>setBulkSkipEmail(e.target.checked)} style={{width:14,height:14,accentColor:"#0f172a"}}/>
+                Don&apos;t email bookers for this action
               </label>
             </>
           )}
@@ -5922,8 +6064,8 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                   <input type="checkbox" checked={clashGrouped} onChange={e=>setClashGrouped(e.target.checked)} style={{accentColor:"#f43f5e"}}/>
                   Group recurring
                 </label>
-                <button onClick={()=>setShowClashNotify(true)} disabled={clashSending}
-                  style={S.btn({background:"#f43f5e",color:"#fff",fontWeight:700,opacity:clashSending?0.7:1})}>
+                <button onClick={()=>setShowClashNotify(true)}
+                  style={S.btn({background:"#f43f5e",color:"#fff",fontWeight:700})}>
                   📧 Notify affected users
                 </button>
               </div>
@@ -6004,14 +6146,6 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
         }
         const thS2={padding:"7px 10px",textAlign:"left",fontWeight:700,color:"#92400e",whiteSpace:"nowrap",borderBottom:"1px solid #fde68a",fontSize:11,textTransform:"uppercase",letterSpacing:"0.04em"};
         const tdS2={padding:"7px 10px",borderBottom:"1px solid #fde68a",verticalAlign:"top"};
-
-        // Suggest a billing state when "amended" is chosen for an invoiced booking.
-        function suggestBillingState(b, reasons) {
-          if (!b.invoiced) return "none";
-          const cv=extractCpsaAmendValues(reasons,b);
-          const delta=cv.duration-b.duration;
-          return delta>0?"invoice_pending":delta<0?"credit_pending":"none";
-        }
 
         // Derive overall resolution from per-field selections.
         // Returns "amended"|"to_correct"|"pending"
@@ -6100,11 +6234,39 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
           // Derive resolution from per-field selections
           const curRes=deriveResolution(changedFields, fieldSel);
 
+          // CPSA submission link(s) + ref ("submission id") for this booking.
+          const cpsaRefs=parseCpsaRefs(b.system_notes,b.notes);
+
+          // Saved record reflects the per-field keep/switch choice (CPSA's value only
+          // where the admin switched that field; ours elsewhere).
+          function effectiveFrom(sel) {
+            return {
+              facility_id: sel.facility==="cpsa" ? cpsaVals.facility_id : b.facility_id,
+              start_hour:  sel.time==="cpsa"     ? cpsaVals.start_hour  : b.start_hour,
+              duration:    sel.duration==="cpsa" ? cpsaVals.duration    : b.duration,
+            };
+          }
+          function rowCostOf(v) {
+            const CUTOFF=17.5, end=v.start_hour+v.duration;
+            const day = v.start_hour>=CUTOFF ? 0 : end>CUTOFF ? CUTOFF-v.start_hour : v.duration;
+            const evening = v.duration-day;
+            const r=facilityRates[v.facility_id];
+            const rates = !r ? {day:0,evening:0} : typeof r==="object" ? {day:parseFloat(r.day)||0,evening:parseFloat(r.evening)||0} : {day:parseFloat(r)||0,evening:0};
+            return day*rates.day + evening*rates.evening;
+          }
+          const origCost=rowCostOf(b);
+          const effectiveVals=effectiveFrom(fieldSel); // what we save to the booking
+          // Billing reconciles what we BILLED against CPSA's confirmed record (cpsaVals),
+          // not the values we keep — so a CPSA reduction credits the booker even when we
+          // keep the longer booking, and a same-cost change (e.g. a facility swap at the
+          // same rate) shows nothing. <0 ⇒ credit owed to booker, >0 ⇒ deficit owed by booker.
+          const cpsaCostDelta=rowCostOf(cpsaVals)-origCost;
+
           function pickField(field, who) {
             if (alreadySettled && who==="cpsa") setShowWarn(true);
             const newSel={...fieldSel,[field]:who};
             const newRes=deriveResolution(changedFields,newSel);
-            const auto=newRes==="amended"?suggestBillingState(b,reasons):"none";
+            const auto=(newRes==="amended"&&b.invoiced)?(cpsaCostDelta<0?"credit_pending":cpsaCostDelta>0?"invoice_pending":"none"):"none";
             setMismatchResState(prev=>({
               ...prev,
               [b.id]:{
@@ -6126,7 +6288,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
           function setBilling(bs) {
             setMismatchResState(prev=>({...prev,[b.id]:{...prev[b.id],resolution:curRes,billingState:bs}}));
           }
-          function doSave() { saveMismatchResolution(b,curRes,curBilling); }
+          function doSave() { saveMismatchResolution(b,curRes,curBilling,effectiveVals); }
 
           const isDirty=!!local;
           const rowBg=rowIdx%2===0?"#fff":"#fffbeb";
@@ -6185,6 +6347,12 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                 <div style={{fontWeight:600,color:"#0f172a",whiteSpace:"nowrap"}}>{b.name}</div>
                 <div style={{color:"#64748b",fontSize:10}}>{b.email}</div>
                 {b.invoiced&&<span style={{fontSize:10,fontWeight:700,background:"#f5f3ff",color:"#5b21b6",border:"1px solid #ddd6fe",borderRadius:4,padding:"1px 4px",display:"inline-block",marginTop:2}}>🧾 invoiced</span>}
+                {cpsaRefs.map((r,i)=>(
+                  <a key={i} href={r.url} target="_blank" rel="noopener noreferrer" title={`CPSA submission ${r.ref} — open the booking on Sporty`}
+                    style={{display:"flex",alignItems:"center",gap:3,marginTop:3,fontSize:10,fontWeight:700,color:"#0369a1",textDecoration:"none",width:"fit-content",background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:4,padding:"1px 5px"}}>
+                    🔗 {r.ref} ↗
+                  </a>
+                ))}
               </td>
               {/* Date */}
               <td style={{...tdS2,whiteSpace:"nowrap",color:"#475569"}}>{fmtDate(b.date)}</td>
@@ -6229,6 +6397,9 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                       <button onClick={()=>saveMismatchResolution(b,"confirmed","none")}
                         title="CPSA verbally confirmed our original is correct - keep our values and mark the booking confirmed"
                         style={{fontFamily:"inherit",fontSize:11,fontWeight:700,borderRadius:5,padding:"3px 9px",cursor:"pointer",background:"#ecfdf5",border:"1.5px solid #6ee7b7",color:"#047857",whiteSpace:"nowrap",textAlign:"left"}}>✓ Confirmed by CPSA</button>
+                      <button onClick={()=>onInformCpsa&&onInformCpsa(b)}
+                        title="Cart an email to a vendor asking CPSA to correct their schedule to match our record. Does not resolve the mismatch."
+                        style={{fontFamily:"inherit",fontSize:11,fontWeight:700,borderRadius:5,padding:"3px 9px",cursor:"pointer",background:"#f0f9ff",border:"1.5px solid #7dd3fc",color:"#0369a1",whiteSpace:"nowrap",textAlign:"left"}}>📨 Inform CPSA</button>
                     </div>
                   )}
                   {curRes==="pending"&&changedFields.length>0&&(
@@ -6240,36 +6411,10 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                   )}
                   {/* Billing follow-up — only relevant when amended */}
                   {curRes==="amended"&&(()=>{
-                    const delta=cpsaVals.duration-b.duration; // +ve = undercharged, -ve = overcharged
                     const ghost=(col)=>({fontFamily:"inherit",fontSize:11,fontWeight:700,borderRadius:5,padding:"3px 9px",cursor:"pointer",background:"transparent",border:`1.5px solid ${col}`,color:col});
-
-                    // Calculate the dollar value of the duration change at the booking's rate.
-                    // For facility-change amendments the rate also changes; account for that too.
-                    const CUTOFF = 17.5;
-                    function splitH(sh, dur) {
-                      const end = sh + dur;
-                      if (sh >= CUTOFF) return { day:0, evening:dur };
-                      if (end > CUTOFF) return { day:CUTOFF-sh, evening:end-CUTOFF };
-                      return { day:dur, evening:0 };
-                    }
-                    function getRates(facId) {
-                      const r = facilityRates[facId];
-                      if (!r) return { day:0, evening:0 };
-                      if (typeof r === "object") return { day:parseFloat(r.day)||0, evening:parseFloat(r.evening)||0 };
-                      return { day:parseFloat(r)||0, evening:0 };
-                    }
-                    // Cost at CPSA-amended values minus cost at our original values.
-                    const origSplit = splitH(b.start_hour, b.duration);
-                    const origRates = getRates(b.facility_id);
-                    const origCost = origSplit.day*origRates.day + origSplit.evening*origRates.evening;
-                    const newFacId = cpsaVals.facility_id || b.facility_id;
-                    const newSH = cpsaVals.start_hour ?? b.start_hour;
-                    const newSplit = splitH(newSH, cpsaVals.duration);
-                    const newRates = getRates(newFacId);
-                    const newCost = newSplit.day*newRates.day + newSplit.evening*newRates.evening;
-                    const costDelta = newCost - origCost; // +ve = we owe more, -ve = we owe a credit
+                    const newCost = rowCostOf(cpsaVals);
                     const hasCostInfo = origCost > 0 || newCost > 0;
-                    const absCostStr = hasCostInfo ? ` — ${fmtCost(Math.abs(costDelta))}` : "";
+                    const absCostStr = hasCostInfo ? ` — ${fmtCost(Math.abs(cpsaCostDelta))}` : "";
 
                     if (!b.invoiced) {
                       const settled = curBilling==="nochange";
@@ -6278,10 +6423,10 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                           <div style={{fontSize:10,fontWeight:700,color:"#92400e",textTransform:"uppercase",letterSpacing:"0.04em",marginBottom:3}}>Follow-up</div>
                           {!settled
                             ? <button style={ghost("#94a3b8")}
-                                title="Booking has not been invoiced yet — just update the stored record to match CPSA. No billing adjustment needed."
+                                title="Booking has not been invoiced yet — just update the stored record to the kept values. No billing adjustment needed."
                                 onClick={()=>setBilling("nochange")}>📝 Update record</button>
                             : <div style={{display:"flex",gap:4,alignItems:"center"}}>
-                                <span title="Record will be updated to CPSA values on save."
+                                <span title="Record will be updated to the kept values on save."
                                   style={{fontSize:11,fontWeight:700,color:"#475569",cursor:"help"}}>📝 Update record</span>
                                 <button style={{fontFamily:"inherit",fontSize:11,border:"1.5px solid #cbd5e1",borderRadius:4,background:"transparent",color:"#94a3b8",cursor:"pointer",padding:"1px 5px"}} onClick={()=>setBilling("none")} title="Undo">↩</button>
                               </div>
@@ -6289,32 +6434,35 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                         </div>
                       );
                     }
-                    // Invoiced path — costDelta drives credit vs deficit.
-                    const overcharged = costDelta > 0; // CPSA cost higher than billed → booker owes more → was undercharged from their side, but here treated as credit
-                    const undercharged = costDelta < 0; // CPSA cost lower than billed → booker owed less than charged → deficit
+                    // Invoiced path — reconcile what we billed against CPSA's confirmed record.
+                    // cpsaCostDelta<0 ⇒ CPSA's record costs less than billed ⇒ credit owed to
+                    // booker; >0 ⇒ deficit owed by booker; 0 ⇒ no adjustment.
+                    const isCredit  = cpsaCostDelta < 0;
+                    const isDeficit = cpsaCostDelta > 0;
                     return (
                       <div style={{borderTop:"1px dashed #fde68a",paddingTop:4}}>
                         <div style={{fontSize:10,fontWeight:700,color:"#92400e",textTransform:"uppercase",letterSpacing:"0.04em",marginBottom:3}}>Billing</div>
                         {curBilling==="none"&&(
-                          <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
-                            {overcharged&&<button style={ghost("#15803d")}
-                              title={`Billed ${fmtCost(origCost)} (${b.duration}h) but CPSA shows ${cpsaVals.duration}h @ ${fmtCost(newCost)}. Credit ${fmtCost(Math.abs(costDelta))} owed.`}
-                              onClick={()=>setBilling("credit_pending")}>💚 Credit{absCostStr}</button>}
-                            {undercharged&&<button style={ghost("#dc2626")}
-                              title={`Billed ${fmtCost(origCost)} (${b.duration}h) but CPSA shows ${cpsaVals.duration}h @ ${fmtCost(newCost)}. Deficit ${fmtCost(Math.abs(costDelta))} owed.`}
-                              onClick={()=>setBilling("invoice_pending")}>📨 Deficit{absCostStr}</button>}
-                            {costDelta===0&&<span style={{fontSize:11,color:"#475569"}}>No billing impact.</span>}
-                            <button style={ghost("#94a3b8")}
-                              title="No billing adjustment needed (already reconciled or intentional)."
-                              onClick={()=>setBilling("nochange")}>No adj.</button>
-                          </div>
+                          cpsaCostDelta===0
+                            ? <span style={{fontSize:11,color:"#475569"}}>No cost change vs CPSA — no billing adjustment.</span>
+                            : <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
+                                {isCredit&&<button style={ghost("#15803d")}
+                                  title={`Billed ${fmtCost(origCost)} but CPSA's record is ${fmtCost(newCost)} — credit ${fmtCost(Math.abs(cpsaCostDelta))} owed to the booker.`}
+                                  onClick={()=>setBilling("credit_pending")}>💚 Credit{absCostStr}</button>}
+                                {isDeficit&&<button style={ghost("#dc2626")}
+                                  title={`Billed ${fmtCost(origCost)} but CPSA's record is ${fmtCost(newCost)} — deficit ${fmtCost(Math.abs(cpsaCostDelta))} owed by the booker.`}
+                                  onClick={()=>setBilling("invoice_pending")}>📨 Deficit{absCostStr}</button>}
+                                <button style={ghost("#94a3b8")}
+                                  title="No billing adjustment needed (already reconciled or intentional)."
+                                  onClick={()=>setBilling("nochange")}>No adj.</button>
+                              </div>
                         )}
                         {(curBilling==="credit_pending"||curBilling==="invoice_pending")&&(
                           <div style={{display:"flex",gap:4,alignItems:"center"}}>
                             <span
                               title={curBilling==="credit_pending"
-                                ? `Credit ${fmtCost(Math.abs(costDelta))} owed to booker (${Math.abs(delta)}h @ ${hasCostInfo?fmtCost(Math.abs(costDelta/delta))+"/h":"rate unknown"}).`
-                                : `Deficit invoice ${fmtCost(costDelta)} owed by booker (${delta}h @ ${hasCostInfo?fmtCost(costDelta/delta)+"/h":"rate unknown"}).`}
+                                ? `Credit ${fmtCost(Math.abs(cpsaCostDelta))} owed to the booker.`
+                                : `Deficit ${fmtCost(Math.abs(cpsaCostDelta))} owed by the booker.`}
                               style={{fontSize:11,fontWeight:700,color:curBilling==="credit_pending"?"#15803d":"#dc2626",cursor:"help"}}>
                               {curBilling==="credit_pending"
                                 ? `💚 Credit${absCostStr}`
@@ -6354,18 +6502,21 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                 <div style={{fontSize:12,color:"#92400e",marginTop:2}}>Click old or new values in each row to set resolution — amended bookings are updated to CPSA values.</div>
               </div>
               <div style={{display:"flex",gap:6}}>
-                {mismatches.length>0&&<button onClick={()=>setShowMismatchNotify(true)} disabled={mismatchSending} style={S.btn({background:"#b45309",color:"#fff",fontWeight:700,fontSize:12,opacity:mismatchSending?0.7:1})}>📧 Notify affected users</button>}
+                {mismatches.length>0&&<button onClick={()=>setShowMismatchNotify(true)} style={S.btn({background:"#b45309",color:"#fff",fontWeight:700,fontSize:12})}>📧 Notify affected users</button>}
                 <button onClick={copyEmailFormat} style={S.btn({background:"#fff",border:"1.5px solid #fde68a",color:"#a16207",fontWeight:700,fontSize:12})}>📧 Copy email</button>
                 <button onClick={()=>{
-                  const blob=new Blob([["Name,Email,Date,Field,Booked,CPSA Says,Changes",...mismatches.map(b=>{
+                  const blob=new Blob([["Name,Email,Date,Field,Booked,CPSA Says,Changes,CPSA Ref,CPSA Link",...mismatches.map(b=>{
                     const fac=FACILITIES.find(x=>x.id===b.facility_id);
                     const reasons=parseMismatchNote(b.system_notes,b.notes);
                     const cv=extractCpsaAmendValues(reasons,b);
+                    const refs=parseCpsaRefs(b.system_notes,b.notes);
                     const esc=v=>`"${String(v).replace(/"/g,'""')}"`;
                     return [b.name,b.email,b.date,fac?.name||b.facility_id,
                       `${fmtTime(b.start_hour)}–${fmtTime(b.start_hour+b.duration)} ${b.duration}h`,
                       `${fmtTime(cv.start_hour)}–${fmtTime(cv.start_hour+cv.duration)} ${cv.duration}h`,
-                      reasons.join("; ")].map(esc).join(",");
+                      reasons.join("; "),
+                      refs.map(r=>r.ref).join(" "),
+                      refs.map(r=>r.url).join(" ")].map(esc).join(",");
                   })].join("\n")],{type:"text/csv"});
                   const url=URL.createObjectURL(blob);const a=document.createElement("a");
                   a.href=url;a.download="cpsa-mismatches.csv";a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
@@ -6586,15 +6737,12 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                 );
               })}
             </div>
-            <label style={{display:"flex",alignItems:"center",gap:8,cursor:silentMode?"default":"pointer",fontSize:13,color:silentMode?"#94a3b8":"#475569",marginBottom:16}}>
-              <input type="checkbox" checked={silentMode||clearSkipEmail} onChange={e=>!silentMode&&setClearSkipEmail(e.target.checked)} disabled={silentMode} style={{width:15,height:15,accentColor:"#0f172a"}}/>
-              {silentMode?"Silent mode active":"Remove without notifying bookers by email"}
-            </label>
+            <div style={{fontSize:12,color:"#64748b",marginBottom:16}}>These move to the 🗑 Removal Queue — the actual deletion and any booker emails happen when you submit that queue.</div>
             <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
               <button onClick={()=>setShowClearModal(false)} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#475569"})}>Cancel</button>
-              <button onClick={async()=>{await onClearOldUnapproved(oldUnapproved.map(b=>b.id),silentMode||clearSkipEmail); setShowClearModal(false);}}
+              <button onClick={()=>{onClearOldUnapproved(oldUnapproved.map(b=>b.id)); setShowClearModal(false);}}
                 style={S.btn({background:"#7c3aed",color:"#fff",fontWeight:700})}>
-                🧹 Delete {oldUnapproved.length} booking{oldUnapproved.length>1?"s":""}
+                🧹 Move {oldUnapproved.length} to removal queue
               </button>
             </div>
           </div>
@@ -6646,13 +6794,13 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
               )}
               <div style={{display:"flex",gap:10,justifyContent:"flex-end",flexWrap:"wrap"}}>
                 <button onClick={()=>{setShowClashNotify(false);setClashNotifyUser(null);}} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#475569"})}>Cancel</button>
-                {selUser&&<button onClick={()=>handleSendClashEmails(selUser.email)} disabled={clashSending}
-                  style={S.btn({background:"#f43f5e",color:"#fff",fontWeight:700,opacity:clashSending?0.6:1})}>
-                  {clashSending?"Sending…":`Send to ${selUser.name}`}
+                {selUser&&<button onClick={()=>handleSendClashEmails(selUser.email)}
+                  style={S.btn({background:"#f43f5e",color:"#fff",fontWeight:700})}>
+                  🛒 Add to cart for {selUser.name}
                 </button>}
-                {!selUser&&<button onClick={()=>handleSendClashEmails(null)} disabled={clashSending}
-                  style={S.btn({background:"#9f1239",color:"#fff",fontWeight:700,opacity:clashSending?0.6:1})}>
-                  {clashSending?"Sending…":`Notify all ${users.length} user${users.length>1?"s":""}`}
+                {!selUser&&<button onClick={()=>handleSendClashEmails(null)}
+                  style={S.btn({background:"#9f1239",color:"#fff",fontWeight:700})}>
+                  🛒 Add all {users.length} to cart
                 </button>}
               </div>
             </div>
@@ -6705,13 +6853,13 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
               )}
               <div style={{display:"flex",gap:10,justifyContent:"flex-end",flexWrap:"wrap"}}>
                 <button onClick={()=>{setShowMismatchNotify(false);setMismatchNotifyUser(null);}} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#475569"})}>Cancel</button>
-                {selUser&&<button onClick={()=>handleSendMismatchEmails(selUser.email)} disabled={mismatchSending}
-                  style={S.btn({background:"#f59e0b",color:"#fff",fontWeight:700,opacity:mismatchSending?0.6:1})}>
-                  {mismatchSending?"Sending…":`Send to ${selUser.name}`}
+                {selUser&&<button onClick={()=>handleSendMismatchEmails(selUser.email)}
+                  style={S.btn({background:"#f59e0b",color:"#fff",fontWeight:700})}>
+                  🛒 Add to cart for {selUser.name}
                 </button>}
-                {!selUser&&users.length>0&&<button onClick={()=>handleSendMismatchEmails(null)} disabled={mismatchSending}
-                  style={S.btn({background:"#b45309",color:"#fff",fontWeight:700,opacity:mismatchSending?0.6:1})}>
-                  {mismatchSending?"Sending…":`Notify all ${users.length} user${users.length>1?"s":""}`}
+                {!selUser&&users.length>0&&<button onClick={()=>handleSendMismatchEmails(null)}
+                  style={S.btn({background:"#b45309",color:"#fff",fontWeight:700})}>
+                  🛒 Add all {users.length} to cart
                 </button>}
               </div>
             </div>
@@ -6924,6 +7072,7 @@ export default function App() {
   const [dayPopupFocus, setDayPopupFocus] = useState(null);
   const [showCart, setShowCart]       =useState(false);
   const [cart,     setCart]           =useState([]); // { drafts, name, email, isMultiEdit? }[]
+  const [informCpsaFor, setInformCpsaFor] = useState(null); // booking awaiting vendor pick for "Inform CPSA"
   const [deleteQueue,setDeleteQueue]  =useState([]); // bookings queued for removal
   const [showDeleteCart,setShowDeleteCart]=useState(false);
   const [editing,  setEditing]  =useState(null);
@@ -7422,17 +7571,15 @@ export default function App() {
     }
   }
 
-  async function handleStatusChange(booking,newStatus) {
-    const patch={status:newStatus,updated_at:new Date().toISOString()};
-    if(configured){try{await sb.update("bookings",booking.id,patch);await loadBookings();}
-      catch(e){showToast("Update failed: "+e.message,"error");return;}}
-    else{setBookings(prev=>prev.map(b=>b.id===booking.id?{...b,...patch}:b));}
-    setViewing(null);showToast(`Booking ${newStatus}!`);
-    logActivity("status_change", { id: booking.id, from: booking.status, to: newStatus });
-    if(!silentMode){
-      sendApprovalEmail({to:booking.email,subject:`Booking ${STATUS_META[newStatus]?.label}`,
-        html:buildApprovalEmailHtml({name:booking.name,email:booking.email,bookings:[{...booking,...patch}],newStatus,adminNote:""})});
-    }
+  function handleStatusChange(booking,newStatus) {
+    // Queue the whole action — the status change and its email are applied when the
+    // cart is submitted, not on click.
+    setCart(c => [...c, {
+      statusChange:true, ids:[booking.id], newStatus, adminNote:"", skipEmail:false,
+      drafts:[booking], name:booking.name, email:booking.email,
+    }]);
+    setViewing(null);
+    showToast(`${STATUS_META[newStatus]?.label||newStatus} queued in cart.`);
   }
 
   function updateFacilityRate(facilityId, type, value) {
@@ -7632,36 +7779,19 @@ export default function App() {
   }
 
   // Bulk approve/reject — groups by email and sends one summary per person
-  async function handleBulkStatusChange(ids, newStatus, adminNote, skipEmail=false) {
+  function handleBulkStatusChange(ids, newStatus, adminNote, skipEmail=false) {
     const affected=bookings.filter(b=>ids.includes(b.id));
-    const patch={status:newStatus,updated_at:new Date().toISOString()};
-    if(configured){
-      try{
-        await Promise.all(affected.map(b=>sb.update("bookings",b.id,patch)));
-        await loadBookings();
-      }catch(e){showToast("Bulk update failed: "+e.message,"error");return;}
-    } else {
-      setBookings(prev=>prev.map(b=>ids.includes(b.id)?{...b,...patch}:b));
-    }
-    logActivity("bulk_status_change", { count: ids.length, to: newStatus });
-    showToast(`${ids.length} booking${ids.length>1?"s":""} ${newStatus}!`);
-
-    const noEmailStatuses = new Set(["pending_cpsa"]);
-    if(!skipEmail && !noEmailStatuses.has(newStatus)){
-      // Group by email, send one email per unique booker
-      const byEmail={};
-      affected.forEach(b=>{
-        const k=b.email.toLowerCase();
-        if(!byEmail[k]) byEmail[k]={name:b.name,email:b.email,bkgs:[]};
-        byEmail[k].bkgs.push({...b,...patch});
-      });
-      const statusLabel = STATUS_META[newStatus]?.label || newStatus;
-      await Promise.all(Object.values(byEmail).map(({name,email,bkgs})=>
-        sendApprovalEmail({to:email,
-          subject:`Your Booking${bkgs.length>1?"s":""} — ${statusLabel}`,
-          html:buildApprovalEmailHtml({name,email,bookings:bkgs,newStatus,adminNote})})
-      ));
-    }
+    if(!affected.length) return;
+    // Queue the whole action — one cart card per booker so emails group cleanly and
+    // the change is applied (and emailed) only on cart submit.
+    const byEmail={};
+    affected.forEach(b=>{ const k=b.email.toLowerCase(); if(!byEmail[k]) byEmail[k]={name:b.name,email:b.email,bkgs:[]}; byEmail[k].bkgs.push(b); });
+    const items=Object.values(byEmail).map(({name,email,bkgs})=>({
+      statusChange:true, ids:bkgs.map(b=>b.id), newStatus, adminNote, skipEmail,
+      drafts:bkgs, name, email,
+    }));
+    setCart(c=>[...c, ...items]);
+    showToast(`${ids.length} booking${ids.length>1?"s":""} queued in cart.`);
   }
 
   // Queue a booking for removal (shows in removal cart)
@@ -7717,29 +7847,14 @@ export default function App() {
     setShowDeleteCart(false);
   }
 
-  // Delete old unapproved (past pending) bookings silently
-  async function handleClearOldUnapproved(ids, skipEmail) {
+  // Move old unapproved (past pending) bookings into the removal queue — the actual
+  // delete and the booker email happen when the removal cart is submitted.
+  function handleClearOldUnapproved(ids) {
     if(!ids.length) return;
     const toRemove = bookings.filter(b=>ids.includes(b.id));
-    if(configured){
-      try{ await Promise.all(ids.map(id=>sb.remove("bookings",id))); await loadBookings(); }
-      catch(e){showToast("Delete failed: "+e.message,"error");return;}
-    } else { setBookings(prev=>prev.filter(b=>!ids.includes(b.id))); }
-
-    if(!skipEmail){
-      const byEmail = {};
-      toRemove.forEach(b=>{
-        const k = b.email.toLowerCase();
-        if(!byEmail[k]) byEmail[k]={name:b.name,email:b.email,bkgs:[]};
-        byEmail[k].bkgs.push(b);
-      });
-      await Promise.all(Object.values(byEmail).map(({name,email,bkgs})=>
-        sendEmail({to:email,subject:`Your Booking${bkgs.length>1?"s have":" has"} been removed`,
-          html:buildOrderEmailHtml({name,email,bookings:[],deletedBookings:bkgs,orderRef:null,isDeletionOnly:true})})
-      ));
-    }
-
-    showToast(`${ids.length} old unapproved booking${ids.length>1?"s":""} cleared.`);
+    setDeleteQueue(prev => { const have=new Set(prev.map(b=>b.id)); return [...prev, ...toRemove.filter(b=>!have.has(b.id))]; });
+    setShowDeleteCart(true);
+    showToast(`${toRemove.length} old booking${toRemove.length>1?"s":""} moved to the removal queue.`);
   }
 
   // Multi-edit from month view: create one edit-row per booking, add all to cart
@@ -7762,24 +7877,92 @@ export default function App() {
     showToast(isEdit ? "Edit added to cart." : `${drafts.length} booking${drafts.length>1?"s":""} added to cart!`);
   }
 
+  // "Inform CPSA": cart an email to a selected vendor carrying the booking's CPSA
+  // submission link and a notification reference, asking them to correct CPSA's
+  // schedule. Does NOT change the booking / resolve the mismatch.
+  function addInformCpsaToCart(booking, vendorEmail, vendorName) {
+    const refs = parseCpsaRefs(booking.system_notes, booking.notes);
+    const submissionId = "CPSA-" + Date.now().toString(36).toUpperCase();
+    setCart(c => [...c, {
+      informCpsa: true, notifyOnly: true,
+      drafts: [booking], name: vendorName || vendorEmail, email: vendorEmail,
+      cpsaRefs: refs, submissionId,
+    }]);
+    setInformCpsaFor(null);
+    showToast("Inform-CPSA email added to cart.");
+  }
+
+  // Generic outbox queue — admin notification actions (clash, mismatch, …) push
+  // their email descriptors here instead of sending; the cart submit sends them.
+  function queueNotifications(items, label) {
+    const arr = (items||[]).filter(Boolean);
+    if (!arr.length) return;
+    setCart(c => [...c, ...arr]);
+    showToast(`${arr.length} ${label||"notification"}${arr.length>1?"s":""} added to cart.`);
+  }
+
   async function handleCartSubmit() {
     if (cart.length === 0) return;
-    // Notify-only items (CPSA status changes from sync) are NOT re-saved — the
-    // booking was already updated during sync; the cart only drives notification.
-    const saveItems = cart.filter(item => !item.notifyOnly);
+    // The cart is the single outbox. Three kinds of work:
+    //  • statusChange — deferred admin actions; the status mutation is applied here,
+    //    then the booker is emailed (sync-style "mutate on submit, then notify").
+    //  • save items   — new bookings + edits (notify-only items are never re-saved).
+    //  • notify-only  — clash / CPSA / mismatch / inform-CPSA emails (no mutation).
+    const statusItems = cart.filter(item => item.statusChange);
+    const saveItems   = cart.filter(item => !item.notifyOnly && !item.statusChange);
     const notifyItems = cart.filter(item => item.notifyOnly);
+
+    // 1. New bookings + edits.
     const allDrafts = saveItems.flatMap(item => item.drafts);
     if (allDrafts.length) {
       const name = (saveItems[0]||{}).name, email = (saveItems[0]||{}).email;
       await handleSave(allDrafts, name, email, { skipEmail: true });
     }
 
+    // 2. Apply the queued status changes (the whole action was deferred to submit).
+    if (statusItems.length) {
+      const now = new Date().toISOString();
+      if (configured) {
+        try {
+          await Promise.all(statusItems.flatMap(it => it.ids.map(id => sb.update("bookings", id, { status: it.newStatus, updated_at: now }))));
+          await loadBookings();
+        } catch(e) { showToast("Status update failed: "+e.message, "error"); return; }
+      } else {
+        setBookings(prev => prev.map(b => { const it = statusItems.find(s => s.ids.includes(b.id)); return it ? {...b, status: it.newStatus, updated_at: now} : b; }));
+      }
+      statusItems.forEach(it => logActivity("status_change", { ids: it.ids, to: it.newStatus, count: it.ids.length }));
+    }
+
     if (!silentMode) {
-      // CPSA status-change notifications (notify-only)
+      const noEmailStatuses = new Set(["pending_cpsa"]);
+      // Status-change emails — one per booker card, unless that card opted out.
+      for (const it of statusItems) {
+        if (it.skipEmail || noEmailStatuses.has(it.newStatus)) continue;
+        const statusLabel = STATUS_META[it.newStatus]?.label || it.newStatus;
+        sendApprovalEmail({to:it.email,
+          subject:`Your Booking${it.drafts.length>1?"s":""} — ${statusLabel}`,
+          html:buildApprovalEmailHtml({name:it.name, email:it.email, bookings:it.drafts.map(d=>({...d,status:it.newStatus})), newStatus:it.newStatus, adminNote:it.adminNote||""})});
+      }
+      // Notify-only emails: clash alerts, CPSA status notices, mismatch, inform-CPSA.
       for (const item of notifyItems) {
+        if (item.clashNotify) {
+          sendApprovalEmail({to:item.email, subject:"⚠️ Scheduling Clash – Action Required",
+            html:buildClashEmailHtml({name:item.name, email:item.email, clashes:item.clashes||[]})});
+          continue;
+        }
         const b = item.drafts[0];
-        sendApprovalEmail({to:item.email, subject:item.newStatus==="cpsa_confirmed"?"Booking Confirmed by CPSA":"Booking Needs Review (CPSA Mismatch)",
-          html:buildApprovalEmailHtml({name:item.name,email:item.email,bookings:[b],newStatus:item.newStatus,adminNote:item.newStatus==="cpsa_review_needed"?parseMismatchNote(b.system_notes,b.notes).join("; "):""})});
+        if (item.informCpsa) {
+          // Vendor alert — asks CPSA to correct their record; booking is untouched.
+          sendApprovalEmail({to:item.email, subject:`CPSA Booking Discrepancy — ${b.purpose||fmtDate(b.date)}`,
+            html:buildInformCpsaEmailHtml({vendorName:item.name, booking:b, refs:item.cpsaRefs||[], submissionId:item.submissionId})});
+        } else if (item.newStatus==="cpsa_review_needed") {
+          // Mismatch notice → the proper amber mismatch email (not the red rejection template).
+          sendApprovalEmail({to:item.email, subject:"⚡ CPSA Booking Mismatch – Please Review",
+            html:buildMismatchEmailHtml({name:item.name, email:item.email, bookings:item.drafts})});
+        } else {
+          sendApprovalEmail({to:item.email, subject:"Booking Confirmed by CPSA",
+            html:buildApprovalEmailHtml({name:item.name, email:item.email, bookings:[b], newStatus:item.newStatus, adminNote:""})});
+        }
       }
       // New bookings: group by email and send one order confirmation each
       const newItems = saveItems.filter(item => !item.isEdit && !item.isMultiEdit);
@@ -7986,8 +8169,8 @@ export default function App() {
 
         {(tab==="calendar"||tab==="month"||tab==="list")&&<FacilityPills/>}
 
-        {tab==="calendar"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<WeekCalendar bookings={bookings} selectedFacility={selFac} onNewBooking={openNew} onBookingClick={setViewing} cartSourceIds={new Set(cart.flatMap(i=>i.sourceIds||[]))} deleteIds={new Set(deleteQueue.map(b=>b.id))} cartNewDrafts={cart.flatMap(i=>!i.notifyOnly&&(i.sourceIds||[]).length===0?i.drafts:[])} focusedDate={focusedDate} setFocusedDate={setFocusedDate} onOpenDay={openDay} bookerFilter={listBookerFilter} aliasNames={aliasNames} emailAliases={emailAliases}/>}</div>}
-        {tab==="month"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<MonthCalendar bookings={bookings} selectedFacility={selFac} onBookingClick={setViewing} onNewBooking={openNew} onMultiDelete={queueMultiForRemoval} onMultiAddToCart={handleMultiAddToCart} loggedInEmail={loggedInEmail} isAdmin={isAdmin} cartSourceIds={new Set(cart.flatMap(i=>i.sourceIds||[]))} deleteIds={new Set(deleteQueue.map(b=>b.id))} cartNewDrafts={cart.flatMap(i=>!i.notifyOnly&&(i.sourceIds||[]).length===0?i.drafts:[])} onOpenDay={openDay} onGotoWeek={dk=>{ setFocusedDate(new Date(dk+"T00:00:00")); setTab("calendar"); }} bookerFilter={listBookerFilter} aliasNames={aliasNames} emailAliases={emailAliases}/>}</div>}
+        {tab==="calendar"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<WeekCalendar bookings={bookings} selectedFacility={selFac} onNewBooking={openNew} onBookingClick={setViewing} cartSourceIds={new Set(cart.flatMap(i=>i.sourceIds||[]))} deleteIds={new Set(deleteQueue.map(b=>b.id))} cartNewDrafts={cart.flatMap(i=>!i.notifyOnly&&!i.statusChange&&(i.sourceIds||[]).length===0?i.drafts:[])} focusedDate={focusedDate} setFocusedDate={setFocusedDate} onOpenDay={openDay} bookerFilter={listBookerFilter} aliasNames={aliasNames} emailAliases={emailAliases}/>}</div>}
+        {tab==="month"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<MonthCalendar bookings={bookings} selectedFacility={selFac} onBookingClick={setViewing} onNewBooking={openNew} onMultiDelete={queueMultiForRemoval} onMultiAddToCart={handleMultiAddToCart} loggedInEmail={loggedInEmail} isAdmin={isAdmin} cartSourceIds={new Set(cart.flatMap(i=>i.sourceIds||[]))} deleteIds={new Set(deleteQueue.map(b=>b.id))} cartNewDrafts={cart.flatMap(i=>!i.notifyOnly&&!i.statusChange&&(i.sourceIds||[]).length===0?i.drafts:[])} onOpenDay={openDay} onGotoWeek={dk=>{ setFocusedDate(new Date(dk+"T00:00:00")); setTab("calendar"); }} bookerFilter={listBookerFilter} aliasNames={aliasNames} emailAliases={emailAliases}/>}</div>}
 
         {tab==="list"&&(
           <div style={S.card}>
@@ -8201,7 +8384,7 @@ export default function App() {
         {tab==="billing"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<BillingTab billingRecords={billingRecords} onUpdateRecord={handleUpdateBillingRecord} onDeleteRecord={id=>setBillingRecords(prev=>prev.filter(r=>r.id!==id))} onLoadToSummary={handleLoadBillingToSummary} isAdmin={isAdmin} loggedInEmail={loggedInEmail} emailAliases={emailAliases} aliasNames={aliasNames} profiles={profiles}/>}</div>}
         {tab==="about"&&<div style={{padding:"8px 0"}}><AboutTab/></div>}
         {tab==="admin"&&isAdmin&&<div style={S.card}>
-          {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onView={setViewing} onQueueDelete={queueForRemovalSilent} clashes={allClashes} deleteIds={new Set(deleteQueue.map(b=>b.id))} facilityRates={facilityRates} onUpdateFacilityRate={updateFacilityRate} onClearOldUnapproved={handleClearOldUnapproved} silentMode={silentMode} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onSyncDB={handleSyncDB} onBulkApply={handleBulkApply} onSaveMismatch={handleSaveMismatch} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} loggedInEmail={loggedInEmail} syncResults={syncResults} onClearSyncResults={()=>setSyncResults([])} showSyncResults={showSyncPanel} onToggleSyncResults={()=>setShowSyncPanel(v=>!v)} bookerFilter={listBookerFilter} onToggleBooker={toggleBooker} onSetBookerFilter={setListBookerFilter} aliasNames={aliasNames} emailAliases={emailAliases}/>}
+          {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onView={setViewing} onQueueDelete={queueForRemovalSilent} clashes={allClashes} deleteIds={new Set(deleteQueue.map(b=>b.id))} facilityRates={facilityRates} onUpdateFacilityRate={updateFacilityRate} onClearOldUnapproved={handleClearOldUnapproved} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onSyncDB={handleSyncDB} onBulkApply={handleBulkApply} onSaveMismatch={handleSaveMismatch} onInformCpsa={setInformCpsaFor} onQueueNotifications={queueNotifications} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} loggedInEmail={loggedInEmail} syncResults={syncResults} onClearSyncResults={()=>setSyncResults([])} showSyncResults={showSyncPanel} onToggleSyncResults={()=>setShowSyncPanel(v=>!v)} bookerFilter={listBookerFilter} onToggleBooker={toggleBooker} onSetBookerFilter={setListBookerFilter} aliasNames={aliasNames} emailAliases={emailAliases}/>}
         </div>}
       </div>
 
@@ -8370,13 +8553,45 @@ export default function App() {
 
       {showCart&&(
         <Modal title="🛒 Booking Cart" onClose={()=>setShowCart(false)} width={660}>
-          <CartModal cart={cart} setCart={setCart} onClose={()=>setShowCart(false)} onSubmit={handleCartSubmit} openNew={openNew}/>
+          <CartModal cart={cart} setCart={setCart} onClose={()=>setShowCart(false)} onSubmit={handleCartSubmit} openNew={openNew} silentMode={silentMode} onToggleSilent={isAdmin?setSilentMode:undefined}/>
+        </Modal>
+      )}
+      {informCpsaFor&&(
+        <Modal title="📨 Inform CPSA — select vendor" onClose={()=>setInformCpsaFor(null)} width={520}>
+          {(()=>{
+            const vendors = Object.entries(profiles||{}).filter(([,p])=>p?.profileType==="vendor");
+            const b = informCpsaFor;
+            const fac = FACILITIES.find(x=>x.id===b.facility_id);
+            const refs = parseCpsaRefs(b.system_notes, b.notes);
+            return (
+              <div style={{display:"flex",flexDirection:"column",gap:14}}>
+                <div style={{background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:10,padding:"10px 14px",fontSize:13,color:"#0c4a6e"}}>
+                  <div style={{fontWeight:700,marginBottom:4}}>{fac?.name||b.facility_id} · {fmtDate(b.date)}</div>
+                  <div style={{color:"#475569"}}>{b.name} · {fmtTime(b.start_hour)}–{fmtTime(b.start_hour+b.duration)}</div>
+                  <div style={{marginTop:6,fontSize:12,color:refs.length?"#0891b2":"#b45309"}}>{refs.length?`🔗 CPSA link: ${refs.map(r=>r.ref).join(", ")}`:"⚠ No CPSA submission link on file — the email will note this."}</div>
+                </div>
+                <div style={{fontSize:12,color:"#64748b"}}>Choose the vendor to notify. This adds an email to your cart asking CPSA to correct their schedule to match our record — it does <strong>not</strong> resolve the mismatch.</div>
+                {vendors.length===0
+                  ? <div style={{fontSize:13,color:"#92400e",background:"#fffbeb",border:"1px solid #fde68a",borderRadius:8,padding:"10px 14px"}}>No vendor profiles yet. Create one in <strong>👤 User Management</strong> first.</div>
+                  : <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                      {vendors.map(([email,p])=>(
+                        <button key={email} onClick={()=>addInformCpsaToCart(b, email, p.fullName||email)}
+                          style={{display:"flex",flexDirection:"column",alignItems:"flex-start",gap:2,padding:"10px 14px",borderRadius:10,border:"1.5px solid #e2e8f0",background:"#fff",cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
+                          <span style={{fontSize:14,fontWeight:700,color:"#0f172a"}}>{p.fullName||email}</span>
+                          <span style={{fontSize:12,color:"#64748b"}}>{email}</span>
+                        </button>
+                      ))}
+                    </div>
+                }
+              </div>
+            );
+          })()}
         </Modal>
       )}
 
       {showDeleteCart&&(
         <Modal title="🗑 Removal Queue" onClose={()=>setShowDeleteCart(false)} width={580}>
-          <DeleteCartModal deleteQueue={deleteQueue} setDeleteQueue={setDeleteQueue} onClose={()=>setShowDeleteCart(false)} onSubmit={handleDeleteCartSubmit} isAdmin={isAdmin} silentMode={silentMode}/>
+          <DeleteCartModal deleteQueue={deleteQueue} setDeleteQueue={setDeleteQueue} onClose={()=>setShowDeleteCart(false)} onSubmit={handleDeleteCartSubmit} isAdmin={isAdmin} silentMode={silentMode} onToggleSilent={setSilentMode}/>
         </Modal>
       )}
 
@@ -8390,7 +8605,7 @@ export default function App() {
         <DayTimelinePopup date={dayPopupDate} focusHour={dayPopupFocus} bookings={bookings} onClose={()=>{setDayPopupDate(null);setDayPopupFocus(null);}}
           onBookingClick={b=>{ setDayPopupDate(null);setDayPopupFocus(null); setViewing(b); }}
           onNewBooking={openNew}
-          cartNewDrafts={cart.flatMap(i=>!i.notifyOnly&&(i.sourceIds||[]).length===0?i.drafts:[])}
+          cartNewDrafts={cart.flatMap(i=>!i.notifyOnly&&!i.statusChange&&(i.sourceIds||[]).length===0?i.drafts:[])}
           deleteIds={new Set(deleteQueue.map(b=>b.id))} cartSourceIds={new Set(cart.flatMap(i=>i.sourceIds||[]))}/>
       )}
     </div>
