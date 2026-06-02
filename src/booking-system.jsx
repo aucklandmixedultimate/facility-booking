@@ -175,6 +175,16 @@ function fmtDateShort(s) {
   const d=new Date(s+"T00:00:00"); return `${d.getDate()} ${d.toLocaleDateString("en-NZ",{month:"short"})}`;
 }
 function fmtDate(s) { return new Date(s+"T00:00:00").toLocaleDateString("en-NZ",{weekday:"short",day:"numeric",month:"short",year:"numeric"}); }
+// Format a CPSA-RES "logged at" stamp — a full ISO datetime (new) or a legacy date-only key.
+function fmtLoggedAt(s) {
+  if (!s) return "";
+  const hasTime = /T\d/.test(s);
+  const d = new Date(hasTime ? s : s + "T00:00:00");
+  if (isNaN(d.getTime())) return s;
+  return hasTime
+    ? d.toLocaleString("en-NZ", { day:"numeric", month:"short", year:"numeric", hour:"numeric", minute:"2-digit" })
+    : d.toLocaleDateString("en-NZ", { day:"numeric", month:"short", year:"numeric" });
+}
 function fmtCost(n) { return "$" + Number(n).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g,","); }
 function fmtTimeShort(h) {
   const hh=Math.floor(h), m=Math.round((h%1)*60), dh=hh>12?hh-12:hh===0?12:hh;
@@ -268,7 +278,7 @@ function parseBilledSnapshot(sysNotes, notesLegacy) {
   if (!m) return null;
   return { facility_id: m[1].trim(), start_hour: parseFloat(m[2]), duration: parseFloat(m[3]) };
 }
-// CPSA mismatch resolution state stored in system_notes as [CPSA-RES] resolution|billingState|date.
+// CPSA mismatch resolution state stored in system_notes as [CPSA-RES] resolution|billingState|loggedAtISO.
 // Billing states: none | credit_pending | invoice_pending | credited | invoiced
 const CPSA_RES_RE_G = /\[CPSA-RES\][^\n]*/g;
 const CPSA_ORIG_RE_G = /\[CPSA-ORIG\][^\n]*/g;
@@ -280,7 +290,8 @@ function parseCpsaResolution(sysNotes) {
 }
 function setCpsaResolution(sysNotes, resolution, billingState="none") {
   const base = (sysNotes||"").replace(CPSA_RES_RE_G,"").trim();
-  const marker = `[CPSA-RES] ${resolution}|${billingState}|${todayKey()}`;
+  // Stamp the full date+time the resolution/update was logged (ISO; legacy rows are date-only).
+  const marker = `[CPSA-RES] ${resolution}|${billingState}|${new Date().toISOString()}`;
   return base ? `${base}\n${marker}` : marker;
 }
 // Original booking values before CPSA amendment — stored so the change can be tracked/reversed.
@@ -5960,6 +5971,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                       {isCpsaAmend&&(
                         <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",borderTop:"1px solid #fde68a",paddingTop:6,marginTop:2}}>
                           <span style={{fontSize:11,color:BILLING_COLOR[billingState],fontWeight:700}}>{BILLING_LABEL[billingState]}</span>
+                          {cpsaRes?.date&&<span style={{fontSize:10,color:"#94a3b8"}} title="When this CPSA resolution was last logged / updated">🕗 logged {fmtLoggedAt(cpsaRes.date)}</span>}
                           {billingState==="credit_pending"&&onMarkAdjustmentSettled&&(
                             <button onClick={()=>onMarkAdjustmentSettled(b,"credited")}
                               style={S.btn({background:"#f0fdf4",color:"#15803d",border:"1px solid #bbf7d0",fontSize:11,padding:"3px 10px",fontWeight:700})}>✓ Mark credited</button>
@@ -6392,6 +6404,11 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                         border:`1px solid ${curRes==="amended"?"#fde68a":"#ddd6fe"}`,
                         borderRadius:4,padding:"2px 7px",display:"inline-block",cursor:"help"}}>
                       {curRes==="amended"?"✓ Amended":"↩ CPSA to correct"}
+                    </div>
+                  )}
+                  {saved?.date&&(
+                    <div style={{fontSize:9,color:"#94a3b8",marginTop:-2}} title="When this resolution was last logged / updated">
+                      🕗 logged {fmtLoggedAt(saved.date)}
                     </div>
                   )}
                   {curRes==="to_correct"&&(
