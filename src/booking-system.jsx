@@ -3787,14 +3787,21 @@ function defaultFacRates(facilityRates, facId) {
   if (typeof r === "object") return { day: r.day ?? 0, evening: r.evening ?? 50 };
   return { day: parseFloat(r) || 0, evening: 50 }; // backward compat (number = day rate)
 }
+// A rule targets one or more bookers and facilities. New rules store arrays
+// (bookerEmails/facilityIds); legacy rules and invoice-locked snapshots store the
+// singular bookerEmail/facilityId — both are normalised here.
+function condBookerList(c)   { return (c.bookerEmails && c.bookerEmails.length) ? c.bookerEmails : (c.bookerEmail ? [c.bookerEmail] : []); }
+function condFacilityList(c) { return (c.facilityIds  && c.facilityIds.length)  ? c.facilityIds  : (c.facilityId  ? [c.facilityId]  : []); }
 function matchingConditions(conditions, facId, bookerEmail, dateStr) {
   const be = (bookerEmail || "").toLowerCase();
-  return (conditions || []).filter(c =>
-    c && c.facilityId === facId &&
-    (c.bookerEmail || "").toLowerCase() === be &&
-    (!c.dateFrom || !dateStr || dateStr >= c.dateFrom) &&
-    (!c.dateTo   || !dateStr || dateStr <= c.dateTo)
-  );
+  return (conditions || []).filter(c => {
+    if (!c) return false;
+    const facs = condFacilityList(c);
+    const bkrs = condBookerList(c).map(x => (x || "").toLowerCase());
+    return facs.includes(facId) && bkrs.includes(be) &&
+      (!c.dateFrom || !dateStr || dateStr >= c.dateFrom) &&
+      (!c.dateTo   || !dateStr || dateStr <= c.dateTo);
+  });
 }
 // Effective {day,evening} for a booker+facility+date: the global rate, then any
 // matching conditions overlaid lowest-priority first so the winner applies last
@@ -3816,7 +3823,120 @@ function resolveRates(facilityRates, conditions, facId, bookerEmail, dateStr) {
   return { day, evening };
 }
 
-function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingConditions = [], onAddPricingCondition, onRemovePricingCondition, isAdmin = false, approxPlayers = {}, onUpdateApproxPlayers, approxDurations = {}, onUpdateApproxDuration, onUpdateFacilityRate, pricingMode = "hourly", onSetPricingMode, onProposeMerge, onBulkApply, onMarkInvoiced, onMarkAdjustmentSettled, bookerFilter=new Set(), profiles={}, emailAliases={}, aliasNames={}, onCreateOfficialInvoice, onFilterChange=null, loadRequest=null }) {
+// Add / edit / list pricing rules. Self-contained (manages its own form state) so it
+// can be dropped into both the Summary tab and the Admin view. A rule targets any
+// number of bookers and facilities, a period (day/evening/both) and a date range.
+function PricingConditionsManager({ conditions = [], bookers = [], onAdd, onUpdate, onRemove, aliasFor }) {
+  const [showForm, setShowForm] = useState(false);
+  const [editId,   setEditId]   = useState(null);
+  const [bkrSel,   setBkrSel]   = useState([]); // lowercased emails
+  const [facSel,   setFacSel]   = useState([]); // facility ids
+  const [period,   setPeriod]   = useState("both");
+  const [dayRate,  setDayRate]  = useState("");
+  const [eveRate,  setEveRate]  = useState("");
+  const [from,     setFrom]     = useState("");
+  const [to,       setTo]       = useState("");
+
+  const inp      = {padding:"4px 7px",borderRadius:6,border:"1.5px solid #e2e8f0",fontSize:12,fontFamily:"inherit",outline:"none"};
+  const lblBlock = {fontSize:10,fontWeight:700,color:"#64748b",textTransform:"uppercase",letterSpacing:"0.04em",marginBottom:4};
+  const lblInline= {fontSize:11,color:"#64748b",display:"flex",alignItems:"center",gap:3};
+  const facName  = id => FACILITIES.find(f=>f.id===id)?.name || id;
+  const label    = em => (aliasFor && aliasFor(em)) || bookers.find(b=>b.email===em)?.label || em;
+
+  const reset   = ()=>{ setEditId(null); setBkrSel([]); setFacSel([]); setPeriod("both"); setDayRate(""); setEveRate(""); setFrom(""); setTo(""); setShowForm(false); };
+  const openAdd = ()=>{ reset(); setShowForm(true); };
+  const openEdit= c =>{
+    setEditId(c.id);
+    setBkrSel(condBookerList(c).map(e=>(e||"").toLowerCase()));
+    setFacSel(condFacilityList(c));
+    setPeriod(c.period||"both");
+    setDayRate(c.dayRate??""); setEveRate(c.eveningRate??"");
+    setFrom(c.dateFrom||""); setTo(c.dateTo||"");
+    setShowForm(true);
+  };
+  const toggle  = (arr,setArr,v)=> setArr(arr.includes(v)?arr.filter(x=>x!==v):[...arr,v]);
+  const canSave = bkrSel.length && facSel.length && from && to &&
+    (period==="day" ? dayRate!=="" : period==="evening" ? eveRate!=="" : (dayRate!==""||eveRate!==""));
+  const save = ()=>{
+    if(!canSave) return;
+    const payload = {
+      bookerEmails: bkrSel.map(e=>e.toLowerCase()),
+      facilityIds:  facSel,
+      period,
+      dayRate:     period==="evening" ? null : (dayRate===""?null:Number(dayRate)),
+      eveningRate: period==="day"     ? null : (eveRate===""?null:Number(eveRate)),
+      dateFrom: from, dateTo: to,
+    };
+    if(editId) onUpdate && onUpdate(editId, { ...payload, bookerEmail:undefined, facilityId:undefined });
+    else       onAdd    && onAdd({ id:newId(), ...payload, locked:false, source:"manual", createdAt:new Date().toISOString() });
+    reset();
+  };
+  const chip = (active,onClick,children,activeBg="#4338ca",activeFg="#fff") => (
+    <button type="button" onClick={onClick} style={{fontFamily:"inherit",fontSize:11,fontWeight:active?700:500,cursor:"pointer",borderRadius:999,padding:"2px 9px",border:`1.5px solid ${active?activeBg:"#cbd5e1"}`,background:active?activeBg:"#fff",color:active?activeFg:"#475569"}}>{children}</button>
+  );
+  const sorted = [...conditions].sort((a,b)=>(b.createdAt||"").localeCompare(a.createdAt||""));
+  return (
+    <div style={{background:"#fff",border:"1.5px solid #e0e7ff",borderRadius:12,padding:14}}>
+      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:(sorted.length||showForm)?10:0,flexWrap:"wrap"}}>
+        <span style={{fontSize:13,fontWeight:700,color:"#4338ca"}}>⚙ Pricing rules</span>
+        <span style={{fontSize:11,color:"#94a3b8"}}>booker rate overrides — beat the global rate within their dates</span>
+        {onAdd&&<button onClick={()=>showForm?reset():openAdd()} style={{marginLeft:"auto",...S.btn({border:"1.5px solid #c7d2fe",background:showForm?"#eef2ff":"#fff",color:"#4338ca",fontSize:12})}}>{showForm&&!editId?"Close":"＋ Add rule"}</button>}
+      </div>
+      {showForm && (
+        <div style={{display:"flex",flexDirection:"column",gap:8,background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:"10px 12px",marginBottom:sorted.length?12:0}}>
+          {editId&&<div style={{fontSize:11,fontWeight:700,color:"#4338ca"}}>✎ Editing rule</div>}
+          <div>
+            <div style={lblBlock}>Bookers <span style={{color:"#94a3b8",fontWeight:500}}>· pick one or more</span></div>
+            <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
+              {bookers.length===0&&<span style={{fontSize:11,color:"#94a3b8"}}>No bookers found.</span>}
+              {bookers.map(b=><Fragment key={b.email}>{chip(bkrSel.includes(b.email),()=>toggle(bkrSel,setBkrSel,b.email),b.label)}</Fragment>)}
+            </div>
+          </div>
+          <div>
+            <div style={lblBlock}>Facilities <span style={{color:"#94a3b8",fontWeight:500}}>· pick one or more</span></div>
+            <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
+              {FACILITIES.map(f=><Fragment key={f.id}>{chip(facSel.includes(f.id),()=>toggle(facSel,setFacSel,f.id),f.name,f.color,"#fff")}</Fragment>)}
+            </div>
+          </div>
+          <div style={{display:"flex",flexWrap:"wrap",gap:8,alignItems:"center"}}>
+            <select value={period} onChange={e=>setPeriod(e.target.value)} style={inp}>
+              <option value="both">Day + Evening</option><option value="day">Day only</option><option value="evening">Evening only</option>
+            </select>
+            {period!=="evening"&&<label style={lblInline}>Day $<input type="number" min="0" step="0.5" value={dayRate} onChange={e=>setDayRate(e.target.value)} style={{...inp,width:64,textAlign:"right"}}/>/hr</label>}
+            {period!=="day"&&<label style={lblInline}>Eve $<input type="number" min="0" step="0.5" value={eveRate} onChange={e=>setEveRate(e.target.value)} style={{...inp,width:64,textAlign:"right"}}/>/hr</label>}
+            <label style={lblInline}>From<input type="date" value={from} onChange={e=>setFrom(e.target.value)} style={inp}/></label>
+            <label style={lblInline}>To<input type="date" value={to} onChange={e=>setTo(e.target.value)} style={inp}/></label>
+            <button onClick={save} disabled={!canSave} style={{...S.btn({border:"none",background:canSave?"#4338ca":"#cbd5e1",color:"#fff",fontSize:12,fontWeight:700}),cursor:canSave?"pointer":"not-allowed"}}>{editId?"Save":"Add"}</button>
+            {editId&&<button onClick={reset} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#64748b",fontSize:12})}>Cancel</button>}
+          </div>
+        </div>
+      )}
+      {sorted.length>0 ? (
+        <div style={{display:"flex",flexDirection:"column",gap:5}}>
+          {sorted.map(c=>{
+            const bkrs=condBookerList(c), facs=condFacilityList(c);
+            return (
+              <div key={c.id} style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",fontSize:12,background:c.locked?"#f5f3ff":"#f8fafc",border:`1px solid ${c.locked?"#ddd6fe":"#e2e8f0"}`,borderRadius:7,padding:"5px 10px"}}>
+                {c.locked&&<span title={c.source||"invoice snapshot"}>🔒</span>}
+                <span style={{fontWeight:700,color:"#0f172a"}}>{bkrs.map(label).join(", ")||"—"}</span>
+                <span style={{color:"#64748b"}}>· {facs.map(facName).join(", ")||"—"}</span>
+                <span style={{color:"#334155"}}>· {c.dayRate!=null?`day ${fmtCost(c.dayRate)}`:""}{(c.dayRate!=null&&c.eveningRate!=null)?" / ":""}{c.eveningRate!=null?`eve ${fmtCost(c.eveningRate)}`:""}/hr</span>
+                <span style={{color:"#94a3b8"}}>· {c.dateFrom} → {c.dateTo}</span>
+                {c.locked&&<span style={{fontSize:10,color:"#7c3aed"}}>{c.source}</span>}
+                <span style={{marginLeft:"auto",display:"flex",gap:6}}>
+                  {onUpdate&&<button onClick={()=>openEdit(c)} title="Edit rule" style={{border:"none",background:"transparent",color:"#4338ca",cursor:"pointer",fontSize:13,fontWeight:700}}>✎</button>}
+                  {onRemove&&<button onClick={()=>onRemove(c.id)} title="Remove rule" style={{border:"none",background:"transparent",color:"#ef4444",cursor:"pointer",fontSize:13,fontWeight:700}}>✕</button>}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      ) : !showForm && <div style={{fontSize:12,color:"#94a3b8"}}>No pricing rules yet. Add one to override the global rate for chosen bookers, facilities and dates.</div>}
+    </div>
+  );
+}
+
+function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingConditions = [], onAddPricingCondition, onUpdatePricingCondition, onRemovePricingCondition, isAdmin = false, approxPlayers = {}, onUpdateApproxPlayers, approxDurations = {}, onUpdateApproxDuration, onUpdateFacilityRate, pricingMode = "hourly", onSetPricingMode, onProposeMerge, onBulkApply, onMarkInvoiced, onMarkAdjustmentSettled, bookerFilter=new Set(), profiles={}, emailAliases={}, aliasNames={}, onCreateOfficialInvoice, onFilterChange=null, loadRequest=null }) {
   const now = new Date();
   const thisYear = now.getFullYear();
 
@@ -3861,14 +3981,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
   const [showInvoice, setShowInvoice] = useState(false);
   const [showRatesEdit, setShowRatesEdit] = useState(false);
   // "Add pricing condition" form
-  const [showCondForm, setShowCondForm] = useState(false);
-  const [condBooker, setCondBooker] = useState("");
-  const [condFac,    setCondFac]    = useState("");
-  const [condPeriod, setCondPeriod] = useState("both"); // day | evening | both
-  const [condDay,    setCondDay]    = useState("");
-  const [condEve,    setCondEve]    = useState("");
-  const [condFrom,   setCondFrom]   = useState("");
-  const [condTo,     setCondTo]     = useState("");
+  // (pricing-rule form state now lives inside <PricingConditionsManager/>)
   // Inline player-count editing: email being edited
   const [editingPlayers,  setEditingPlayers]  = useState(null);
   const [playersInput,    setPlayersInput]    = useState("");
@@ -4612,75 +4725,15 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
               </div>
             </div>
           )}
-          {isAdmin && onAddPricingCondition && (()=>{
-            const canAdd = condBooker && condFac && condFrom && condTo &&
-              (condPeriod==="day" ? condDay!=="" : condPeriod==="evening" ? condEve!=="" : (condDay!==""||condEve!==""));
-            const submit = () => {
-              if (!canAdd) return;
-              onAddPricingCondition({
-                id: newId(),
-                bookerEmail: condBooker.toLowerCase(),
-                facilityId: condFac,
-                period: condPeriod,
-                dayRate:     condPeriod==="evening" ? null : (condDay===""?null:Number(condDay)),
-                eveningRate: condPeriod==="day"     ? null : (condEve===""?null:Number(condEve)),
-                dateFrom: condFrom, dateTo: condTo,
-                locked: false, source: "manual",
-                createdAt: new Date().toISOString(),
-              });
-              setCondDay(""); setCondEve(""); setCondBooker(""); setCondFac(""); setCondFrom(""); setCondTo(""); setShowCondForm(false);
-            };
-            const inp = {padding:"4px 7px",borderRadius:6,border:"1.5px solid #e2e8f0",fontSize:12,fontFamily:"inherit",outline:"none"};
-            const facName = id => FACILITIES.find(f=>f.id===id)?.name || id;
-            const sorted = [...pricingConditions].sort((a,b)=>(b.createdAt||"").localeCompare(a.createdAt||""));
-            return (
-              <div style={{background:"#fff",border:"1.5px solid #e0e7ff",borderRadius:12,padding:14,marginBottom:14}}>
-                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:(pricingConditions.length||showCondForm)?10:0,flexWrap:"wrap"}}>
-                  <span style={{fontSize:13,fontWeight:700,color:"#4338ca"}}>⚙ Pricing conditions</span>
-                  <span style={{fontSize:11,color:"#94a3b8"}}>booker rate overrides — beat the global rate within their dates</span>
-                  <button onClick={()=>setShowCondForm(v=>!v)} style={{marginLeft:"auto",...S.btn({border:"1.5px solid #c7d2fe",background:showCondForm?"#eef2ff":"#fff",color:"#4338ca",fontSize:12})}}>{showCondForm?"Close":"＋ Add condition"}</button>
-                </div>
-                {showCondForm && (
-                  <div style={{display:"flex",flexWrap:"wrap",gap:8,alignItems:"center",background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:"10px 12px",marginBottom:pricingConditions.length?12:0}}>
-                    <select value="booker_rate" onChange={()=>{}} disabled title="Condition type (more types coming later)" style={{...inp,fontWeight:700,color:"#4338ca"}}><option value="booker_rate">Booker rate override</option></select>
-                    <select value={condBooker} onChange={e=>setCondBooker(e.target.value)} style={inp}>
-                      <option value="">Booker…</option>
-                      {allInvoiceEmails.map(em=><option key={em} value={em}>{summaryAlias(em)} — {em}</option>)}
-                    </select>
-                    <select value={condFac} onChange={e=>setCondFac(e.target.value)} style={inp}>
-                      <option value="">Facility…</option>
-                      {FACILITIES.map(f=><option key={f.id} value={f.id}>{f.name}</option>)}
-                    </select>
-                    <select value={condPeriod} onChange={e=>setCondPeriod(e.target.value)} style={inp}>
-                      <option value="both">Day + Evening</option>
-                      <option value="day">Day only</option>
-                      <option value="evening">Evening only</option>
-                    </select>
-                    {condPeriod!=="evening" && <label style={{fontSize:11,color:"#64748b",display:"flex",alignItems:"center",gap:3}}>Day $<input type="number" min="0" step="0.5" value={condDay} onChange={e=>setCondDay(e.target.value)} style={{...inp,width:64,textAlign:"right"}}/>/hr</label>}
-                    {condPeriod!=="day" && <label style={{fontSize:11,color:"#64748b",display:"flex",alignItems:"center",gap:3}}>Eve $<input type="number" min="0" step="0.5" value={condEve} onChange={e=>setCondEve(e.target.value)} style={{...inp,width:64,textAlign:"right"}}/>/hr</label>}
-                    <label style={{fontSize:11,color:"#64748b",display:"flex",alignItems:"center",gap:3}}>From<input type="date" value={condFrom} onChange={e=>setCondFrom(e.target.value)} style={inp}/></label>
-                    <label style={{fontSize:11,color:"#64748b",display:"flex",alignItems:"center",gap:3}}>To<input type="date" value={condTo} onChange={e=>setCondTo(e.target.value)} style={inp}/></label>
-                    <button onClick={submit} disabled={!canAdd} style={{...S.btn({border:"none",background:canAdd?"#4338ca":"#cbd5e1",color:"#fff",fontSize:12,fontWeight:700}),cursor:canAdd?"pointer":"not-allowed"}}>Add</button>
-                  </div>
-                )}
-                {sorted.length>0 && (
-                  <div style={{display:"flex",flexDirection:"column",gap:5}}>
-                    {sorted.map(c=>(
-                      <div key={c.id} style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",fontSize:12,background:c.locked?"#f5f3ff":"#f8fafc",border:`1px solid ${c.locked?"#ddd6fe":"#e2e8f0"}`,borderRadius:7,padding:"5px 10px"}}>
-                        {c.locked&&<span title={c.source||"invoice"}>🔒</span>}
-                        <span style={{fontWeight:700,color:"#0f172a"}}>{summaryAlias(c.bookerEmail)}</span>
-                        <span style={{color:"#64748b"}}>· {facName(c.facilityId)}</span>
-                        <span style={{color:"#334155"}}>· {c.dayRate!=null?`day ${fmtCost(c.dayRate)}`:""}{(c.dayRate!=null&&c.eveningRate!=null)?" / ":""}{c.eveningRate!=null?`eve ${fmtCost(c.eveningRate)}`:""}/hr</span>
-                        <span style={{color:"#94a3b8"}}>· {c.dateFrom} → {c.dateTo}</span>
-                        {c.locked&&<span style={{fontSize:10,color:"#7c3aed"}}>{c.source}</span>}
-                        {onRemovePricingCondition&&<button onClick={()=>onRemovePricingCondition(c.id)} title="Remove condition" style={{marginLeft:"auto",border:"none",background:"transparent",color:"#ef4444",cursor:"pointer",fontSize:13,fontWeight:700}}>✕</button>}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            );
-          })()}
+          {isAdmin && onAddPricingCondition && (
+            <div style={{marginBottom:14}}>
+              <PricingConditionsManager
+                conditions={pricingConditions}
+                bookers={[...new Map(allInvoiceEmails.map(em=>[em.toLowerCase(),{email:em.toLowerCase(),label:summaryAlias(em)}])).values()]}
+                onAdd={onAddPricingCondition} onUpdate={onUpdatePricingCondition} onRemove={onRemovePricingCondition}
+                aliasFor={summaryAlias}/>
+            </div>
+          )}
           <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:10 }}>
             {facCosts.map(({ fac, dayHrs, eveningHrs, hours, bkgCount, rates, cost }) => {
               const hasRates = rates.day > 0 || rates.evening > 0;
@@ -5798,7 +5851,7 @@ function SyncedItemRow({ ab, bookings }) {
 }
 
 // ─── Admin Panel with action queue, bulk approve, facility rates ──────────────
-function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,clashes=[],deleteIds=new Set(),facilityRates={},onClearOldUnapproved,onBulkApply,onSaveMismatch,onInformCpsa,onQueueNotifications,onMarkAdjustmentSettled,loggedInEmail,syncResults=[],onClearSyncResults,showSyncResults=false,onToggleSyncResults,bookerFilter=new Set(),onToggleBooker,onSetBookerFilter,aliasNames={},emailAliases={}}) {
+function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,clashes=[],deleteIds=new Set(),facilityRates={},onClearOldUnapproved,onBulkApply,onSaveMismatch,onInformCpsa,onQueueNotifications,onMarkAdjustmentSettled,loggedInEmail,syncResults=[],onClearSyncResults,showSyncResults=false,onToggleSyncResults,bookerFilter=new Set(),onToggleBooker,onSetBookerFilter,aliasNames={},emailAliases={},pricingConditions=[],onAddPricingCondition,onUpdatePricingCondition,onRemovePricingCondition}) {
   const [showSchedulePanel, setShowSchedulePanel] = useState(false);
   const [showActivityPanel, setShowActivityPanel] = useState(false);
   // Which sync-result months are expanded in the grouped dropdown (monthKey set).
@@ -5852,6 +5905,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
   const [mismatchResState,setMismatchResState]=useState({}); // { [bookingId]: { resolution, billingState } }
   const [mismatchSort,setMismatchSort]=useState({key:"date",dir:"asc"});
   const [showTrackChanges,setShowTrackChanges]=useState(false);
+  const [showPricingRules,setShowPricingRules]=useState(false);
 
   const si={padding:"7px 12px",borderRadius:8,border:"1.5px solid #e2e8f0",fontSize:13,fontFamily:"inherit",color:"#0f172a",background:"#f8fafc",outline:"none"};
   const today=todayKey();
@@ -6038,6 +6092,9 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
         <button onClick={()=>setShowTrackChanges(v=>!v)} style={S.btn({border:`1.5px solid ${trackedChanges.length>0?"#ddd6fe":"#e2e8f0"}`,background:showTrackChanges?"#f5f3ff":"#fff",color:trackedChanges.length>0?"#5b21b6":"#94a3b8",fontSize:12,fontWeight:trackedChanges.length>0?700:500})}>
           🧾 Track Changes ({trackedChanges.length}) {showTrackChanges?"▴":"▾"}
         </button>
+        {onAddPricingCondition&&<button onClick={()=>setShowPricingRules(v=>!v)} style={S.btn({border:`1.5px solid ${pricingConditions.length>0?"#c7d2fe":"#e2e8f0"}`,background:showPricingRules?"#eef2ff":"#fff",color:pricingConditions.length>0?"#4338ca":"#94a3b8",fontSize:12,fontWeight:pricingConditions.length>0?700:500})}>
+          💲 Pricing Rules ({pricingConditions.length}) {showPricingRules?"▴":"▾"}
+        </button>}
       </div>
 
       {/* Inline sync results panel */}
@@ -6205,6 +6262,13 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
         </div>
       )}
 
+      {showPricingRules&&onAddPricingCondition&&(
+        <PricingConditionsManager
+          conditions={pricingConditions}
+          bookers={[...new Map(bookings.filter(b=>!isAdminBooking(b)&&b.email).map(b=>[b.email.toLowerCase(),{email:b.email.toLowerCase(),label:aliasNames[b.email.toLowerCase()]||b.name||b.email}])).values()].sort((a,b)=>a.label.localeCompare(b.label))}
+          onAdd={onAddPricingCondition} onUpdate={onUpdatePricingCondition} onRemove={onRemovePricingCondition}
+          aliasFor={em=>aliasNames[(em||"").toLowerCase()]}/>
+      )}
       {/* Per-row action queue submission panel */}
       {actionQueue.length>0&&(
         <div style={{background:"#f0fdf4",border:"1.5px solid #86efac",borderRadius:12,padding:16,display:"flex",flexDirection:"column",gap:10}}>
@@ -7838,6 +7902,7 @@ export default function App() {
     persistSetting("pricing_conditions", next);
   }
   function addPricingCondition(cond) { savePricingConditions([...pricingConditions, cond]); }
+  function updatePricingCondition(id, patch) { savePricingConditions(pricingConditions.map(c=>c.id===id?{...c,...patch}:c)); }
   function removePricingCondition(id) { savePricingConditions(pricingConditions.filter(c=>c.id!==id)); }
 
   function setPricingMode(mode) {
@@ -8651,11 +8716,11 @@ export default function App() {
           </div>
         )}
 
-        {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<SummaryTab bookings={bookings} loggedInEmail={loggedInEmail} facilityRates={facilityRates} pricingConditions={pricingConditions} onAddPricingCondition={addPricingCondition} onRemovePricingCondition={removePricingCondition} isAdmin={isAdmin} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onUpdateFacilityRate={updateFacilityRate} pricingMode={pricingMode} onSetPricingMode={setPricingMode} onProposeMerge={handleProposeMerge} onBulkApply={handleBulkApply} onMarkInvoiced={handleMarkInvoiced} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} bookerFilter={listBookerFilter} profiles={profiles} emailAliases={emailAliases} aliasNames={aliasNames} onCreateOfficialInvoice={handleCreateOfficialInvoice} onFilterChange={s=>setListBookerFilter(s)} loadRequest={summaryLoadRequest}/>}</div>}
+        {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<SummaryTab bookings={bookings} loggedInEmail={loggedInEmail} facilityRates={facilityRates} pricingConditions={pricingConditions} onAddPricingCondition={addPricingCondition} onUpdatePricingCondition={updatePricingCondition} onRemovePricingCondition={removePricingCondition} isAdmin={isAdmin} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onUpdateFacilityRate={updateFacilityRate} pricingMode={pricingMode} onSetPricingMode={setPricingMode} onProposeMerge={handleProposeMerge} onBulkApply={handleBulkApply} onMarkInvoiced={handleMarkInvoiced} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} bookerFilter={listBookerFilter} profiles={profiles} emailAliases={emailAliases} aliasNames={aliasNames} onCreateOfficialInvoice={handleCreateOfficialInvoice} onFilterChange={s=>setListBookerFilter(s)} loadRequest={summaryLoadRequest}/>}</div>}
         {tab==="billing"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<BillingTab billingRecords={billingRecords} onUpdateRecord={handleUpdateBillingRecord} onDeleteRecord={id=>setBillingRecords(prev=>prev.filter(r=>r.id!==id))} onLoadToSummary={handleLoadBillingToSummary} isAdmin={isAdmin} loggedInEmail={loggedInEmail} emailAliases={emailAliases} aliasNames={aliasNames} profiles={profiles}/>}</div>}
         {tab==="about"&&<div style={{padding:"8px 0"}}><AboutTab/></div>}
         {tab==="admin"&&isAdmin&&<div style={S.card}>
-          {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onView={setViewing} onQueueDelete={queueForRemovalSilent} clashes={allClashes} deleteIds={new Set(deleteQueue.map(b=>b.id))} facilityRates={facilityRates} onUpdateFacilityRate={updateFacilityRate} onClearOldUnapproved={handleClearOldUnapproved} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onSyncDB={handleSyncDB} onBulkApply={handleBulkApply} onSaveMismatch={handleSaveMismatch} onInformCpsa={setInformCpsaFor} onQueueNotifications={queueNotifications} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} loggedInEmail={loggedInEmail} syncResults={syncResults} onClearSyncResults={()=>setSyncResults([])} showSyncResults={showSyncPanel} onToggleSyncResults={()=>setShowSyncPanel(v=>!v)} bookerFilter={listBookerFilter} onToggleBooker={toggleBooker} onSetBookerFilter={setListBookerFilter} aliasNames={aliasNames} emailAliases={emailAliases}/>}
+          {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onView={setViewing} onQueueDelete={queueForRemovalSilent} clashes={allClashes} deleteIds={new Set(deleteQueue.map(b=>b.id))} facilityRates={facilityRates} onUpdateFacilityRate={updateFacilityRate} onClearOldUnapproved={handleClearOldUnapproved} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onSyncDB={handleSyncDB} onBulkApply={handleBulkApply} onSaveMismatch={handleSaveMismatch} onInformCpsa={setInformCpsaFor} onQueueNotifications={queueNotifications} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} loggedInEmail={loggedInEmail} syncResults={syncResults} onClearSyncResults={()=>setSyncResults([])} showSyncResults={showSyncPanel} onToggleSyncResults={()=>setShowSyncPanel(v=>!v)} bookerFilter={listBookerFilter} onToggleBooker={toggleBooker} onSetBookerFilter={setListBookerFilter} aliasNames={aliasNames} emailAliases={emailAliases} pricingConditions={pricingConditions} onAddPricingCondition={addPricingCondition} onUpdatePricingCondition={updatePricingCondition} onRemovePricingCondition={removePricingCondition}/>}
         </div>}
       </div>
 
