@@ -243,6 +243,47 @@ function timeOverlaps(a,b) {
   return a.start_hour<b.start_hour+b.duration && a.start_hour+a.duration>b.start_hour;
 }
 function isAdminBooking(b)  { return b.email === "admin"; }
+
+// ─── Copy any rendered table to the clipboard ────────────────────────────────
+// Serialises a live <table> DOM node to clean HTML + tab-separated text so it
+// pastes as a real table into Sheets/Excel/Docs/email (same idea as the mismatch
+// "copy" action, but generic). <CopyableTable> wraps a table and adds the button.
+function escTableText(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function serializeTableEl(table){
+  if(!table) return { html:"", text:"" };
+  const rows = [...table.rows];
+  const cellText = c => (c.innerText||c.textContent||"").replace(/\s+/g," ").trim();
+  const text = rows.map(r => [...r.cells].map(cellText).join("\t")).join("\n");
+  const htmlRows = rows.map(r => {
+    const head = r.parentElement && r.parentElement.tagName === "THEAD";
+    return "<tr>" + [...r.cells].map(c => {
+      const th = c.tagName === "TH" || head;
+      return `<${th?"th":"td"} style="border:1px solid #cbd5e1;padding:4px 8px;text-align:left;font-size:12px;${th?"background:#f1f5f9;font-weight:700":""}">${escTableText(cellText(c))}</${th?"th":"td"}>`;
+    }).join("") + "</tr>";
+  }).join("");
+  return { html:`<table style="border-collapse:collapse;font-family:sans-serif">${htmlRows}</table>`, text };
+}
+function CopyableTable({ children, style, align="left" }){
+  const [done, setDone] = useState(false);
+  async function copy(e){
+    const table = e.currentTarget.closest("[data-copytable]")?.querySelector("table");
+    const { html, text } = serializeTableEl(table);
+    if(!text) return;
+    try { await navigator.clipboard.write([new ClipboardItem({ "text/html": new Blob([html],{type:"text/html"}), "text/plain": new Blob([text],{type:"text/plain"}) })]); }
+    catch { try { await navigator.clipboard.writeText(text); } catch { /* ignore */ } }
+    setDone(true); setTimeout(()=>setDone(false), 1500);
+  }
+  return (
+    <div data-copytable="" style={style}>
+      <div style={{display:"flex",justifyContent:align==="right"?"flex-end":"flex-start",marginBottom:4}}>
+        <button type="button" onClick={copy} title="Copy this table to the clipboard — paste into Sheets, Docs or email"
+          style={{fontFamily:"inherit",fontSize:10,fontWeight:700,cursor:"pointer",border:"1px solid #cbd5e1",borderRadius:6,padding:"2px 8px",background:done?"#dcfce7":"#fff",color:done?"#166534":"#475569",lineHeight:1.4}}>
+          {done?"✓ Copied":"📋 Copy table"}</button>
+      </div>
+      {children}
+    </div>
+  );
+}
 // System markers (CPSA mismatch, billing snapshot, CPSA submission refs) live in
 // booking.system_notes — separate from user-editable booking.notes. All read helpers
 // fall back to booking.notes for rows that pre-date the system_notes column migration.
@@ -761,6 +802,7 @@ function ActivityLogModal({onClose, inline=false}) {
         </div>
         {error&&<div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:6,padding:"6px 10px",fontSize:12,color:"#b91c1c"}}>⚠ {error} — has <code>supabase-migration-activity-log.sql</code> been run?</div>}
         <div style={{overflowY:"auto",flex:1,minHeight:0,border:"1px solid #f1f5f9",borderRadius:8}}>
+          <CopyableTable>
           <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
             <thead style={{position:"sticky",top:0,background:"#f8fafc",zIndex:1}}>
               <tr>
@@ -785,6 +827,7 @@ function ActivityLogModal({onClose, inline=false}) {
               }
             </tbody>
           </table>
+          </CopyableTable>
         </div>
       </div>
     </ALWrapper>
@@ -2853,6 +2896,7 @@ function PatternModal({ email, name, pk, bkgs, isAdmin, canEdit: canEditProp, on
       </div>
 
       <div style={{overflowY:"auto",maxHeight:280,marginBottom:16}}>
+        <CopyableTable>
         <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
           <thead>
             <tr style={{background:"#f8fafc",borderBottom:"1px solid #e2e8f0"}}>
@@ -2879,6 +2923,7 @@ function PatternModal({ email, name, pk, bkgs, isAdmin, canEdit: canEditProp, on
             })}
           </tbody>
         </table>
+        </CopyableTable>
       </div>
 
       {(isAdmin || canEdit) && (
@@ -2933,6 +2978,7 @@ function OneOffModal({ email, name, bkgs, onClose }) {
     <Modal title={`One-off Bookings — ${name}`} onClose={onClose}>
       <div style={{fontSize:12,color:"#64748b",marginBottom:10}}>{sorted.length} one-off booking{sorted.length!==1?"s":""} · {email}</div>
       <div style={{overflowY:"auto",maxHeight:360}}>
+        <CopyableTable>
         <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
           <thead>
             <tr style={{background:"#f8fafc",borderBottom:"1px solid #e2e8f0"}}>
@@ -2959,6 +3005,7 @@ function OneOffModal({ email, name, bkgs, onClose }) {
             })}
           </tbody>
         </table>
+        </CopyableTable>
       </div>
       <div style={{marginTop:12}}>
         <button onClick={onClose} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#64748b",fontSize:12})}>Close</button>
@@ -3127,6 +3174,7 @@ function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkApply, o
           </div>
         )}
         <div style={{overflowY:"auto",maxHeight:"60vh",overflowX:"auto"}}>
+          <CopyableTable>
           <table style={{width:"100%",borderCollapse:"collapse",minWidth:560}}>
             <thead>
               <tr style={{background:"#f8fafc"}}>
@@ -3199,6 +3247,7 @@ function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkApply, o
               {rows.length===0&&<tr><td colSpan={colCount} style={{...tdS2,textAlign:"center",color:"#94a3b8"}}>No active bookings.</td></tr>}
             </tbody>
           </table>
+          </CopyableTable>
         </div>
         {groupSelectable && selectedGroups.size>0 && (
           <div style={{marginTop:10,padding:"10px 14px",background:"#0f172a",borderRadius:10,display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",color:"#fff"}}>
@@ -3544,6 +3593,7 @@ function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onLoadT
         {((exportMode==="individual"?(rec.individualLines||rec.lines):rec.lines)||[]).length>0&&(
           <div style={{marginTop:10}}>
             <div style={{fontSize:11,fontWeight:700,color:"#475569",marginBottom:4}}>Invoice Lines ({exportMode==="individual"?"Itemised — per booking":"Summary — grouped"})</div>
+            <CopyableTable>
             <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
               <thead>
                 <tr style={{background:"#f8fafc"}}>
@@ -3562,6 +3612,7 @@ function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onLoadT
                 ))}
               </tbody>
             </table>
+            </CopyableTable>
           </div>
         )}
       </div>
@@ -3942,6 +3993,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
 
   // Date range state: preset key + optional custom from/to
   const [preset,      setPreset]      = useState("this_year");
+  const [summaryIncludeInvoiced, setSummaryIncludeInvoiced] = useState(true); // show invoiced bookings in summary totals
   const [customFrom,  setCustomFrom]  = useState("");
   const [customTo,    setCustomTo]    = useState("");
   // Multi-select booker filter — Set of lowercased emails. Empty Set = all bookers.
@@ -4067,6 +4119,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
   const active = bookings.filter(b => {
     if (isAdminBooking(b)) return false;
     if (["cancelled","rejected"].includes(b.status)) return false;
+    if (b.invoiced && !summaryIncludeInvoiced) return false;
     if (dateFrom && b.date < dateFrom) return false;
     if (dateTo   && b.date > dateTo)   return false;
     if (emailFilterSet.size>0 && !emailFilterSet.has(b.email?.toLowerCase())) return false;
@@ -4589,6 +4642,10 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
               {p.label}
             </button>
           ))}
+          <label style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:5,fontSize:12,color:"#475569",cursor:"pointer",userSelect:"none"}} title="Include or exclude already-invoiced bookings in the summary totals">
+            <input type="checkbox" checked={summaryIncludeInvoiced} onChange={e=>setSummaryIncludeInvoiced(e.target.checked)} style={{accentColor:"#5b21b6"}}/>
+            🧾 Include invoiced
+          </label>
         </div>
         {/* Custom date range inputs */}
         {preset==="custom" && (
@@ -4819,6 +4876,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
           ? <div style={{ textAlign:"center", padding:"32px 0", color:"#94a3b8", fontSize:14 }}>No active bookings match the current filter.</div>
           : (
             <div style={{ overflowX:"auto", borderRadius:12, border:"1px solid #f1f5f9" }}>
+              <CopyableTable>
               <table style={{ width:"100%", borderCollapse:"collapse", background:"#fff" }}>
                 <thead>
                   <tr style={{ background:"#f8fafc" }}>
@@ -5056,6 +5114,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
                   })()}
                 </tfoot>
               </table>
+              </CopyableTable>
             </div>
           )}
         {isPerBooking && rows.length > 0 && (
@@ -5385,6 +5444,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
                 });
               })()}
               <div style={{overflowX:"auto"}}>
+                <CopyableTable>
                 <table style={{width:"100%",borderCollapse:"collapse",minWidth:480}}>
                   <thead>
                     <tr style={{background:"#f8fafc"}}>
@@ -5500,6 +5560,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
                     )}
                   </tbody>
                 </table>
+                </CopyableTable>
               </div>
             </div>
           );
@@ -6823,6 +6884,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
             {mismatches.length===0
               ? <div style={{fontSize:12,color:"#92400e"}}>No mismatches at this time. Run a sync to refresh.</div>
               : <div style={{overflowX:"auto",borderRadius:8,border:"1px solid #fde68a"}}>
+                  <CopyableTable>
                   <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
                     <thead>
                       <tr style={{background:"#fef3c7"}}>
@@ -6849,6 +6911,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                       {mismatches.map((b,i)=><MismatchRow key={b.id} b={b} rowIdx={i}/>)}
                     </tbody>
                   </table>
+                  </CopyableTable>
                 </div>
             }
           </div>
@@ -6860,6 +6923,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
         ? <div style={{textAlign:"center",padding:"40px 0",color:"#94a3b8",fontSize:14}}>No bookings found.</div>
         : (
         <div style={{overflowX:"auto",borderRadius:12,border:"1px solid #f1f5f9"}}>
+          <CopyableTable>
           <table style={{width:"100%",borderCollapse:"collapse",background:"#fff",fontSize:13}}>
             <thead>
               <tr style={{background:"#f8fafc"}}>
@@ -7012,6 +7076,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
               })}
             </tbody>
           </table>
+          </CopyableTable>
         </div>
       )}
 
@@ -8557,6 +8622,7 @@ export default function App() {
                   {visible.length===0
                     ? <div style={{textAlign:"center",padding:"40px 0",color:"#94a3b8",fontSize:14}}>No bookings match the current filters.</div>
                     : <div style={{overflowX:"auto",borderRadius:10,border:"1px solid #f1f5f9"}}>
+                        <CopyableTable>
                         <table style={{width:"100%",borderCollapse:"collapse",background:"#fff",fontSize:12}}>
                           <thead>
                             <tr style={{background:"#f8fafc"}}>
@@ -8707,6 +8773,7 @@ export default function App() {
                             })}
                           </tbody>
                         </table>
+                        </CopyableTable>
                       </div>
                   }
                   <div style={{marginTop:8,fontSize:12,color:"#94a3b8"}}>{visible.length} booking{visible.length!==1?"s":""} shown</div>
