@@ -345,9 +345,21 @@ function parseCpsaRefs(sysNotes, notesLegacy) {
 }
 
 // Compare the billed snapshot to a booking's current dimensions. Returns the
-// structured discrepancies (old → new) plus the net hours delta (owing if >0,
-// credit if <0), or null when there is no recorded snapshot / no drift.
-function getBillingDrift(booking) {
+// Day/evening-split cost of a booking-like {start_hour,duration,facility_id} at the
+// given facility rates (5:30pm cutoff). Shared by the mismatch view and billed-change
+// tracking so both frame credit/deficit identically.
+function bookingCost(v, facilityRates) {
+  const CUTOFF=17.5, end=v.start_hour+v.duration;
+  const day = v.start_hour>=CUTOFF ? 0 : end>CUTOFF ? CUTOFF-v.start_hour : v.duration;
+  const evening = v.duration-day;
+  const r=(facilityRates||{})[v.facility_id];
+  const rates = !r ? {day:0,evening:0} : typeof r==="object" ? {day:parseFloat(r.day)||0,evening:parseFloat(r.evening)||0} : {day:parseFloat(r)||0,evening:0};
+  return day*rates.day + evening*rates.evening;
+}
+// structured discrepancies (old → new) plus the net hours delta and, when rates are
+// supplied, the cost delta vs the billed snapshot (>0 ⇒ deficit owed by the booker,
+// <0 ⇒ credit owed to them). Returns null when there is no snapshot / no drift.
+function getBillingDrift(booking, facilityRates) {
   const snap = parseBilledSnapshot(booking.system_notes, booking.notes);
   if (!snap) return null;
   const rows = [];
@@ -358,7 +370,13 @@ function getBillingDrift(booking) {
   if (snap.duration !== booking.duration)
     rows.push({ label:"Dur", old: `${snap.duration}h`, next: `${booking.duration}h` });
   if (!rows.length) return null;
-  return { rows, hoursDelta: +(booking.duration - snap.duration).toFixed(2), snap };
+  const out = { rows, hoursDelta: +(booking.duration - snap.duration).toFixed(2), snap, costDelta: null, billedCost: null, currentCost: null };
+  if (facilityRates) {
+    out.billedCost  = bookingCost(snap, facilityRates);
+    out.currentCost = bookingCost(booking, facilityRates);
+    out.costDelta   = +(out.currentCost - out.billedCost).toFixed(2);
+  }
+  return out;
 }
 function getSameFacilityOverlaps(draft, others) {
   return others.filter(o => o.facility_id === draft.facility_id && timeOverlaps(draft, o));
@@ -5861,10 +5879,11 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
   }
 
   // Invoiced bookings whose current time/duration/field has drifted from the billed
-  // snapshot — excess time is owing, reduced time is a credit.
+  // snapshot. Framed as the mismatch view does: a costlier kept booking ⇒ deficit owed
+  // by the booker, a cheaper one ⇒ credit owed to them (not raw "owing" hours).
   const trackedChanges = bookings
     .filter(b => b.invoiced && inBookerFilter(b.email))
-    .map(b => { const d = getBillingDrift(b); return d ? { booking: b, ...d } : null; })
+    .map(b => { const d = getBillingDrift(b, facilityRates); return d ? { booking: b, ...d } : null; })
     .filter(Boolean);
 
   // Old unapproved = bookings in any review state with past dates, excluding mismatches (those need resolution, not deletion)
@@ -6119,9 +6138,9 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
         <div style={{background:"#f5f3ff",border:"1.5px solid #ddd6fe",borderRadius:12,padding:16,display:"flex",flexDirection:"column",gap:10}}>
           <div style={{fontWeight:700,fontSize:14,color:"#5b21b6"}}>🧾 Billed-booking changes</div>
           {trackedChanges.length===0
-            ? <div style={{fontSize:12,color:"#7c6aa8"}}>No changes detected since invoicing. Edits to an invoiced booking's time, duration or field will appear here as owing (excess) or credit (reduced).</div>
+            ? <div style={{fontSize:12,color:"#7c6aa8"}}>No changes detected since invoicing. Edits to an invoiced booking's time, duration or field appear here as a deficit (kept booking costs more than billed) or a credit (costs less).</div>
             : <div style={{display:"flex",flexDirection:"column",gap:8,maxHeight:360,overflowY:"auto"}}>
-                {trackedChanges.map(({booking:b,rows,hoursDelta},i)=>{
+                {trackedChanges.map(({booking:b,rows,hoursDelta,costDelta,billedCost,currentCost},i)=>{
                   const cpsaRes = parseCpsaResolution(b.system_notes);
                   const isCpsaAmend = cpsaRes?.resolution === "amended";
                   const billingState = cpsaRes?.billingState || "none";
@@ -6134,9 +6153,27 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                         <span style={{fontWeight:600,color:"#0f172a"}}>{b.name}</span>
                         <span style={{color:"#94a3b8"}}>{fmtDate(b.date)} · {b.purpose}</span>
                         {isCpsaAmend&&<span style={{fontSize:10,fontWeight:700,background:"#fef9c3",color:"#a16207",border:"1px solid #fde68a",borderRadius:4,padding:"1px 5px"}}>⚠ CPSA amendment</span>}
-                        <span style={{marginLeft:"auto",fontWeight:800,fontSize:12,color:hoursDelta>0?"#b91c1c":hoursDelta<0?"#15803d":"#64748b",background:hoursDelta>0?"#fef2f2":hoursDelta<0?"#f0fdf4":"#f8fafc",border:`1px solid ${hoursDelta>0?"#fecaca":hoursDelta<0?"#bbf7d0":"#e2e8f0"}`,borderRadius:6,padding:"2px 8px",whiteSpace:"nowrap"}}>
-                          {hoursDelta>0?`+${hoursDelta}h owing`:hoursDelta<0?`${Math.abs(hoursDelta)}h credit`:"field changed"}
-                        </span>
+                        {(()=>{
+                          // Hours change is neutral context; the financial verdict mirrors the
+                          // mismatch view — deficit (booker under-billed) vs credit (over-billed).
+                          const hrsLabel = hoursDelta>0?`+${hoursDelta}h`:hoursDelta<0?`−${Math.abs(hoursDelta)}h`:"field changed";
+                          const credit  = billingState==="credit_pending"||billingState==="credited"||(billingState==="none"&&costDelta<0);
+                          const deficit = billingState==="invoice_pending"||billingState==="invoiced"||(billingState==="none"&&costDelta>0);
+                          const amt = (costDelta!=null&&costDelta!==0)?fmtCost(Math.abs(costDelta)):null;
+                          return (
+                            <span style={{marginLeft:"auto",display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+                              <span style={{fontWeight:600,fontSize:11,color:"#64748b",whiteSpace:"nowrap"}}>{hrsLabel}</span>
+                              {(credit||deficit)&&(
+                                <span title={deficit
+                                    ? `${b.name||"Booker"} in deficit${amt?` ${amt}`:""} from invoice — billed ${fmtCost(billedCost)}, kept booking now costs ${fmtCost(currentCost)}.`
+                                    : `Credit${amt?` ${amt}`:""} owed to ${b.name||"the booker"} — billed ${fmtCost(billedCost)}, kept booking now costs ${fmtCost(currentCost)}.`}
+                                  style={{fontWeight:800,fontSize:12,color:deficit?"#dc2626":"#15803d",background:deficit?"#fef2f2":"#f0fdf4",border:`1px solid ${deficit?"#fecaca":"#bbf7d0"}`,borderRadius:6,padding:"2px 8px",whiteSpace:"nowrap"}}>
+                                  {deficit?`📨 Deficit${amt?` ${amt}`:""}`:`💚 Credit${amt?` ${amt}`:""}`}
+                                </span>
+                              )}
+                            </span>
+                          );
+                        })()}
                       </div>
                       <div style={{display:"grid",gridTemplateColumns:"auto auto auto auto",gap:"2px 10px",alignItems:"center",marginBottom:isCpsaAmend?6:0}}>
                         {rows.map((p,ri)=>(<Fragment key={ri}>
@@ -6436,14 +6473,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
               duration:    sel.duration==="cpsa" ? cpsaVals.duration    : b.duration,
             };
           }
-          function rowCostOf(v) {
-            const CUTOFF=17.5, end=v.start_hour+v.duration;
-            const day = v.start_hour>=CUTOFF ? 0 : end>CUTOFF ? CUTOFF-v.start_hour : v.duration;
-            const evening = v.duration-day;
-            const r=facilityRates[v.facility_id];
-            const rates = !r ? {day:0,evening:0} : typeof r==="object" ? {day:parseFloat(r.day)||0,evening:parseFloat(r.evening)||0} : {day:parseFloat(r)||0,evening:0};
-            return day*rates.day + evening*rates.evening;
-          }
+          const rowCostOf = v => bookingCost(v, facilityRates);
           const origCost=rowCostOf(b);
           const effectiveVals=effectiveFrom(fieldSel); // what we save to the booking
           // Billing follows the KEPT (effective) values, not CPSA's full record — the booker is
@@ -8581,7 +8611,7 @@ export default function App() {
                                   <td style={{padding:"3px 6px",whiteSpace:"nowrap",color:"#475569",fontSize:11}}>{fmt24(b.start_hour)}–{fmt24(b.start_hour+b.duration)}</td>
                                   <td style={{padding:"3px 6px",fontSize:11,maxWidth:150}}>{(()=>{
                                     const reasons=parseMismatchNote(b.system_notes,b.notes);
-                                    const drift=getBillingDrift(b);
+                                    const drift=getBillingDrift(b, facilityRates);
                                     // Parse CPSA submission URL from system_notes (or legacy notes)
                                     const cpsaUrlMatch=(b.system_notes||b.notes||"").match(/\[CPSA [^\]]+\]\s*Ref\s+(\S+)\s*·\s*(https?:\/\/\S+)/);
                                     const cpsaUrl=cpsaUrlMatch?cpsaUrlMatch[2]:null;
@@ -8597,8 +8627,12 @@ export default function App() {
                                       return <span title={reasons.join("\n")} style={{color:"#a16207",cursor:"help",display:"inline-block",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:160}}>⚠ {reasons.join(", ")}</span>;
                                     }
                                     if(drift){
-                                      const lbl=drift.hoursDelta>0?`+${drift.hoursDelta}h owing`:drift.hoursDelta<0?`${Math.abs(drift.hoursDelta)}h credit`:"field Δ";
-                                      return <span title={drift.rows.map(r=>`${r.label}: ${r.old} → ${r.next}`).join("\n")} style={{color:drift.hoursDelta>0?"#b91c1c":drift.hoursDelta<0?"#15803d":"#5b21b6",cursor:"help",fontWeight:600}}>🧾 {lbl}</span>;
+                                      const cd=drift.costDelta;
+                                      const deficit=cd!=null&&cd>0, credit=cd!=null&&cd<0;
+                                      const amt=(cd!=null&&cd!==0)?fmtCost(Math.abs(cd)):null;
+                                      const hrs=drift.hoursDelta>0?`+${drift.hoursDelta}h`:drift.hoursDelta<0?`−${Math.abs(drift.hoursDelta)}h`:"field Δ";
+                                      const fin=deficit?` deficit${amt?` ${amt}`:""}`:credit?` credit${amt?` ${amt}`:""}`:"";
+                                      return <span title={`${drift.rows.map(r=>`${r.label}: ${r.old} → ${r.next}`).join("\n")}${amt?`\nBilled ${fmtCost(drift.billedCost)} → now ${fmtCost(drift.currentCost)}`:""}`} style={{color:deficit?"#b91c1c":credit?"#15803d":"#5b21b6",cursor:"help",fontWeight:600}}>🧾 {hrs}{fin}</span>;
                                     }
                                     return <span style={{color:"#cbd5e1"}}>—</span>;
                                   })()}</td>
