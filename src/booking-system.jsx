@@ -5716,6 +5716,69 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
 
 
 
+// One newly-synced CPSA field booking, expandable to reveal the AMUA bookings it
+// clashes with (same facility / same time), any simultaneous use of a different
+// facility, and the CPSA-review/mismatch status of clashing bookings. Detail is
+// computed live against current bookings so it reflects later resolutions.
+function SyncedItemRow({ ab, bookings }) {
+  const af = FACILITIES.find(x=>x.id===ab.facility_id);
+  // Resolve the live booking (by id, else a field-block match) so overlap checks
+  // exclude the item itself and stay accurate for older sync-log entries.
+  const live = (ab.id && bookings.find(b=>b.id===ab.id))
+    || bookings.find(b=>isAdminBooking(b) && b.facility_id===ab.facility_id && b.date===ab.date && b.start_hour===ab.start_hour && b.duration===ab.duration)
+    || null;
+  const bk = live || ab;
+  const others    = bookings.filter(b => b.id!==bk.id && !["cancelled","rejected"].includes(b.status));
+  const sameAll   = getSameFacilityOverlaps(bk, others);
+  const sameAdmin = sameAll.filter(isAdminBooking);
+  const sameUser  = sameAll.filter(b=>!isAdminBooking(b));
+  const cross     = getCrossFacilityOverlaps(bk, others).filter(b=>!isAdminBooking(b));
+  const mismatched= sameUser.filter(b=>b.status==="cpsa_review_needed");
+  const hasIssue  = sameAdmin.length||sameUser.length||cross.length;
+  const span  = b => `${fmtTime(b.start_hour)}–${fmtTime(b.start_hour+b.duration)}`;
+  const badge = (txt,bg,fg,bd) => <span style={{fontSize:9,fontWeight:700,background:bg,color:fg,border:`1px solid ${bd}`,borderRadius:8,padding:"0 5px",whiteSpace:"nowrap"}}>{txt}</span>;
+  const block = (bg,bd,children) => <div style={{background:bg,border:`1px solid ${bd}`,borderRadius:6,padding:"5px 8px",display:"flex",flexDirection:"column",gap:2}}>{children}</div>;
+  return (
+    <details style={{fontSize:11}}>
+      <summary style={{color:"#475569",cursor:"pointer",display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+        <span style={{width:7,height:7,borderRadius:"50%",background:af?.color||"#94a3b8",flexShrink:0}}/>
+        <span>{fmtDate(ab.date)} · {span(ab)} · {af?.name||ab.facility_id}{ab.purpose ? " · "+ab.purpose : ""}</span>
+        {sameUser.length>0 && badge(`⚡ ${sameUser.length} clash${sameUser.length!==1?"es":""}`,"#fecdd3","#9f1239","#fda4af")}
+        {mismatched.length>0 && badge(`⚠ ${mismatched.length} mismatch${mismatched.length!==1?"es":""}`,"#fde68a","#92400e","#fcd34d")}
+        {cross.length>0 && badge(`ℹ ${cross.length} other facility`,"#fef9c3","#854d0e","#fde68a")}
+        {!hasIssue && badge("✓ clean","#dcfce7","#166534","#86efac")}
+      </summary>
+      <div style={{margin:"5px 0 7px 16px",display:"flex",flexDirection:"column",gap:5}}>
+        {sameAdmin.length>0 && block("#fef2f2","#fca5a5",<>
+          <div style={{fontWeight:700,color:"#b91c1c"}}>🚫 Same facility — other field block{sameAdmin.length!==1?"s":""}</div>
+          {sameAdmin.map(b=><div key={b.id} style={{color:"#991b1b"}}>{span(b)} · {b.purpose||"Field block"}</div>)}
+        </>)}
+        {sameUser.length>0 && block("#fff7ed","#fed7aa",<>
+          <div style={{fontWeight:700,color:"#c2410c"}}>⚡ Clashes — AMUA bookings on this facility at the same time</div>
+          {sameUser.map(b=>{ const rs=parseMismatchNote(b.system_notes,b.notes); return (
+            <div key={b.id} style={{color:"#9a3412"}}>
+              <div style={{display:"flex",gap:5,alignItems:"center",flexWrap:"wrap"}}>
+                <span>{span(b)} · {b.name||b.email} · {b.purpose||"—"}</span>
+                {b.status==="cpsa_review_needed" && badge("⚠ CPSA mismatch","#fde68a","#92400e","#fcd34d")}
+                {b.invoiced && badge("invoiced","#e0e7ff","#3730a3","#c7d2fe")}
+              </div>
+              {rs.length>0 && <div style={{marginLeft:10,color:"#92400e",fontSize:10}}>{rs.map((x,i)=><div key={i}>· {x}</div>)}</div>}
+            </div>
+          ); })}
+        </>)}
+        {cross.length>0 && block("#fefce8","#fde68a",<>
+          <div style={{fontWeight:700,color:"#854d0e"}}>ℹ Simultaneous use of a different facility</div>
+          {cross.map(b=>{ const cf=FACILITIES.find(f=>f.id===b.facility_id); return (
+            <div key={b.id} style={{color:"#713f12"}}>{cf?.name||b.facility_id} · {span(b)} · {b.name||b.email}{b.purpose?` · ${b.purpose}`:""}</div>
+          ); })}
+        </>)}
+        {!hasIssue && <div style={{color:"#16a34a",display:"flex",alignItems:"center",gap:5}}><span style={{width:7,height:7,borderRadius:"50%",background:"#22c55e",display:"inline-block"}}/>No clashes or mismatches at this time.</div>}
+        {ab.id && !live && <div style={{color:"#94a3b8",fontStyle:"italic"}}>This synced item is no longer in current bookings (removed since sync).</div>}
+      </div>
+    </details>
+  );
+}
+
 // ─── Admin Panel with action queue, bulk approve, facility rates ──────────────
 function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,clashes=[],deleteIds=new Set(),facilityRates={},onClearOldUnapproved,onBulkApply,onSaveMismatch,onInformCpsa,onQueueNotifications,onMarkAdjustmentSettled,loggedInEmail,syncResults=[],onClearSyncResults,showSyncResults=false,onToggleSyncResults,bookerFilter=new Set(),onToggleBooker,onSetBookerFilter,aliasNames={},emailAliases={}}) {
   const [showSchedulePanel, setShowSchedulePanel] = useState(false);
@@ -6015,13 +6078,9 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                       : <div style={{display:"flex",flexDirection:"column",gap:3,paddingLeft:12,borderLeft:"2px solid #e0f2fe"}}>
                           {[
                             r.added>0 && ((r.addedBookings&&r.addedBookings.length)
-                              ? <details><summary style={{color:"#0e7490",fontSize:12,cursor:"pointer"}}>＋ <strong>{r.added}</strong> booking{r.added!==1?"s":""} added</summary>
-                                  <div style={{margin:"4px 0 2px 14px",display:"flex",flexDirection:"column",gap:2}}>
-                                    {r.addedBookings.map((ab,abi)=>{ const af=FACILITIES.find(x=>x.id===ab.facility_id); return (
-                                      <div key={abi} style={{fontSize:11,color:"#475569",display:"flex",gap:6,alignItems:"center"}}>
-                                        <span style={{width:7,height:7,borderRadius:"50%",background:af?.color||"#94a3b8",flexShrink:0}}/>
-                                        {fmtDate(ab.date)} · {fmtTime(ab.start_hour)}-{fmtTime(ab.start_hour+ab.duration)} · {af?.name||ab.facility_id}{ab.purpose ? " · "+ab.purpose : ""}
-                                      </div> ); })}
+                              ? <details><summary style={{color:"#0e7490",fontSize:12,cursor:"pointer"}}>＋ <strong>{r.added}</strong> booking{r.added!==1?"s":""} added <span style={{color:"#94a3b8",fontWeight:400}}>· expand each for clashes / mismatches</span></summary>
+                                  <div style={{margin:"4px 0 2px 14px",display:"flex",flexDirection:"column",gap:3}}>
+                                    {r.addedBookings.map((ab,abi)=><SyncedItemRow key={ab.id||abi} ab={ab} bookings={bookings}/>)}
                                   </div>
                                 </details>
                               : <span style={{color:"#0e7490",fontSize:12}}>＋ <strong>{r.added}</strong> booking{r.added!==1?"s":""} added</span>),
@@ -7533,7 +7592,7 @@ export default function App() {
             setBookings(prev => [...prev, newBk]);
           }
           added++;
-          addedBookings.push({ facility_id, date, start_hour, duration, purpose });
+          addedBookings.push({ id: newBk.id, facility_id, date, start_hour, duration, purpose });
           logActivity("cpsa_admin_booking_add", { date, facility_id, start_hour, duration, purpose });
         }
       }
