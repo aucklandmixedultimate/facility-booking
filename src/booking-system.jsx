@@ -3756,7 +3756,49 @@ function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onLoadT
   );
 }
 
-function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = false, approxPlayers = {}, onUpdateApproxPlayers, approxDurations = {}, onUpdateApproxDuration, onUpdateFacilityRate, pricingMode = "hourly", onSetPricingMode, onProposeMerge, onBulkApply, onMarkInvoiced, onMarkAdjustmentSettled, bookerFilter=new Set(), profiles={}, emailAliases={}, aliasNames={}, onCreateOfficialInvoice, onFilterChange=null, loadRequest=null }) {
+// ─── Pricing conditions ─────────────────────────────────────────────────────
+// A condition pins a booker's rate for one facility over a date range. All
+// conditions are stored even when they overlap/conflict; at price time the
+// applicable one is chosen by priority — invoice-locked first, then newest.
+// Each condition may override the day rate, the evening rate, or both.
+// { id, bookerEmail, facilityId, period:"day"|"evening"|"both",
+//   dayRate, eveningRate, dateFrom, dateTo, locked, source, createdAt }
+function defaultFacRates(facilityRates, facId) {
+  const r = (facilityRates || {})[facId];
+  if (!r) return { day: 0, evening: 50 };
+  if (typeof r === "object") return { day: r.day ?? 0, evening: r.evening ?? 50 };
+  return { day: parseFloat(r) || 0, evening: 50 }; // backward compat (number = day rate)
+}
+function matchingConditions(conditions, facId, bookerEmail, dateStr) {
+  const be = (bookerEmail || "").toLowerCase();
+  return (conditions || []).filter(c =>
+    c && c.facilityId === facId &&
+    (c.bookerEmail || "").toLowerCase() === be &&
+    (!c.dateFrom || !dateStr || dateStr >= c.dateFrom) &&
+    (!c.dateTo   || !dateStr || dateStr <= c.dateTo)
+  );
+}
+// Effective {day,evening} for a booker+facility+date: the global rate, then any
+// matching conditions overlaid lowest-priority first so the winner applies last
+// (order: non-locked oldest → newest → locked).
+function resolveRates(facilityRates, conditions, facId, bookerEmail, dateStr) {
+  const base = defaultFacRates(facilityRates, facId);
+  const matches = matchingConditions(conditions, facId, bookerEmail, dateStr);
+  if (!matches.length) return base;
+  const sorted = [...matches].sort((a, b) => {
+    const ra = a.locked ? 1 : 0, rb = b.locked ? 1 : 0;
+    if (ra !== rb) return ra - rb;                                  // locked last → wins
+    return (a.createdAt || "").localeCompare(b.createdAt || "");    // newest last → wins
+  });
+  let { day, evening } = base;
+  for (const c of sorted) {
+    if (c.dayRate != null && c.dayRate !== "")         day = Number(c.dayRate);
+    if (c.eveningRate != null && c.eveningRate !== "") evening = Number(c.eveningRate);
+  }
+  return { day, evening };
+}
+
+function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingConditions = [], onAddPricingCondition, onRemovePricingCondition, isAdmin = false, approxPlayers = {}, onUpdateApproxPlayers, approxDurations = {}, onUpdateApproxDuration, onUpdateFacilityRate, pricingMode = "hourly", onSetPricingMode, onProposeMerge, onBulkApply, onMarkInvoiced, onMarkAdjustmentSettled, bookerFilter=new Set(), profiles={}, emailAliases={}, aliasNames={}, onCreateOfficialInvoice, onFilterChange=null, loadRequest=null }) {
   const now = new Date();
   const thisYear = now.getFullYear();
 
@@ -3800,6 +3842,15 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
   // Invoice modal state
   const [showInvoice, setShowInvoice] = useState(false);
   const [showRatesEdit, setShowRatesEdit] = useState(false);
+  // "Add pricing condition" form
+  const [showCondForm, setShowCondForm] = useState(false);
+  const [condBooker, setCondBooker] = useState("");
+  const [condFac,    setCondFac]    = useState("");
+  const [condPeriod, setCondPeriod] = useState("both"); // day | evening | both
+  const [condDay,    setCondDay]    = useState("");
+  const [condEve,    setCondEve]    = useState("");
+  const [condFrom,   setCondFrom]   = useState("");
+  const [condTo,     setCondTo]     = useState("");
   // Inline player-count editing: email being edited
   const [editingPlayers,  setEditingPlayers]  = useState(null);
   const [playersInput,    setPlayersInput]    = useState("");
@@ -3923,12 +3974,11 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
     return { day: b.duration, evening: 0 };
   }
 
-  function getFacRates(facId) {
-    const r = facilityRates[facId];
-    if (!r) return { day: 0, evening: 50 };
-    if (typeof r === "object") return { day: r.day ?? 0, evening: r.evening ?? 50 };
-    return { day: parseFloat(r) || 0, evening: 50 }; // backward compat
+  function getFacRates(facId, bookerEmail, dateStr) {
+    if (bookerEmail) return resolveRates(facilityRates, pricingConditions, facId, bookerEmail, dateStr);
+    return defaultFacRates(facilityRates, facId);
   }
+  const bRates = b => getFacRates(b.facility_id, b.email, b.date);
 
   const isPerBooking = pricingMode === "per_booking";
 
@@ -3954,7 +4004,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
   // category (day/evening, decided by majority split). In hourly mode the
   // booking is split at 5:30 pm between day and evening rates.
   function getBookingCost(b) {
-    const rates = getFacRates(b.facility_id);
+    const rates = bRates(b);
     if (isPerBooking) {
       const rate = categoryOf(b) === "evening" ? rates.evening : rates.day;
       return getApproxDuration(b.email) * rate;
@@ -3970,7 +4020,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
     if (!byEmail[key]) byEmail[key] = { email:b.email, name:b.name, daytime:0, evening:0, total:0, bookings:0, dayBkgs:0, eveBkgs:0, cost:0, dayCost:0, eveCost:0 };
     const rec = byEmail[key];
     const { day, evening } = splitHours(b);
-    const rates = getFacRates(b.facility_id);
+    const rates = bRates(b);
     rec.evening  += evening;
     rec.daytime  += day;
     rec.total    += b.duration;
@@ -3990,7 +4040,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
     if (!snap) return 0;
     const orig = { ...b, facility_id:snap.facility_id, start_hour:snap.start_hour, duration:snap.duration };
     const od = splitHours(orig), nd = splitHours(b);
-    const or = getFacRates(snap.facility_id), nr = getFacRates(b.facility_id);
+    const or = getFacRates(snap.facility_id, b.email, b.date), nr = bRates(b);
     return (nd.day*nr.day + nd.evening*nr.evening) - (od.day*or.day + od.evening*or.evening);
   }
   // Pending credit (will be discounted from next invoice) — negative number.
@@ -4063,7 +4113,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
       const groups = {};
       bkgs.forEach(b => {
         const { day, evening } = splitHours(b);
-        const rates = getFacRates(b.facility_id);
+        const rates = bRates(b);
         const fac = FACILITIES.find(f => f.id === b.facility_id);
         const facName = fac?.name || b.facility_id;
         if (day > 0) {
@@ -4085,7 +4135,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
     } else {
       return bkgs.map(b => {
         const { day, evening } = splitHours(b);
-        const rates = getFacRates(b.facility_id);
+        const rates = bRates(b);
         const fac = FACILITIES.find(f => f.id === b.facility_id);
         const cost = day * rates.day + evening * rates.evening;
         const timeStr = `${fmtTime(b.start_hour)}–${fmtTime(b.start_hour + b.duration)}`;
@@ -4108,7 +4158,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
       if (!snap) return [];
       const orig = { ...b, facility_id:snap.facility_id, start_hour:snap.start_hour, duration:snap.duration };
       const origDay = splitHours(orig), currDay = splitHours(b);
-      const origRates = getFacRates(snap.facility_id), currRates = getFacRates(b.facility_id);
+      const origRates = getFacRates(snap.facility_id, b.email, b.date), currRates = bRates(b);
       const origCost = origDay.day*origRates.day + origDay.evening*origRates.evening;
       const currCost = currDay.day*currRates.day + currDay.evening*currRates.evening;
       const rawDelta = currCost - origCost;
@@ -4544,6 +4594,75 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
               </div>
             </div>
           )}
+          {isAdmin && onAddPricingCondition && (()=>{
+            const canAdd = condBooker && condFac && condFrom && condTo &&
+              (condPeriod==="day" ? condDay!=="" : condPeriod==="evening" ? condEve!=="" : (condDay!==""||condEve!==""));
+            const submit = () => {
+              if (!canAdd) return;
+              onAddPricingCondition({
+                id: newId(),
+                bookerEmail: condBooker.toLowerCase(),
+                facilityId: condFac,
+                period: condPeriod,
+                dayRate:     condPeriod==="evening" ? null : (condDay===""?null:Number(condDay)),
+                eveningRate: condPeriod==="day"     ? null : (condEve===""?null:Number(condEve)),
+                dateFrom: condFrom, dateTo: condTo,
+                locked: false, source: "manual",
+                createdAt: new Date().toISOString(),
+              });
+              setCondDay(""); setCondEve(""); setCondBooker(""); setCondFac(""); setCondFrom(""); setCondTo(""); setShowCondForm(false);
+            };
+            const inp = {padding:"4px 7px",borderRadius:6,border:"1.5px solid #e2e8f0",fontSize:12,fontFamily:"inherit",outline:"none"};
+            const facName = id => FACILITIES.find(f=>f.id===id)?.name || id;
+            const sorted = [...pricingConditions].sort((a,b)=>(b.createdAt||"").localeCompare(a.createdAt||""));
+            return (
+              <div style={{background:"#fff",border:"1.5px solid #e0e7ff",borderRadius:12,padding:14,marginBottom:14}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:(pricingConditions.length||showCondForm)?10:0,flexWrap:"wrap"}}>
+                  <span style={{fontSize:13,fontWeight:700,color:"#4338ca"}}>⚙ Pricing conditions</span>
+                  <span style={{fontSize:11,color:"#94a3b8"}}>booker rate overrides — beat the global rate within their dates</span>
+                  <button onClick={()=>setShowCondForm(v=>!v)} style={{marginLeft:"auto",...S.btn({border:"1.5px solid #c7d2fe",background:showCondForm?"#eef2ff":"#fff",color:"#4338ca",fontSize:12})}}>{showCondForm?"Close":"＋ Add condition"}</button>
+                </div>
+                {showCondForm && (
+                  <div style={{display:"flex",flexWrap:"wrap",gap:8,alignItems:"center",background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:"10px 12px",marginBottom:pricingConditions.length?12:0}}>
+                    <select value="booker_rate" onChange={()=>{}} disabled title="Condition type (more types coming later)" style={{...inp,fontWeight:700,color:"#4338ca"}}><option value="booker_rate">Booker rate override</option></select>
+                    <select value={condBooker} onChange={e=>setCondBooker(e.target.value)} style={inp}>
+                      <option value="">Booker…</option>
+                      {allInvoiceEmails.map(em=><option key={em} value={em}>{summaryAlias(em)} — {em}</option>)}
+                    </select>
+                    <select value={condFac} onChange={e=>setCondFac(e.target.value)} style={inp}>
+                      <option value="">Facility…</option>
+                      {FACILITIES.map(f=><option key={f.id} value={f.id}>{f.name}</option>)}
+                    </select>
+                    <select value={condPeriod} onChange={e=>setCondPeriod(e.target.value)} style={inp}>
+                      <option value="both">Day + Evening</option>
+                      <option value="day">Day only</option>
+                      <option value="evening">Evening only</option>
+                    </select>
+                    {condPeriod!=="evening" && <label style={{fontSize:11,color:"#64748b",display:"flex",alignItems:"center",gap:3}}>Day $<input type="number" min="0" step="0.5" value={condDay} onChange={e=>setCondDay(e.target.value)} style={{...inp,width:64,textAlign:"right"}}/>/hr</label>}
+                    {condPeriod!=="day" && <label style={{fontSize:11,color:"#64748b",display:"flex",alignItems:"center",gap:3}}>Eve $<input type="number" min="0" step="0.5" value={condEve} onChange={e=>setCondEve(e.target.value)} style={{...inp,width:64,textAlign:"right"}}/>/hr</label>}
+                    <label style={{fontSize:11,color:"#64748b",display:"flex",alignItems:"center",gap:3}}>From<input type="date" value={condFrom} onChange={e=>setCondFrom(e.target.value)} style={inp}/></label>
+                    <label style={{fontSize:11,color:"#64748b",display:"flex",alignItems:"center",gap:3}}>To<input type="date" value={condTo} onChange={e=>setCondTo(e.target.value)} style={inp}/></label>
+                    <button onClick={submit} disabled={!canAdd} style={{...S.btn({border:"none",background:canAdd?"#4338ca":"#cbd5e1",color:"#fff",fontSize:12,fontWeight:700}),cursor:canAdd?"pointer":"not-allowed"}}>Add</button>
+                  </div>
+                )}
+                {sorted.length>0 && (
+                  <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                    {sorted.map(c=>(
+                      <div key={c.id} style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",fontSize:12,background:c.locked?"#f5f3ff":"#f8fafc",border:`1px solid ${c.locked?"#ddd6fe":"#e2e8f0"}`,borderRadius:7,padding:"5px 10px"}}>
+                        {c.locked&&<span title={c.source||"invoice"}>🔒</span>}
+                        <span style={{fontWeight:700,color:"#0f172a"}}>{summaryAlias(c.bookerEmail)}</span>
+                        <span style={{color:"#64748b"}}>· {facName(c.facilityId)}</span>
+                        <span style={{color:"#334155"}}>· {c.dayRate!=null?`day ${fmtCost(c.dayRate)}`:""}{(c.dayRate!=null&&c.eveningRate!=null)?" / ":""}{c.eveningRate!=null?`eve ${fmtCost(c.eveningRate)}`:""}/hr</span>
+                        <span style={{color:"#94a3b8"}}>· {c.dateFrom} → {c.dateTo}</span>
+                        {c.locked&&<span style={{fontSize:10,color:"#7c3aed"}}>{c.source}</span>}
+                        {onRemovePricingCondition&&<button onClick={()=>onRemovePricingCondition(c.id)} title="Remove condition" style={{marginLeft:"auto",border:"none",background:"transparent",color:"#ef4444",cursor:"pointer",fontSize:13,fontWeight:700}}>✕</button>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
           <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:10 }}>
             {facCosts.map(({ fac, dayHrs, eveningHrs, hours, bkgCount, rates, cost }) => {
               const hasRates = rates.day > 0 || rates.evening > 0;
@@ -4932,7 +5051,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
               const numBookers = groups.length;
               const totalRate = allBkgs.reduce((s,b)=>{
                 const cat = categoryOf(b);
-                const r = getFacRates(b.facility_id);
+                const r = bRates(b);
                 const dur = getApproxDuration(b.email);
                 return s + (isPerBooking ? dur*r[cat] : (splitHours(b).day*r.day + splitHours(b).evening*r.evening));
               },0);
@@ -4998,7 +5117,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
                   });
                   const getCost = (g) => g.bkgs.reduce((s,b)=>{
                     const cat = categoryOf(b);
-                    const r = getFacRates(b.facility_id);
+                    const r = bRates(b);
                     const dur = getApproxDuration(b.email);
                     return s + (isPerBooking ? dur*r[cat] : (splitHours(b).day*r.day+splitHours(b).evening*r.evening));
                   }, 0);
@@ -5039,7 +5158,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, isAdmin = fal
                     const outside = g.bkgs.filter(b=>!hasOverlap || b.date<overlapStart || b.date>overlapEnd);
                     individualCostByEmail[g.email] = outside.reduce((s,b)=>{
                       const cat = categoryOf(b);
-                      const r = getFacRates(b.facility_id);
+                      const r = bRates(b);
                       const dur = getApproxDuration(b.email);
                       return s + (isPerBooking ? dur*r[cat] : (splitHours(b).day*r.day+splitHours(b).evening*r.evening));
                     }, 0);
@@ -7183,6 +7302,10 @@ export default function App() {
   const [facilityRates, setFacilityRates] = useState(()=>{
     try{return JSON.parse(localStorage.getItem("fb_facility_rates")||"{}");}catch{return {};}
   });
+  // Pricing conditions: booker rate overrides (manual + invoice-locked snapshots).
+  const [pricingConditions, setPricingConditions] = useState(()=>{
+    try{return JSON.parse(localStorage.getItem("fb_pricing_conditions")||"[]");}catch{return [];}
+  });
   const [listBookerFilter, setListBookerFilter] = useState(new Set()); // empty = all (additive multi-select)
   const [showBookerPicker, setShowBookerPicker] = useState(false);
   // Toggle a booker; if it's a primary with linked secondaries, toggle the whole profile group.
@@ -7253,6 +7376,10 @@ export default function App() {
       if (map.facility_rates && typeof map.facility_rates === "object") {
         setFacilityRates(map.facility_rates);
         try{localStorage.setItem("fb_facility_rates",JSON.stringify(map.facility_rates));}catch{ /* ignore */ }
+      }
+      if (Array.isArray(map.pricing_conditions)) {
+        setPricingConditions(map.pricing_conditions);
+        try{localStorage.setItem("fb_pricing_conditions",JSON.stringify(map.pricing_conditions));}catch{ /* ignore */ }
       }
       if (map.approx_players && typeof map.approx_players === "object") {
         setApproxPlayers(map.approx_players);
@@ -7615,6 +7742,15 @@ export default function App() {
     persistSetting("facility_rates", newRates);
   }
 
+  // Pricing conditions — persisted like facility rates (local + synced setting).
+  function savePricingConditions(next) {
+    setPricingConditions(next);
+    try{localStorage.setItem("fb_pricing_conditions",JSON.stringify(next));}catch{ /* ignore */ }
+    persistSetting("pricing_conditions", next);
+  }
+  function addPricingCondition(cond) { savePricingConditions([...pricingConditions, cond]); }
+  function removePricingCondition(id) { savePricingConditions(pricingConditions.filter(c=>c.id!==id)); }
+
   function setPricingMode(mode) {
     setPricingModeState(mode);
     try{localStorage.setItem("fb_pricing_mode", mode);}catch{ /* ignore */ }
@@ -7660,6 +7796,7 @@ export default function App() {
     await loadBookings();
     await loadSettings();
     await persistSetting("facility_rates", facilityRates);
+    await persistSetting("pricing_conditions", pricingConditions);
     await persistSetting("approx_players", approxPlayers);
     await persistSetting("approx_durations", approxDurations);
     await persistSetting("log_retention_months", logRetentionMonths);
@@ -7780,6 +7917,7 @@ export default function App() {
   // invoiced and settle any credit adjustments bundled into the invoice.
   async function handleUpdateBillingRecord(patch) {
     let creditTargets = [];
+    let lockedConds = [];
     setBillingRecords(prev => {
       const old = prev.find(r=>r.id===patch.id);
       if (old && (old.status||"draft")==="draft" && patch.status && patch.status!=="draft") {
@@ -7794,6 +7932,19 @@ export default function App() {
         if (creditIds.size) {
           creditTargets = bookings.filter(b=>creditIds.has(b.id));
         }
+        // Pin the prices billed: one locked pricing condition per booker+facility for
+        // this invoice's date range, snapshotting the rate that was actually applied.
+        if ((old.type==="invoice"||!old.type) && old.bookerEmail && old.bookerEmail!=="gtec") {
+          const invBkgs = bookings.filter(b=>ids.has(b.id));
+          const facIds = [...new Set(invBkgs.map(b=>b.facility_id))];
+          const from = old.dateFrom, to = old.dateTo, stamp = new Date().toISOString();
+          const src = `invoice ${old.referenceId||old.gtecInvoiceNumber||old.id||""}`.trim();
+          lockedConds = facIds.map(facId => {
+            const eff = resolveRates(facilityRates, pricingConditions, facId, old.bookerEmail, from);
+            return { id:newId(), bookerEmail:old.bookerEmail.toLowerCase(), facilityId:facId, period:"both",
+              dayRate:eff.day, eveningRate:eff.evening, dateFrom:from, dateTo:to, locked:true, source:src, createdAt:stamp };
+          });
+        }
       }
       return prev.map(r=>r.id===patch.id?{...r,...patch}:r);
     });
@@ -7801,6 +7952,8 @@ export default function App() {
     for (const b of creditTargets) {
       await handleMarkAdjustmentSettled(b, "credited");
     }
+    // Persist invoice-locked pricing snapshots (after setState so state is consistent)
+    if (lockedConds.length) savePricingConditions([...pricingConditions, ...lockedConds]);
   }
 
   // Bulk approve/reject — groups by email and sends one summary per person
@@ -8405,7 +8558,7 @@ export default function App() {
           </div>
         )}
 
-        {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<SummaryTab bookings={bookings} loggedInEmail={loggedInEmail} facilityRates={facilityRates} isAdmin={isAdmin} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onUpdateFacilityRate={updateFacilityRate} pricingMode={pricingMode} onSetPricingMode={setPricingMode} onProposeMerge={handleProposeMerge} onBulkApply={handleBulkApply} onMarkInvoiced={handleMarkInvoiced} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} bookerFilter={listBookerFilter} profiles={profiles} emailAliases={emailAliases} aliasNames={aliasNames} onCreateOfficialInvoice={handleCreateOfficialInvoice} onFilterChange={s=>setListBookerFilter(s)} loadRequest={summaryLoadRequest}/>}</div>}
+        {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<SummaryTab bookings={bookings} loggedInEmail={loggedInEmail} facilityRates={facilityRates} pricingConditions={pricingConditions} onAddPricingCondition={addPricingCondition} onRemovePricingCondition={removePricingCondition} isAdmin={isAdmin} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onUpdateFacilityRate={updateFacilityRate} pricingMode={pricingMode} onSetPricingMode={setPricingMode} onProposeMerge={handleProposeMerge} onBulkApply={handleBulkApply} onMarkInvoiced={handleMarkInvoiced} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} bookerFilter={listBookerFilter} profiles={profiles} emailAliases={emailAliases} aliasNames={aliasNames} onCreateOfficialInvoice={handleCreateOfficialInvoice} onFilterChange={s=>setListBookerFilter(s)} loadRequest={summaryLoadRequest}/>}</div>}
         {tab==="billing"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<BillingTab billingRecords={billingRecords} onUpdateRecord={handleUpdateBillingRecord} onDeleteRecord={id=>setBillingRecords(prev=>prev.filter(r=>r.id!==id))} onLoadToSummary={handleLoadBillingToSummary} isAdmin={isAdmin} loggedInEmail={loggedInEmail} emailAliases={emailAliases} aliasNames={aliasNames} profiles={profiles}/>}</div>}
         {tab==="about"&&<div style={{padding:"8px 0"}}><AboutTab/></div>}
         {tab==="admin"&&isAdmin&&<div style={S.card}>
