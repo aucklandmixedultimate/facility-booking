@@ -115,15 +115,15 @@ const DURATIONS = [
 ];
 const STATUS_META = {
   pending_amua: {bg:"#fff8e1",border:"#f59e0b",text:"#92400e",dot:"#f59e0b",label:"(1/4) Pending AMUA Review"},
-  queued_cpsa:  {bg:"#dbeafe",border:"#93c5fd",text:"#1e40af",dot:"#3b82f6",label:"(2/4) Queued for CPSA"},
-  pending_cpsa: {bg:"#e0f2fe",border:"#7dd3fc",text:"#075985",dot:"#0ea5e9",label:"(3/4) Pending CPSA Review"},
+  queued_cpsa:  {bg:"#dbeafe",border:"#93c5fd",text:"#1e40af",dot:"#3b82f6",label:"(2/4) Queued for GTEC"},
+  pending_cpsa: {bg:"#e0f2fe",border:"#7dd3fc",text:"#075985",dot:"#0ea5e9",label:"(3/4) Pending GTEC Review"},
   approved:      {bg:"#f0fdf4",border:"#22c55e",text:"#14532d",dot:"#22c55e",label:"(4/4) Approved"},
-  cpsa_confirmed:{bg:"#ecfeff",border:"#0891b2",text:"#155e75",dot:"#0891b2",label:"🌐 CPSA Confirmed"},
-  cpsa_review_needed: {bg:"#fef9c3",border:"#a16207",text:"#713f12",dot:"#a16207",label:"⚠ CPSA Mismatch — AMUA Review"},
+  cpsa_confirmed:{bg:"#ecfeff",border:"#0891b2",text:"#155e75",dot:"#0891b2",label:"🌐 GTEC Confirmed"},
+  cpsa_review_needed: {bg:"#fef9c3",border:"#a16207",text:"#713f12",dot:"#a16207",label:"⚠ GTEC Mismatch — AMUA Review"},
   rejected:     {bg:"#fff1f2",border:"#f43f5e",text:"#881337",dot:"#f43f5e",label:"Rejected"},
   cancelled:    {bg:"#f8f8f8",border:"#94a3b8",text:"#475569",dot:"#94a3b8",label:"Cancelled"},
   clash:        {bg:"#fef3c7",border:"#d97706",text:"#92400e",dot:"#d97706",label:"Clash"},
-  amua_submit:  {bg:"#dbeafe",border:"#93c5fd",text:"#1e40af",dot:"#3b82f6",label:"(2/4) Queued for CPSA"},
+  amua_submit:  {bg:"#dbeafe",border:"#93c5fd",text:"#1e40af",dot:"#3b82f6",label:"(2/4) Queued for GTEC"},
   pending:      {bg:"#fff8e1",border:"#f59e0b",text:"#92400e",dot:"#f59e0b",label:"(1/4) Pending AMUA Review"},
 };
 // invoiced is an orthogonal billing flag (booking.invoiced boolean), not a workflow status.
@@ -571,15 +571,15 @@ function buildApprovalEmailHtml({ name, email, bookings: bkgs, newStatus, adminN
   const isCpsaConfirmed = newStatus === "cpsa_confirmed";
   const isCpsaReview = newStatus === "cpsa_review_needed";
   const color = isApproved ? "#22c55e" : isCpsaConfirmed ? "#0891b2" : isQueued ? "#3b82f6" : isCpsaReview ? "#d97706" : "#f43f5e";
-  const label = isApproved ? "Approved ✓" : isCpsaConfirmed ? "Confirmed by CPSA ✓" : isQueued ? "Queued for CPSA Review" : isCpsaReview ? "Needs Review — CPSA Mismatch" : "Rejected ✗";
+  const label = isApproved ? "Approved ✓" : isCpsaConfirmed ? "Confirmed by GTEC ✓" : isQueued ? "Queued for GTEC Review" : isCpsaReview ? "Needs Review — GTEC Mismatch" : "Rejected ✗";
   const bodyText = isApproved
     ? "Great news — your booking request has been approved!"
     : isCpsaConfirmed
-    ? "Good news — CPSA has confirmed your booking. The details on CPSA's official schedule match what you booked, so nothing further is needed."
+    ? "Good news — GTEC has confirmed your booking. The details on GTEC's official schedule match what you booked, so nothing further is needed."
     : isQueued
-    ? "Your booking request has been reviewed by AMUA and is now queued to be submitted to CPSA for final approval. We'll notify you once a decision has been made."
+    ? "Your booking request has been reviewed by AMUA and is now queued to be submitted to GTEC for final approval. We'll notify you once a decision has been made."
     : isCpsaReview
-    ? "The details CPSA holds for your booking currently differ from your original request. AMUA is clarifying this with CPSA — nothing is final yet, and we'll do our best to align it to your original request."
+    ? "The details GTEC holds for your booking currently differ from your original request. AMUA is clarifying this with GTEC — nothing is final yet, and we'll do our best to align it to your original request."
     : "We're sorry — your booking request could not be approved.";
   const rows = bkgs.map(b => {
     const f = FACILITIES.find(x=>x.id===b.facility_id);
@@ -635,10 +635,10 @@ function buildMismatchEmailHtml({ name, email, bookings: bkgs }) {
       + "</tr>";
   }).join("");
   return "<div style='font-family:sans-serif;max-width:640px'>"
-    + "<h2 style='color:#b45309'>⚡ CPSA Booking Mismatch — Please Review</h2>"
+    + "<h2 style='color:#b45309'>⚡ GTEC Booking Mismatch — Please Review</h2>"
     + "<p>Hi " + (name || email) + ",</p>"
-    + "<p>The details CPSA holds for the following booking(s) currently differ from your original request. We're clarifying these with CPSA, so nothing is final yet.</p>"
-    + "<table style='width:100%;border-collapse:collapse;font-size:13px;margin:16px 0;border:1px solid #fde68a'><thead><tr style='background:#fef3c7'><th style='padding:8px;text-align:left'>Booking</th><th style='padding:8px'>Field</th><th style='padding:8px'>Date</th><th style='padding:8px'>Booked → CPSA</th><th style='padding:8px'>Changes</th></tr></thead><tbody>" + rows + "</tbody></table>"
+    + "<p>The details GTEC holds for the following booking(s) currently differ from your original request. We're clarifying these with GTEC, so nothing is final yet.</p>"
+    + "<table style='width:100%;border-collapse:collapse;font-size:13px;margin:16px 0;border:1px solid #fde68a'><thead><tr style='background:#fef3c7'><th style='padding:8px;text-align:left'>Booking</th><th style='padding:8px'>Field</th><th style='padding:8px'>Date</th><th style='padding:8px'>Booked → GTEC</th><th style='padding:8px'>Changes</th></tr></thead><tbody>" + rows + "</tbody></table>"
     + "<p>AMUA will do its best to align each booking to your original request as closely as it can. If the booked time ends up reduced, the difference will be credited against a future invoice. If you have any questions, just reply to this email and we'll follow up.</p>"
     + "<p style='color:#64748b;font-size:12px'>Automated notification from FacilityBook – AMUA.</p></div>";
 }
@@ -652,17 +652,17 @@ function buildInformCpsaEmailHtml({ vendorName, booking, refs = [], submissionId
   const reasons = parseMismatchNote(booking.system_notes, booking.notes);
   const cv = extractCpsaAmendValues(reasons, booking);
   const cfac = FACILITIES.find(x => x.id === cv.facility_id);
-  const facNote = booking.facility_id !== cv.facility_id ? " — CPSA shows " + (cfac?.name || cv.facility_id) : "";
+  const facNote = booking.facility_id !== cv.facility_id ? " — GTEC shows " + (cfac?.name || cv.facility_id) : "";
   const reasonRows = reasons.length
-    ? reasons.map(r => { const p = splitReason(r); return "<tr><td style='padding:4px 8px;font-weight:600;color:#0f172a'>" + p.label + "</td><td style='padding:4px 8px;color:#15803d;font-weight:700'>AMUA: " + (p.old || "—") + "</td><td style='padding:4px 8px;color:#b45309'>CPSA now: " + (p.next || "—") + "</td></tr>"; }).join("")
+    ? reasons.map(r => { const p = splitReason(r); return "<tr><td style='padding:4px 8px;font-weight:600;color:#0f172a'>" + p.label + "</td><td style='padding:4px 8px;color:#15803d;font-weight:700'>AMUA: " + (p.old || "—") + "</td><td style='padding:4px 8px;color:#b45309'>GTEC now: " + (p.next || "—") + "</td></tr>"; }).join("")
     : "<tr><td colspan='3' style='padding:4px 8px;color:#64748b'>See booking details above.</td></tr>";
   const linkRows = refs.length
     ? refs.map(r => "<div style='margin:4px 0'><a href='" + r.url + "' style='color:#0369a1;font-weight:600'>" + (r.ref || "View on Sporty") + " ↗</a> <span style='color:#94a3b8;font-size:12px'>" + (r.date || "") + "</span></div>").join("")
-    : "<div style='color:#64748b;font-size:13px'>No CPSA submission link is on file for this booking.</div>";
+    : "<div style='color:#64748b;font-size:13px'>No GTEC submission link is on file for this booking.</div>";
   return "<div style='font-family:sans-serif;max-width:640px'>"
-    + "<h2 style='color:#0369a1'>CPSA Booking Discrepancy — Correction Requested</h2>"
+    + "<h2 style='color:#0369a1'>GTEC Booking Discrepancy — Correction Requested</h2>"
     + "<p>Hi " + (vendorName || "there") + ",</p>"
-    + "<p>AMUA's record for the booking below differs from what CPSA currently holds. Please review and correct CPSA's schedule to match our record (the <strong>AMUA</strong> values).</p>"
+    + "<p>AMUA's record for the booking below differs from what GTEC currently holds. Please review and correct GTEC's schedule to match our record (the <strong>AMUA</strong> values).</p>"
     + "<table style='width:100%;border-collapse:collapse;font-size:13px;margin:12px 0;border:1px solid #e2e8f0'><tbody>"
     + "<tr><td style='padding:6px 8px;color:#64748b;width:96px'>Booker</td><td style='padding:6px 8px;color:#0f172a'>" + (booking.name || "") + "</td></tr>"
     + "<tr><td style='padding:6px 8px;color:#64748b'>Field</td><td style='padding:6px 8px;color:#0f172a'>" + (fac?.name || booking.facility_id) + facNote + "</td></tr>"
@@ -671,7 +671,7 @@ function buildInformCpsaEmailHtml({ vendorName, booking, refs = [], submissionId
     + "</tbody></table>"
     + "<div style='font-size:12px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.04em;margin:14px 0 4px'>Discrepancies</div>"
     + "<table style='width:100%;border-collapse:collapse;font-size:13px;border:1px solid #e2e8f0'><tbody>" + reasonRows + "</tbody></table>"
-    + "<div style='font-size:12px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.04em;margin:14px 0 4px'>CPSA record</div>"
+    + "<div style='font-size:12px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.04em;margin:14px 0 4px'>GTEC record</div>"
     + linkRows
     + (submissionId ? "<p style='color:#94a3b8;font-size:12px;margin-top:14px'>Reference: " + submissionId + "</p>" : "")
     + "<p style='color:#64748b;font-size:12px'>Sent from FacilityBook – AMUA.</p></div>";
@@ -808,7 +808,7 @@ function ActivityLogModal({onClose, inline=false}) {
     <ALWrapper>
       <div style={{display:"flex",flexDirection:"column",gap:10,minHeight:0,flex:1}}>
         <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0}}>
-          <button onClick={()=>setFilter("sync")} style={{padding:"4px 10px",borderRadius:14,border:`1.5px solid ${filter==="sync"?"#0f172a":"#e2e8f0"}`,background:filter==="sync"?"#0f172a":"#fff",color:filter==="sync"?"#fff":"#475569",fontSize:12,fontWeight:600,fontFamily:"inherit",cursor:"pointer"}}>Sync & CPSA</button>
+          <button onClick={()=>setFilter("sync")} style={{padding:"4px 10px",borderRadius:14,border:`1.5px solid ${filter==="sync"?"#0f172a":"#e2e8f0"}`,background:filter==="sync"?"#0f172a":"#fff",color:filter==="sync"?"#fff":"#475569",fontSize:12,fontWeight:600,fontFamily:"inherit",cursor:"pointer"}}>Sync & GTEC</button>
           <button onClick={()=>setFilter("all")} style={{padding:"4px 10px",borderRadius:14,border:`1.5px solid ${filter==="all"?"#0f172a":"#e2e8f0"}`,background:filter==="all"?"#0f172a":"#fff",color:filter==="all"?"#fff":"#475569",fontSize:12,fontWeight:600,fontFamily:"inherit",cursor:"pointer"}}>All</button>
           <span style={{marginLeft:"auto",fontSize:11,color:"#94a3b8"}}>{rows===null?"Loading…":`${filtered.length} of ${collapsed.length} entries (logins collapsed to most-recent per user)`}</span>
         </div>
@@ -1545,7 +1545,7 @@ function CartModal({ cart, setCart, onClose, onSubmit, openNew, silentMode=false
         : (
           <>
             <div style={{fontSize:13,color:'#64748b',marginBottom:12}}>
-              {[totalNew>0&&`${totalNew} new booking${totalNew>1?'s':''}`, totalEdits>0&&`${totalEdits} edit${totalEdits>1?'s':''}`, totalStatus>0&&`${totalStatus} status change${totalStatus>1?'s':''}`, totalClash>0&&`${totalClash} clash alert${totalClash>1?'s':''}`, totalNotify>0&&`${totalNotify} CPSA notification${totalNotify>1?'s':''}`, totalInform>0&&`${totalInform} Inform-CPSA email${totalInform>1?'s':''}`].filter(Boolean).join(' · ')} ready to submit.
+              {[totalNew>0&&`${totalNew} new booking${totalNew>1?'s':''}`, totalEdits>0&&`${totalEdits} edit${totalEdits>1?'s':''}`, totalStatus>0&&`${totalStatus} status change${totalStatus>1?'s':''}`, totalClash>0&&`${totalClash} clash alert${totalClash>1?'s':''}`, totalNotify>0&&`${totalNotify} GTEC notification${totalNotify>1?'s':''}`, totalInform>0&&`${totalInform} Inform-GTEC email${totalInform>1?'s':''}`].filter(Boolean).join(' · ')} ready to submit.
             </div>
             <div style={{flex:1,minHeight:0,overflowY:'auto',display:'flex',flexDirection:'column',gap:10,paddingRight:2}}>
               {/* Regular (non-notify) cart items */}
@@ -1675,7 +1675,7 @@ function CartModal({ cart, setCart, onClose, onSubmit, openNew, silentMode=false
                     <div style={{background:'#f0f9ff',padding:'10px 14px',display:'flex',alignItems:'center',gap:8}}>
                       <EmailChip email={item.email}/>
                       <span style={{fontSize:13,fontWeight:600,color:'#0f172a',flex:1}}>{item.name}</span>
-                      <span style={{fontSize:11,fontWeight:700,color:'#0369a1',background:'#e0f2fe',border:'1px solid #7dd3fc',borderRadius:4,padding:'1px 7px'}}>📨 Inform CPSA</span>
+                      <span style={{fontSize:11,fontWeight:700,color:'#0369a1',background:'#e0f2fe',border:'1px solid #7dd3fc',borderRadius:4,padding:'1px 7px'}}>📨 Inform GTEC</span>
                       <button onClick={()=>removeDraft(gi,0)} title="Remove" style={{background:'none',border:'none',cursor:'pointer',color:'#f43f5e',fontSize:15,padding:'2px 4px',lineHeight:1}}>✕</button>
                     </div>
                     <div style={{padding:'8px 14px',fontSize:12,color:'#64748b',background:'#fff'}}>
@@ -1683,7 +1683,7 @@ function CartModal({ cart, setCart, onClose, onSubmit, openNew, silentMode=false
                       {reasons.length>0&&<div style={{marginTop:4,color:'#0369a1'}}>{reasons.join(' · ')}</div>}
                       {refs.length>0
                         ? <div style={{marginTop:4,fontSize:11,color:'#0891b2'}}>🔗 {refs.map(r=>r.ref).join(', ')}</div>
-                        : <div style={{marginTop:4,fontSize:11,color:'#94a3b8'}}>No CPSA link on file</div>}
+                        : <div style={{marginTop:4,fontSize:11,color:'#94a3b8'}}>No GTEC link on file</div>}
                     </div>
                   </div>
                 );
@@ -2153,12 +2153,12 @@ function BookingDetail({booking,onEdit,onClose,onCancel,isAdmin,onStatusChange,l
       </div>
       {booking.status==="cpsa_review_needed"&&parseMismatchNote(booking.system_notes,booking.notes).length>0&&(
         <div style={{background:"#fef9c3",border:"1px solid #fde047",borderRadius:10,padding:"12px 16px"}}>
-          <div style={{fontSize:12,fontWeight:700,color:"#713f12",textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:8,display:"flex",alignItems:"center",gap:6}}>⚠ Flagged inconsistencies vs CPSA</div>
+          <div style={{fontSize:12,fontWeight:700,color:"#713f12",textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:8,display:"flex",alignItems:"center",gap:6}}>⚠ Flagged inconsistencies vs GTEC</div>
           <div style={{display:"grid",gridTemplateColumns:"auto 1fr auto 1fr",gap:"4px 10px",alignItems:"center"}}>
             <div style={{fontSize:10,fontWeight:700,color:"#a16207",textTransform:"uppercase"}}></div>
             <div style={{fontSize:10,fontWeight:700,color:"#a16207",textTransform:"uppercase"}}>Booked</div>
             <div></div>
-            <div style={{fontSize:10,fontWeight:700,color:"#a16207",textTransform:"uppercase"}}>CPSA</div>
+            <div style={{fontSize:10,fontWeight:700,color:"#a16207",textTransform:"uppercase"}}>GTEC</div>
             {parseMismatchNote(booking.system_notes,booking.notes).map((r,i)=>{const p=splitReason(r);return(<Fragment key={i}>
               <div style={{fontSize:13,fontWeight:600,color:"#713f12"}}>{p.label}</div>
               <div style={{fontSize:13,color:"#854d0e"}}>{p.old||"—"}</div>
@@ -2166,7 +2166,7 @@ function BookingDetail({booking,onEdit,onClose,onCancel,isAdmin,onStatusChange,l
               <div style={{fontSize:13,color:"#854d0e",fontWeight:600}}>{p.next||"—"}</div>
             </Fragment>);})}
           </div>
-          <div style={{fontSize:11,color:"#a16207",marginTop:8}}>Detected during CPSA sync — reconcile before confirming.</div>
+          <div style={{fontSize:11,color:"#a16207",marginTop:8}}>Detected during GTEC sync — reconcile before confirming.</div>
         </div>
       )}
       {isPast&&<div style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:"8px 12px",fontSize:12,color:"#64748b",display:"flex",alignItems:"center",gap:6}}>🔒 Past booking — {isAdmin?"admin can delete":"read-only"}</div>}
@@ -2200,7 +2200,7 @@ function BookingDetail({booking,onEdit,onClose,onCancel,isAdmin,onStatusChange,l
         return <>
           {cpsaLines.map((c,i)=>(
             <div key={i} style={{background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:8,padding:"10px 14px",display:"flex",flexDirection:"column",gap:6}}>
-              <div style={{fontSize:11,fontWeight:700,color:"#0369a1",textTransform:"uppercase",letterSpacing:"0.05em"}}>CPSA Submission</div>
+              <div style={{fontSize:11,fontWeight:700,color:"#0369a1",textTransform:"uppercase",letterSpacing:"0.05em"}}>GTEC Submission</div>
               <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
                 <span style={{fontSize:12,background:"#0891b2",color:"#fff",borderRadius:6,padding:"2px 8px",fontWeight:700}}>{c.ref}</span>
                 <span style={{fontSize:12,color:"#64748b"}}>{c.date}</span>
@@ -2386,7 +2386,7 @@ function WeekCalendar({ bookings, onNewBooking, onBookingClick, selectedFacility
                         <div key={b.id}
                           onClick={e=>{ e.stopPropagation(); if(!isDimmed) onBookingClick(b); }}
                           onMouseDown={e=>e.stopPropagation()}
-                          title={(()=>{const r=parseMismatchNote(b.system_notes,b.notes);return `${b.name} – ${fac?.name}`+(b.status==="cpsa_review_needed"&&r.length?`\n⚠ CPSA inconsistencies:\n${r.join("\n")}`:b.status==="cpsa_confirmed"?"\n🌐 CPSA confirmed":"");})()}
+                          title={(()=>{const r=parseMismatchNote(b.system_notes,b.notes);return `${b.name} – ${fac?.name}`+(b.status==="cpsa_review_needed"&&r.length?`\n⚠ GTEC inconsistencies:\n${r.join("\n")}`:b.status==="cpsa_confirmed"?"\n🌐 GTEC confirmed":"");})()}
                           className={facSocial?(bkTxt==="#fff"?"fac-social-tex":"fac-social-tex-dark"):undefined}
                           style={{ position:"absolute", top:(b.start_hour-CAL_START)*HOUR_H, height:Math.max(b.duration*HOUR_H-2,20), background:bkBg, borderRadius:6, padding:"3px 6px", cursor:isDimmed?"default":"pointer", overflow:"hidden", opacity:isDimmed?dimOpacity:REVIEW_STATUSES.has(b.status)?0.75:1, pointerEvents:isDimmed?"none":"auto", border:deleteIds.has(b.id)?"2.5px solid #ef4444":cartSourceIds.has(b.id)?"2.5px solid #f59e0b":b.status==="clash"?"2px dashed #d97706":REVIEW_STATUSES.has(b.status)?`2px dashed ${bkTxt==="#fff"?"rgba(255,255,255,0.6)":"rgba(113,63,18,0.5)"}`:b.status==="rejected"?"2px solid rgba(244,63,94,0.8)":"none", boxShadow:deleteIds.has(b.id)?"0 0 0 3px rgba(239,68,68,0.25)":cartSourceIds.has(b.id)?"0 0 0 3px rgba(245,158,11,0.25)":"0 1px 4px rgba(0,0,0,0.15)", zIndex:2, borderLeft:bkBorderLeft, ...stk }}>
                           {!isAdmin_bk&&b.email&&(
@@ -2575,7 +2575,7 @@ function MonthCalendar({ bookings, onBookingClick, onNewBooking, selectedFacilit
                   return (
                     <div key={b.id}
                       onClick={e=>{ e.stopPropagation(); if(isDimmed) return; if(selMode) toggleSel(b.id); else onBookingClick(b); }}
-                      title={(()=>{const r=parseMismatchNote(b.system_notes,b.notes);return `${b.name} · ${fac?.name} · ${fmtTime(b.start_hour)}–${fmtTime(b.start_hour+b.duration)}`+(b.status==="cpsa_review_needed"&&r.length?`\n⚠ CPSA inconsistencies:\n${r.join("\n")}`:b.status==="cpsa_confirmed"?"\n🌐 CPSA confirmed":"");})()}
+                      title={(()=>{const r=parseMismatchNote(b.system_notes,b.notes);return `${b.name} · ${fac?.name} · ${fmtTime(b.start_hour)}–${fmtTime(b.start_hour+b.duration)}`+(b.status==="cpsa_review_needed"&&r.length?`\n⚠ GTEC inconsistencies:\n${r.join("\n")}`:b.status==="cpsa_confirmed"?"\n🌐 GTEC confirmed":"");})()}
                       className={facSocial?(chipTxt==="#fff"?"fac-social-tex":"fac-social-tex-dark"):undefined}
                       style={{ background:chipBg, borderRadius:4, padding:"2px 4px", fontSize:10, fontWeight:700, color:chipTxt, overflow:"hidden", whiteSpace:"nowrap", borderLeft:chipLeft, outline:chipOutline, opacity:isDimmed?dimOpacity:REVIEW_STATUSES.has(b.status)?0.75:1, cursor:isDimmed?"default":"pointer", pointerEvents:isDimmed?"none":"auto", display:"flex", alignItems:"center", gap:3 }}>
                       {!isAdmin_bk&&<span style={{width:6,height:6,borderRadius:"50%",background:ec,flexShrink:0,display:"inline-block",boxShadow:"0 0 0 1px rgba(255,255,255,0.35)"}}/>}
@@ -2771,10 +2771,10 @@ function AboutTab() {
       <div style={card}>
         <h2 style={h2}>How to Book</h2>
         <p style={{margin:"0 0 12px",fontSize:13,color:"#475569"}}>
-          Bookings at Cornwall Park are managed through CPSA (Cornwall Park Sport Association).
+          Bookings at Cornwall Park are managed through GTEC (Grammar TEC).
           AMUA (Auckland Mixed Ultimate Association) acts as a facilitating body and can submit booking requests on your behalf.
           You can also submit directly using the{" "}
-          <a href="https://www.grammartec.co.nz/viewform/499414" target="_blank" rel="noopener noreferrer" style={link}>CPSA field hire form</a>.
+          <a href="https://www.grammartec.co.nz/viewform/499414" target="_blank" rel="noopener noreferrer" style={link}>GTEC field hire form</a>.
         </p>
         <h3 style={{margin:"12px 0 8px",fontSize:14,fontWeight:700,color:"#0f172a"}}>Approval Process</h3>
         <div style={step}>
@@ -2789,17 +2789,17 @@ function AboutTab() {
           <div style={stepNum("#f59e0b")}>2</div>
           <div>
             <div style={{fontWeight:600,fontSize:14,color:"#0f172a"}}>AMUA reviews your request</div>
-            <div style={{fontSize:13,color:"#475569",marginTop:2}}>AMUA checks availability and eligibility. If accepted, the booking is queued for submission to CPSA — status becomes <Badge status="queued_cpsa"/>. If there is a conflict or issue, AMUA may reject or request revision.</div>
+            <div style={{fontSize:13,color:"#475569",marginTop:2}}>AMUA checks availability and eligibility. If accepted, the booking is queued for submission to GTEC — status becomes <Badge status="queued_cpsa"/>. If there is a conflict or issue, AMUA may reject or request revision.</div>
           </div>
         </div>
         <div style={arrow}>↓</div>
         <div style={step}>
           <div style={stepNum("#0ea5e9")}>3</div>
           <div>
-            <div style={{fontWeight:600,fontSize:14,color:"#0f172a"}}>AMUA submits to CPSA</div>
-            <div style={{fontSize:13,color:"#475569",marginTop:2}}>AMUA lodges the request with CPSA using the{" "}
-              <a href="https://www.grammartec.co.nz/viewform/499414" target="_blank" rel="noopener noreferrer" style={link}>CPSA field hire form</a>.
-              Status becomes <Badge status="pending_cpsa"/>. You can also contact CPSA directly — AMUA can co-sign as the responsible party.
+            <div style={{fontWeight:600,fontSize:14,color:"#0f172a"}}>AMUA submits to GTEC</div>
+            <div style={{fontSize:13,color:"#475569",marginTop:2}}>AMUA lodges the request with GTEC using the{" "}
+              <a href="https://www.grammartec.co.nz/viewform/499414" target="_blank" rel="noopener noreferrer" style={link}>GTEC field hire form</a>.
+              Status becomes <Badge status="pending_cpsa"/>. You can also contact GTEC directly — AMUA can co-sign as the responsible party.
             </div>
           </div>
         </div>
@@ -2807,9 +2807,9 @@ function AboutTab() {
         <div style={step}>
           <div style={stepNum("#22c55e")}>4</div>
           <div>
-            <div style={{fontWeight:600,fontSize:14,color:"#0f172a"}}>CPSA decision &amp; reconciliation</div>
+            <div style={{fontWeight:600,fontSize:14,color:"#0f172a"}}>GTEC decision &amp; reconciliation</div>
             <div style={{fontSize:13,color:"#475569",marginTop:2}}>
-              Once AMUA receives verbal confirmation from CPSA, the booking is marked <Badge status="approved"/> (or <Badge status="rejected"/> if declined) — accept/reject only applies while a booking has not yet been reconciled against CPSA's published schedule. When AMUA later syncs the official CPSA schedule, an approved booking that matches CPSA's record exactly is promoted to <Badge status="cpsa_confirmed"/> — confirming that what you booked is what CPSA has on file. If anything differs (time, duration or facility), the booking is flagged <Badge status="cpsa_review_needed"/> instead, and AMUA will triage the discrepancy. Bookings with a 🌐 marker in the calendar are CPSA-confirmed.
+              Once AMUA receives verbal confirmation from GTEC, the booking is marked <Badge status="approved"/> (or <Badge status="rejected"/> if declined) — accept/reject only applies while a booking has not yet been reconciled against GTEC's published schedule. When AMUA later syncs the official GTEC schedule, an approved booking that matches GTEC's record exactly is promoted to <Badge status="cpsa_confirmed"/> — confirming that what you booked is what GTEC has on file. If anything differs (time, duration or facility), the booking is flagged <Badge status="cpsa_review_needed"/> instead, and AMUA will triage the discrepancy. Bookings with a 🌐 marker in the calendar are GTEC-confirmed.
             </div>
           </div>
         </div>
@@ -4370,7 +4370,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
       const origTimeStr = `${fmtTime(snap.start_hour)}–${fmtTime(snap.start_hour+snap.duration)}`;
       return [{
         desc:    `[${signedCost>0?"Invoice adj.":"Credit adj."}] ${fmtDate(b.date)} · ${fac?.name||b.facility_id}`,
-        detail:  `CPSA amendment: billed ${origTimeStr} ${snap.duration}h → amended ${timeStr} ${b.duration}h (${bs||"pending"})`,
+        detail:  `GTEC amendment: billed ${origTimeStr} ${snap.duration}h → amended ${timeStr} ${b.duration}h (${bs||"pending"})`,
         cost:    signedCost,
         isAdj:   true,
       }];
@@ -5729,7 +5729,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
                       {mismatchAdjustments.length>0&&(
                         <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"#92400e",cursor:"pointer",background:"#fffbeb",border:"1px solid #fde68a",borderRadius:8,padding:"8px 12px"}}>
                           <input type="checkbox" checked={invIncludeAdjustments} onChange={e=>setInvIncludeAdjustments(e.target.checked)} style={{accentColor:"#f59e0b"}}/>
-                          Include {mismatchAdjustments.length} CPSA mismatch adjustment{mismatchAdjustments.length!==1?"s":""}
+                          Include {mismatchAdjustments.length} GTEC mismatch adjustment{mismatchAdjustments.length!==1?"s":""}
                         </label>
                       )}
                     </div>
@@ -5903,7 +5903,7 @@ function SyncedItemRow({ ab, bookings }) {
             <div key={b.id} style={{color:"#9a3412"}}>
               <div style={{display:"flex",gap:5,alignItems:"center",flexWrap:"wrap"}}>
                 <span>{span(b)} · {b.name||b.email} · {b.purpose||"—"}</span>
-                {b.status==="cpsa_review_needed" && badge("⚠ CPSA mismatch","#fde68a","#92400e","#fcd34d")}
+                {b.status==="cpsa_review_needed" && badge("⚠ GTEC mismatch","#fde68a","#92400e","#fcd34d")}
                 {b.invoiced && badge("invoiced","#e0e7ff","#3730a3","#c7d2fe")}
               </div>
               {rs.length>0 && <div style={{marginLeft:10,color:"#92400e",fontSize:10}}>{rs.map((x,i)=><div key={i}>· {x}</div>)}</div>}
@@ -6174,7 +6174,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
       {showSyncResults&&(
         <div style={{background:"#ecfeff",border:"1.5px solid #a5f3fc",borderRadius:12,padding:16,display:"flex",flexDirection:"column",gap:8}}>
           <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
-            <span style={{fontWeight:700,fontSize:14,color:"#0e7490"}}>🔄 CPSA Sync Results</span>
+            <span style={{fontWeight:700,fontSize:14,color:"#0e7490"}}>🔄 GTEC Sync Results</span>
             <span style={{fontSize:11,color:"#0891b2",marginLeft:"auto"}}>{syncResults.length>0?`${syncResults.length} month${syncResults.length!==1?"s":""} · grouped by month, tap to expand`:"No sync results yet"}</span>
             {onClearSyncResults&&syncResults.length>0&&<button onClick={onClearSyncResults} style={{padding:"3px 10px",borderRadius:6,border:"1px solid #a5f3fc",background:"#fff",color:"#0e7490",cursor:"pointer",fontSize:11,fontWeight:600,fontFamily:"inherit"}}>Clear all</button>}
           </div>
@@ -6194,7 +6194,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
           })()}
           {syncResults.length===0&&(
             <div style={{background:"#fff",border:"1px dashed #a5f3fc",borderRadius:8,padding:"14px",fontSize:12,color:"#64748b",textAlign:"center"}}>
-              No CPSA syncs have run yet. Use <strong>Sync CPSA</strong> to pull the latest feed — results will appear here grouped by month.
+              No GTEC syncs have run yet. Use <strong>Sync GTEC</strong> to pull the latest feed — results will appear here grouped by month.
             </div>
           )}
           {/* Group by month (newest first); each month collapses to a one-line summary
@@ -6234,7 +6234,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                                 </details>
                               : <span style={{color:"#0e7490",fontSize:12}}>＋ <strong>{r.added}</strong> booking{r.added!==1?"s":""} added</span>),
                             r.skipped>0 && <span style={{color:"#64748b",fontSize:12}}>— <strong>{r.skipped}</strong> already existed</span>,
-                            r.cpsaConfirmed>0 && <span style={{color:"#0891b2",fontSize:12}}>🌐 <strong>{r.cpsaConfirmed}</strong> CPSA-confirmed</span>,
+                            r.cpsaConfirmed>0 && <span style={{color:"#0891b2",fontSize:12}}>🌐 <strong>{r.cpsaConfirmed}</strong> GTEC-confirmed</span>,
                             r.cpsaReviewNeeded>0 && <span style={{color:"#b45309",fontSize:12}}>⚠ <strong>{r.cpsaReviewNeeded}</strong> need review</span>,
                             r.clashes>0 && <span style={{color:"#c2410c",fontSize:12}}>⚡ <strong>{r.clashes}</strong> clash{r.clashes!==1?"es":""} flagged</span>,
                             r.notified>0 && <span style={{color:"#7c3aed",fontSize:12}}>📧 <strong>{r.notified}</strong> queued to notify</span>,
@@ -6282,7 +6282,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                         <EmailChip email={b.email}/>
                         <span style={{fontWeight:600,color:"#0f172a"}}>{b.name}</span>
                         <span style={{color:"#94a3b8"}}>{fmtDate(b.date)} · {b.purpose}</span>
-                        {isCpsaAmend&&<span style={{fontSize:10,fontWeight:700,background:"#fef9c3",color:"#a16207",border:"1px solid #fde68a",borderRadius:4,padding:"1px 5px"}}>⚠ CPSA amendment</span>}
+                        {isCpsaAmend&&<span style={{fontSize:10,fontWeight:700,background:"#fef9c3",color:"#a16207",border:"1px solid #fde68a",borderRadius:4,padding:"1px 5px"}}>⚠ GTEC amendment</span>}
                         {(()=>{
                           // Hours change is neutral context; the financial verdict mirrors the
                           // mismatch view — deficit (booker under-billed) vs credit (over-billed).
@@ -6316,7 +6316,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                       {isCpsaAmend&&(
                         <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",borderTop:"1px solid #fde68a",paddingTop:6,marginTop:2}}>
                           <span style={{fontSize:11,color:BILLING_COLOR[billingState],fontWeight:700}}>{BILLING_LABEL[billingState]}</span>
-                          {cpsaRes?.date&&<span style={{fontSize:10,color:"#94a3b8"}} title="When this CPSA resolution was last logged / updated">🕗 logged {fmtLoggedAt(cpsaRes.date)}</span>}
+                          {cpsaRes?.date&&<span style={{fontSize:10,color:"#94a3b8"}} title="When this GTEC resolution was last logged / updated">🕗 logged {fmtLoggedAt(cpsaRes.date)}</span>}
                           {billingState==="credit_pending"&&onMarkAdjustmentSettled&&(
                             <button onClick={()=>onMarkAdjustmentSettled(b,"credited")}
                               style={S.btn({background:"#f0fdf4",color:"#15803d",border:"1px solid #bbf7d0",fontSize:11,padding:"3px 10px",fontWeight:700})}>✓ Mark credited</button>
@@ -6347,8 +6347,8 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
         <div style={{background:"#f0fdf4",border:"1.5px solid #86efac",borderRadius:12,padding:16,display:"flex",flexDirection:"column",gap:10}}>
           <div style={{fontWeight:700,fontSize:14,color:"#166534"}}>
             📋 Action Queue — {[
-              actionQueue.filter(a=>a.newStatus==="queued_cpsa").length && `${actionQueue.filter(a=>a.newStatus==="queued_cpsa").length} queue for CPSA`,
-              actionQueue.filter(a=>a.newStatus==="approved").length && `${actionQueue.filter(a=>a.newStatus==="approved").length} CPSA approved`,
+              actionQueue.filter(a=>a.newStatus==="queued_cpsa").length && `${actionQueue.filter(a=>a.newStatus==="queued_cpsa").length} queue for GTEC`,
+              actionQueue.filter(a=>a.newStatus==="approved").length && `${actionQueue.filter(a=>a.newStatus==="approved").length} GTEC approved`,
               actionQueue.filter(a=>a.newStatus==="rejected").length && `${actionQueue.filter(a=>a.newStatus==="rejected").length} reject`,
             ].filter(Boolean).join(", ") || "empty"}
             <button onClick={()=>setActionQueue([])} style={{...S.btn({border:"1px solid #86efac",background:"transparent",color:"#166534",fontSize:11,padding:"2px 8px"}),marginLeft:12}}>Clear</button>
@@ -6381,8 +6381,8 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
             <>
               <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
                 <select style={si} value={bulkStatus} onChange={e=>setBulkStatus(e.target.value)}>
-                  <option value="queued_cpsa">Queue for CPSA</option>
-                  <option value="approved">CPSA Approved</option>
+                  <option value="queued_cpsa">Queue for GTEC</option>
+                  <option value="approved">GTEC Approved</option>
                   <option value="rejected">Reject</option>
                 </select>
                 <input style={{...si,flex:1,minWidth:200}} placeholder="Optional note to include in email…" value={bulkNote} onChange={e=>setBulkNote(e.target.value)}/>
@@ -6524,44 +6524,82 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
         // Rich HTML email for clipboard, plain text fallback.
         async function copyEmailFormat() {
           const dateStr = new Date().toLocaleDateString("en-NZ",{day:"numeric",month:"long",year:"numeric"});
+          // Pills reflect the DIRECTION of the current (unsaved) per-field selection:
+          //  • kept ours → GTEC must change their record   → "GTEC to update"
+          //  • took GTEC → our booking is amended to match  → "BOOKER to acknowledge"
+          const PILL_GTEC   = `<span style="display:inline-block;margin-left:6px;padding:1px 6px;border-radius:8px;background:#dbeafe;color:#1e3a8a;border:1px solid #93c5fd;font-size:10px;font-weight:700;white-space:nowrap">GTEC to update</span>`;
+          const PILL_BOOKER = `<span style="display:inline-block;margin-left:6px;padding:1px 6px;border-radius:8px;background:#ffedd5;color:#9a3412;border:1px solid #fdba74;font-size:10px;font-weight:700;white-space:nowrap">BOOKER to acknowledge</span>`;
+          // Changed fields between our booking and GTEC's record, with display strings.
+          function changedFieldsOf(b, cv) {
+            const fac=FACILITIES.find(x=>x.id===b.facility_id);
+            const cfac=FACILITIES.find(x=>x.id===cv.facility_id);
+            const list=[];
+            if (cv.facility_id!==b.facility_id) list.push({key:"facility",label:"Field",our:fac?.name||b.facility_id,gtec:cfac?.name||cv.facility_id});
+            if (cv.start_hour!==b.start_hour)   list.push({key:"time",label:"Time",our:`${fmtTime(b.start_hour)}–${fmtTime(b.start_hour+b.duration)}`,gtec:`${fmtTime(cv.start_hour)}–${fmtTime(cv.start_hour+cv.duration)}`});
+            if (cv.duration!==b.duration)       list.push({key:"duration",label:"Dur",our:`${b.duration}h`,gtec:`${cv.duration}h`});
+            return list;
+          }
+          // Changes cell reflects the admin's current (unsaved) selections from mismatchResState.
+          function changesHtml(b, cv) {
+            const sel=(mismatchResState[b.id]?.fieldSel)||{};
+            const fields=changedFieldsOf(b, cv);
+            if(!fields.length) return `<span style="color:#94a3b8">—</span>`;
+            return fields.map(f=>{
+              const s=sel[f.key];
+              if(s==="ours") return `<div style="margin:2px 0"><strong>${f.label}:</strong> ${f.gtec} → <span style="color:#1e3a8a;font-weight:700">${f.our}</span>${PILL_GTEC}</div>`;
+              if(s==="cpsa") return `<div style="margin:2px 0"><strong>${f.label}:</strong> ${f.our} → <span style="color:#9a3412;font-weight:700">${f.gtec}</span>${PILL_BOOKER}</div>`;
+              return `<div style="margin:2px 0;color:#64748b"><strong>${f.label}:</strong> ${f.our} → ${f.gtec}</div>`;
+            }).join("");
+          }
+          function changesText(b, cv) {
+            const sel=(mismatchResState[b.id]?.fieldSel)||{};
+            return changedFieldsOf(b, cv).map(f=>{
+              const s=sel[f.key];
+              if(s==="ours") return `${f.label}: ${f.gtec} → ${f.our} [GTEC to update]`;
+              if(s==="cpsa") return `${f.label}: ${f.our} → ${f.gtec} [BOOKER to acknowledge]`;
+              return `${f.label}: ${f.our} → ${f.gtec}`;
+            }).join("; ");
+          }
           const rowsHtml = mismatches.map(b=>{
             const fac=FACILITIES.find(x=>x.id===b.facility_id);
             const reasons=parseMismatchNote(b.system_notes,b.notes);
             const cv=extractCpsaAmendValues(reasons,b);
             const cfac=FACILITIES.find(x=>x.id===cv.facility_id);
-            const changes=reasons.join("; ");
+            const alias=adminAlias(b.email);
+            const col=emailColor(b.email);
             return `<tr>
-              <td style="padding:8px 12px;border-bottom:1px solid #fde68a">${b.name}<br><span style="color:#64748b;font-size:11px">${b.email}</span></td>
+              <td style="padding:8px 12px;border-bottom:1px solid #fde68a"><span style="display:inline-block;padding:2px 8px;border-radius:10px;background:${col};color:#fff;font-weight:700;font-size:11px">${alias}</span><br><span style="color:#64748b;font-size:11px">${b.email}</span></td>
               <td style="padding:8px 12px;border-bottom:1px solid #fde68a;white-space:nowrap">${fmtDate(b.date)}</td>
               <td style="padding:8px 12px;border-bottom:1px solid #fde68a;white-space:nowrap">${fac?.name||b.facility_id}</td>
               <td style="padding:8px 12px;border-bottom:1px solid #fde68a;white-space:nowrap"><span style="text-decoration:line-through;color:#94a3b8">${fmtTime(b.start_hour)}–${fmtTime(b.start_hour+b.duration)}, ${b.duration}h${b.facility_id!==cv.facility_id?" ("+fac?.name+")":""}</span><br><span style="color:#a16207;font-weight:700">→ ${fmtTime(cv.start_hour)}–${fmtTime(cv.start_hour+cv.duration)}, ${cv.duration}h${b.facility_id!==cv.facility_id?" ("+(cfac?.name||cv.facility_id)+")":""}</span></td>
-              <td style="padding:8px 12px;border-bottom:1px solid #fde68a;font-size:11px;color:#64748b">${changes}</td>
+              <td style="padding:8px 12px;border-bottom:1px solid #fde68a;font-size:11px;color:#64748b">${changesHtml(b, cv)}</td>
             </tr>`;
           }).join("");
           const html=`<div style="font-family:sans-serif;font-size:13px;color:#0f172a;max-width:720px">
-<h3 style="color:#a16207;margin:0 0 8px">⚡ CPSA Mismatch Report — ${dateStr}</h3>
-<p style="color:#475569;margin:0 0 16px">The following ${mismatches.length} field booking${mismatches.length!==1?"s":""} have discrepancies between our records and CPSA data. Please review and advise whether each reflects your intended booking.</p>
+<h3 style="color:#a16207;margin:0 0 8px">⚡ GTEC Mismatch Report — ${dateStr}</h3>
+<p style="color:#475569;margin:0 0 8px">The following ${mismatches.length} field booking${mismatches.length!==1?"s":""} have discrepancies between our records and GTEC data. The <strong>Changes</strong> column shows the proposed resolution for each field.</p>
+<p style="color:#94a3b8;font-size:11px;margin:0 0 16px">${PILL_GTEC} GTEC's schedule should be corrected to the proposed value. ${PILL_BOOKER} our booking is being amended to GTEC's value — the booker should be notified.</p>
 <table cellpadding="0" cellspacing="0" style="border-collapse:collapse;width:100%;font-size:12px;border:1px solid #fde68a;border-radius:8px;overflow:hidden">
 <thead><tr style="background:#fef3c7">
   <th style="padding:8px 12px;text-align:left;font-weight:700;color:#92400e">Booker</th>
   <th style="padding:8px 12px;text-align:left;font-weight:700;color:#92400e">Date</th>
   <th style="padding:8px 12px;text-align:left;font-weight:700;color:#92400e">Field</th>
-  <th style="padding:8px 12px;text-align:left;font-weight:700;color:#92400e">Booked → CPSA</th>
+  <th style="padding:8px 12px;text-align:left;font-weight:700;color:#92400e">Booked → GTEC</th>
   <th style="padding:8px 12px;text-align:left;font-weight:700;color:#92400e">Changes</th>
 </tr></thead>
 <tbody>${rowsHtml}</tbody>
 </table>
 <p style="color:#94a3b8;font-size:11px;margin:12px 0 0">Generated by FacilityBook · ${dateStr}</p>
 </div>`;
-          const plain=["CPSA Mismatch Report — "+dateStr,"","Booker\tDate\tField\tBooked\tCPSA Says\tChanges",
+          const plain=["GTEC Mismatch Report — "+dateStr,"","Booker\tDate\tField\tBooked\tGTEC Says\tChanges",
             ...mismatches.map(b=>{
               const fac=FACILITIES.find(x=>x.id===b.facility_id);
               const reasons=parseMismatchNote(b.system_notes,b.notes);
               const cv=extractCpsaAmendValues(reasons,b);
-              return [b.name,b.email,fmtDate(b.date),fac?.name||b.facility_id,
+              return [adminAlias(b.email),b.email,fmtDate(b.date),fac?.name||b.facility_id,
                 `${fmtTime(b.start_hour)}–${fmtTime(b.start_hour+b.duration)} ${b.duration}h`,
                 `${fmtTime(cv.start_hour)}–${fmtTime(cv.start_hour+cv.duration)} ${cv.duration}h`,
-                reasons.join("; ")].join("\t");
+                changesText(b, cv)].join("\t");
             })
           ].join("\n");
           try {
@@ -6663,11 +6701,11 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
             const oursActive=sel==="ours";
             const cpsaActive=sel==="cpsa";
             const oursTooltip = oursActive
-              ? "Keeping our record — CPSA will be asked to correct this on their side"
-              : "Our record (original) — click to keep ours and flag CPSA to correct";
+              ? "Keeping our record — GTEC will be asked to correct this on their side"
+              : "Our record (original) — click to keep ours and flag GTEC to correct";
             const cpsaTooltip = cpsaActive
-              ? "Accepting CPSA's value — our record will be amended to match"
-              : "CPSA's value (mismatch) — click to accept and amend our record";
+              ? "Accepting GTEC's value — our record will be amended to match"
+              : "GTEC's value (mismatch) — click to accept and amend our record";
             return (
               <div style={{display:"flex",flexDirection:"column",gap:3}}>
                 {prefix&&<span style={{fontSize:10,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.03em",fontWeight:700}}>{prefix}</span>}
@@ -6708,7 +6746,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                 <div style={{color:"#64748b",fontSize:10}}>{b.email}</div>
                 {b.invoiced&&<span style={{fontSize:10,fontWeight:700,background:"#f5f3ff",color:"#5b21b6",border:"1px solid #ddd6fe",borderRadius:4,padding:"1px 4px",display:"inline-block",marginTop:2}}>🧾 invoiced</span>}
                 {cpsaRefs.map((r,i)=>(
-                  <a key={i} href={r.url} target="_blank" rel="noopener noreferrer" title={`CPSA submission ${r.ref} — open the booking on Sporty`}
+                  <a key={i} href={r.url} target="_blank" rel="noopener noreferrer" title={`GTEC submission ${r.ref} — open the booking on Sporty`}
                     style={{display:"flex",alignItems:"center",gap:3,marginTop:3,fontSize:10,fontWeight:700,color:"#0369a1",textDecoration:"none",width:"fit-content",background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:4,padding:"1px 5px"}}>
                     🔗 {r.ref} ↗
                   </a>
@@ -6741,14 +6779,14 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                   {curRes!=="pending"&&(
                     <div
                       title={curRes==="amended"
-                        ? "Resolved: our record has been amended to CPSA's values."
-                        : "Pending: CPSA to correct on their side. Becomes 'corrected' once CPSA acknowledges."}
+                        ? "Resolved: our record has been amended to GTEC's values."
+                        : "Pending: GTEC to correct on their side. Becomes 'corrected' once GTEC acknowledges."}
                       style={{fontSize:10,fontWeight:700,
                         color:curRes==="amended"?"#a16207":"#5b21b6",
                         background:curRes==="amended"?"#fef9c3":"#f5f3ff",
                         border:`1px solid ${curRes==="amended"?"#fde68a":"#ddd6fe"}`,
                         borderRadius:4,padding:"2px 7px",display:"inline-block",cursor:"help"}}>
-                      {curRes==="amended"?"✓ Amended":"↩ CPSA to correct"}
+                      {curRes==="amended"?"✓ Amended":"↩ GTEC to correct"}
                     </div>
                   )}
                   {saved?.date&&(
@@ -6758,13 +6796,13 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                   )}
                   {curRes==="to_correct"&&(
                     <div style={{display:"flex",flexDirection:"column",gap:4,marginTop:2}}>
-                      <div style={{fontSize:10,color:"#64748b",fontWeight:700}}>CPSA follow-up:</div>
+                      <div style={{fontSize:10,color:"#64748b",fontWeight:700}}>GTEC follow-up:</div>
                       <button onClick={()=>saveMismatchResolution(b,"confirmed","none")}
-                        title="CPSA verbally confirmed our original is correct - keep our values and mark the booking confirmed"
-                        style={{fontFamily:"inherit",fontSize:11,fontWeight:700,borderRadius:5,padding:"3px 9px",cursor:"pointer",background:"#ecfdf5",border:"1.5px solid #6ee7b7",color:"#047857",whiteSpace:"nowrap",textAlign:"left"}}>✓ Confirmed by CPSA</button>
+                        title="GTEC verbally confirmed our original is correct - keep our values and mark the booking confirmed"
+                        style={{fontFamily:"inherit",fontSize:11,fontWeight:700,borderRadius:5,padding:"3px 9px",cursor:"pointer",background:"#ecfdf5",border:"1.5px solid #6ee7b7",color:"#047857",whiteSpace:"nowrap",textAlign:"left"}}>✓ Confirmed by GTEC</button>
                       <button onClick={()=>onInformCpsa&&onInformCpsa(b)}
-                        title="Cart an email to a vendor asking CPSA to correct their schedule to match our record. Does not resolve the mismatch."
-                        style={{fontFamily:"inherit",fontSize:11,fontWeight:700,borderRadius:5,padding:"3px 9px",cursor:"pointer",background:"#f0f9ff",border:"1.5px solid #7dd3fc",color:"#0369a1",whiteSpace:"nowrap",textAlign:"left"}}>📨 Inform CPSA</button>
+                        title="Cart an email to a vendor asking GTEC to correct their schedule to match our record. Does not resolve the mismatch."
+                        style={{fontFamily:"inherit",fontSize:11,fontWeight:700,borderRadius:5,padding:"3px 9px",cursor:"pointer",background:"#f0f9ff",border:"1.5px solid #7dd3fc",color:"#0369a1",whiteSpace:"nowrap",textAlign:"left"}}>📨 Inform GTEC</button>
                     </div>
                   )}
                   {curRes==="pending"&&changedFields.length>0&&(
@@ -6868,14 +6906,14 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
           <div style={{background:"#fffbeb",border:"1.5px solid #fde68a",borderRadius:12,padding:16,display:"flex",flexDirection:"column",gap:10}}>
             <div style={{display:"flex",alignItems:"center",gap:8,justifyContent:"space-between",flexWrap:"wrap"}}>
               <div>
-                <span style={{fontWeight:700,fontSize:14,color:"#b45309"}}>⚡ {mismatches.length} CPSA mismatch{mismatches.length!==1?"es":""} pending review</span>
-                <div style={{fontSize:12,color:"#92400e",marginTop:2}}>Click old or new values in each row to set resolution — amended bookings are updated to CPSA values.</div>
+                <span style={{fontWeight:700,fontSize:14,color:"#b45309"}}>⚡ {mismatches.length} GTEC mismatch{mismatches.length!==1?"es":""} pending review</span>
+                <div style={{fontSize:12,color:"#92400e",marginTop:2}}>Click old or new values in each row to set resolution — amended bookings are updated to GTEC values.</div>
               </div>
               <div style={{display:"flex",gap:6}}>
                 {mismatches.length>0&&<button onClick={()=>setShowMismatchNotify(true)} style={S.btn({background:"#b45309",color:"#fff",fontWeight:700,fontSize:12})}>📧 Notify affected users</button>}
                 <button onClick={copyEmailFormat} style={S.btn({background:"#fff",border:"1.5px solid #fde68a",color:"#a16207",fontWeight:700,fontSize:12})}>📧 Copy email</button>
                 <button onClick={()=>{
-                  const blob=new Blob([["Name,Email,Date,Field,Booked,CPSA Says,Changes,CPSA Ref,CPSA Link",...mismatches.map(b=>{
+                  const blob=new Blob([["Name,Email,Date,Field,Booked,GTEC Says,Changes,GTEC Ref,GTEC Link",...mismatches.map(b=>{
                     const fac=FACILITIES.find(x=>x.id===b.facility_id);
                     const reasons=parseMismatchNote(b.system_notes,b.notes);
                     const cv=extractCpsaAmendValues(reasons,b);
@@ -6889,7 +6927,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                       refs.map(r=>r.url).join(" ")].map(esc).join(",");
                   })].join("\n")],{type:"text/csv"});
                   const url=URL.createObjectURL(blob);const a=document.createElement("a");
-                  a.href=url;a.download="cpsa-mismatches.csv";a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+                  a.href=url;a.download="gtec-mismatches.csv";a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
                 }} style={S.btn({background:"#f59e0b",color:"#fff",fontWeight:700,fontSize:12})}>⬇ Export CSV</button>
               </div>
             </div>
@@ -7031,7 +7069,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                 const queued=actionQueue.find(a=>a.id===b.id);
                 const isDeleteQueued=deleteIds.has(b.id);
                 const rowBg=isDeleteQueued?"#fff1f2":queued?"#f0fdf4":selected.has(b.id)?"#f5f3ff":"#fff";
-                const queueLabel = queued ? {queued_cpsa:"→ Queue for CPSA",approved:"✓ CPSA Approved",rejected:"✗ Reject"}[queued.newStatus]||queued.newStatus : null;
+                const queueLabel = queued ? {queued_cpsa:"→ Queue for GTEC",approved:"✓ GTEC Approved",rejected:"✗ Reject"}[queued.newStatus]||queued.newStatus : null;
                 return (
                   <tr key={b.id} onClick={()=>onView&&onView(b)} style={{background:rowBg,borderTop:ri>0?"1px solid #f1f5f9":"none",transition:"background 0.1s",cursor:"pointer"}}
                     onMouseEnter={e=>{if(!rowBg||rowBg==="#fff")e.currentTarget.style.background="#f8fafc";}}
@@ -7065,11 +7103,11 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                     <td style={{padding:"3px 8px"}} onClick={e=>e.stopPropagation()}>
                       <div style={{display:"flex",gap:3,justifyContent:"flex-end",flexWrap:"wrap"}}>
                         {isPending&&!isDeleteQueued&&<>
-                          {isAmuaStage&&<button onClick={()=>queueAction(b.id,"queued_cpsa")} title="Queue for CPSA"
-                            style={S.btn({padding:"3px 7px",fontSize:10,background:queued?.newStatus==="queued_cpsa"?"#1d4ed8":"#3b82f6",color:"#fff",outline:queued?.newStatus==="queued_cpsa"?"2px solid #1d4ed8":"none"})}>CPSA →</button>}
-                          {(b.status==="queued_cpsa"||b.status==="amua_submit")&&<button onClick={()=>queueAction(b.id,"pending_cpsa")} title="Mark as Pending CPSA Review (no email)"
+                          {isAmuaStage&&<button onClick={()=>queueAction(b.id,"queued_cpsa")} title="Queue for GTEC"
+                            style={S.btn({padding:"3px 7px",fontSize:10,background:queued?.newStatus==="queued_cpsa"?"#1d4ed8":"#3b82f6",color:"#fff",outline:queued?.newStatus==="queued_cpsa"?"2px solid #1d4ed8":"none"})}>GTEC →</button>}
+                          {(b.status==="queued_cpsa"||b.status==="amua_submit")&&<button onClick={()=>queueAction(b.id,"pending_cpsa")} title="Mark as Pending GTEC Review (no email)"
                             style={S.btn({padding:"3px 7px",fontSize:10,background:queued?.newStatus==="pending_cpsa"?"#0369a1":"#0ea5e9",color:"#fff",outline:queued?.newStatus==="pending_cpsa"?"2px solid #0369a1":"none"})}>⏳</button>}
-                          {isCpsaStage&&<button onClick={()=>queueAction(b.id,"approved")} title="Mark CPSA Approved"
+                          {isCpsaStage&&<button onClick={()=>queueAction(b.id,"approved")} title="Mark GTEC Approved"
                             style={S.btn({padding:"3px 7px",fontSize:10,background:queued?.newStatus==="approved"?"#15803d":"#22c55e",color:"#fff",outline:queued?.newStatus==="approved"?"2px solid #15803d":"none"})}>✓</button>}
                           <button onClick={()=>queueAction(b.id,"rejected")} title="Reject"
                             style={S.btn({padding:"3px 7px",fontSize:10,background:queued?.newStatus==="rejected"?"#be123c":"#f43f5e",color:"#fff",outline:queued?.newStatus==="rejected"?"2px solid #be123c":"none"})}>✗</button>
@@ -8111,9 +8149,9 @@ export default function App() {
     }
     logActivity("mismatch_resolution", { booking_id:booking.id, resolution:logPayload.resolution, billing_state:logPayload.billing_state });
     const msg = logPayload.resolution === "amended"
-      ? "Booking updated to CPSA values."
+      ? "Booking updated to GTEC values."
       : logPayload.resolution === "to_correct"
-      ? "Flagged for CPSA to correct."
+      ? "Flagged for GTEC to correct."
       : "Resolution saved.";
     showToast(msg);
     return true;
@@ -8298,14 +8336,14 @@ export default function App() {
   // schedule. Does NOT change the booking / resolve the mismatch.
   function addInformCpsaToCart(booking, vendorEmail, vendorName) {
     const refs = parseCpsaRefs(booking.system_notes, booking.notes);
-    const submissionId = "CPSA-" + Date.now().toString(36).toUpperCase();
+    const submissionId = "GTEC-" + Date.now().toString(36).toUpperCase();
     setCart(c => [...c, {
       informCpsa: true, notifyOnly: true,
       drafts: [booking], name: vendorName || vendorEmail, email: vendorEmail,
       cpsaRefs: refs, submissionId,
     }]);
     setInformCpsaFor(null);
-    showToast("Inform-CPSA email added to cart.");
+    showToast("Inform-GTEC email added to cart.");
   }
 
   // Generic outbox queue — admin notification actions (clash, mismatch, …) push
@@ -8369,14 +8407,14 @@ export default function App() {
         const b = item.drafts[0];
         if (item.informCpsa) {
           // Vendor alert — asks CPSA to correct their record; booking is untouched.
-          sendApprovalEmail({to:item.email, subject:`CPSA Booking Discrepancy — ${b.purpose||fmtDate(b.date)}`,
+          sendApprovalEmail({to:item.email, subject:`GTEC Booking Discrepancy — ${b.purpose||fmtDate(b.date)}`,
             html:buildInformCpsaEmailHtml({vendorName:item.name, booking:b, refs:item.cpsaRefs||[], submissionId:item.submissionId})});
         } else if (item.newStatus==="cpsa_review_needed") {
           // Mismatch notice → the proper amber mismatch email (not the red rejection template).
-          sendApprovalEmail({to:item.email, subject:"⚡ CPSA Booking Mismatch – Please Review",
+          sendApprovalEmail({to:item.email, subject:"⚡ GTEC Booking Mismatch – Please Review",
             html:buildMismatchEmailHtml({name:item.name, email:item.email, bookings:item.drafts})});
         } else {
-          sendApprovalEmail({to:item.email, subject:"Booking Confirmed by CPSA",
+          sendApprovalEmail({to:item.email, subject:"Booking Confirmed by GTEC",
             html:buildApprovalEmailHtml({name:item.name, email:item.email, bookings:[b], newStatus:item.newStatus, adminNote:""})});
         }
       }
@@ -8436,7 +8474,7 @@ export default function App() {
   // primary so a booker with multiple emails shows a single pill. `bookerGroups`
   // maps each primary → the full set of its addresses (primary + secondaries) so
   // selecting the pill filters/toggles every booking under that booker.
-  const bookerGroups = useMemo(() => {
+  const bookerGroups = (() => {
     const g = {};
     bookings.filter(b=>!isAdminBooking(b)).forEach(b=>{
       const em = b.email?.toLowerCase(); if(!em) return;
@@ -8444,8 +8482,8 @@ export default function App() {
       (g[primary] ||= new Set()).add(em); g[primary].add(primary);
     });
     return g;
-  }, [bookings, canonEmail]);
-  const emailLegend = useMemo(() => Object.keys(bookerGroups).sort(), [bookerGroups]);
+  })();
+  const emailLegend = Object.keys(bookerGroups).sort();
 
   return (
     <div style={{minHeight:"100vh",background:"#f8fafc",fontFamily:"'DM Sans','Segoe UI',system-ui,sans-serif"}}>
@@ -8495,7 +8533,7 @@ export default function App() {
                 const syncLabel=minsAgo===null?"Never synced":minsAgo<1?"Just synced":minsAgo<60?`${minsAgo}m ago`:`${Math.floor(minsAgo/60)}h ago`;
                 return(
                   <button onClick={handleSyncAll} disabled={syncingMonth}
-                    title={`Sync all months with CPSA · Last: ${syncLabel}`}
+                    title={`Sync all months with GTEC · Last: ${syncLabel}`}
                     style={S.btn({background:syncingMonth?"#e2e8f0":"#0ea5e9",color:syncingMonth?"#94a3b8":"#fff",fontSize:11,padding:"7px 10px",cursor:syncingMonth?"wait":"pointer",opacity:syncingMonth?0.7:1})}>
                     {syncingMonth?"⏳":"🔄"}{!isMobile&&(syncingMonth?` Syncing…`:` Sync`)}
                   </button>
@@ -8668,7 +8706,7 @@ export default function App() {
                                 </th>
                               ))}
                               <th style={{padding:"4px 6px",textAlign:"left",fontWeight:600,color:"#64748b",borderBottom:"1px solid #e2e8f0",fontSize:11,whiteSpace:"nowrap"}}>Time</th>
-                              <th style={{padding:"4px 6px",textAlign:"left",fontWeight:600,color:"#64748b",borderBottom:"1px solid #e2e8f0",fontSize:11}}>CPSA</th>
+                              <th style={{padding:"4px 6px",textAlign:"left",fontWeight:600,color:"#64748b",borderBottom:"1px solid #e2e8f0",fontSize:11}}>GTEC</th>
                               <th style={{padding:"4px 6px",textAlign:"left",fontWeight:600,color:"#64748b",borderBottom:"1px solid #e2e8f0",fontSize:11}}>Purpose</th>
                             </tr>
                             <tr style={{background:"#f1f5f9"}}>
@@ -8783,11 +8821,11 @@ export default function App() {
                                     const cpsaUrl=cpsaUrlMatch?cpsaUrlMatch[2]:null;
                                     if(b.status==="cpsa_confirmed"){
                                       return cpsaUrl
-                                        ? <a href={cpsaUrl} target="_blank" rel="noopener noreferrer" style={{color:"#0891b2",fontWeight:600,textDecoration:"none"}} title="View CPSA booking">🌐 confirmed ↗</a>
-                                        : <span style={{color:"#94a3b8",fontWeight:600}} title="CPSA confirmed — no submission URL recorded">🌐 confirmed</span>;
+                                        ? <a href={cpsaUrl} target="_blank" rel="noopener noreferrer" style={{color:"#0891b2",fontWeight:600,textDecoration:"none"}} title="View GTEC booking">🌐 confirmed ↗</a>
+                                        : <span style={{color:"#94a3b8",fontWeight:600}} title="GTEC confirmed — no submission URL recorded">🌐 confirmed</span>;
                                     }
                                     if(b.status==="approved" && CPSA_FIELD_IDS.has(b.facility_id)){
-                                      return <span style={{color:"#94a3b8",fontSize:11}} title="Field booking — run sync to check CPSA status">⏳ awaiting sync</span>;
+                                      return <span style={{color:"#94a3b8",fontSize:11}} title="Field booking — run sync to check GTEC status">⏳ awaiting sync</span>;
                                     }
                                     if(b.status==="cpsa_review_needed"&&reasons.length){
                                       return <span title={reasons.join("\n")} style={{color:"#a16207",cursor:"help",display:"inline-block",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:160}}>⚠ {reasons.join(", ")}</span>;
@@ -8833,7 +8871,7 @@ export default function App() {
         <Modal title="🧩 Install AMUA Booking Extension" onClose={()=>setShowExtensionModal(false)} width={560}>
           <div style={{display:"flex",flexDirection:"column",gap:16,fontSize:14,color:"#0f172a"}}>
             <div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:8,padding:"10px 14px",fontSize:13,color:"#166534"}}>
-              The browser extension lets you submit bookings to CPSA (Sporty) directly from this app and syncs confirmation links back automatically.
+              The browser extension lets you submit bookings to GTEC (Sporty) directly from this app and syncs confirmation links back automatically.
             </div>
             <a href="https://github.com/aucklandmixedultimate/amua-booking-extension/releases/download/v2.1.0/amua-booking-extension-v2.1.0.zip" target="_blank" rel="noopener noreferrer"
               style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,background:"#7c3aed",color:"#fff",borderRadius:10,padding:"12px 16px",textDecoration:"none",fontWeight:700,fontSize:14}}>
@@ -8844,7 +8882,7 @@ export default function App() {
                 ["1","Download the latest build", <>Click the button above to open the <a href="https://github.com/aucklandmixedultimate/amua-booking-extension/releases/download/v2.1.0/amua-booking-extension-v2.1.0.zip" target="_blank" rel="noopener noreferrer" style={{color:"#7c3aed",fontWeight:600}}>latest release</a>, download the attached <code style={{background:"#f1f5f9",padding:"1px 5px",borderRadius:4,fontSize:12}}>.zip</code>, and unzip it.</>],
                 ["2","Open Chrome Extensions", <>Navigate to <code style={{background:"#f1f5f9",padding:"1px 5px",borderRadius:4,fontSize:12}}>chrome://extensions</code> and enable <strong>Developer mode</strong> (toggle top-right).</>],
                 ["3","Load unpacked", <>Click <strong>Load unpacked</strong> and select the unzipped folder (the one containing <code style={{background:"#f1f5f9",padding:"1px 5px",borderRadius:4,fontSize:12}}>manifest.json</code>).</>],
-                ["4","Pin & use", "Pin the extension from the Chrome toolbar. Open a CPSA booking page on Sporty and the extension will detect it automatically."],
+                ["4","Pin & use", "Pin the extension from the Chrome toolbar. Open a GTEC booking page on Sporty and the extension will detect it automatically."],
                 ["•","Building from source?", <>If you cloned the repo instead, run <code style={{background:"#f1f5f9",padding:"1px 5px",borderRadius:4,fontSize:12}}>build.bat</code> (Windows) or <code style={{background:"#f1f5f9",padding:"1px 5px",borderRadius:4,fontSize:12}}>npm run build</code> first, then load the generated <code style={{background:"#f1f5f9",padding:"1px 5px",borderRadius:4,fontSize:12}}>dist/</code> folder.</>],
               ].map(([num,title,desc])=>(
                 <div key={num} style={{display:"flex",gap:12,alignItems:"flex-start"}}>
@@ -8871,7 +8909,7 @@ export default function App() {
         <Modal title="🗑 Log Retention" onClose={()=>setShowRetentionModal(false)} width={460}>
           <div style={{fontSize:12,color:"#64748b",marginBottom:14}}>
             How long to keep <strong>activity-log entries</strong> and <strong>monthly sync results</strong> before
-            they're automatically purged. Purging runs when an admin loads the app and after each CPSA sync.
+            they're automatically purged. Purging runs when an admin loads the app and after each GTEC sync.
           </div>
           <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
             <span style={{fontSize:13,color:"#0f172a",fontWeight:600}}>Keep logs for</span>
@@ -8995,7 +9033,7 @@ export default function App() {
         </Modal>
       )}
       {informCpsaFor&&(
-        <Modal title="📨 Inform CPSA — select vendor" onClose={()=>setInformCpsaFor(null)} width={520}>
+        <Modal title="📨 Inform GTEC — select vendor" onClose={()=>setInformCpsaFor(null)} width={520}>
           {(()=>{
             const vendors = Object.entries(profiles||{}).filter(([,p])=>p?.profileType==="vendor");
             const b = informCpsaFor;
@@ -9006,9 +9044,9 @@ export default function App() {
                 <div style={{background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:10,padding:"10px 14px",fontSize:13,color:"#0c4a6e"}}>
                   <div style={{fontWeight:700,marginBottom:4}}>{fac?.name||b.facility_id} · {fmtDate(b.date)}</div>
                   <div style={{color:"#475569"}}>{b.name} · {fmtTime(b.start_hour)}–{fmtTime(b.start_hour+b.duration)}</div>
-                  <div style={{marginTop:6,fontSize:12,color:refs.length?"#0891b2":"#b45309"}}>{refs.length?`🔗 CPSA link: ${refs.map(r=>r.ref).join(", ")}`:"⚠ No CPSA submission link on file — the email will note this."}</div>
+                  <div style={{marginTop:6,fontSize:12,color:refs.length?"#0891b2":"#b45309"}}>{refs.length?`🔗 GTEC link: ${refs.map(r=>r.ref).join(", ")}`:"⚠ No GTEC submission link on file — the email will note this."}</div>
                 </div>
-                <div style={{fontSize:12,color:"#64748b"}}>Choose the vendor to notify. This adds an email to your cart asking CPSA to correct their schedule to match our record — it does <strong>not</strong> resolve the mismatch.</div>
+                <div style={{fontSize:12,color:"#64748b"}}>Choose the vendor to notify. This adds an email to your cart asking GTEC to correct their schedule to match our record — it does <strong>not</strong> resolve the mismatch.</div>
                 {vendors.length===0
                   ? <div style={{fontSize:13,color:"#92400e",background:"#fffbeb",border:"1px solid #fde68a",borderRadius:8,padding:"10px 14px"}}>No vendor profiles yet. Create one in <strong>👤 User Management</strong> first.</div>
                   : <div style={{display:"flex",flexDirection:"column",gap:6}}>
