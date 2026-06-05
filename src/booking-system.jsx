@@ -14,6 +14,14 @@ const supabase = SUPABASE_URL && SUPABASE_ANON
   : null;
 let _accessToken = null;
 let _currentUser = null; // { id, email } — kept in sync by onAuthStateChange
+// { secondaryEmail: primaryEmail } — kept in sync from the component's emailAliases
+// state so module-level sendEmail can CC a booker's primary address on mail sent
+// to one of their linked secondary addresses.
+let _emailAliases = {};
+function primaryEmailFor(em) {
+  if (!em) return null;
+  return _emailAliases[em.toLowerCase()] || null;
+}
 const _sessionId = (crypto?.randomUUID?.() || `sess-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 function authHeaders(extra = {}) {
   return { apikey: SUPABASE_ANON, Authorization: `Bearer ${_accessToken || SUPABASE_ANON}`, ...extra };
@@ -450,24 +458,28 @@ function getClashes(allBookings) {
 // EmailJS credentials ship in the browser bundle. The function authenticates the
 // caller's Supabase session (JWT) and holds the EmailJS keys as Supabase secrets.
 // If the function isn't reachable/deployed, sending is skipped (never throws).
-async function sendEmail({ to, subject, html, kind = "order" }) {
+async function sendEmail({ to, subject, html, kind = "order", cc }) {
   if (!supabase || !_accessToken) {
     console.warn("Email skipped: no Supabase session for", to);
     logActivity("email_failed", { to, subject, error: "no_session" });
     return;
   }
+  // When `to` is a linked secondary address, CC the booker's primary email so the
+  // main account is kept in the loop. Caller can pass an explicit `cc` to override.
+  const ccResolved = cc ?? primaryEmailFor(to);
+  const ccFinal = ccResolved && ccResolved.toLowerCase() !== (to||"").toLowerCase() ? ccResolved : undefined;
   try {
     const res = await fetch(`${SUPABASE_URL}/functions/v1/send-email`, {
       method: "POST",
       headers: { "Content-Type": "application/json", apikey: SUPABASE_ANON, Authorization: `Bearer ${_accessToken}` },
-      body: JSON.stringify({ to, subject, html, kind }),
+      body: JSON.stringify({ to, subject, html, kind, ...(ccFinal ? { cc: ccFinal } : {}) }),
     });
     if (!res.ok) {
       const body = await res.text().catch(() => "(no body)");
       console.warn(`send-email ${res.status}:`, body);
       logActivity("email_failed", { to, subject, status: res.status });
     } else {
-      logActivity("email_sent", { to, subject });
+      logActivity("email_sent", { to, subject, ...(ccFinal ? { cc: ccFinal } : {}) });
     }
   } catch (e) {
     console.error("Email network error:", e);
@@ -7465,7 +7477,7 @@ export default function App() {
   const [emailAliases, setEmailAliases] = useState(()=>{
     try{ return JSON.parse(localStorage.getItem("fb_email_aliases")||"{}"); }catch{ return {}; }
   });
-  useEffect(()=>{ try{ localStorage.setItem("fb_email_aliases", JSON.stringify(emailAliases)); }catch{ /* ignore */ } }, [emailAliases]);
+  useEffect(()=>{ try{ localStorage.setItem("fb_email_aliases", JSON.stringify(emailAliases)); }catch{ /* ignore */ } _emailAliases = emailAliases; }, [emailAliases]);
   // aliasNames: { primaryEmail: displayName } — overrides the default email-prefix label.
   const [aliasNames, setAliasNames] = useState(()=>{
     try{ return JSON.parse(localStorage.getItem("fb_alias_names")||"{}"); }catch{ return {}; }

@@ -41,13 +41,13 @@ Deno.serve(async (req) => {
   if (!user?.id) return json(401, { error: "unauthorized" });
 
   // 2) Validate payload.
-  let body: { to?: string; subject?: string; html?: string; kind?: string };
+  let body: { to?: string; subject?: string; html?: string; kind?: string; cc?: string };
   try {
     body = await req.json();
   } catch {
     return json(400, { error: "invalid_json" });
   }
-  const { to, subject, html, kind } = body ?? {};
+  const { to, subject, html, kind, cc } = body ?? {};
   if (!to || !subject || !html) return json(400, { error: "missing_fields" });
 
   // 3) Resolve EmailJS config (secrets — never shipped to the client).
@@ -71,7 +71,10 @@ Deno.serve(async (req) => {
       template_id: templateId,
       user_id: publicKey,
       accessToken: privateKey,
-      template_params: { to_email: to, subject, message_html: html },
+      // `cc_email` is only meaningful if the EmailJS template's Cc field is set to
+      // "{{cc_email}}" — see README. Empty string when absent so the template's Cc
+      // resolves to nothing rather than a literal placeholder.
+      template_params: { to_email: to, subject, message_html: html, cc_email: cc ?? "" },
     }),
   });
   if (!ejRes.ok) {

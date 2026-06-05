@@ -39,11 +39,21 @@ Authorization: Bearer <user access token>
 apikey: <anon key>
 Content-Type: application/json
 
-{ "to": "a@b.com", "subject": "…", "html": "<p>…</p>", "kind": "order" | "approval" }
+{ "to": "a@b.com", "subject": "…", "html": "<p>…</p>", "kind": "order" | "approval",
+  "cc": "primary@b.com" }
 ```
 
 Responses: `200 {ok:true}`, `401` (not a signed-in user), `400` (bad payload),
 `500` (function secrets missing), `502` (EmailJS rejected the send).
+
+### Cc support (optional)
+
+`cc` is forwarded to EmailJS as the `cc_email` template param. The app sets it
+automatically when mailing a booker's **linked secondary** address, so the
+booker's **primary** email is kept in the loop. For this to take effect, edit
+**both** EmailJS templates (order + approval) and set their **Cc** field to
+`{{cc_email}}` (Email Templates → Settings → Cc). When no Cc is needed the param
+is an empty string, so the Cc resolves to nothing.
 
 ## Smoke test
 
