@@ -14,6 +14,14 @@ const supabase = SUPABASE_URL && SUPABASE_ANON
   : null;
 let _accessToken = null;
 let _currentUser = null; // { id, email } — kept in sync by onAuthStateChange
+// { secondaryEmail: primaryEmail } — kept in sync from the component's emailAliases
+// state so module-level sendEmail can CC a booker's primary address on mail sent
+// to one of their linked secondary addresses.
+let _emailAliases = {};
+function primaryEmailFor(em) {
+  if (!em) return null;
+  return _emailAliases[em.toLowerCase()] || null;
+}
 const _sessionId = (crypto?.randomUUID?.() || `sess-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 function authHeaders(extra = {}) {
   return { apikey: SUPABASE_ANON, Authorization: `Bearer ${_accessToken || SUPABASE_ANON}`, ...extra };
@@ -450,24 +458,28 @@ function getClashes(allBookings) {
 // EmailJS credentials ship in the browser bundle. The function authenticates the
 // caller's Supabase session (JWT) and holds the EmailJS keys as Supabase secrets.
 // If the function isn't reachable/deployed, sending is skipped (never throws).
-async function sendEmail({ to, subject, html, kind = "order" }) {
+async function sendEmail({ to, subject, html, kind = "order", cc }) {
   if (!supabase || !_accessToken) {
     console.warn("Email skipped: no Supabase session for", to);
     logActivity("email_failed", { to, subject, error: "no_session" });
     return;
   }
+  // When `to` is a linked secondary address, CC the booker's primary email so the
+  // main account is kept in the loop. Caller can pass an explicit `cc` to override.
+  const ccResolved = cc ?? primaryEmailFor(to);
+  const ccFinal = ccResolved && ccResolved.toLowerCase() !== (to||"").toLowerCase() ? ccResolved : undefined;
   try {
     const res = await fetch(`${SUPABASE_URL}/functions/v1/send-email`, {
       method: "POST",
       headers: { "Content-Type": "application/json", apikey: SUPABASE_ANON, Authorization: `Bearer ${_accessToken}` },
-      body: JSON.stringify({ to, subject, html, kind }),
+      body: JSON.stringify({ to, subject, html, kind, ...(ccFinal ? { cc: ccFinal } : {}) }),
     });
     if (!res.ok) {
       const body = await res.text().catch(() => "(no body)");
       console.warn(`send-email ${res.status}:`, body);
       logActivity("email_failed", { to, subject, status: res.status });
     } else {
-      logActivity("email_sent", { to, subject });
+      logActivity("email_sent", { to, subject, ...(ccFinal ? { cc: ccFinal } : {}) });
     }
   } catch (e) {
     console.error("Email network error:", e);
@@ -7465,7 +7477,7 @@ export default function App() {
   const [emailAliases, setEmailAliases] = useState(()=>{
     try{ return JSON.parse(localStorage.getItem("fb_email_aliases")||"{}"); }catch{ return {}; }
   });
-  useEffect(()=>{ try{ localStorage.setItem("fb_email_aliases", JSON.stringify(emailAliases)); }catch{ /* ignore */ } }, [emailAliases]);
+  useEffect(()=>{ try{ localStorage.setItem("fb_email_aliases", JSON.stringify(emailAliases)); }catch{ /* ignore */ } _emailAliases = emailAliases; }, [emailAliases]);
   // aliasNames: { primaryEmail: displayName } — overrides the default email-prefix label.
   const [aliasNames, setAliasNames] = useState(()=>{
     try{ return JSON.parse(localStorage.getItem("fb_alias_names")||"{}"); }catch{ return {}; }
@@ -8420,7 +8432,20 @@ export default function App() {
     </div>
   );
 
-  const emailLegend=[...new Set(bookings.filter(b=>!isAdminBooking(b)).map(b=>b.email).filter(Boolean))];
+  // One legend entry per canonical booker: linked secondaries fold into their
+  // primary so a booker with multiple emails shows a single pill. `bookerGroups`
+  // maps each primary → the full set of its addresses (primary + secondaries) so
+  // selecting the pill filters/toggles every booking under that booker.
+  const bookerGroups = useMemo(() => {
+    const g = {};
+    bookings.filter(b=>!isAdminBooking(b)).forEach(b=>{
+      const em = b.email?.toLowerCase(); if(!em) return;
+      const primary = canonEmail(em);
+      (g[primary] ||= new Set()).add(em); g[primary].add(primary);
+    });
+    return g;
+  }, [bookings, canonEmail]);
+  const emailLegend = useMemo(() => Object.keys(bookerGroups).sort(), [bookerGroups]);
 
   return (
     <div style={{minHeight:"100vh",background:"#f8fafc",fontFamily:"'DM Sans','Segoe UI',system-ui,sans-serif"}}>
@@ -8545,9 +8570,10 @@ export default function App() {
         {!configured&&<Banner type="info" msg="⚙️  Demo Mode — add Supabase credentials to enable persistent storage."/>}
 
         {emailLegend.length>0&&(tab==="calendar"||tab==="month"||tab==="list"||tab==="summary"||(tab==="admin"&&isAdmin))&&(()=>{
-          // Top header: always show every booker (by alias). The All/None chip toggles
-          // between "everything selected" and "nothing selected" on each click.
-          const allLower = emailLegend.map(e=>e.toLowerCase());
+          // Top header: one pill per canonical booker (by alias). The All/None chip
+          // toggles between "everything selected" and "nothing selected". Linked
+          // secondaries are folded into their primary's group.
+          const allLower = [...new Set(emailLegend.flatMap(p=>[...bookerGroups[p]]))];
           const allSelected = listBookerFilter.size>0 && allLower.every(e=>listBookerFilter.has(e));
           return (
             <div style={{display:"flex",gap:6,marginBottom:12,alignItems:"center",overflowX:"auto",WebkitOverflowScrolling:"touch",scrollbarWidth:"none",msOverflowStyle:"none",paddingBottom:2}}>
@@ -8556,14 +8582,16 @@ export default function App() {
                 style={{padding:"5px 12px",borderRadius:20,border:"1.5px solid",cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",flexShrink:0,borderColor:listBookerFilter.size===0?"#0f172a":"#e2e8f0",background:listBookerFilter.size===0?"#0f172a":"#fff",color:listBookerFilter.size===0?"#fff":"#475569"}}>
                 {allSelected?"None":"All"}
               </button>
-              {emailLegend.map(e=>{
-                const active=listBookerFilter.has(e.toLowerCase());
-                const c=emailColor(e);
+              {emailLegend.map(primary=>{
+                const group=bookerGroups[primary];
+                const active=[...group].every(em=>listBookerFilter.has(em));
+                const c=emailColor(primary);
+                const others=[...group].filter(em=>em!==primary);
                 return(
-                  <button key={e} onClick={()=>toggleBooker(e.toLowerCase())}
-                    title={e}
+                  <button key={primary} onClick={()=>toggleBooker(primary)}
+                    title={others.length?`${primary} (+ ${others.join(", ")})`:primary}
                     style={{padding:"5px 12px",borderRadius:20,border:`1.5px solid ${active?c:"#e2e8f0"}`,cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",flexShrink:0,background:active?c:"#fff",color:active?"#fff":"#475569"}}>
-                    {displayNameFor(e)}
+                    {displayNameFor(primary)}
                   </button>
                 );
               })}
