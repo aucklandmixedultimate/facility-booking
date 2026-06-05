@@ -8432,7 +8432,20 @@ export default function App() {
     </div>
   );
 
-  const emailLegend=[...new Set(bookings.filter(b=>!isAdminBooking(b)).map(b=>b.email).filter(Boolean))];
+  // One legend entry per canonical booker: linked secondaries fold into their
+  // primary so a booker with multiple emails shows a single pill. `bookerGroups`
+  // maps each primary → the full set of its addresses (primary + secondaries) so
+  // selecting the pill filters/toggles every booking under that booker.
+  const bookerGroups = useMemo(() => {
+    const g = {};
+    bookings.filter(b=>!isAdminBooking(b)).forEach(b=>{
+      const em = b.email?.toLowerCase(); if(!em) return;
+      const primary = canonEmail(em);
+      (g[primary] ||= new Set()).add(em); g[primary].add(primary);
+    });
+    return g;
+  }, [bookings, canonEmail]);
+  const emailLegend = useMemo(() => Object.keys(bookerGroups).sort(), [bookerGroups]);
 
   return (
     <div style={{minHeight:"100vh",background:"#f8fafc",fontFamily:"'DM Sans','Segoe UI',system-ui,sans-serif"}}>
@@ -8557,9 +8570,10 @@ export default function App() {
         {!configured&&<Banner type="info" msg="⚙️  Demo Mode — add Supabase credentials to enable persistent storage."/>}
 
         {emailLegend.length>0&&(tab==="calendar"||tab==="month"||tab==="list"||tab==="summary"||(tab==="admin"&&isAdmin))&&(()=>{
-          // Top header: always show every booker (by alias). The All/None chip toggles
-          // between "everything selected" and "nothing selected" on each click.
-          const allLower = emailLegend.map(e=>e.toLowerCase());
+          // Top header: one pill per canonical booker (by alias). The All/None chip
+          // toggles between "everything selected" and "nothing selected". Linked
+          // secondaries are folded into their primary's group.
+          const allLower = [...new Set(emailLegend.flatMap(p=>[...bookerGroups[p]]))];
           const allSelected = listBookerFilter.size>0 && allLower.every(e=>listBookerFilter.has(e));
           return (
             <div style={{display:"flex",gap:6,marginBottom:12,alignItems:"center",overflowX:"auto",WebkitOverflowScrolling:"touch",scrollbarWidth:"none",msOverflowStyle:"none",paddingBottom:2}}>
@@ -8568,14 +8582,16 @@ export default function App() {
                 style={{padding:"5px 12px",borderRadius:20,border:"1.5px solid",cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",flexShrink:0,borderColor:listBookerFilter.size===0?"#0f172a":"#e2e8f0",background:listBookerFilter.size===0?"#0f172a":"#fff",color:listBookerFilter.size===0?"#fff":"#475569"}}>
                 {allSelected?"None":"All"}
               </button>
-              {emailLegend.map(e=>{
-                const active=listBookerFilter.has(e.toLowerCase());
-                const c=emailColor(e);
+              {emailLegend.map(primary=>{
+                const group=bookerGroups[primary];
+                const active=[...group].every(em=>listBookerFilter.has(em));
+                const c=emailColor(primary);
+                const others=[...group].filter(em=>em!==primary);
                 return(
-                  <button key={e} onClick={()=>toggleBooker(e.toLowerCase())}
-                    title={e}
+                  <button key={primary} onClick={()=>toggleBooker(primary)}
+                    title={others.length?`${primary} (+ ${others.join(", ")})`:primary}
                     style={{padding:"5px 12px",borderRadius:20,border:`1.5px solid ${active?c:"#e2e8f0"}`,cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",flexShrink:0,background:active?c:"#fff",color:active?"#fff":"#475569"}}>
-                    {displayNameFor(e)}
+                    {displayNameFor(primary)}
                   </button>
                 );
               })}
