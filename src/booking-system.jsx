@@ -101,8 +101,14 @@ const FACILITY_TINT = { f1:"#f5f3ff", f2:"#ede9fe", f3:"#dcfce7", f4:"#ecfdf5", 
 function isSocialFac(id) { return FACILITIES.find(f=>f.id===id)?.kind==="social"; }
 const EMAIL_COLORS = ["#6366f1","#ec4899","#f59e0b","#10b981","#ef4444","#8b5cf6","#06b6d4","#84cc16","#f97316","#14b8a6","#e879f9","#fb7185","#34d399","#60a5fa","#fbbf24"];
 const _ecc = {}; let _eci = 0;
+// { primaryEmail: "#hex" } — admin-set colour overrides, kept in sync from the
+// component's aliasColors state. Colour is resolved per canonical booker so linked
+// secondaries share their primary's colour (and override).
+let _emailColorOverrides = {};
 function emailColor(email) {
-  const k = (email||"").toLowerCase().trim();
+  const raw = (email||"").toLowerCase().trim();
+  const k = (_emailAliases[raw] || raw); // canonical primary
+  if (_emailColorOverrides[k]) return _emailColorOverrides[k];
   if (!_ecc[k]) { _ecc[k] = EMAIL_COLORS[_eci % EMAIL_COLORS.length]; _eci++; }
   return _ecc[k];
 }
@@ -847,7 +853,7 @@ function ActivityLogModal({onClose, inline=false}) {
 }
 
 // Admin UI: map secondary emails into a primary profile + manage profile details.
-function UserMgmtModal({ bookings, aliases, aliasNames, onChange, onChangeNames, profiles, onUpdateProfile, adminEmail, onClose, onViewAs }) {
+function UserMgmtModal({ bookings, aliases, aliasNames, aliasColors={}, onChange, onChangeNames, onChangeColors, profiles, onUpdateProfile, adminEmail, onClose, onViewAs }) {
   const allEmails = useMemo(() => {
     const s = new Set();
     bookings.forEach(b => { if (b.email && !isAdminBooking(b)) s.add(b.email.toLowerCase()); });
@@ -883,6 +889,15 @@ function UserMgmtModal({ bookings, aliases, aliasNames, onChange, onChangeNames,
     if (!trimmed || trimmed === dflt) delete next[primary];
     else next[primary] = trimmed;
     onChangeNames(next);
+  }
+  // Set/clear the chip colour override for a booker. Empty value reverts to the
+  // auto-assigned palette colour.
+  function setAliasColor(primary, value) {
+    if (!onChangeColors) return;
+    const next = { ...(aliasColors||{}) };
+    if (!value) delete next[primary];
+    else next[primary] = value;
+    onChangeColors(next);
   }
   const [linkSource, setLinkSource] = useState("");
   const [linkTarget, setLinkTarget] = useState("");
@@ -1045,6 +1060,23 @@ function UserMgmtModal({ bookings, aliases, aliasNames, onChange, onChangeNames,
                           placeholder={dflt}
                           style={{...si,width:"auto",flex:1}}/>
                         <span style={{fontSize:10,color:"#94a3b8",whiteSpace:"nowrap"}}>default: {dflt}</span>
+                      </div>
+                    )}
+                    {/* Chip colour override */}
+                    {onChangeColors && fieldRow("Colour",
+                      <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                        <span style={{display:"inline-block",padding:"3px 10px",borderRadius:12,background:emailColor(primary),color:"#fff",fontSize:12,fontWeight:700}}>{aliasName||dflt}</span>
+                        <input type="color" value={aliasColors[primary]||emailColor(primary)} onChange={e=>setAliasColor(primary,e.target.value)}
+                          title="Pick a custom colour"
+                          style={{width:30,height:24,padding:0,border:"1px solid #e2e8f0",borderRadius:6,cursor:"pointer",background:"none"}}/>
+                        <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
+                          {EMAIL_COLORS.map(c=>(
+                            <button key={c} onClick={()=>setAliasColor(primary,c)} title={c}
+                              style={{width:16,height:16,borderRadius:"50%",background:c,border:(aliasColors[primary]||"").toLowerCase()===c.toLowerCase()?"2px solid #0f172a":"1px solid rgba(0,0,0,0.12)",cursor:"pointer",padding:0}}/>
+                          ))}
+                        </div>
+                        {aliasColors[primary] && <button onClick={()=>setAliasColor(primary,"")}
+                          style={{fontSize:10,color:"#64748b",background:"none",border:"1px solid #e2e8f0",borderRadius:6,padding:"2px 6px",cursor:"pointer",fontFamily:"inherit"}}>Reset</button>}
                       </div>
                     )}
                     {/* Full / official name */}
@@ -6528,7 +6560,12 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
           //  • kept ours → GTEC must change their record   → "GTEC to update"
           //  • took GTEC → our booking is amended to match  → "BOOKER to acknowledge"
           const PILL_GTEC   = `<span style="display:inline-block;margin-left:6px;padding:1px 6px;border-radius:8px;background:#dbeafe;color:#1e3a8a;border:1px solid #93c5fd;font-size:10px;font-weight:700;white-space:nowrap">GTEC to update</span>`;
-          const PILL_BOOKER = `<span style="display:inline-block;margin-left:6px;padding:1px 6px;border-radius:8px;background:#ffedd5;color:#9a3412;border:1px solid #fdba74;font-size:10px;font-weight:700;white-space:nowrap">BOOKER to acknowledge</span>`;
+          // The BOOKER pill carries the booker's own coloured chip (alias + colour) so
+          // it's clear which booker needs to acknowledge the change.
+          const bookerPill = b => {
+            const chip = `<span style="display:inline-block;padding:0 6px;border-radius:8px;background:${emailColor(b.email)};color:#fff;font-weight:700">${adminAlias(b.email)}</span>`;
+            return `<span style="display:inline-block;margin-left:6px;padding:1px 6px;border-radius:8px;background:#ffedd5;color:#9a3412;border:1px solid #fdba74;font-size:10px;font-weight:700;white-space:nowrap">${chip} to acknowledge</span>`;
+          };
           // Changed fields between our booking and GTEC's record, with display strings.
           function changedFieldsOf(b, cv) {
             const fac=FACILITIES.find(x=>x.id===b.facility_id);
@@ -6547,7 +6584,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
             return fields.map(f=>{
               const s=sel[f.key];
               if(s==="ours") return `<div style="margin:2px 0"><strong>${f.label}:</strong> ${f.gtec} → <span style="color:#1e3a8a;font-weight:700">${f.our}</span>${PILL_GTEC}</div>`;
-              if(s==="cpsa") return `<div style="margin:2px 0"><strong>${f.label}:</strong> ${f.our} → <span style="color:#9a3412;font-weight:700">${f.gtec}</span>${PILL_BOOKER}</div>`;
+              if(s==="cpsa") return `<div style="margin:2px 0"><strong>${f.label}:</strong> ${f.our} → <span style="color:#9a3412;font-weight:700">${f.gtec}</span>${bookerPill(b)}</div>`;
               return `<div style="margin:2px 0;color:#64748b"><strong>${f.label}:</strong> ${f.our} → ${f.gtec}</div>`;
             }).join("");
           }
@@ -6556,7 +6593,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
             return changedFieldsOf(b, cv).map(f=>{
               const s=sel[f.key];
               if(s==="ours") return `${f.label}: ${f.gtec} → ${f.our} [GTEC to update]`;
-              if(s==="cpsa") return `${f.label}: ${f.our} → ${f.gtec} [BOOKER to acknowledge]`;
+              if(s==="cpsa") return `${f.label}: ${f.our} → ${f.gtec} [${adminAlias(b.email)} to acknowledge]`;
               return `${f.label}: ${f.our} → ${f.gtec}`;
             }).join("; ");
           }
@@ -6578,7 +6615,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
           const html=`<div style="font-family:sans-serif;font-size:13px;color:#0f172a;max-width:720px">
 <h3 style="color:#a16207;margin:0 0 8px">⚡ GTEC Mismatch Report — ${dateStr}</h3>
 <p style="color:#475569;margin:0 0 8px">The following ${mismatches.length} field booking${mismatches.length!==1?"s":""} have discrepancies between our records and GTEC data. The <strong>Changes</strong> column shows the proposed resolution for each field.</p>
-<p style="color:#94a3b8;font-size:11px;margin:0 0 16px">${PILL_GTEC} GTEC's schedule should be corrected to the proposed value. ${PILL_BOOKER} our booking is being amended to GTEC's value — the booker should be notified.</p>
+<p style="color:#94a3b8;font-size:11px;margin:0 0 16px">${PILL_GTEC} GTEC's schedule should be corrected to the proposed value. <span style="display:inline-block;margin-left:6px;padding:1px 6px;border-radius:8px;background:#ffedd5;color:#9a3412;border:1px solid #fdba74;font-size:10px;font-weight:700;white-space:nowrap">BOOKER to acknowledge</span> our booking is being amended to GTEC's value — the named booker should be notified.</p>
 <table cellpadding="0" cellspacing="0" style="border-collapse:collapse;width:100%;font-size:12px;border:1px solid #fde68a;border-radius:8px;overflow:hidden">
 <thead><tr style="background:#fef3c7">
   <th style="padding:8px 12px;text-align:left;font-weight:700;color:#92400e">Booker</th>
@@ -7521,6 +7558,16 @@ export default function App() {
     try{ return JSON.parse(localStorage.getItem("fb_alias_names")||"{}"); }catch{ return {}; }
   });
   useEffect(()=>{ try{ localStorage.setItem("fb_alias_names", JSON.stringify(aliasNames)); }catch{ /* ignore */ } }, [aliasNames]);
+  // aliasColors: { primaryEmail: "#hex" } — admin-set chip colour overrides.
+  const [aliasColors, setAliasColors] = useState(()=>{
+    let init = {}; try{ init = JSON.parse(localStorage.getItem("fb_alias_colors")||"{}"); }catch{ /* ignore */ }
+    _emailColorOverrides = init; // make available to module-level emailColor on first render
+    return init;
+  });
+  // Mirror into the module-level map synchronously so emailColor() reflects edits
+  // on the very next render (no one-frame lag), plus persist to localStorage.
+  _emailColorOverrides = aliasColors;
+  useEffect(()=>{ try{ localStorage.setItem("fb_alias_colors", JSON.stringify(aliasColors)); }catch{ /* ignore */ } }, [aliasColors]);
   const canonEmail = useCallback(em => {
     if (!em) return em;
     const k = em.toLowerCase();
@@ -9003,8 +9050,10 @@ export default function App() {
           bookings={bookings}
           aliases={emailAliases}
           aliasNames={aliasNames}
+          aliasColors={aliasColors}
           onChange={setEmailAliases}
           onChangeNames={setAliasNames}
+          onChangeColors={setAliasColors}
           profiles={profiles}
           onUpdateProfile={setProfiles}
           adminEmail={realLoggedInEmail}
