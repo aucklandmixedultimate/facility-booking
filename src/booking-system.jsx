@@ -7739,6 +7739,23 @@ export default function App() {
         setLogRetentionMonthsState(m);
         try{localStorage.setItem("fb_log_retention_months",String(m));}catch{ /* ignore */ }
       }
+      // Booker identity settings — global, admin-managed; load for every user so the
+      // merge (aliases), display names, chip colours and profiles persist across devices.
+      if (map.email_aliases && typeof map.email_aliases === "object") {
+        setEmailAliases(map.email_aliases); _emailAliases = map.email_aliases;
+        try{localStorage.setItem("fb_email_aliases",JSON.stringify(map.email_aliases));}catch{ /* ignore */ }
+      }
+      if (map.alias_names && typeof map.alias_names === "object") {
+        setAliasNames(map.alias_names);
+        try{localStorage.setItem("fb_alias_names",JSON.stringify(map.alias_names));}catch{ /* ignore */ }
+      }
+      if (map.alias_colors && typeof map.alias_colors === "object") {
+        setAliasColors(map.alias_colors); _emailColorOverrides = map.alias_colors;
+        try{localStorage.setItem("fb_alias_colors",JSON.stringify(map.alias_colors));}catch{ /* ignore */ }
+      }
+      // NB: `profiles` is intentionally NOT loaded/stored here — it holds sensitive
+      // billing details (addresses, GST, admin bank account) and the settings table
+      // is anon-readable. Profiles stay device-local until an admin-only store exists.
     } catch(e) {
       // settings table may not yet exist; silent fallback to localStorage
       console.warn("loadSettings:", e.message);
@@ -8151,6 +8168,12 @@ export default function App() {
     try{localStorage.setItem("fb_approx_durations",JSON.stringify(next));}catch{ /* ignore */ }
     persistSetting("approx_durations", next);
   }
+  // Booker identity settings — state + localStorage handled via their effects; these
+  // wrappers additionally sync the change to the shared `settings` table so aliases,
+  // names, chip colours and profiles persist across devices/sessions.
+  function saveEmailAliases(next) { setEmailAliases(next); persistSetting("email_aliases", next); }
+  function saveAliasNames(next)   { setAliasNames(next);   persistSetting("alias_names", next); }
+  function saveAliasColors(next)  { setAliasColors(next);  persistSetting("alias_colors", next); }
 
   async function handleSyncDB() {
     await loadBookings();
@@ -8160,6 +8183,9 @@ export default function App() {
     await persistSetting("approx_players", approxPlayers);
     await persistSetting("approx_durations", approxDurations);
     await persistSetting("log_retention_months", logRetentionMonths);
+    await persistSetting("email_aliases", emailAliases);
+    await persistSetting("alias_names", aliasNames);
+    await persistSetting("alias_colors", aliasColors);
     showToast("Synced with database.");
   }
 
@@ -9098,9 +9124,9 @@ export default function App() {
           aliases={emailAliases}
           aliasNames={aliasNames}
           aliasColors={aliasColors}
-          onChange={setEmailAliases}
-          onChangeNames={setAliasNames}
-          onChangeColors={setAliasColors}
+          onChange={saveEmailAliases}
+          onChangeNames={saveAliasNames}
+          onChangeColors={saveAliasColors}
           profiles={profiles}
           onUpdateProfile={setProfiles}
           adminEmail={realLoggedInEmail}

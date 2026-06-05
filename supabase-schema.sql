@@ -9,6 +9,11 @@
 --   facility_rates    → { "<facility_id>": { day, evening }, ... }
 --   approx_players    → { "<email_lc>": <int>, ... }
 --   approx_durations  → { "<email_lc>": <float hours>, ... }
+--   email_aliases     → { "<secondary_email>": "<primary_email>", ... }
+--   alias_names       → { "<primary_email>": "<display name>", ... }
+--   alias_colors      → { "<primary_email>": "#hex", ... }
+-- (profiles are NOT stored here — they hold sensitive billing/bank details and
+--  this table is anon-readable; they remain device-local for now.)
 create table if not exists settings (
   key         text primary key,
   value       jsonb not null default '{}'::jsonb,
