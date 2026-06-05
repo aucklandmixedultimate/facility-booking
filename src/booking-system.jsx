@@ -954,8 +954,11 @@ function UserMgmtModal({ bookings, aliases, aliasNames, aliasColors={}, onChange
     const s = new Set(Object.keys(groups));
     if (adminEmail) s.add(adminEmail.toLowerCase());
     Object.keys(profiles||{}).forEach(k => s.add(k));
-    return [...s].sort();
-  }, [groups, adminEmail, profiles]);
+    // Exclude any email that is itself a secondary (aliased onto a primary) — a
+    // lingering profile entry or the admin email shouldn't show as its own card;
+    // it must nest under its primary instead.
+    return [...s].filter(em => !aliases[em]).sort();
+  }, [groups, adminEmail, profiles, aliases]);
 
   // Create-vendor form state
   const [newVendorEmail, setNewVendorEmail] = useState("");
