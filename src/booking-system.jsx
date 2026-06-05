@@ -8025,20 +8025,27 @@ export default function App() {
   async function handleBulkApply({bkgs, bulkTime, bulkDur, bulkFac, cancelFrom}) {
     const toCancel = cancelFrom ? bkgs.filter(b=>b.date>=cancelFrom) : [];
     const toUpdate = bkgs.filter(b=>!cancelFrom||b.date<cancelFrom);
-    if(configured){
-      try{
-        for(const b of toUpdate) await sb.update("bookings",b.id,{start_hour:bulkTime,duration:bulkDur,facility_id:bulkFac,updated_at:new Date().toISOString()});
-        for(const b of toCancel) await sb.remove("bookings",b.id);
-        await loadBookings();
-      }catch(e){showToast("Bulk apply failed: "+e.message,"error");return;}
-    } else {
-      setBookings(prev=>{
-        const cancelIds=new Set(toCancel.map(b=>b.id));
+    // Apply edits immediately. Cancellations are NOT deleted here — they're routed
+    // through the removal (email) cart so the booker gets a cancellation email on submit.
+    if(toUpdate.length>0){
+      if(configured){
+        try{
+          for(const b of toUpdate) await sb.update("bookings",b.id,{start_hour:bulkTime,duration:bulkDur,facility_id:bulkFac,updated_at:new Date().toISOString()});
+          await loadBookings();
+        }catch(e){showToast("Bulk apply failed: "+e.message,"error");return;}
+      } else {
         const updateIds=new Set(toUpdate.map(b=>b.id));
-        return prev.filter(b=>!cancelIds.has(b.id)).map(b=>updateIds.has(b.id)?{...b,start_hour:bulkTime,duration:bulkDur,facility_id:bulkFac}:b);
-      });
+        setBookings(prev=>prev.map(b=>updateIds.has(b.id)?{...b,start_hour:bulkTime,duration:bulkDur,facility_id:bulkFac}:b));
+      }
     }
-    const parts=[toUpdate.length>0&&`${toUpdate.length} updated`,toCancel.length>0&&`${toCancel.length} cancelled`].filter(Boolean);
+    if(toCancel.length>0){
+      setDeleteQueue(prev => { const have=new Set(prev.map(b=>b.id)); return [...prev, ...toCancel.filter(b=>!have.has(b.id))]; });
+      setShowDeleteCart(true);
+    }
+    const parts=[
+      toUpdate.length>0&&`${toUpdate.length} updated`,
+      toCancel.length>0&&`${toCancel.length} queued for removal`,
+    ].filter(Boolean);
     showToast(parts.join(", ")||"Applied.");
   }
 
