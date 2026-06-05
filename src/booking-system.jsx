@@ -361,6 +361,20 @@ function setCpsaOrig(sysNotes, b) {
   const marker = `[CPSA-ORIG] ${b.facility_id}|${b.start_hour}|${b.duration}`;
   return base ? `${base}\n${marker}` : marker;
 }
+// Pre-clash workflow status, stored in system_notes when a sync flags a booking as
+// "clash". A later sync that finds the clash resolved restores this prior stage
+// (e.g. pending_amua, queued_cpsa) instead of leaving the booking stuck on "clash".
+const CLASH_PREV_RE = /\[CLASH-PREV\][^\n]*/g;
+function setClashPrevStatus(sysNotes, status) {
+  const base = (sysNotes||"").replace(CLASH_PREV_RE,"").trim();
+  const marker = `[CLASH-PREV] ${status}`;
+  return base ? `${base}\n${marker}` : marker;
+}
+function parseClashPrevStatus(sysNotes) {
+  const m = (sysNotes||"").match(/\[CLASH-PREV\]\s*([^\n]*)/);
+  return m ? m[1].trim() : null;
+}
+function stripClashPrevStatus(sysNotes) { return (sysNotes||"").replace(CLASH_PREV_RE,"").trim(); }
 // Parse the compact time strings produced by fmtTimeShort, e.g. "6p" → 18, "6:30p" → 18.5.
 function parseFmtTimeShort(s) {
   const m = (s||"").trim().toLowerCase().match(/^(\d+)(?::(\d+))?([ap])$/);
@@ -2887,12 +2901,15 @@ function AboutTab() {
   );
 }
 
-function buildOverlapPatternMap(active, facSensitive) {
+// `canon` folds a (lowercased) email onto its canonical primary so linked
+// secondary bookers group under one entry. Defaults to identity.
+function buildOverlapPatternMap(active, facSensitive, canon) {
+  const keyOf = canon || (e=>e);
   function dayName(d){return["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][new Date(d+"T12:00").getDay()];}
   function timesOverlap(b1,b2){return b1.start_hour<b2.start_hour+b2.duration&&b2.start_hour<b1.start_hour+b1.duration;}
   const patternMap={};
   active.forEach(b=>{
-    const email=b.email.toLowerCase();
+    const email=keyOf((b.email||"").toLowerCase());
     const dn=dayName(b.date);
     if(!patternMap[email]) patternMap[email]={};
     const emailPats=patternMap[email];
@@ -3077,7 +3094,8 @@ function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkApply, o
   };
 
   const active = bookings.filter(b=>(["approved","cpsa_confirmed","cpsa_review_needed","pending_cpsa","queued_cpsa","pending_amua","amua_submit","pending"].includes(b.status)||b.invoiced)&&!isAdminBooking(b));
-  const patternMap = buildOverlapPatternMap(active, facSensitive);
+  const canonEmail = em => (emailAliases[(em||"").toLowerCase()] || (em||"").toLowerCase());
+  const patternMap = buildOverlapPatternMap(active, facSensitive, canonEmail);
 
   const rows = Object.entries(patternMap).map(([email,pats])=>{
     const nameDisplay=(Object.values(pats)[0]||[])[0]?.name||email;
@@ -5188,8 +5206,10 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
           )}
         </div>
         {(()=>{
-          // Build pattern groups per email using overlap-aware grouping
-          const patternMap = buildOverlapPatternMap(active, scheduleFacSensitive);
+          // Build pattern groups per email using overlap-aware grouping (canonical
+          // primary so linked secondary bookers fold into one row).
+          const canonEmail = em => (emailAliases[(em||"").toLowerCase()] || (em||"").toLowerCase());
+          const patternMap = buildOverlapPatternMap(active, scheduleFacSensitive, canonEmail);
 
           // Build rows: one per email with recurring + one-off lists + hours/cost/facilities summary
           const scheduleRows = Object.entries(patternMap).map(([email,pats])=>{
@@ -6048,10 +6068,16 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
   // Old unapproved = bookings in any review state with past dates, excluding mismatches (those need resolution, not deletion)
   const oldUnapproved=bookings.filter(b=>REVIEW_STATUSES.has(b.status)&&b.status!=="cpsa_review_needed"&&b.date<today);
 
-  // Booker chip data
-  const adminBookerMap = {};
-  bookings.filter(b=>!isAdminBooking(b)&&b.email&&b.name).forEach(b=>{adminBookerMap[b.email.toLowerCase()]=b.name;});
-  const adminBookerEmails = Object.keys(adminBookerMap).sort();
+  // Booker chip data — canonical groups so linked secondaries fold into one chip.
+  const adminCanonEmail = em => (emailAliases[(em||"").toLowerCase()] || (em||"").toLowerCase());
+  const adminBookerGroups = {};
+  bookings.filter(b=>!isAdminBooking(b)&&b.email).forEach(b=>{
+    const em=b.email.toLowerCase(); const primary=adminCanonEmail(em);
+    (adminBookerGroups[primary] ||= new Set()).add(em); adminBookerGroups[primary].add(primary);
+  });
+  const adminBookerPrimaries = Object.keys(adminBookerGroups).sort();
+  // Every address across all groups — used for select-all / all-selected checks.
+  const adminBookerEmails = [...new Set(adminBookerPrimaries.flatMap(p=>[...adminBookerGroups[p]]))];
 
   function matchesQ(b) {
     const t=q.toLowerCase();
@@ -6232,7 +6258,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
           {/* Group by month (newest first); each month collapses to a one-line summary
               and expands to the full breakdown + date of the latest exact new change. */}
           {[...syncResults].sort((a,b)=>(b.monthKey||"").localeCompare(a.monthKey||"")).map(r=>{
-            const changeCount = (r.added||0)+(r.cpsaConfirmed||0)+(r.cpsaReviewNeeded||0)+(r.removed||0)+(r.clashes||0);
+            const changeCount = (r.added||0)+(r.cpsaConfirmed||0)+(r.cpsaReviewNeeded||0)+(r.removed||0)+(r.clashes||0)+(r.clashesResolved||0);
             const hasChanges = changeCount > 0;
             // Months that surfaced new clashes/mismatches are emphasised (tinted card + badges).
             const attention = !r.error && ((r.clashes||0)>0 || (r.cpsaReviewNeeded||0)>0);
@@ -6269,6 +6295,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                             r.cpsaConfirmed>0 && <span style={{color:"#0891b2",fontSize:12}}>🌐 <strong>{r.cpsaConfirmed}</strong> GTEC-confirmed</span>,
                             r.cpsaReviewNeeded>0 && <span style={{color:"#b45309",fontSize:12}}>⚠ <strong>{r.cpsaReviewNeeded}</strong> need review</span>,
                             r.clashes>0 && <span style={{color:"#c2410c",fontSize:12}}>⚡ <strong>{r.clashes}</strong> clash{r.clashes!==1?"es":""} flagged</span>,
+                            r.clashesResolved>0 && <span style={{color:"#16a34a",fontSize:12}}>↩ <strong>{r.clashesResolved}</strong> clash{r.clashesResolved!==1?"es":""} restored</span>,
                             r.notified>0 && <span style={{color:"#7c3aed",fontSize:12}}>📧 <strong>{r.notified}</strong> queued to notify</span>,
                             r.removed>0 && <span style={{color:"#94a3b8",fontSize:12}}>✕ <strong>{r.removed}</strong> stale removed</span>,
                             !hasChanges && <span style={{color:"#94a3b8",fontSize:12,fontStyle:"italic"}}>No new changes in the latest sync.</span>,
@@ -7051,13 +7078,16 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                             <div style={{position:"absolute",top:"100%",left:0,zIndex:31,marginTop:4,background:"#fff",border:"1.5px solid #e2e8f0",borderRadius:10,boxShadow:"0 8px 24px rgba(15,23,42,0.12)",padding:8,minWidth:200,maxWidth:340,maxHeight:300,overflowY:"auto"}}>
                               <div style={{fontSize:10,fontWeight:700,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:6,padding:"0 2px"}}>Filter bookers</div>
                               <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-                                {adminBookerEmails.map(em=>{
-                                  const active=adminBookerFilter.has(em);
-                                  const c=emailColor(em);
+                                {adminBookerPrimaries.map(primary=>{
+                                  const group=adminBookerGroups[primary];
+                                  const active=[...group].every(em=>adminBookerFilter.has(em));
+                                  const c=emailColor(primary);
+                                  const others=[...group].filter(em=>em!==primary);
                                   return(
-                                    <button key={em} onClick={()=>toggleAdminBooker(em)}
+                                    <button key={primary} onClick={()=>toggleAdminBooker(primary)}
+                                      title={others.length?`${primary} (+ ${others.join(", ")})`:primary}
                                       style={{padding:"3px 8px",fontSize:11,borderRadius:14,border:`1.5px solid ${active?c:"#e2e8f0"}`,background:active?c:"#fff",color:active?"#fff":"#475569",cursor:"pointer",fontWeight:600,fontFamily:"inherit"}}>
-                                      {adminAlias(em)}
+                                      {adminAlias(primary)}
                                     </button>
                                   );
                                 })}
@@ -7116,8 +7146,8 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                     </td>
                     <td style={{padding:"3px 6px",whiteSpace:"nowrap",fontSize:11,color:"#475569"}}>{fmtDateShort(b.date)}</td>
                     <td style={{padding:"3px 6px"}}>
-                      <span onClick={e=>{e.stopPropagation();toggleAdminBooker(b.email.toLowerCase());}}
-                        style={{display:"inline-block",padding:"2px 8px",borderRadius:10,background:emailColor(b.email),color:"#fff",fontSize:11,fontWeight:600,cursor:"pointer",outline:adminBookerFilter.has(b.email.toLowerCase())?"2px solid #0f172a":"none",outlineOffset:1}}>
+                      <span onClick={e=>{e.stopPropagation();toggleAdminBooker(adminCanonEmail(b.email));}}
+                        style={{display:"inline-block",padding:"2px 8px",borderRadius:10,background:emailColor(b.email),color:"#fff",fontSize:11,fontWeight:600,cursor:"pointer",outline:adminBookerFilter.has(adminCanonEmail(b.email))?"2px solid #0f172a":"none",outlineOffset:1}}>
                         {adminAlias(b.email)}
                       </span>
                     </td>
@@ -7886,22 +7916,36 @@ export default function App() {
       const today = todayKey();
       const adminBks = freshBookings.filter(b => isAdminBooking(b) && b.date >= today);
       const userBks  = freshBookings.filter(b => !isAdminBooking(b) && b.date >= today);
-      let clashUpdates = 0;
+      let clashUpdates = 0, clashResolved = 0;
       for (const ub of userBks) {
         // Skip bookings already matched/confirmed via CPSA — their admin slot was removed above
         if (matchedUserIds.has(ub.id)) continue;
         if (ub.status === "cpsa_confirmed" || ub.status === "cpsa_review_needed") continue;
         const hasClash = adminBks.some(ab => ab.facility_id === ub.facility_id && timeOverlaps(ab, ub));
         if (hasClash && ub.status !== "clash") {
+          // Flag as clash, remembering the stage it was at so it can be restored later.
+          const sysNotes = setClashPrevStatus(ub.system_notes, ub.status);
           if (configured) {
             await sb.update("bookings", ub.id, { status: "clash", updated_at: new Date().toISOString() });
+            sb.update("bookings", ub.id, { system_notes: sysNotes }).catch(() => {});
           } else {
-            setBookings(prev => prev.map(b => b.id === ub.id ? {...b, status:"clash"} : b));
+            setBookings(prev => prev.map(b => b.id === ub.id ? {...b, status:"clash", system_notes: sysNotes} : b));
           }
           clashUpdates++;
+        } else if (!hasClash && ub.status === "clash") {
+          // Clash resolved (admin slot gone) → restore the prior workflow stage.
+          const restored = parseClashPrevStatus(ub.system_notes) || "pending_amua";
+          const sysNotes = stripClashPrevStatus(ub.system_notes);
+          if (configured) {
+            await sb.update("bookings", ub.id, { status: restored, updated_at: new Date().toISOString() });
+            sb.update("bookings", ub.id, { system_notes: sysNotes }).catch(() => {});
+          } else {
+            setBookings(prev => prev.map(b => b.id === ub.id ? {...b, status: restored, system_notes: sysNotes} : b));
+          }
+          clashResolved++;
         }
       }
-      if (configured && clashUpdates > 0) await loadBookings();
+      if (configured && (clashUpdates > 0 || clashResolved > 0)) await loadBookings();
 
       // Queue CPSA status-change notifications in the cart (notify-only, no booking edits).
       if (cpsaNotifications.length) setCart(prev => [...prev, ...cpsaNotifications]);
@@ -7909,14 +7953,14 @@ export default function App() {
       const label = `${MONTHS[month]} ${year}`;
       const monthKey = `${year}-${String(month+1).padStart(2,"0")}`;
       const syncedAt = new Date().toISOString();
-      const hadChanges = added + cpsaConfirmed + cpsaReviewNeeded + removed + clashUpdates > 0;
+      const hadChanges = added + cpsaConfirmed + cpsaReviewNeeded + removed + clashUpdates + clashResolved > 0;
       setSyncResults(prev => {
         const existing = prev.find(r => r.monthKey === monthKey);
         const without = prev.filter(r => r.monthKey !== monthKey);
         // lastChangeAt = when this month last produced an actual new change; preserved
         // from the prior result when this sync turned up nothing new.
         const lastChangeAt = hadChanges ? syncedAt : (existing?.lastChangeAt || null);
-        return [...without, { monthKey, label, added, skipped, removed, cpsaConfirmed, cpsaReviewNeeded, clashes: clashUpdates, notified: cpsaNotifications.length, addedBookings, syncedAt, lastChangeAt }];
+        return [...without, { monthKey, label, added, skipped, removed, cpsaConfirmed, cpsaReviewNeeded, clashes: clashUpdates, clashesResolved: clashResolved, notified: cpsaNotifications.length, addedBookings, syncedAt, lastChangeAt }];
       });
     } catch(e) {
       setSyncResults(prev => {
@@ -8692,9 +8736,9 @@ export default function App() {
         {tab==="list"&&(
           <div style={S.card}>
             {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:(()=>{
-              const bookerMap = {};
-              bookings.filter(b=>!isAdminBooking(b)&&b.email&&b.name).forEach(b=>{bookerMap[b.email.toLowerCase()]=b.name;});
-              const bookerEmails = Object.keys(bookerMap).sort();
+              // Canonical booker list (linked secondaries fold into their primary) — the
+              // same source the header pills use, so the column filter shows one chip per booker.
+              const bookerAllEmails = [...new Set(emailLegend.flatMap(p=>[...bookerGroups[p]]))];
               const clashAdminIds = new Set(allClashes.map(c=>c.admin.id));
               const clashUserIds  = new Set(allClashes.map(c=>c.user.id));
               const allClashIds   = new Set([...clashAdminIds,...clashUserIds]);
@@ -8765,10 +8809,10 @@ export default function App() {
                               </th>
                               <th style={{padding:"3px 4px",whiteSpace:"normal",position:"relative"}}>
                                 {(()=>{
-                                  const allSel = listBookerFilter.size>0 && bookerEmails.every(e=>listBookerFilter.has(e));
+                                  const allSel = listBookerFilter.size>0 && bookerAllEmails.every(e=>listBookerFilter.has(e));
                                   return (
                                     <div style={{display:"flex",gap:3,alignItems:"center",flexWrap:"wrap"}}>
-                                      <button onClick={()=>setListBookerFilter(allSel?new Set():new Set(bookerEmails))}
+                                      <button onClick={()=>setListBookerFilter(allSel?new Set():new Set(bookerAllEmails))}
                                         title={allSel?"Clear all bookers":"Select all bookers"}
                                         style={{padding:"1px 7px",fontSize:10,borderRadius:10,border:"1.5px solid #e2e8f0",background:listBookerFilter.size===0?"#0f172a":"#fff",color:listBookerFilter.size===0?"#fff":"#475569",cursor:"pointer",fontWeight:listBookerFilter.size===0?700:400,lineHeight:1.6}}>{allSel?"None":"All"}</button>
                                       <button onClick={()=>setShowBookerPicker(v=>!v)}
@@ -8783,13 +8827,16 @@ export default function App() {
                                           <div style={{position:"absolute",top:"100%",left:0,zIndex:31,marginTop:4,background:"#fff",border:"1.5px solid #e2e8f0",borderRadius:10,boxShadow:"0 8px 24px rgba(15,23,42,0.12)",padding:8,minWidth:200,maxWidth:340,maxHeight:300,overflowY:"auto"}}>
                                             <div style={{fontSize:10,fontWeight:700,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:6,padding:"0 2px"}}>Filter bookers</div>
                                             <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-                                              {bookerEmails.map(em=>{
-                                                const active=listBookerFilter.has(em);
-                                                const c=emailColor(em);
+                                              {emailLegend.map(primary=>{
+                                                const group=bookerGroups[primary];
+                                                const active=[...group].every(em=>listBookerFilter.has(em));
+                                                const c=emailColor(primary);
+                                                const others=[...group].filter(em=>em!==primary);
                                                 return(
-                                                  <button key={em} onClick={()=>toggleBooker(em)}
+                                                  <button key={primary} onClick={()=>toggleBooker(primary)}
+                                                    title={others.length?`${primary} (+ ${others.join(", ")})`:primary}
                                                     style={{padding:"3px 8px",fontSize:11,borderRadius:14,border:`1.5px solid ${active?c:"#e2e8f0"}`,background:active?c:"#fff",color:active?"#fff":"#475569",cursor:"pointer",fontWeight:600,fontFamily:"inherit"}}>
-                                                    {displayNameFor(em)}
+                                                    {displayNameFor(primary)}
                                                   </button>
                                                 );
                                               })}
@@ -8844,7 +8891,7 @@ export default function App() {
                                   <td style={{padding:"3px 6px"}}>
                                     {isAdmin_bk
                                       ? <span style={{fontSize:10,fontWeight:700,color:"#94a3b8",background:"#f1f5f9",borderRadius:10,padding:"2px 6px"}}>🔒</span>
-                                      : <span onClick={e=>{e.stopPropagation();toggleBooker(b.email.toLowerCase());}} style={{display:"inline-block",padding:"2px 8px",borderRadius:10,background:emailColor(b.email),color:"#fff",fontSize:11,fontWeight:600,cursor:"pointer",outline:listBookerFilter.has(b.email.toLowerCase())?"2px solid #0f172a":"none",outlineOffset:1}}>
+                                      : <span onClick={e=>{e.stopPropagation();toggleBooker(canonEmail(b.email));}} style={{display:"inline-block",padding:"2px 8px",borderRadius:10,background:emailColor(b.email),color:"#fff",fontSize:11,fontWeight:600,cursor:"pointer",outline:listBookerFilter.has(canonEmail(b.email))?"2px solid #0f172a":"none",outlineOffset:1}}>
                                           {displayNameFor(b.email)}
                                         </span>
                                     }
