@@ -6006,7 +6006,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
   const [showBookerFilter,setShowBookerFilter]=useState(false);
   const [adminDateFrom,setAdminDateFrom]=useState(""), [adminDateTo,setAdminDateTo]=useState("");
   const [adminColPurpose,setAdminColPurpose]=useState("");
-  const [sortCol,setSortCol]=useState("date"), [sortDir,setSortDir]=useState("desc");
+  const [sortCol,setSortCol]=useState("date"), [sortDir,setSortDir]=useState("asc");
   const [selected,setSelected]=useState(new Set());
   const [bulkNote,setBulkNote]=useState("");
   const [bulkSending,setBulkSending]=useState(false);
