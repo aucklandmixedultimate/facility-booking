@@ -71,6 +71,64 @@ RLS blocked the old anon-key writes; v2.0.0 introduced OAuth support, and
 preserves admin/audit markers on re-sync. The in-app install modal links to the
 v2.1.0 release.
 
+> Naming note: the facility authority is branded **GTEC** in all user-facing UI
+> and email copy, but the internal status keys and `system_notes` markers are
+> unchanged — they remain `queued_cpsa` / `pending_cpsa` / `cpsa_confirmed` and
+> `[CPSA …]`. The extension queries and writes these internal values, NOT the
+> "GTEC" display strings.
+
+### Submitting queued bookings — recurring-series grouping (extension v2.2.0+)
+
+Bookings the admin has approved for submission sit at status **`queued_cpsa`**
+(legacy alias: `amua_submit`). The extension picks these up and lodges them on
+Sporty. **A recurring booking must be submitted to GTEC as ONE booking request,
+not one request per occurrence.**
+
+**Which rows to pick up:** `status in ('queued_cpsa','amua_submit')`,
+`email <> 'admin'`, and `date >= today`.
+
+**Series grouping key.** Group the picked-up rows into one GTEC request per
+*series*. Two bookings belong to the same series when ALL of these match:
+
+| Field | Notes |
+| --- | --- |
+| `email` (lowercased) | the booking's own booker email — group by the address on the row; do **not** apply the app's alias merge here, the GTEC form is per-account |
+| `facility_id` | exact facility |
+| weekday | `new Date(date+'T12:00').getDay()` (0–6) |
+| `start_hour` | exact start |
+| `duration` | exact duration |
+| `purpose` | trimmed, case-insensitive |
+
+i.e. `seriesKey = email | facility_id | weekday | start_hour | duration | lower(trim(purpose))`.
+
+The member **dates** are the sorted list of each row's `date`. Submit them as a
+date range when they are contiguous weekly occurrences, otherwise as the explicit
+date list (whatever the Sporty form accepts). This mirrors the app's own
+recurring-pattern detection (`buildOverlapPatternMap` in `src/booking-system.jsx`),
+which groups by booker + weekday + start time; the key above is the stricter,
+submission-time version (adds facility, duration and purpose so only truly
+identical weekly sessions collapse into one request).
+
+**Status transition after submitting:** set **every member row** of the series to
+`pending_cpsa` (the app's "Pending GTEC Review" stage). Do this per row — there is
+no series-level status column.
+
+**Confirmation / mismatch write-back is per member.** GTEC returns one
+confirmation reference + URL for the whole series. Fan that result out to **every
+member booking** individually, using the existing markers (see catalogue below):
+write the same `[CPSA <date>] Ref <ref> · <url>` to each member's `system_notes`,
+and on a mismatch write `[CPSA-MISMATCH] …` to the specific member(s) that differ.
+The web app reads markers and status per booking, so a correctly fanned-out series
+simply appears as N confirmed rows that the Schedule Summary re-groups into one
+recurring pattern — no app-side aggregation is required.
+
+**No app schema/code change is needed for this.** Grouping is derived from
+existing columns and confirmation is stored per row, so the app's existing
+per-booking status + marker model already supports grouped series. If we later
+want the admin UI to show "1 request · N sessions" for queued series, that is an
+optional display-only enhancement, not a contract change.
+
+
 ### Extension schema requirement (v2.1.0+)
 
 `supabase-migration-system-notes.sql` adds a `system_notes text` column to
@@ -165,6 +223,9 @@ Done:
 - [x] CPSA extension v2.1.0 ships `system_notes` writes + marker preservation; install link updated to v2.1.0.
 
 Outstanding:
+- [ ] CPSA extension v2.2.0: submit `queued_cpsa` recurring bookings as ONE GTEC
+      request per series (grouping key + per-member status/confirmation write-back
+      documented under "Submitting queued bookings"). No app change required.
 - [ ] Run `supabase-migration-activity-log.sql` in the SQL editor (creates the audit
       table + RLS). Until then `logActivity` inserts silently no-op.
 - [ ] Run `supabase-migration-invoiced-flag.sql` in the SQL editor (adds `invoiced boolean`
