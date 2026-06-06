@@ -8996,13 +8996,13 @@ export default function App() {
             <div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:8,padding:"10px 14px",fontSize:13,color:"#166534"}}>
               The browser extension lets you submit bookings to GTEC (Sporty) directly from this app and syncs confirmation links back automatically.
             </div>
-            <a href="https://github.com/aucklandmixedultimate/amua-booking-extension/releases/download/v2.1.0/amua-booking-extension-v2.1.0.zip" target="_blank" rel="noopener noreferrer"
+            <a href="https://github.com/aucklandmixedultimate/amua-booking-extension/releases/download/v2.1.2/amua-booking-extension-v2.1.2.zip" target="_blank" rel="noopener noreferrer"
               style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,background:"#7c3aed",color:"#fff",borderRadius:10,padding:"12px 16px",textDecoration:"none",fontWeight:700,fontSize:14}}>
               ⬇ Download latest build (.zip)
             </a>
             <div style={{display:"flex",flexDirection:"column",gap:10}}>
               {[
-                ["1","Download the latest build", <>Click the button above to open the <a href="https://github.com/aucklandmixedultimate/amua-booking-extension/releases/download/v2.1.0/amua-booking-extension-v2.1.0.zip" target="_blank" rel="noopener noreferrer" style={{color:"#7c3aed",fontWeight:600}}>latest release</a>, download the attached <code style={{background:"#f1f5f9",padding:"1px 5px",borderRadius:4,fontSize:12}}>.zip</code>, and unzip it.</>],
+                ["1","Download the latest build", <>Click the button above to open the <a href="https://github.com/aucklandmixedultimate/amua-booking-extension/releases/download/v2.1.2/amua-booking-extension-v2.1.2.zip" target="_blank" rel="noopener noreferrer" style={{color:"#7c3aed",fontWeight:600}}>latest release</a>, download the attached <code style={{background:"#f1f5f9",padding:"1px 5px",borderRadius:4,fontSize:12}}>.zip</code>, and unzip it.</>],
                 ["2","Open Chrome Extensions", <>Navigate to <code style={{background:"#f1f5f9",padding:"1px 5px",borderRadius:4,fontSize:12}}>chrome://extensions</code> and enable <strong>Developer mode</strong> (toggle top-right).</>],
                 ["3","Load unpacked", <>Click <strong>Load unpacked</strong> and select the unzipped folder (the one containing <code style={{background:"#f1f5f9",padding:"1px 5px",borderRadius:4,fontSize:12}}>manifest.json</code>).</>],
                 ["4","Pin & use", "Pin the extension from the Chrome toolbar. Open a GTEC booking page on Sporty and the extension will detect it automatically."],
