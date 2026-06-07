@@ -63,13 +63,14 @@ carry a logged-in user's JWT.
 - Login gate: `session === undefined` renders nothing (loading); `!session` renders
   the Google sign-in screen.
 
-## CPSA browser extension — v2.1.2 is the current release
+## CPSA browser extension
 
 The `amua-booking-extension` writes confirmation notes/links back to `bookings`.
 RLS blocked the old anon-key writes; v2.0.0 introduced OAuth support, and
 **v2.1.0 additionally writes to `system_notes`** (instead of `notes`) and
-preserves admin/audit markers on re-sync. The current release is **v2.1.2**; the
-in-app install modal links to it.
+preserves admin/audit markers on re-sync. The in-app install modal links to the
+extension's `/releases/latest` page, so it always tracks the newest release
+without needing a version bump in the app.
 
 > Naming note: the facility authority is branded **GTEC** in all user-facing UI
 > and email copy, but the internal status keys and `system_notes` markers are
@@ -221,7 +222,8 @@ Done:
 
 - [x] CPSA extension auth fixed by shipping v2.0.0 (OAuth token); install link updated.
 - [x] CPSA extension v2.1.0 ships `system_notes` writes + marker preservation; install link updated to v2.1.0.
-- [x] CPSA extension v2.1.2 is the current release; in-app install link updated to v2.1.2.
+- [x] In-app install link now points to the extension's `/releases/latest` page
+      (tracks the newest release automatically; no per-version app bump needed).
 
 Outstanding:
 - [ ] CPSA extension v2.2.0: submit `queued_cpsa` recurring bookings as ONE GTEC
