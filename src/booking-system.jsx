@@ -7150,8 +7150,9 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                                   const c=emailColor(primary);
                                   const others=[...group].filter(em=>em!==primary);
                                   return(
-                                    <button key={primary} onClick={()=>toggleAdminBooker(primary)}
-                                      title={others.length?`${primary} (+ ${others.join(", ")})`:primary}
+                                    <button key={primary}
+                                      onClick={e=>{ if(e.ctrlKey||e.metaKey) toggleAdminBooker(primary); else setAdminBookerFilter(new Set(group)); }}
+                                      title={`Click to show only this booker · Ctrl/⌘-click to add/remove${others.length?`\n${primary} (+ ${others.join(", ")})`:`\n${primary}`}`}
                                       style={{padding:"3px 8px",fontSize:11,borderRadius:14,border:`1.5px solid ${active?c:"#e2e8f0"}`,background:active?c:"#fff",color:active?"#fff":"#475569",cursor:"pointer",fontWeight:600,fontFamily:"inherit"}}>
                                       {adminAlias(primary)}
                                     </button>
