@@ -23,6 +23,9 @@ function primaryEmailFor(em) {
   return _emailAliases[em.toLowerCase()] || null;
 }
 const _sessionId = (crypto?.randomUUID?.() || `sess-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+// Timestamp of this page load. Used to scope "new" sync-result highlighting to the
+// current session, so changes from a previous session read as old/seen on reload.
+const _sessionStartIso = new Date().toISOString();
 function authHeaders(extra = {}) {
   return { apikey: SUPABASE_ANON, Authorization: `Bearer ${_accessToken || SUPABASE_ANON}`, ...extra };
 }
@@ -4639,7 +4642,11 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
       bookingIds:  allBkgsFlat.map(b=>b.id),
       linkedInvoiceIds: invoiceRecords.map(r=>r.id),
       lines: poLines,
-      individualLines: [],
+      // Itemised view: every booking across all bookers, prefixed with the booker
+      // name, reusing each invoice's own per-booking lines (so totals reconcile).
+      individualLines: invoiceRecords.flatMap(inv =>
+        (inv.individualLines||[]).map(l => ({ ...l, desc: `${inv.bookerName} · ${l.desc||l.description||l.label||""}` }))
+      ),
       subtotal: sumSubtotal, gst: sumGst, total: sumTotal, gstMode: invGst,
       status: "draft",
       gtecInvoiceNumber: "",
@@ -5919,6 +5926,26 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
 // clashes with (same facility / same time), any simultaneous use of a different
 // facility, and the CPSA-review/mismatch status of clashing bookings. Detail is
 // computed live against current bookings so it reflects later resolutions.
+// One flagged user booking (mismatch or clash) surfaced by a sync, with a link to
+// open it. Snapshot fields are stored on the sync result; the live row is resolved
+// by id so "View" opens the current booking (and shows if it's since been resolved).
+function SyncFlaggedRow({ snap, bookings, onView, kind }) {
+  const f = FACILITIES.find(x=>x.id===snap.facility_id);
+  const live = snap.id ? bookings.find(b=>b.id===snap.id) : null;
+  const span = `${fmtTime(snap.start_hour)}–${fmtTime(snap.start_hour+snap.duration)}`;
+  return (
+    <div style={{display:"flex",gap:6,alignItems:"flex-start",flexWrap:"wrap",fontSize:11,color:"#475569"}}>
+      <span style={{width:7,height:7,borderRadius:"50%",background:f?.color||"#94a3b8",flexShrink:0,marginTop:4}}/>
+      <div style={{display:"flex",flexDirection:"column",minWidth:0}}>
+        <span>{fmtDate(snap.date)} · {span} · {f?.name||snap.facility_id} · {snap.name||snap.email}{snap.purpose?` · ${snap.purpose}`:""}</span>
+        {kind==="review" && snap.reasons?.length>0 && <span style={{color:"#b45309"}}>{snap.reasons.join(" · ")}</span>}
+      </div>
+      {live && onView
+        ? <button onClick={()=>onView(live)} style={{marginLeft:"auto",fontSize:10,fontWeight:700,color:"#0369a1",background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:6,padding:"1px 7px",cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>View ↗</button>
+        : <span style={{marginLeft:"auto",fontSize:10,color:"#94a3b8"}}>(resolved)</span>}
+    </div>
+  );
+}
 function SyncedItemRow({ ab, bookings }) {
   const af = FACILITIES.find(x=>x.id===ab.facility_id);
   // Resolve the live booking (by id, else a field-block match) so overlap checks
@@ -6240,9 +6267,11 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
             {onClearSyncResults&&syncResults.length>0&&<button onClick={onClearSyncResults} style={{padding:"3px 10px",borderRadius:6,border:"1px solid #a5f3fc",background:"#fff",color:"#0e7490",cursor:"pointer",fontSize:11,fontWeight:600,fontFamily:"inherit"}}>Clear all</button>}
           </div>
           {(()=>{
-            // Emphasise sync runs that surfaced new clashes or mismatches — these need action.
-            const totClash = syncResults.reduce((s,r)=>s+(r.clashes||0),0);
-            const totMis = syncResults.reduce((s,r)=>s+(r.cpsaReviewNeeded||0),0);
+            // Emphasise only clashes/mismatches surfaced THIS session — anything from a
+            // previous session reads as old/seen once the page is reloaded.
+            const isNewRun = r => !!r.syncedAt && r.syncedAt >= _sessionStartIso;
+            const totClash = syncResults.reduce((s,r)=>s+(isNewRun(r)?(r.clashes||0):0),0);
+            const totMis = syncResults.reduce((s,r)=>s+(isNewRun(r)?(r.cpsaReviewNeeded||0):0),0);
             if(totClash+totMis===0) return null;
             return (
               <div style={{background:"#fff7ed",border:"1.5px solid #fdba74",borderRadius:8,padding:"8px 12px",display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",fontSize:12,color:"#9a3412"}}>
@@ -6263,8 +6292,9 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
           {[...syncResults].sort((a,b)=>(b.monthKey||"").localeCompare(a.monthKey||"")).map(r=>{
             const changeCount = (r.added||0)+(r.cpsaConfirmed||0)+(r.cpsaReviewNeeded||0)+(r.removed||0)+(r.clashes||0)+(r.clashesResolved||0);
             const hasChanges = changeCount > 0;
-            // Months that surfaced new clashes/mismatches are emphasised (tinted card + badges).
-            const attention = !r.error && ((r.clashes||0)>0 || (r.cpsaReviewNeeded||0)>0);
+            // Only emphasise (tint + "new" badges) when the run happened this session.
+            const isNew = !!r.syncedAt && r.syncedAt >= _sessionStartIso;
+            const attention = !r.error && isNew && ((r.clashes||0)>0 || (r.cpsaReviewNeeded||0)>0);
             const open = expandedSyncMonths.has(r.monthKey);
             const fmt = iso => iso ? new Date(iso).toLocaleString("en-NZ",{day:"numeric",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"}) : "—";
             return (
@@ -6277,8 +6307,8 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                     : hasChanges
                       ? <span style={{fontSize:10,fontWeight:700,background:"#0ea5e9",color:"#fff",borderRadius:10,padding:"1px 6px"}}>{changeCount} change{changeCount!==1?"s":""}</span>
                       : <span style={{fontSize:10,fontWeight:600,color:"#94a3b8"}}>no new changes</span>}
-                  {(r.clashes||0)>0&&<span style={{fontSize:10,fontWeight:700,background:"#fecdd3",color:"#9f1239",borderRadius:10,padding:"1px 6px"}}>⚡ {r.clashes} new clash{r.clashes!==1?"es":""}</span>}
-                  {(r.cpsaReviewNeeded||0)>0&&<span style={{fontSize:10,fontWeight:700,background:"#fde68a",color:"#92400e",borderRadius:10,padding:"1px 6px"}}>⚠ {r.cpsaReviewNeeded} new mismatch{r.cpsaReviewNeeded!==1?"es":""}</span>}
+                  {(r.clashes||0)>0&&<span style={{fontSize:10,fontWeight:700,background:isNew?"#fecdd3":"#f1f5f9",color:isNew?"#9f1239":"#94a3b8",borderRadius:10,padding:"1px 6px"}}>⚡ {r.clashes}{isNew?" new":""} clash{r.clashes!==1?"es":""}</span>}
+                  {(r.cpsaReviewNeeded||0)>0&&<span style={{fontSize:10,fontWeight:700,background:isNew?"#fde68a":"#f1f5f9",color:isNew?"#92400e":"#94a3b8",borderRadius:10,padding:"1px 6px"}}>⚠ {r.cpsaReviewNeeded}{isNew?" new":""} mismatch{r.cpsaReviewNeeded!==1?"es":""}</span>}
                   <span style={{fontSize:10,color:"#94a3b8",marginLeft:"auto"}}>{r.syncedAt?new Date(r.syncedAt).toLocaleString("en-NZ",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}):"—"}</span>
                 </button>
                 {open&&(
@@ -6296,8 +6326,20 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                               : <span style={{color:"#0e7490",fontSize:12}}>＋ <strong>{r.added}</strong> booking{r.added!==1?"s":""} added</span>),
                             r.skipped>0 && <span style={{color:"#64748b",fontSize:12}}>— <strong>{r.skipped}</strong> already existed</span>,
                             r.cpsaConfirmed>0 && <span style={{color:"#0891b2",fontSize:12}}>🌐 <strong>{r.cpsaConfirmed}</strong> GTEC-confirmed</span>,
-                            r.cpsaReviewNeeded>0 && <span style={{color:"#b45309",fontSize:12}}>⚠ <strong>{r.cpsaReviewNeeded}</strong> need review</span>,
-                            r.clashes>0 && <span style={{color:"#c2410c",fontSize:12}}>⚡ <strong>{r.clashes}</strong> clash{r.clashes!==1?"es":""} flagged</span>,
+                            r.cpsaReviewNeeded>0 && ((r.reviewBookings&&r.reviewBookings.length)
+                              ? <details><summary style={{color:"#b45309",fontSize:12,cursor:"pointer"}}>⚠ <strong>{r.cpsaReviewNeeded}</strong> need review <span style={{color:"#94a3b8",fontWeight:400}}>· expand to see which</span></summary>
+                                  <div style={{margin:"4px 0 2px 14px",display:"flex",flexDirection:"column",gap:4}}>
+                                    {r.reviewBookings.map((s,i)=><SyncFlaggedRow key={s.id||i} snap={s} bookings={bookings} onView={onView} kind="review"/>)}
+                                  </div>
+                                </details>
+                              : <span style={{color:"#b45309",fontSize:12}}>⚠ <strong>{r.cpsaReviewNeeded}</strong> need review</span>),
+                            r.clashes>0 && ((r.clashBookings&&r.clashBookings.length)
+                              ? <details><summary style={{color:"#c2410c",fontSize:12,cursor:"pointer"}}>⚡ <strong>{r.clashes}</strong> clash{r.clashes!==1?"es":""} flagged <span style={{color:"#94a3b8",fontWeight:400}}>· expand to see which</span></summary>
+                                  <div style={{margin:"4px 0 2px 14px",display:"flex",flexDirection:"column",gap:4}}>
+                                    {r.clashBookings.map((s,i)=><SyncFlaggedRow key={s.id||i} snap={s} bookings={bookings} onView={onView} kind="clash"/>)}
+                                  </div>
+                                </details>
+                              : <span style={{color:"#c2410c",fontSize:12}}>⚡ <strong>{r.clashes}</strong> clash{r.clashes!==1?"es":""} flagged</span>),
                             r.clashesResolved>0 && <span style={{color:"#16a34a",fontSize:12}}>↩ <strong>{r.clashesResolved}</strong> clash{r.clashesResolved!==1?"es":""} restored</span>,
                             r.notified>0 && <span style={{color:"#7c3aed",fontSize:12}}>📧 <strong>{r.notified}</strong> queued to notify</span>,
                             r.removed>0 && <span style={{color:"#94a3b8",fontSize:12}}>✕ <strong>{r.removed}</strong> stale removed</span>,
@@ -7087,8 +7129,9 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                                   const c=emailColor(primary);
                                   const others=[...group].filter(em=>em!==primary);
                                   return(
-                                    <button key={primary} onClick={()=>toggleAdminBooker(primary)}
-                                      title={others.length?`${primary} (+ ${others.join(", ")})`:primary}
+                                    <button key={primary}
+                                      onClick={e=>{ if(e.ctrlKey||e.metaKey) toggleAdminBooker(primary); else setAdminBookerFilter(new Set(group)); }}
+                                      title={`Click to show only this booker · Ctrl/⌘-click to add/remove${others.length?`\n${primary} (+ ${others.join(", ")})`:`\n${primary}`}`}
                                       style={{padding:"3px 8px",fontSize:11,borderRadius:14,border:`1.5px solid ${active?c:"#e2e8f0"}`,background:active?c:"#fff",color:active?"#fff":"#475569",cursor:"pointer",fontWeight:600,fontFamily:"inherit"}}>
                                       {adminAlias(primary)}
                                     </button>
@@ -7777,6 +7820,8 @@ export default function App() {
       const events = await fetchCJREvents(year, month);
       let added = 0, skipped = 0, removed = 0, cpsaConfirmed = 0, cpsaReviewNeeded = 0;
       const addedBookings = []; // snapshots of bookings added this sync (for the expandable log)
+      const reviewBookings = []; // user bookings flagged needing review (mismatch) this sync
+      const clashBookings = [];  // user bookings flagged as clash this sync
       const currentBookings = configured ? (await sb.select("bookings")) : bookings;
       const matchedUserIds = new Set();
       const cpsaNotifications = []; // notify-only cart items for first-time CPSA status changes
@@ -7857,7 +7902,11 @@ export default function App() {
             }
           }
           if (statusChanged) {
-            if (match.exact) cpsaConfirmed++; else cpsaReviewNeeded++;
+            if (match.exact) cpsaConfirmed++; else {
+              cpsaReviewNeeded++;
+              const b = match.booking;
+              reviewBookings.push({ id:b.id, date:b.date, facility_id:b.facility_id, start_hour:b.start_hour, duration:b.duration, purpose:b.purpose, name:b.name, email:b.email, reasons: match.reasons||[] });
+            }
             logActivity(match.exact?"cpsa_confirm":"cpsa_review_flag", { booking_id: match.booking.id, from: match.booking.status, to: targetStatus, reasons: match.reasons||[] });
             // First-time transition into a CPSA status → queue a notify-only cart item.
             if (match.booking.email && !isAdminBooking(match.booking)) {
@@ -7951,6 +8000,7 @@ export default function App() {
           } else {
             setBookings(prev => prev.map(b => b.id === ub.id ? {...b, status:"clash", system_notes: sysNotes} : b));
           }
+          clashBookings.push({ id:ub.id, date:ub.date, facility_id:ub.facility_id, start_hour:ub.start_hour, duration:ub.duration, purpose:ub.purpose, name:ub.name, email:ub.email });
           clashUpdates++;
         } else if (!hasClash && ub.status === "clash") {
           // Clash resolved (admin slot gone) → restore the prior workflow stage.
@@ -7980,7 +8030,7 @@ export default function App() {
         // lastChangeAt = when this month last produced an actual new change; preserved
         // from the prior result when this sync turned up nothing new.
         const lastChangeAt = hadChanges ? syncedAt : (existing?.lastChangeAt || null);
-        return [...without, { monthKey, label, added, skipped, removed, cpsaConfirmed, cpsaReviewNeeded, clashes: clashUpdates, clashesResolved: clashResolved, notified: cpsaNotifications.length, addedBookings, syncedAt, lastChangeAt }];
+        return [...without, { monthKey, label, added, skipped, removed, cpsaConfirmed, cpsaReviewNeeded, clashes: clashUpdates, clashesResolved: clashResolved, notified: cpsaNotifications.length, addedBookings, reviewBookings, clashBookings, syncedAt, lastChangeAt }];
       });
     } catch(e) {
       setSyncResults(prev => {
