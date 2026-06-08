@@ -6062,6 +6062,27 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
   const [showTrackChanges,setShowTrackChanges]=useState(false);
   const [showPricingRules,setShowPricingRules]=useState(false);
 
+  // Collapsible admin sections — only one open at a time, unless Ctrl/⌘ is held.
+  // Sync Results is parent-controlled (toggle-only), so its setter toggles to reach
+  // the desired open/closed state.
+  const sectionPanels = [
+    { open: showSchedulePanel, set: v => setShowSchedulePanel(v) },
+    { open: showActivityPanel, set: v => setShowActivityPanel(v) },
+    { open: showSyncResults,   set: v => { if (v !== showSyncResults) onToggleSyncResults?.(); } },
+    { open: showClashPanel,    set: v => setShowClashPanel(v) },
+    { open: showMismatchPanel, set: v => setShowMismatchPanel(v) },
+    { open: showTrackChanges,  set: v => setShowTrackChanges(v) },
+    { open: showPricingRules,  set: v => setShowPricingRules(v) },
+  ];
+  function toggleSection(idx, e) {
+    const additive = e && (e.ctrlKey || e.metaKey);
+    const willOpen = !sectionPanels[idx].open;
+    sectionPanels.forEach((p, i) => {
+      if (i === idx) p.set(willOpen);
+      else if (!additive && p.open) p.set(false); // collapse the rest unless additive
+    });
+  }
+
   const si={padding:"7px 12px",borderRadius:8,border:"1.5px solid #e2e8f0",fontSize:13,fontFamily:"inherit",color:"#0f172a",background:"#f8fafc",outline:"none"};
   const today=todayKey();
 
@@ -6233,27 +6254,27 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
             🧹 Clear old unapproved ({oldUnapproved.length})
           </button>
         )}
-        <button onClick={()=>setShowSchedulePanel(v=>!v)} style={S.btn({background:showSchedulePanel?"#f0f9ff":"#fff",color:"#0369a1",border:`1.5px solid ${showSchedulePanel?"#7dd3fc":"#bae6fd"}`,fontSize:12,fontWeight:700})}>
+        <button onClick={e=>toggleSection(0,e)} title="Ctrl/⌘-click to keep other sections open" style={S.btn({background:showSchedulePanel?"#f0f9ff":"#fff",color:"#0369a1",border:`1.5px solid ${showSchedulePanel?"#7dd3fc":"#bae6fd"}`,fontSize:12,fontWeight:700})}>
           📅 Schedule {showSchedulePanel?"▴":"▾"}
         </button>
-        <button onClick={()=>setShowActivityPanel(v=>!v)} style={S.btn({background:showActivityPanel?"#f8fafc":"#fff",color:"#475569",border:`1.5px solid ${showActivityPanel?"#94a3b8":"#e2e8f0"}`,fontSize:12,fontWeight:700})}>
+        <button onClick={e=>toggleSection(1,e)} title="Ctrl/⌘-click to keep other sections open" style={S.btn({background:showActivityPanel?"#f8fafc":"#fff",color:"#475569",border:`1.5px solid ${showActivityPanel?"#94a3b8":"#e2e8f0"}`,fontSize:12,fontWeight:700})}>
           📜 Activity Log {showActivityPanel?"▴":"▾"}
         </button>
-        {<button onClick={onToggleSyncResults} style={S.btn({background:showSyncResults?"#ecfeff":"#fff",color:syncResults.length>0?"#0e7490":"#94a3b8",border:`1.5px solid ${showSyncResults?"#a5f3fc":"#e2e8f0"}`,fontSize:12,fontWeight:syncResults.length>0?700:500})}>
+        {<button onClick={e=>toggleSection(2,e)} title="Ctrl/⌘-click to keep other sections open" style={S.btn({background:showSyncResults?"#ecfeff":"#fff",color:syncResults.length>0?"#0e7490":"#94a3b8",border:`1.5px solid ${showSyncResults?"#a5f3fc":"#e2e8f0"}`,fontSize:12,fontWeight:syncResults.length>0?700:500})}>
           🔄 Sync Results ({syncResults.length}) {showSyncResults?"▴":"▾"}
         </button>}
-        <button onClick={()=>setShowClashPanel(v=>!v)} style={S.btn({border:`1.5px solid ${visibleClashes.length>0?"#fda4af":"#e2e8f0"}`,background:showClashPanel?"#fff1f2":"#fff",color:visibleClashes.length>0?"#9f1239":"#94a3b8",fontSize:12,fontWeight:visibleClashes.length>0?700:500})}>
+        <button onClick={e=>toggleSection(3,e)} title="Ctrl/⌘-click to keep other sections open" style={S.btn({border:`1.5px solid ${visibleClashes.length>0?"#fda4af":"#e2e8f0"}`,background:showClashPanel?"#fff1f2":"#fff",color:visibleClashes.length>0?"#9f1239":"#94a3b8",fontSize:12,fontWeight:visibleClashes.length>0?700:500})}>
           ⚠️ Clashes ({visibleClashes.length}) {showClashPanel?"▴":"▾"}
         </button>
         {(()=>{ const mc=bookings.filter(b=>b.status==="cpsa_review_needed"&&!isAdminBooking(b)&&inBookerFilter(b.email)).length; return (
-        <button onClick={()=>setShowMismatchPanel(v=>!v)} style={S.btn({border:`1.5px solid ${mc>0?"#fde68a":"#e2e8f0"}`,background:showMismatchPanel?"#fffbeb":"#fff",color:mc>0?"#b45309":"#94a3b8",fontSize:12,fontWeight:mc>0?700:500})}>
+        <button onClick={e=>toggleSection(4,e)} title="Ctrl/⌘-click to keep other sections open" style={S.btn({border:`1.5px solid ${mc>0?"#fde68a":"#e2e8f0"}`,background:showMismatchPanel?"#fffbeb":"#fff",color:mc>0?"#b45309":"#94a3b8",fontSize:12,fontWeight:mc>0?700:500})}>
           ⚡ Mismatches ({mc}) {showMismatchPanel?"▴":"▾"}
         </button>
         );})()}
-        <button onClick={()=>setShowTrackChanges(v=>!v)} style={S.btn({border:`1.5px solid ${trackedChanges.length>0?"#ddd6fe":"#e2e8f0"}`,background:showTrackChanges?"#f5f3ff":"#fff",color:trackedChanges.length>0?"#5b21b6":"#94a3b8",fontSize:12,fontWeight:trackedChanges.length>0?700:500})}>
+        <button onClick={e=>toggleSection(5,e)} title="Ctrl/⌘-click to keep other sections open" style={S.btn({border:`1.5px solid ${trackedChanges.length>0?"#ddd6fe":"#e2e8f0"}`,background:showTrackChanges?"#f5f3ff":"#fff",color:trackedChanges.length>0?"#5b21b6":"#94a3b8",fontSize:12,fontWeight:trackedChanges.length>0?700:500})}>
           🧾 Track Changes ({trackedChanges.length}) {showTrackChanges?"▴":"▾"}
         </button>
-        {onAddPricingCondition&&<button onClick={()=>setShowPricingRules(v=>!v)} style={S.btn({border:`1.5px solid ${pricingConditions.length>0?"#c7d2fe":"#e2e8f0"}`,background:showPricingRules?"#eef2ff":"#fff",color:pricingConditions.length>0?"#4338ca":"#94a3b8",fontSize:12,fontWeight:pricingConditions.length>0?700:500})}>
+        {onAddPricingCondition&&<button onClick={e=>toggleSection(6,e)} title="Ctrl/⌘-click to keep other sections open" style={S.btn({border:`1.5px solid ${pricingConditions.length>0?"#c7d2fe":"#e2e8f0"}`,background:showPricingRules?"#eef2ff":"#fff",color:pricingConditions.length>0?"#4338ca":"#94a3b8",fontSize:12,fontWeight:pricingConditions.length>0?700:500})}>
           💲 Pricing Rules ({pricingConditions.length}) {showPricingRules?"▴":"▾"}
         </button>}
       </div>
@@ -7129,9 +7150,8 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                                   const c=emailColor(primary);
                                   const others=[...group].filter(em=>em!==primary);
                                   return(
-                                    <button key={primary}
-                                      onClick={e=>{ if(e.ctrlKey||e.metaKey) toggleAdminBooker(primary); else setAdminBookerFilter(new Set(group)); }}
-                                      title={`Click to show only this booker · Ctrl/⌘-click to add/remove${others.length?`\n${primary} (+ ${others.join(", ")})`:`\n${primary}`}`}
+                                    <button key={primary} onClick={()=>toggleAdminBooker(primary)}
+                                      title={others.length?`${primary} (+ ${others.join(", ")})`:primary}
                                       style={{padding:"3px 8px",fontSize:11,borderRadius:14,border:`1.5px solid ${active?c:"#e2e8f0"}`,background:active?c:"#fff",color:active?"#fff":"#475569",cursor:"pointer",fontWeight:600,fontFamily:"inherit"}}>
                                       {adminAlias(primary)}
                                     </button>
