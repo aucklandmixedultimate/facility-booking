@@ -43,7 +43,9 @@ async function logActivity(action, detail = {}) {
         user_email: _currentUser.email || null,
         session_id: _sessionId,
         action,
-        detail,
+        // Stamp the actor's role so the log can be filtered by admin vs booker activity.
+        // Lives inside detail (jsonb) so no schema migration is needed.
+        detail: { ...detail, by: _currentUser.role === "admin" ? "admin" : "booker" },
       }),
     });
   } catch { /* silent */ }
@@ -795,10 +797,72 @@ function Modal({title,onClose,children,width=560}) {
     </div>
   );
 }
+// ─── Activity-log presentation helpers ───────────────────────────────────────
+// Friendly action names + a human-readable summary, so the log reads as plain
+// English instead of raw JSON like {"ids":[...],"count":1}.
+const ACTIVITY_ADMIN_ACTIONS = new Set([
+  "cpsa_sync_start","cpsa_sync_complete","cpsa_confirm","cpsa_review_flag",
+  "cpsa_admin_booking_add","cpsa_admin_booking_remove","mismatch_resolution",
+  "mismatch_billing_settled","status_change","invoiced","official_invoice_created",
+]);
+const ACTIVITY_LABELS = {
+  booking_create:"Booking created", booking_edit:"Booking edited", booking_delete:"Booking deleted",
+  status_change:"Status changed", cpsa_sync_start:"Sync started", cpsa_sync_complete:"Sync completed",
+  cpsa_confirm:"GTEC confirmed", cpsa_review_flag:"Mismatch flagged",
+  cpsa_admin_booking_add:"GTEC block added", cpsa_admin_booking_remove:"GTEC block removed",
+  mismatch_resolution:"Mismatch resolved", mismatch_billing_settled:"Billing settled",
+  invoiced:"Invoiced", official_invoice_created:"Invoice created",
+  email_sent:"Email sent", email_failed:"Email failed", sign_in:"Signed in", sign_out:"Signed out",
+};
+// Who performed the action: explicit stamp from logActivity, else best-effort by action.
+function activityActor(r) {
+  const by = r.detail?.by;
+  if (by === "admin" || by === "booker") return by;
+  return ACTIVITY_ADMIN_ACTIONS.has(r.action) ? "admin" : "booker";
+}
+function activityFacName(fid) { const f = FACILITIES.find(x=>x.id===fid); return f ? f.name : (fid||"?"); }
+function activitySlot(it) {
+  if (!it || !it.date) return "";
+  const t = (typeof it.start_hour==="number") ? ` ${fmtTime(it.start_hour)}–${fmtTime(it.start_hour+(it.duration||0))}` : "";
+  return `${fmtDateShort(it.date)}${t} · ${activityFacName(it.facility_id)}`;
+}
+function activityItemsSummary(items, count) {
+  const n = count || (items?items.length:0);
+  if (!items || !items.length) return n ? `${n} booking${n!==1?"s":""}` : "";
+  const head = items.slice(0,3).map(activitySlot).filter(Boolean).join("; ");
+  const extra = n - Math.min(3, items.length);
+  return head + (extra>0 ? ` +${extra} more` : "");
+}
+function describeActivity(r) {
+  const d = r.detail || {};
+  const statusLabel = s => (STATUS_META[s]?.label || s || "").replace(/^\(\d\/\d\)\s*/,"");
+  switch (r.action) {
+    case "booking_create": return `Created ${activityItemsSummary(d.items,d.count)}`;
+    case "booking_edit":   return `Edited ${activityItemsSummary(d.items,d.count)}`;
+    case "booking_delete": return `Deleted ${activityItemsSummary(d.items,d.count)}`;
+    case "status_change":  return `Set ${d.count||d.ids?.length||0} booking${(d.count||d.ids?.length)!==1?"s":""} → ${statusLabel(d.to)}`;
+    case "cpsa_sync_start":    return `Started GTEC sync${d.months?` · ${d.months} month${d.months!==1?"s":""}`:""}`;
+    case "cpsa_sync_complete": return `Completed GTEC sync${d.months?` · ${d.months} month${d.months!==1?"s":""}`:""}`;
+    case "cpsa_confirm":     return "Confirmed a booking against GTEC";
+    case "cpsa_review_flag": return `Flagged a GTEC mismatch${d.reasons?.length?` · ${d.reasons.join(", ")}`:""}`;
+    case "cpsa_admin_booking_add":    return `Added GTEC block · ${activitySlot(d)}${d.purpose?` · ${d.purpose}`:""}`;
+    case "cpsa_admin_booking_remove": return `Removed GTEC block · ${d.date?fmtDateShort(d.date):""} · ${activityFacName(d.facility_id)}${d.purpose?` · ${d.purpose}`:""}`;
+    case "mismatch_resolution":     return `Resolved mismatch · ${d.resolution||""}${d.billing_state&&d.billing_state!=="none"?` (${d.billing_state})`:""}`;
+    case "mismatch_billing_settled":return `Settled mismatch billing${d.billing_state?` · ${d.billing_state}`:""}`;
+    case "invoiced":                return `Marked ${d.count||d.ids?.length||0} booking${(d.count||d.ids?.length)!==1?"s":""} invoiced`;
+    case "official_invoice_created":return `Created official invoice · ${d.count||0} item${d.count!==1?"s":""}`;
+    case "email_sent":   return `→ ${d.to||""}${d.subject?` · ${d.subject}`:""}`;
+    case "email_failed": return `→ ${d.to||""}${d.subject?` · ${d.subject}`:""}`;
+    case "sign_in":  return d.email ? `${d.email}` : "Signed in";
+    case "sign_out": return "Signed out";
+    default: { const { by, ...rest } = d; void by; return Object.keys(rest).length ? JSON.stringify(rest) : ""; }
+  }
+}
+
 function ActivityLogModal({onClose, inline=false}) {
   const [rows, setRows] = useState(null);
   const [error, setError] = useState("");
-  const [filter, setFilter] = useState("sync"); // sync | all
+  const [filter, setFilter] = useState("all"); // all | sync | admin | booker
   const SYNC_ACTIONS = useMemo(()=>new Set([
     "cpsa_sync_start","cpsa_sync_complete","cpsa_confirm","cpsa_review_flag",
     "cpsa_admin_booking_add","cpsa_admin_booking_remove","mismatch_resolution","mismatch_billing_settled"
@@ -827,13 +891,26 @@ function ActivityLogModal({onClose, inline=false}) {
     }
     return out;
   }, [rows]);
-  const filtered = collapsed.filter(r => filter==="all" ? true : SYNC_ACTIONS.has(r.action));
+  const filtered = collapsed.filter(r => {
+    if (filter==="all")   return true;
+    if (filter==="sync")  return SYNC_ACTIONS.has(r.action);
+    if (filter==="admin") return activityActor(r)==="admin";
+    if (filter==="booker")return activityActor(r)==="booker";
+    return true;
+  });
   const actionStyle = a => {
     if (a.startsWith("cpsa_sync")) return {color:"#0e7490",bg:"#ecfeff",border:"#a5f3fc"};
     if (a==="cpsa_confirm") return {color:"#0e7490",bg:"#ecfeff",border:"#a5f3fc"};
     if (a==="cpsa_review_flag") return {color:"#b45309",bg:"#fffbeb",border:"#fde68a"};
     if (a.startsWith("cpsa_admin_booking")) return {color:"#475569",bg:"#f8fafc",border:"#e2e8f0"};
     if (a.startsWith("mismatch")) return {color:"#7c3aed",bg:"#f5f3ff",border:"#ddd6fe"};
+    if (a==="booking_create") return {color:"#15803d",bg:"#f0fdf4",border:"#bbf7d0"};
+    if (a==="booking_edit")   return {color:"#0369a1",bg:"#f0f9ff",border:"#bae6fd"};
+    if (a==="booking_delete") return {color:"#b91c1c",bg:"#fef2f2",border:"#fecaca"};
+    if (a==="status_change")  return {color:"#a16207",bg:"#fefce8",border:"#fde68a"};
+    if (a==="invoiced"||a==="official_invoice_created") return {color:"#3730a3",bg:"#eef2ff",border:"#c7d2fe"};
+    if (a==="email_sent")   return {color:"#0e7490",bg:"#ecfeff",border:"#a5f3fc"};
+    if (a==="email_failed") return {color:"#b91c1c",bg:"#fef2f2",border:"#fecaca"};
     if (a==="sign_in"||a==="sign_out") return {color:"#475569",bg:"#f8fafc",border:"#e2e8f0"};
     return {color:"#475569",bg:"#fff",border:"#e2e8f0"};
   };
@@ -843,9 +920,10 @@ function ActivityLogModal({onClose, inline=false}) {
   return (
     <ALWrapper>
       <div style={{display:"flex",flexDirection:"column",gap:10,minHeight:0,flex:1}}>
-        <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0}}>
-          <button onClick={()=>setFilter("sync")} style={{padding:"4px 10px",borderRadius:14,border:`1.5px solid ${filter==="sync"?"#0f172a":"#e2e8f0"}`,background:filter==="sync"?"#0f172a":"#fff",color:filter==="sync"?"#fff":"#475569",fontSize:12,fontWeight:600,fontFamily:"inherit",cursor:"pointer"}}>Sync & GTEC</button>
-          <button onClick={()=>setFilter("all")} style={{padding:"4px 10px",borderRadius:14,border:`1.5px solid ${filter==="all"?"#0f172a":"#e2e8f0"}`,background:filter==="all"?"#0f172a":"#fff",color:filter==="all"?"#fff":"#475569",fontSize:12,fontWeight:600,fontFamily:"inherit",cursor:"pointer"}}>All</button>
+        <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0,flexWrap:"wrap"}}>
+          {[["all","All"],["sync","Sync & GTEC"],["admin","Admin activity"],["booker","Booker activity"]].map(([val,label])=>(
+            <button key={val} onClick={()=>setFilter(val)} style={{padding:"4px 10px",borderRadius:14,border:`1.5px solid ${filter===val?"#0f172a":"#e2e8f0"}`,background:filter===val?"#0f172a":"#fff",color:filter===val?"#fff":"#475569",fontSize:12,fontWeight:600,fontFamily:"inherit",cursor:"pointer"}}>{label}</button>
+          ))}
           <span style={{marginLeft:"auto",fontSize:11,color:"#94a3b8"}}>{rows===null?"Loading…":`${filtered.length} of ${collapsed.length} entries (logins collapsed to most-recent per user)`}</span>
         </div>
         {error&&<div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:6,padding:"6px 10px",fontSize:12,color:"#b91c1c"}}>⚠ {error} — has <code>supabase-migration-activity-log.sql</code> been run?</div>}
@@ -855,20 +933,31 @@ function ActivityLogModal({onClose, inline=false}) {
             <thead style={{position:"sticky",top:0,background:"#f8fafc",zIndex:1}}>
               <tr>
                 <th style={{textAlign:"left",padding:"7px 10px",fontWeight:700,color:"#475569",borderBottom:"1px solid #e2e8f0"}}>When</th>
+                <th style={{textAlign:"left",padding:"7px 10px",fontWeight:700,color:"#475569",borderBottom:"1px solid #e2e8f0"}}>Who</th>
                 <th style={{textAlign:"left",padding:"7px 10px",fontWeight:700,color:"#475569",borderBottom:"1px solid #e2e8f0"}}>Action</th>
                 <th style={{textAlign:"left",padding:"7px 10px",fontWeight:700,color:"#475569",borderBottom:"1px solid #e2e8f0"}}>Detail</th>
               </tr>
             </thead>
             <tbody>
               {filtered.length===0&&rows!==null
-                ? <tr><td colSpan={3} style={{padding:24,textAlign:"center",color:"#94a3b8",fontSize:13}}>No activity matches this filter.</td></tr>
+                ? <tr><td colSpan={4} style={{padding:24,textAlign:"center",color:"#94a3b8",fontSize:13}}>No activity matches this filter.</td></tr>
                 : filtered.map(r=>{
                     const st = actionStyle(r.action);
+                    const actor = activityActor(r);
+                    const isAdminActor = actor==="admin";
                     return (
                       <tr key={r.id} style={{borderBottom:"1px solid #f1f5f9"}}>
                         <td style={{padding:"6px 10px",color:"#64748b",whiteSpace:"nowrap",fontSize:11}}>{new Date(r.created_at).toLocaleString("en-NZ",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})}</td>
-                        <td style={{padding:"6px 10px",whiteSpace:"nowrap"}}><span style={{fontSize:11,fontWeight:700,padding:"1px 7px",borderRadius:10,background:st.bg,color:st.color,border:`1px solid ${st.border}`}}>{r.action}</span></td>
-                        <td style={{padding:"6px 10px",color:"#475569",fontFamily:"ui-monospace,monospace",fontSize:11,wordBreak:"break-word"}}>{r.detail?JSON.stringify(r.detail):""}</td>
+                        <td style={{padding:"6px 10px",fontSize:11,whiteSpace:"nowrap"}}>
+                          <div style={{display:"flex",flexDirection:"column",gap:2}}>
+                            <span style={{display:"inline-flex",alignItems:"center",gap:4}}>
+                              <span style={{fontSize:9,fontWeight:700,padding:"0 5px",borderRadius:8,background:isAdminActor?"#eef2ff":"#f0fdf4",color:isAdminActor?"#4338ca":"#15803d",border:`1px solid ${isAdminActor?"#c7d2fe":"#bbf7d0"}`}}>{isAdminActor?"Admin":"Booker"}</span>
+                            </span>
+                            <span style={{color:"#64748b",maxWidth:160,overflow:"hidden",textOverflow:"ellipsis"}} title={r.user_email||""}>{r.user_email||"—"}</span>
+                          </div>
+                        </td>
+                        <td style={{padding:"6px 10px",whiteSpace:"nowrap"}}><span style={{fontSize:11,fontWeight:700,padding:"1px 7px",borderRadius:10,background:st.bg,color:st.color,border:`1px solid ${st.border}`}}>{ACTIVITY_LABELS[r.action]||r.action}</span></td>
+                        <td style={{padding:"6px 10px",color:"#475569",fontSize:11,wordBreak:"break-word"}}>{describeActivity(r)}</td>
                       </tr>
                     );
                   })
@@ -7780,13 +7869,13 @@ export default function App() {
       const s = data.session;
       setSession(s);
       _accessToken = s?.access_token || null;
-      _currentUser = s?.user ? { id: s.user.id, email: s.user.email } : null;
+      _currentUser = s?.user ? { id: s.user.id, email: s.user.email, role: s.user.app_metadata?.role } : null;
     });
     const { data: sub } = supabase.auth.onAuthStateChange((evt, s) => {
       if (evt === "SIGNED_OUT") logActivity("sign_out", {}); // log before clearing _currentUser
       setSession(s);
       _accessToken = s?.access_token || null;
-      _currentUser = s?.user ? { id: s.user.id, email: s.user.email } : null;
+      _currentUser = s?.user ? { id: s.user.id, email: s.user.email, role: s.user.app_metadata?.role } : null;
       if (evt === "SIGNED_IN") logActivity("sign_in", { email: s?.user?.email });
     });
     return () => sub.subscription.unsubscribe();
@@ -8181,7 +8270,12 @@ export default function App() {
       });
     }
     setShowForm(false);setViewing(null);
-    logActivity(isNew?"booking_create":"booking_edit", { count: draftsArr.length, ids: draftsArr.map(d=>d.id) });
+    logActivity(isNew?"booking_create":"booking_edit", {
+      count: draftsArr.length,
+      ids: draftsArr.map(d=>d.id),
+      booker: bookerEmail || draftsArr[0]?.email,
+      items: draftsArr.slice(0,8).map(d=>({ date:d.date, facility_id:d.facility_id, start_hour:d.start_hour, duration:d.duration })),
+    });
     showToast(isNew?`${draftsArr.length} booking${draftsArr.length>1?"s":""} submitted!`:"Booking updated!");
 
     // Send confirmation email (skipped when caller handles its own sending, e.g. handleCartSubmit)
@@ -8513,6 +8607,12 @@ export default function App() {
       ));
     }
 
+    logActivity("booking_delete", {
+      count: deleteQueue.length,
+      ids,
+      booker: deleteQueue[0]?.email,
+      items: deleteQueue.slice(0,8).map(b=>({ date:b.date, facility_id:b.facility_id, start_hour:b.start_hour, duration:b.duration })),
+    });
     showToast(`${ids.length} booking${ids.length>1?"s":""} removed.`);
     setDeleteQueue([]);
     setShowDeleteCart(false);
