@@ -159,7 +159,7 @@ rewriting `system_notes`.
 
 | Marker | Owner | Written when | Payload |
 | --- | --- | --- | --- |
-| `[CPSA <date>] Ref <ref> · <url>` | extension | CPSA confirms a booking | confirmation ref + link |
+| `[CPSA <date>] Ref <ref> · <url>` | extension | CPSA confirms a booking | confirmation ref + link. **`<date>` MUST be ISO `YYYY-MM-DD`** — do not write locale/US `m/d/yyyy`, which is ambiguous. The app reformats this date for display and assumes US order only as a fallback for legacy markers. |
 | `[CPSA-MISMATCH]` | extension | Sync finds CPSA values differ from our record | pipe-separated reason strings, e.g. `Time: 6p → 7p \| Dur: 2h → 3h \| Field: A → B` |
 | `[BILLED] facility\|start\|duration` | app | Invoice/PO export with "mark invoiced" | snapshot of billed values; used to compute drift for credit/invoice adjustments |
 | `[CPSA-ORIG] facility\|start\|duration` | app | Admin chooses **Amended** to accept CPSA values | snapshot of pre-amendment booking so the operation is reversible |

@@ -192,6 +192,19 @@ function fmtDateShort(s) {
   const d=new Date(s+"T00:00:00"); return `${d.getDate()} ${d.toLocaleDateString("en-NZ",{month:"short"})}`;
 }
 function fmtDate(s) { return new Date(s+"T00:00:00").toLocaleDateString("en-NZ",{weekday:"short",day:"numeric",month:"short",year:"numeric"}); }
+// Normalise a free-text date (e.g. an extension-written GTEC submission marker that
+// may be in ambiguous US m/d/yyyy form) to the app's unambiguous "5 Jun 2026" style.
+// ISO yyyy-mm-dd is reformatted directly; numeric slash/dash dates are parsed (US
+// interpretation, matching the extension's locale) and reformatted; anything we
+// can't parse is returned untouched so we never show a misleading date.
+function fmtRefDate(raw) {
+  if (!raw) return raw;
+  const s = String(raw).trim();
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return new Date(`${iso[1]}-${iso[2]}-${iso[3]}T00:00:00`).toLocaleDateString("en-NZ",{day:"numeric",month:"short",year:"numeric"});
+  const d = new Date(s); // handles "6/5/2026" as US m/d; dd/mm with day>12 → Invalid
+  return isNaN(d.getTime()) ? s : d.toLocaleDateString("en-NZ",{day:"numeric",month:"short",year:"numeric"});
+}
 // Format a CPSA-RES "logged at" stamp — a full ISO datetime (new) or a legacy date-only key.
 function fmtLoggedAt(s) {
   if (!s) return "";
@@ -680,7 +693,7 @@ function buildInformCpsaEmailHtml({ vendorName, booking, refs = [], submissionId
     ? reasons.map(r => { const p = splitReason(r); return "<tr><td style='padding:4px 8px;font-weight:600;color:#0f172a'>" + p.label + "</td><td style='padding:4px 8px;color:#15803d;font-weight:700'>AMUA: " + (p.old || "—") + "</td><td style='padding:4px 8px;color:#b45309'>GTEC now: " + (p.next || "—") + "</td></tr>"; }).join("")
     : "<tr><td colspan='3' style='padding:4px 8px;color:#64748b'>See booking details above.</td></tr>";
   const linkRows = refs.length
-    ? refs.map(r => "<div style='margin:4px 0'><a href='" + r.url + "' style='color:#0369a1;font-weight:600'>" + (r.ref || "View on Sporty") + " ↗</a> <span style='color:#94a3b8;font-size:12px'>" + (r.date || "") + "</span></div>").join("")
+    ? refs.map(r => "<div style='margin:4px 0'><a href='" + r.url + "' style='color:#0369a1;font-weight:600'>" + (r.ref || "View on Sporty") + " ↗</a> <span style='color:#94a3b8;font-size:12px'>" + fmtRefDate(r.date || "") + "</span></div>").join("")
     : "<div style='color:#64748b;font-size:13px'>No GTEC submission link is on file for this booking.</div>";
   return "<div style='font-family:sans-serif;max-width:640px'>"
     + "<h2 style='color:#0369a1'>GTEC Booking Discrepancy — Correction Requested</h2>"
@@ -2255,7 +2268,7 @@ function BookingDetail({booking,onEdit,onClose,onCancel,isAdmin,onStatusChange,l
               <div style={{fontSize:11,fontWeight:700,color:"#0369a1",textTransform:"uppercase",letterSpacing:"0.05em"}}>GTEC Submission</div>
               <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
                 <span style={{fontSize:12,background:"#0891b2",color:"#fff",borderRadius:6,padding:"2px 8px",fontWeight:700}}>{c.ref}</span>
-                <span style={{fontSize:12,color:"#64748b"}}>{c.date}</span>
+                <span style={{fontSize:12,color:"#64748b"}}>{fmtRefDate(c.date)}</span>
                 <a href={c.url} target="_blank" rel="noopener noreferrer"
                   style={{fontSize:12,background:"#0ea5e9",color:"#fff",borderRadius:6,padding:"3px 10px",textDecoration:"none",fontWeight:600,marginLeft:"auto"}}>
                   View / Edit on Sporty ↗
@@ -4244,6 +4257,9 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
     const primary = (emailAliases[em.toLowerCase()] || em).toLowerCase();
     return (aliasNames||{})[primary] || primary.split("@")[0];
   }
+  // Canonical primary email — folds linked secondary bookers onto their primary so
+  // the summary groups them as one booker (matches the rest of the app).
+  const canonEmail = em => (emailAliases[(em||"").toLowerCase()] || (em||"").toLowerCase());
 
   // Categorize a booking as "day" or "evening" by which side of 5:30 pm has
   // the larger portion. Evening wins on ties.
@@ -4268,8 +4284,8 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
   // Per-email aggregation (over filtered active bookings)
   const byEmail = {};
   active.forEach(b => {
-    const key = b.email.toLowerCase();
-    if (!byEmail[key]) byEmail[key] = { email:b.email, name:b.name, daytime:0, evening:0, total:0, bookings:0, dayBkgs:0, eveBkgs:0, cost:0, dayCost:0, eveCost:0 };
+    const key = canonEmail(b.email);
+    if (!byEmail[key]) byEmail[key] = { email:key, name:b.name, daytime:0, evening:0, total:0, bookings:0, dayBkgs:0, eveBkgs:0, cost:0, dayCost:0, eveCost:0 };
     const rec = byEmail[key];
     const { day, evening } = splitHours(b);
     const rates = bRates(b);
@@ -4312,7 +4328,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
   // Bookings per booker, sorted by date
   const bkgsByEmail = {};
   active.forEach(b => {
-    const k = b.email.toLowerCase();
+    const k = canonEmail(b.email);
     if (!bkgsByEmail[k]) bkgsByEmail[k] = [];
     bkgsByEmail[k].push(b);
   });
