@@ -5991,9 +5991,9 @@ function SyncedItemRow({ ab, bookings }) {
         {!hasIssue && badge("✓ clean","#dcfce7","#166534","#86efac")}
       </summary>
       <div style={{margin:"5px 0 7px 16px",display:"flex",flexDirection:"column",gap:5}}>
-        {sameAdmin.length>0 && block("#fef2f2","#fca5a5",<>
-          <div style={{fontWeight:700,color:"#b91c1c"}}>🚫 Same facility — other field block{sameAdmin.length!==1?"s":""}</div>
-          {sameAdmin.map(b=><div key={b.id} style={{color:"#991b1b"}}>{span(b)} · {b.purpose||"Field block"}</div>)}
+        {sameAdmin.length>0 && block("#eff6ff","#bfdbfe",<>
+          <div style={{fontWeight:700,color:"#1d4ed8"}}>❗ Same facility — other field block{sameAdmin.length!==1?"s":""}</div>
+          {sameAdmin.map(b=><div key={b.id} style={{color:"#1e40af"}}>{span(b)} · {b.purpose||"Field block"}</div>)}
         </>)}
         {sameUser.length>0 && block("#fff7ed","#fed7aa",<>
           <div style={{fontWeight:700,color:"#c2410c"}}>⚡ Clashes — AMUA bookings on this facility at the same time</div>
@@ -6027,7 +6027,13 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
   const [showActivityPanel, setShowActivityPanel] = useState(false);
   // Which sync-result months are expanded in the grouped dropdown (monthKey set).
   const [expandedSyncMonths, setExpandedSyncMonths] = useState(()=>new Set());
-  const toggleSyncMonth = mk => setExpandedSyncMonths(prev=>{ const s=new Set(prev); s.has(mk)?s.delete(mk):s.add(mk); return s; });
+  // Months the admin has expanded this session. Once a month's results are viewed,
+  // they stop reading as "new" (drop the new badges + the top "new issues" rollup).
+  const [seenSyncMonths, setSeenSyncMonths] = useState(()=>new Set());
+  const toggleSyncMonth = mk => {
+    setExpandedSyncMonths(prev=>{ const s=new Set(prev); s.has(mk)?s.delete(mk):s.add(mk); return s; });
+    setSeenSyncMonths(prev=> prev.has(mk) ? prev : new Set(prev).add(mk));
+  };
   const adminAlias = em => {
     if (!em) return em;
     const primary = (emailAliases[em.toLowerCase()] || em).toLowerCase();
@@ -6306,7 +6312,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
           {(()=>{
             // Emphasise only clashes/mismatches surfaced THIS session — anything from a
             // previous session reads as old/seen once the page is reloaded.
-            const isNewRun = r => !!r.syncedAt && r.syncedAt >= _sessionStartIso;
+            const isNewRun = r => !!r.syncedAt && r.syncedAt >= _sessionStartIso && !seenSyncMonths.has(r.monthKey);
             const totClash = syncResults.reduce((s,r)=>s+(isNewRun(r)?(r.clashes||0):0),0);
             const totMis = syncResults.reduce((s,r)=>s+(isNewRun(r)?(r.cpsaReviewNeeded||0):0),0);
             if(totClash+totMis===0) return null;
@@ -6330,7 +6336,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
             const changeCount = (r.added||0)+(r.cpsaConfirmed||0)+(r.cpsaReviewNeeded||0)+(r.removed||0)+(r.clashes||0)+(r.clashesResolved||0);
             const hasChanges = changeCount > 0;
             // Only emphasise (tint + "new" badges) when the run happened this session.
-            const isNew = !!r.syncedAt && r.syncedAt >= _sessionStartIso;
+            const isNew = !!r.syncedAt && r.syncedAt >= _sessionStartIso && !seenSyncMonths.has(r.monthKey);
             const attention = !r.error && isNew && ((r.clashes||0)>0 || (r.cpsaReviewNeeded||0)>0);
             const open = expandedSyncMonths.has(r.monthKey);
             const fmt = iso => iso ? new Date(iso).toLocaleString("en-NZ",{day:"numeric",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"}) : "—";
@@ -8894,11 +8900,16 @@ export default function App() {
                         ⚠️ {listShowClashes?"All":"Clashes only"} ({allClashes.length})
                       </button>
                     )}
-                    <button onClick={()=>setShowScheduleModal(true)}
-                      style={S.btn({background:"#f0f9ff",color:"#0369a1",border:"1.5px solid #bae6fd",fontSize:12,fontWeight:700})}>
-                      📅 Summarise
+                    <button onClick={()=>setShowScheduleModal(v=>!v)}
+                      style={S.btn({background:showScheduleModal?"#0369a1":"#f0f9ff",color:showScheduleModal?"#fff":"#0369a1",border:"1.5px solid #bae6fd",fontSize:12,fontWeight:700})}>
+                      📅 {showScheduleModal?"Hide summary":"Summarise"}
                     </button>
                   </div>
+                  {showScheduleModal && (
+                    <div style={{marginBottom:10}}>
+                      <ScheduleSummaryModal bookings={bookings} isAdmin={isAdmin} loggedInEmail={loggedInEmail} onBulkApply={handleBulkApply} onBulkStatusChange={handleBulkStatusChange} aliasNames={aliasNames} emailAliases={emailAliases} inline onClose={()=>setShowScheduleModal(false)}/>
+                    </div>
+                  )}
                   {visible.length===0
                     ? <div style={{textAlign:"center",padding:"40px 0",color:"#94a3b8",fontSize:14}}>No bookings match the current filters.</div>
                     : <div style={{overflowX:"auto",borderRadius:10,border:"1px solid #f1f5f9"}}>
@@ -9075,7 +9086,6 @@ export default function App() {
       </div>
 
       {/* Modals */}
-      {showScheduleModal && <ScheduleSummaryModal bookings={bookings} isAdmin={isAdmin} loggedInEmail={loggedInEmail} onBulkApply={handleBulkApply} onBulkStatusChange={handleBulkStatusChange} aliasNames={aliasNames} emailAliases={emailAliases} onClose={()=>setShowScheduleModal(false)}/>}
       {showAdminScheduleModal && <ScheduleSummaryModal bookings={bookings} isAdmin={true} loggedInEmail={loggedInEmail} onBulkApply={handleBulkApply} onBulkStatusChange={handleBulkStatusChange} aliasNames={aliasNames} emailAliases={emailAliases} onClose={()=>setShowAdminScheduleModal(false)}/>}
       {showExtensionModal&&(
         <Modal title="🧩 Install AMUA Booking Extension" onClose={()=>setShowExtensionModal(false)} width={560}>
