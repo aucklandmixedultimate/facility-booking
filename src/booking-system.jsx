@@ -8894,11 +8894,16 @@ export default function App() {
                         ⚠️ {listShowClashes?"All":"Clashes only"} ({allClashes.length})
                       </button>
                     )}
-                    <button onClick={()=>setShowScheduleModal(true)}
-                      style={S.btn({background:"#f0f9ff",color:"#0369a1",border:"1.5px solid #bae6fd",fontSize:12,fontWeight:700})}>
-                      📅 Summarise
+                    <button onClick={()=>setShowScheduleModal(v=>!v)}
+                      style={S.btn({background:showScheduleModal?"#0369a1":"#f0f9ff",color:showScheduleModal?"#fff":"#0369a1",border:"1.5px solid #bae6fd",fontSize:12,fontWeight:700})}>
+                      📅 {showScheduleModal?"Hide summary":"Summarise"}
                     </button>
                   </div>
+                  {showScheduleModal && (
+                    <div style={{marginBottom:10}}>
+                      <ScheduleSummaryModal bookings={bookings} isAdmin={isAdmin} loggedInEmail={loggedInEmail} onBulkApply={handleBulkApply} onBulkStatusChange={handleBulkStatusChange} aliasNames={aliasNames} emailAliases={emailAliases} inline onClose={()=>setShowScheduleModal(false)}/>
+                    </div>
+                  )}
                   {visible.length===0
                     ? <div style={{textAlign:"center",padding:"40px 0",color:"#94a3b8",fontSize:14}}>No bookings match the current filters.</div>
                     : <div style={{overflowX:"auto",borderRadius:10,border:"1px solid #f1f5f9"}}>
@@ -9075,7 +9080,6 @@ export default function App() {
       </div>
 
       {/* Modals */}
-      {showScheduleModal && <ScheduleSummaryModal bookings={bookings} isAdmin={isAdmin} loggedInEmail={loggedInEmail} onBulkApply={handleBulkApply} onBulkStatusChange={handleBulkStatusChange} aliasNames={aliasNames} emailAliases={emailAliases} onClose={()=>setShowScheduleModal(false)}/>}
       {showAdminScheduleModal && <ScheduleSummaryModal bookings={bookings} isAdmin={true} loggedInEmail={loggedInEmail} onBulkApply={handleBulkApply} onBulkStatusChange={handleBulkStatusChange} aliasNames={aliasNames} emailAliases={emailAliases} onClose={()=>setShowAdminScheduleModal(false)}/>}
       {showExtensionModal&&(
         <Modal title="🧩 Install AMUA Booking Extension" onClose={()=>setShowExtensionModal(false)} width={560}>
