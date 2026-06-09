@@ -7914,7 +7914,11 @@ export default function App() {
         // Check if this CPSA event matches an existing approved user booking
         const match = findMatchingUserBooking(currentBookings, ev, facilityIds);
         if (match) {
-          const targetStatus = match.exact ? "cpsa_confirmed" : "cpsa_review_needed";
+          // A booking the admin has explicitly marked "✓ Confirmed by GTEC" stays confirmed:
+          // its resolution is sticky, so a later non-exact match must never reactivate the
+          // mismatch (drop it back to cpsa_review_needed) on it.
+          const confirmedByGtec = parseCpsaResolution(match.booking.system_notes)?.resolution === "confirmed";
+          const targetStatus = (match.exact || confirmedByGtec) ? "cpsa_confirmed" : "cpsa_review_needed";
           matchedUserIds.add(match.booking.id);
 
           // Remove any pre-existing admin bookings at this slot (from prior syncs)
