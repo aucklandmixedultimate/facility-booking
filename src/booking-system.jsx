@@ -6274,7 +6274,7 @@ function SyncedItemRow({ ab, bookings }) {
 }
 
 // ─── Admin Panel with action queue, bulk approve, facility rates ──────────────
-function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,clashes=[],deleteIds=new Set(),facilityRates={},onClearOldUnapproved,onBulkApply,onSaveMismatch,onInformCpsa,onQueueNotifications,onMarkAdjustmentSettled,loggedInEmail,syncResults=[],onClearSyncResults,showSyncResults=false,onToggleSyncResults,bookerFilter=new Set(),onToggleBooker,onSetBookerFilter,aliasNames={},emailAliases={},pricingConditions=[],onAddPricingCondition,onUpdatePricingCondition,onRemovePricingCondition}) {
+function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,clashes=[],deleteIds=new Set(),facilityRates={},onClearOldUnapproved,onBulkApply,onSaveMismatch,onInformCpsa,onQueueNotifications,onMarkAdjustmentSettled,onLinkClash,loggedInEmail,syncResults=[],onClearSyncResults,showSyncResults=false,onToggleSyncResults,bookerFilter=new Set(),onToggleBooker,onSetBookerFilter,aliasNames={},emailAliases={},pricingConditions=[],onAddPricingCondition,onUpdatePricingCondition,onRemovePricingCondition}) {
   const [showSchedulePanel, setShowSchedulePanel] = useState(false);
   const [showActivityPanel, setShowActivityPanel] = useState(false);
   // Which sync-result months are expanded in the grouped dropdown (monthKey set).
@@ -6841,18 +6841,34 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                       <div key={i} style={{background:"#fff",border:`1px solid ${isRecurring?"#f43f5e44":"#fecdd3"}`,borderRadius:8,padding:"8px 12px",fontSize:12,color:"#0f172a",display:"flex",gap:8,alignItems:"flex-start",flexWrap:"wrap"}}>
                         {isRecurring&&<span style={{fontWeight:700,color:"#f43f5e",fontSize:11,background:"#fff1f2",borderRadius:4,padding:"1px 6px",whiteSpace:"nowrap",marginTop:2}}>×{g.instances.length} recurring · {g.dn}</span>}
                         <ClashPair admin={g.admin} user={g.user}/>
-                        {isRecurring&&(
-                          <button onClick={()=>setClashPatternModal({email:g.user.email,name:g.user.name||g.user.email,pk:`${g.dn}_${g.admin.start_hour}`,bkgs:g.userBkgs,canEdit:true})}
-                            style={S.btn({background:"#f43f5e",color:"#fff",fontSize:11,padding:"3px 8px"})}>
-                            Resolve recurring
-                          </button>
-                        )}
+                        <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+                          {onLinkClash&&(
+                            <button title={`Confirm this is the same booking — mark it GTEC-confirmed, remove the field block${isRecurring?` (all ${g.instances.length})`:""}, and teach the matcher this org`}
+                              onClick={()=>{ if(window.confirm(`Link ${g.instances.length} booking${g.instances.length!==1?"s":""} to GTEC event "${g.admin.purpose}"?\n\nThey'll be marked GTEC-confirmed and future syncs will auto-link this org.`)) onLinkClash(g.instances.map(c=>({admin:c.admin,user:c.user}))); }}
+                              style={S.btn({background:"#15803d",color:"#fff",fontSize:11,padding:"3px 8px",fontWeight:700})}>
+                              🔗 Link{isRecurring?` all ×${g.instances.length}`:""}
+                            </button>
+                          )}
+                          {isRecurring&&(
+                            <button onClick={()=>setClashPatternModal({email:g.user.email,name:g.user.name||g.user.email,pk:`${g.dn}_${g.admin.start_hour}`,bkgs:g.userBkgs,canEdit:true})}
+                              style={S.btn({background:"#f43f5e",color:"#fff",fontSize:11,padding:"3px 8px"})}>
+                              Resolve recurring
+                            </button>
+                          )}
+                        </div>
                       </div>
                     );
                   })
                 : filtered.map((c,i)=>(
                     <div key={i} style={{background:"#fff",border:"1px solid #fecdd3",borderRadius:8,padding:"8px 12px",fontSize:12,color:"#0f172a",display:"flex",gap:8,alignItems:"flex-start",flexWrap:"wrap"}}>
                       <ClashPair admin={c.admin} user={c.user}/>
+                      {onLinkClash&&(
+                        <button title="Confirm this is the same booking — mark it GTEC-confirmed, remove the field block, and teach the matcher this org"
+                          onClick={()=>{ if(window.confirm(`Link this booking to GTEC event "${c.admin.purpose}"?\n\nIt'll be marked GTEC-confirmed and future syncs will auto-link this org.`)) onLinkClash([{admin:c.admin,user:c.user}]); }}
+                          style={S.btn({background:"#15803d",color:"#fff",fontSize:11,padding:"3px 8px",fontWeight:700})}>
+                          🔗 Link to GTEC
+                        </button>
+                      )}
                     </div>
                   ))
               }
@@ -7726,20 +7742,95 @@ function nameSimilarity(a, b) {
   return inter / (sa.size + sb.size - inter);
 }
 
+// Activity/booking-type words that describe WHAT a slot is for, not WHO booked it.
+// Stripped before identity comparison so "Euphoria Training" reads as "Euphoria".
+const GTEC_ACTIVITY_WORDS = new Set(["training","train","trainings","trials","trial","game","games","practice","practise","session","sessions","scrim","scrimmage","scrimmages","match","matches","fixture","fixtures","league","tournament","tourney","hat","social","dev","development","clinic","camp","mixed","womens","mens","open"]);
+function stripActivityTokens(name) { return tokenize(name).filter(t => !GTEC_ACTIVITY_WORDS.has(t)); }
+
+// Bounded Levenshtein (early-exit beyond max) for typo tolerance on org tokens.
+function editDistance(a, b, max=2) {
+  if (a === b) return 0;
+  const la=a.length, lb=b.length;
+  if (Math.abs(la-lb) > max) return max+1;
+  let prev = Array.from({length: lb+1}, (_,i)=>i);
+  for (let i=1;i<=la;i++) {
+    const cur=[i]; let best=i;
+    for (let j=1;j<=lb;j++) {
+      const cost = a[i-1]===b[j-1]?0:1;
+      const v = Math.min(prev[j]+1, cur[j-1]+1, prev[j-1]+cost);
+      cur[j]=v; if (v<best) best=v;
+    }
+    if (best>max) return max+1;
+    prev=cur;
+  }
+  return prev[lb];
+}
+
+// The booker's email is embedded in the scraped EventDetails, e.g.
+//   "...scheduled by Liang-Shou Wei (aucklandeuphoria@gmail.com), and has been
+//    submitted on their behalf by the Auckland Mixed Ultimate Association."
+// This is the single most reliable matching key — exact identity, immune to the
+// name typos/abbreviations that appear in EventName ("Euhporia", "AUTUC", …).
+function extractEventDetailsEmail(details) {
+  const m = (details||"").match(/scheduled by[^(]*\(\s*([^)\s]+@[^)\s]+)\s*\)/i);
+  if (m) return m[1].trim().toLowerCase();
+  const any = (details||"").match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i);
+  return any ? any[0].toLowerCase() : "";
+}
+
+// 0..4 identity confidence that GTEC event `team` refers to booking `b`.
+// 4 = definitive (email from EventDetails, or a previously-taught manual link).
+function gtecIdentityScore(team, b, { detailEmail, gtecLinks, canon }) {
+  const bEmail = canon(b.email);
+  // 1. Email straight from EventDetails — definitive, beats every other signal.
+  if (detailEmail && canon(detailEmail) === bEmail) return 4;
+  const coreTokens = stripActivityTokens(team);
+  const coreNorm = coreTokens.join("");
+  // 2. A previously-taught manual link (org token → email) — definitive.
+  if (coreNorm && gtecLinks[coreNorm] && canon(gtecLinks[coreNorm]) === bEmail) return 4;
+  // 3. Org identity carried by the email prefix / name (activity words stripped).
+  const emailPrefix = normalizeId((b.email||"").split("@")[0]);
+  const nameNorm = normalizeId(b.name);
+  const purposeNorm = stripActivityTokens(b.purpose).join("");
+  if (coreNorm && (emailPrefix === coreNorm || nameNorm === coreNorm)) return 4;
+  if (coreNorm.length>=4 && emailPrefix && (emailPrefix.includes(coreNorm) || coreNorm.includes(emailPrefix))) return 3;
+  if (coreNorm.length>=4 && nameNorm && (nameNorm.includes(coreNorm) || coreNorm.includes(nameNorm))) return 3;
+  // 4. Fuzzy (typo) match of org tokens against any candidate identity token.
+  const candTokens = [...tokenize((b.email||"").split("@")[0]), ...tokenize(b.name), ...tokenize(b.purpose)];
+  for (const ct of coreTokens) {
+    if (ct.length < 4) continue;
+    const thr = ct.length>=7 ? 2 : 1;
+    for (const dt of candTokens) {
+      if (dt.length < 4) continue;
+      if (dt.includes(ct) || ct.includes(dt)) return 3;
+      if (editDistance(ct, dt, thr) <= thr) return 3;
+    }
+  }
+  // 5. Loose: name-similarity or purpose containment.
+  if (nameSimilarity(team, b.name) >= 0.5) return 2;
+  if (coreNorm && purposeNorm && (purposeNorm.includes(coreNorm) || coreNorm.includes(purposeNorm))) return 1;
+  return 0;
+}
+
+// Normalised org-token key used both to teach (manual link) and recall (gtecLinks).
+function gtecTeamKey(eventName) { return stripActivityTokens(extractCPSATeam(eventName)).join(""); }
+
 // Find a user booking that this CJR event likely represents.
 // Returns { booking, exact } where exact=true means tight match (auto-confirm),
-// exact=false means fuzzy match (flag for AMUA review).
-function findMatchingUserBooking(allBookings, ev, facilityIds) {
+// exact=false means fuzzy/dimension-drift match (flag for AMUA review).
+// gtecLinks: { orgTokenKey: email } taught by manual clash-linking.
+function findMatchingUserBooking(allBookings, ev, facilityIds, gtecLinks={}, emailAliases={}) {
   const date = parseCJRDate(ev.EventStartDate);
   if (!date) return null;
   const { start_hour, duration } = parseCJRDateTime(ev.EventDateTime);
   const team = extractCPSATeam(ev.EventName);
   const teamNorm = normalizeId(team);
-  if (!teamNorm) return null;
+  const detailEmail = extractEventDetailsEmail(ev.EventDetails);
+  if (!teamNorm && !detailEmail) return null;
+  const canon = e => ((emailAliases[(e||"").toLowerCase()] || e || "").toLowerCase());
 
   // Eligible bookings: same date, time-overlap, non-admin, in an approvable state.
-  // Facility is NOT required — any time overlap on the same date is considered a
-  // potential CPSA link (99% of bookings are via Auckland Mixed Ultimate).
+  // Facility is NOT required — any time overlap on the same date is a potential link.
   const candidates = allBookings.filter(b => {
     if (b.email === "admin") return false;
     if (!["approved","cpsa_confirmed","cpsa_review_needed","clash","pending_cpsa","queued_cpsa","pending_amua","amua_submit","pending"].includes(b.status) && !b.invoiced) return false;
@@ -7750,52 +7841,35 @@ function findMatchingUserBooking(allBookings, ev, facilityIds) {
   });
   if (!candidates.length) return null;
 
-  // Score each candidate: identity (4) + time-exact (2) + duration-exact (1) + facility unambiguous (1)
+  // Identity dominates (×10) over the time/duration/facility tie-breakers.
   const scored = candidates.map(b => {
-    const emailPrefix = normalizeId((b.email||"").split("@")[0]);
-    const nameNorm = normalizeId(b.name);
-    const purposeNorm = normalizeId(b.purpose);
-    let identityScore = 0;
-    if (emailPrefix === teamNorm || nameNorm === teamNorm) identityScore = 4;
-    else if (emailPrefix && (emailPrefix.includes(teamNorm) || teamNorm.includes(emailPrefix))) identityScore = 3;
-    else if (nameNorm && (nameNorm.includes(teamNorm) || teamNorm.includes(nameNorm))) identityScore = 2;
-    else if (nameSimilarity(team, b.name) >= 0.5) identityScore = 2;
-    else if (purposeNorm && (purposeNorm.includes(teamNorm) || teamNorm.includes(purposeNorm))) identityScore = 1;
+    const identityScore = gtecIdentityScore(team, b, { detailEmail, gtecLinks, canon });
     const timeExact = b.start_hour === start_hour ? 2 : 0;
     const durExact  = b.duration === duration ? 1 : 0;
-    const facExact  = facilityIds.length === 1 ? 1 : 0;
-    return { booking: b, score: identityScore + timeExact + durExact + facExact, identityScore };
+    const facExact  = facilityIds.includes(b.facility_id) ? 1 : 0;
+    return { booking: b, score: identityScore*10 + timeExact + durExact + facExact, identityScore };
   }).sort((a,b)=>b.score-a.score);
 
   const best = scored[0];
   const teamIsOurs = resemblesAMUA(team);
-  // A CPSA event that is neither our own org (AMUA) nor a plausible identity match
-  // to the booking is a *different tenant* renting the same field at an overlapping
-  // time — do NOT link it (prevents e.g. "Auckland Girls Grammar" matching an AMUA
-  // member's booking purely on time overlap).
+  const emailLinked = best.identityScore >= 4 && !!detailEmail;
+  // A CPSA event that is neither our own org (AMUA), nor email-linked, nor a plausible
+  // identity match is a *different tenant* sharing the field — do NOT link it.
   if (!teamIsOurs && best.identityScore < 2) return null;
 
-  // Capture specific inconsistencies between the CPSA event and the matched booking,
-  // succinctly (old → new = booked → CPSA), so the admin sees exactly what differs.
+  // Capture specific inconsistencies (booked → CPSA) so the admin sees what differs.
   const b = best.booking;
   const reasons = [];
-  if (b.start_hour !== start_hour)
-    reasons.push(`Time: ${fmtTimeShort(b.start_hour)} → ${fmtTimeShort(start_hour)}`);
-  if (b.duration !== duration)
-    reasons.push(`Dur: ${b.duration}h → ${duration}h`);
-  if (!facilityIds.includes(b.facility_id))
-    reasons.push(`Field: ${facShort(b.facility_id)} → ${facilityIds.map(facShort).join("/")}`);
-  // Only flag the name when the CPSA event is NOT our own org and the identity match
-  // is loose. An AMUA-named event under an individual member is not a name mismatch.
-  if (!teamIsOurs && best.identityScore < 4)
-    reasons.push(`Name: ${b.name} → ${team}`);
+  if (b.start_hour !== start_hour) reasons.push(`Time: ${fmtTimeShort(b.start_hour)} → ${fmtTimeShort(start_hour)}`);
+  if (b.duration !== duration)     reasons.push(`Dur: ${b.duration}h → ${duration}h`);
+  if (!facilityIds.includes(b.facility_id)) reasons.push(`Field: ${facShort(b.facility_id)} → ${facilityIds.map(facShort).join("/")}`);
+  // Name is only an inconsistency for loosely-identified events — not when the email
+  // (or a strong org link) already confirms identity, even if the booking is under an
+  // individual member's name.
+  if (!teamIsOurs && !emailLinked && best.identityScore < 4) reasons.push(`Name: ${b.name} → ${team}`);
 
-  // Exact = CPSA agrees with the booking on every dimension (no recorded drift) AND
-  // the identity link is strong enough to trust. Any inconsistency → review needed,
-  // so the specific reasons surface in the admin/booking views.
-  const identityOk = teamIsOurs || best.identityScore >= 3;
+  const identityOk = teamIsOurs || emailLinked || best.identityScore >= 3;
   const exact = reasons.length === 0 && identityOk;
-
   return { booking: b, exact, reasons };
 }
 
@@ -7917,6 +7991,13 @@ export default function App() {
     try{ return JSON.parse(localStorage.getItem("fb_email_aliases")||"{}"); }catch{ return {}; }
   });
   useEffect(()=>{ try{ localStorage.setItem("fb_email_aliases", JSON.stringify(emailAliases)); }catch{ /* ignore */ } _emailAliases = emailAliases; }, [emailAliases]);
+  // gtecLinks: { orgTokenKey: email } — taught by manually linking a clash to GTEC,
+  // so future syncs auto-link the same org's events (acronyms etc. that can't be
+  // derived from the email alone).
+  const [gtecLinks, setGtecLinks] = useState(()=>{
+    try{ return JSON.parse(localStorage.getItem("fb_gtec_links")||"{}"); }catch{ return {}; }
+  });
+  useEffect(()=>{ try{ localStorage.setItem("fb_gtec_links", JSON.stringify(gtecLinks)); }catch{ /* ignore */ } }, [gtecLinks]);
   // aliasNames: { primaryEmail: displayName } — overrides the default email-prefix label.
   const [aliasNames, setAliasNames] = useState(()=>{
     try{ return JSON.parse(localStorage.getItem("fb_alias_names")||"{}"); }catch{ return {}; }
@@ -8157,7 +8238,7 @@ export default function App() {
         const facilityIds = mapCJRFacility(purpose);
 
         // Check if this CPSA event matches an existing approved user booking
-        const match = findMatchingUserBooking(currentBookings, ev, facilityIds);
+        const match = findMatchingUserBooking(currentBookings, ev, facilityIds, gtecLinks, emailAliases);
         if (match) {
           // A booking the admin has explicitly marked "✓ Confirmed by GTEC" stays confirmed:
           // its resolution is sticky, so a later non-exact match must never reactivate the
@@ -8180,10 +8261,12 @@ export default function App() {
           // everything known from the sync — not just the differing fields.
           const gtecSnap = { name: ev.EventName || "", date, start_hour, duration, facilityIds };
           // Record/clear mismatch reasons + GTEC snapshot in system_notes (separate
-          // from user notes). stripMismatchNote clears both on confirm.
+          // from user notes). stripMismatchNote clears both on confirm; matching a
+          // previously-clashing booking also clears its stale clash marker.
+          const baseNotes = stripClashPrevStatus(match.booking.system_notes);
           const newSysNotes = targetStatus === "cpsa_review_needed"
-            ? setGtecSnapshot(setMismatchNote(match.booking.system_notes, match.reasons), gtecSnap)
-            : stripMismatchNote(match.booking.system_notes);
+            ? setGtecSnapshot(setMismatchNote(baseNotes, match.reasons), gtecSnap)
+            : stripMismatchNote(baseNotes);
           const statusChanged = match.booking.status !== targetStatus;
           const sysNotesChanged = (match.booking.system_notes || "") !== newSysNotes;
           if (statusChanged || sysNotesChanged) {
@@ -8546,6 +8629,44 @@ export default function App() {
     await persistSetting("alias_names", aliasNames);
     await persistSetting("alias_colors", aliasColors);
     showToast("Synced with database.");
+  }
+
+  // Manually link clash pair(s) to GTEC: confirm the user booking(s) against the
+  // overlapping GTEC event, remove the admin field-block, and (by default) teach
+  // the matcher the org-token→email mapping so future syncs auto-link this org.
+  async function handleLinkClashToGtec(pairs, { remember = true } = {}) {
+    const list = Array.isArray(pairs) ? pairs : [pairs];
+    if (!list.length) return;
+    const adminIds = new Set();
+    const taught = {};
+    for (const { admin, user } of list) {
+      const live = bookings.find(b => b.id === user.id) || user;
+      const sameFac = admin.facility_id === user.facility_id;
+      const reasons = [];
+      if (admin.start_hour !== user.start_hour) reasons.push(`Time: ${fmtTimeShort(user.start_hour)} → ${fmtTimeShort(admin.start_hour)}`);
+      if (admin.duration !== user.duration)     reasons.push(`Dur: ${user.duration}h → ${admin.duration}h`);
+      if (!sameFac)                             reasons.push(`Field: ${facShort(user.facility_id)} → ${facShort(admin.facility_id)}`);
+      const targetStatus = reasons.length ? "cpsa_review_needed" : "cpsa_confirmed";
+      const gtecSnap = { name: admin.purpose||"", date: admin.date, start_hour: admin.start_hour, duration: admin.duration, facilityIds: [admin.facility_id] };
+      let sys = stripClashPrevStatus(live.system_notes || "");
+      sys = targetStatus === "cpsa_review_needed" ? setGtecSnapshot(setMismatchNote(sys, reasons), gtecSnap) : stripMismatchNote(sys);
+      if (configured) {
+        await sb.update("bookings", live.id, { status: targetStatus, system_notes: sys, updated_at: new Date().toISOString() });
+      } else {
+        setBookings(prev => prev.map(b => b.id === live.id ? { ...b, status: targetStatus, system_notes: sys } : b));
+      }
+      adminIds.add(admin.id);
+      const key = gtecTeamKey(admin.purpose);
+      if (remember && key && live.email) taught[key] = live.email.toLowerCase();
+      logActivity("clash_linked", { booking_id: live.id, gtec: admin.purpose, status: targetStatus });
+    }
+    for (const id of adminIds) {
+      if (configured) await sb.remove("bookings", id);
+      else setBookings(prev => prev.filter(b => b.id !== id));
+    }
+    if (remember && Object.keys(taught).length) setGtecLinks(prev => ({ ...prev, ...taught }));
+    if (configured) await loadBookings();
+    showToast(`Linked ${list.length} booking${list.length!==1?"s":""} to GTEC${remember?" — future syncs will auto-link this org":""}.`);
   }
 
   async function handleBulkApply({bkgs, bulkTime, bulkDur, bulkFac, cancelFrom}) {
@@ -9452,7 +9573,7 @@ export default function App() {
         {tab==="billing"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<BillingTab billingRecords={billingRecords} onUpdateRecord={handleUpdateBillingRecord} onDeleteRecord={id=>setBillingRecords(prev=>prev.filter(r=>r.id!==id))} onLoadToSummary={handleLoadBillingToSummary} isAdmin={isAdmin} loggedInEmail={loggedInEmail} emailAliases={emailAliases} aliasNames={aliasNames} profiles={profiles} driveEnabled={driveConfigured()} onDriveSync={handleDriveSync} onDriveAttach={handleDriveAttachGtec}/>}</div>}
         {tab==="about"&&<div style={{padding:"8px 0"}}><AboutTab/></div>}
         {tab==="admin"&&isAdmin&&<div style={S.card}>
-          {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onView={setViewing} onQueueDelete={queueForRemovalSilent} clashes={allClashes} deleteIds={new Set(deleteQueue.map(b=>b.id))} facilityRates={facilityRates} onUpdateFacilityRate={updateFacilityRate} onClearOldUnapproved={handleClearOldUnapproved} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onSyncDB={handleSyncDB} onBulkApply={handleBulkApply} onSaveMismatch={handleSaveMismatch} onInformCpsa={setInformCpsaFor} onQueueNotifications={queueNotifications} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} loggedInEmail={loggedInEmail} syncResults={syncResults} onClearSyncResults={()=>setSyncResults([])} showSyncResults={showSyncPanel} onToggleSyncResults={()=>setShowSyncPanel(v=>!v)} bookerFilter={listBookerFilter} onToggleBooker={toggleBooker} onSetBookerFilter={setListBookerFilter} aliasNames={aliasNames} emailAliases={emailAliases} pricingConditions={pricingConditions} onAddPricingCondition={addPricingCondition} onUpdatePricingCondition={updatePricingCondition} onRemovePricingCondition={removePricingCondition}/>}
+          {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onView={setViewing} onQueueDelete={queueForRemovalSilent} clashes={allClashes} deleteIds={new Set(deleteQueue.map(b=>b.id))} facilityRates={facilityRates} onUpdateFacilityRate={updateFacilityRate} onClearOldUnapproved={handleClearOldUnapproved} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onSyncDB={handleSyncDB} onBulkApply={handleBulkApply} onSaveMismatch={handleSaveMismatch} onInformCpsa={setInformCpsaFor} onQueueNotifications={queueNotifications} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} onLinkClash={handleLinkClashToGtec} loggedInEmail={loggedInEmail} syncResults={syncResults} onClearSyncResults={()=>setSyncResults([])} showSyncResults={showSyncPanel} onToggleSyncResults={()=>setShowSyncPanel(v=>!v)} bookerFilter={listBookerFilter} onToggleBooker={toggleBooker} onSetBookerFilter={setListBookerFilter} aliasNames={aliasNames} emailAliases={emailAliases} pricingConditions={pricingConditions} onAddPricingCondition={addPricingCondition} onUpdatePricingCondition={updatePricingCondition} onRemovePricingCondition={removePricingCondition}/>}
         </div>}
       </div>
 
