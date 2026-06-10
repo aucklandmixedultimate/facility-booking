@@ -1677,192 +1677,53 @@ function InlineDayPicker({ date, bookings, onPick, onConfirm, multi=false }) {
     </div>
   );
 }
-function BookingRow({ row, idx, onChange, onRemove, onPickSlots, isOnly, isAdmin, isEditing, allBookings }) {
+// One slot (facility/date/time/duration) within a grouped booking request. Shared
+// purpose / notes / repetition live on the parent form, so this row stays compact.
+function SlotRow({ slot, idx, onChange, onRemove, canRemove, allBookings }) {
   const isMobile = useMobile();
-  const [recurMode, setRecurMode] = useState(row.recur?.mode || "none");
-  const [recurWeeks, setRecurWeeks] = useState(row.recur?.weeks || 4);
-  const [recurUntil, setRecurUntil] = useState(row.recur?.until || "");
-  // Manual entry for facility/time/duration. Day-grid picker opens in its own popup.
-  const [showPicker, setShowPicker] = useState(false);
-
-  function upd(k,v) { onChange(idx, {...row, [k]:v}); }
-  function pickSlot(facility_id, start_hour, duration) {
-    onChange(idx, {...row, facility_id, start_hour, duration});
-    setShowPicker(false);
-  }
-  // Multi-pick: first slot fills this row, the rest become additional rows.
-  function confirmPicks(picks) {
-    if (!picks || !picks.length) { setShowPicker(false); return; }
-    onPickSlots ? onPickSlots(idx, picks) : pickSlot(picks[0].facility_id, picks[0].start_hour, picks[0].duration);
-    setShowPicker(false);
-  }
-  const canMultiPick = !isEditing && !!onPickSlots;
-  function updRecur(changes) {
-    const r = {mode:recurMode, weeks:recurWeeks, until:recurUntil, ...changes};
-    if(changes.mode!==undefined) setRecurMode(changes.mode);
-    if(changes.weeks!==undefined) setRecurWeeks(changes.weeks);
-    if(changes.until!==undefined) setRecurUntil(changes.until);
-    onChange(idx, {...row, recur:r});
-  }
-
-  const canRecur = !isEditing; // recurrence only for new bookings, not edits
-
+  const upd = (k,v) => onChange(idx, { ...slot, [k]:v });
+  const facName = FACILITIES.find(f=>f.id===slot.facility_id)?.name || slot.facility_id;
+  const ready = !!(slot.date && slot.facility_id && slot.duration);
+  const draft = { id: slot.id||"__draft__", facility_id:slot.facility_id, date:slot.date, start_hour:slot.start_hour, duration:slot.duration, status:"pending_amua" };
+  const others = ready ? allBookings.filter(b=>b.id!==draft.id && !["cancelled","rejected"].includes(b.status)) : [];
+  const sameClashes = ready ? getSameFacilityOverlaps(draft, others) : [];
+  const adminClashes = sameClashes.filter(isAdminBooking);
+  const userClashes  = sameClashes.filter(b=>!isAdminBooking(b));
+  const timeStr = `${fmtTime(slot.start_hour)}–${fmtTime(slot.start_hour+slot.duration)}`;
   return (
-    <div style={{border:"1.5px solid #e2e8f0",borderRadius:12,padding:16,background:"#fafafa",display:"flex",flexDirection:"column",gap:12,position:"relative"}}>
-      {!isOnly && <button onClick={()=>onRemove(idx)} style={{position:"absolute",top:10,right:10,background:"#fff1f2",border:"1px solid #fda4af",borderRadius:6,color:"#f43f5e",cursor:"pointer",fontSize:12,fontWeight:700,padding:"2px 8px"}}>✕ Remove</button>}
-      {!isOnly && <div style={{fontSize:11,fontWeight:700,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.08em"}}>Booking #{idx+1}</div>}
-
-      {/* Date row + slot-picker launcher */}
-      <div style={{display:"flex",alignItems:"flex-end",gap:10,flexWrap:"wrap"}}>
-        <div style={{flex:"1 1 200px"}}>
-          <label style={S.lbl}>Date *</label>
-          <input style={S.inp} type="date" value={row.date} onChange={e=>upd("date",e.target.value)} min={todayKey()}/>
-        </div>
-        <button type="button" onClick={()=>setShowPicker(true)}
-          title="Pick a slot on the day grid"
-          style={S.btn({border:"1.5px solid #6366f1",background:"#eef2ff",color:"#4338ca",fontSize:12,padding:"7px 12px",fontWeight:700})}>
-          📅 Pick on day grid
-        </button>
-      </div>
-
-      <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:10}}>
+    <div style={{border:"1.5px solid #e2e8f0",borderRadius:10,padding:12,background:"#fafafa",display:"flex",flexDirection:"column",gap:8,position:"relative"}}>
+      {canRemove && <button onClick={()=>onRemove(idx)} title="Remove slot" style={{position:"absolute",top:8,right:8,background:"#fff1f2",border:"1px solid #fda4af",borderRadius:6,color:"#f43f5e",cursor:"pointer",fontSize:12,fontWeight:700,padding:"1px 7px",lineHeight:1.5}}>✕</button>}
+      <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr 1fr":"1.5fr 1.3fr 1fr 1fr",gap:8}}>
         <div>
           <label style={S.lbl}>Facility *</label>
-          <select style={S.inp} value={row.facility_id} onChange={e=>upd("facility_id",e.target.value)}>
+          <select style={S.inp} value={slot.facility_id} onChange={e=>upd("facility_id",e.target.value)}>
             {FACILITIES.map(f=><option key={f.id} value={f.id}>{f.name}</option>)}
           </select>
         </div>
         <div>
-          <label style={S.lbl}>Start Time *</label>
-          <select style={S.inp} value={row.start_hour} onChange={e=>upd("start_hour",parseFloat(e.target.value))}>
+          <label style={S.lbl}>Date *</label>
+          <input style={S.inp} type="date" value={slot.date} min={todayKey()} onChange={e=>upd("date",e.target.value)}/>
+        </div>
+        <div>
+          <label style={S.lbl}>Start</label>
+          <select style={S.inp} value={slot.start_hour} onChange={e=>upd("start_hour",parseFloat(e.target.value))}>
             {Array.from({length:CAL_TOTAL*2+1},(_,i)=>CAL_START+i*0.5).filter(h=>h<=CAL_END).map(h=><option key={h} value={h}>{fmtTime(h)}</option>)}
           </select>
         </div>
-      </div>
-      <div>
-        <label style={S.lbl}>Duration *</label>
-        <select style={S.inp} value={row.duration} onChange={e=>upd("duration",parseFloat(e.target.value))}>
-          {(DURATIONS.some(d=>d.value===row.duration)?DURATIONS:[...DURATIONS,{value:row.duration,label:row.duration+" hrs"}].sort((a,b)=>a.value-b.value)).map(d=><option key={d.value} value={d.value}>{d.label}</option>)}
-        </select>
-      </div>
-
-      {showPicker && (
-        <Modal title={`📅 Pick ${canMultiPick?"slots":"a slot"} — ${row.date||"select date first"}`} onClose={()=>setShowPicker(false)} width={760}>
-          {row.date
-            ? <InlineDayPicker date={row.date} bookings={allBookings} onPick={pickSlot} multi={canMultiPick} onConfirm={confirmPicks}/>
-            : <div style={{padding:24,textAlign:"center",color:"#94a3b8",fontSize:13}}>Set a date first, then pick a slot.</div>
-          }
-          <div style={{marginTop:12,display:"flex",justifyContent:"flex-end"}}>
-            <button onClick={()=>setShowPicker(false)} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#475569",fontSize:12})}>Close</button>
-          </div>
-        </Modal>
-      )}
-      <div>
-        <label style={S.lbl}>Purpose *</label>
-        <input style={S.inp} value={row.purpose} onChange={e=>upd("purpose",e.target.value)} placeholder="e.g. Training, Meeting…"/>
-      </div>
-      <div>
-        <label style={S.lbl}>Notes</label>
-        <textarea style={{...S.inp,resize:"vertical",minHeight:52}} value={row.notes} onChange={e=>upd("notes",e.target.value)} placeholder="Any requirements…"/>
-      </div>
-
-      {/* Recurrence — only for edit mode */}
-      {canRecur && (
-        <div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:8,padding:12}}>
-          <label style={{...S.lbl,color:"#16a34a"}}>🔁 Weekly Recurrence</label>
-          <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center"}}>
-            <select style={{...S.inp,width:"auto"}} value={recurMode} onChange={e=>updRecur({mode:e.target.value})}>
-              <option value="none">No recurrence</option>
-              <option value="weeks">Repeat for N weeks</option>
-              <option value="until">Repeat until date</option>
-            </select>
-            {recurMode==="weeks" && (
-              <div style={{display:"flex",alignItems:"center",gap:8}}>
-                <input type="number" min={1} max={52} value={recurWeeks} onChange={e=>updRecur({weeks:parseInt(e.target.value)||1})} style={{...S.inp,width:70}}/>
-                <span style={{fontSize:13,color:"#475569"}}>weeks</span>
-              </div>
-            )}
-            {recurMode==="until" && (
-              <input type="date" value={recurUntil} min={row.date||todayKey()} onChange={e=>updRecur({until:e.target.value})} style={{...S.inp,width:"auto"}}/>
-            )}
-          </div>
-          {recurMode!=="none" && (
-            <div style={{fontSize:12,color:"#16a34a",marginTop:6}}>
-              Will create {recurMode==="weeks"?recurWeeks:(()=>{
-                if(!recurUntil||!row.date) return "?";
-                const [sy,sm,sd]=row.date.split("-").map(Number);
-                const [ey,em,ed]=recurUntil.split("-").map(Number);
-                const diff=Math.round((Date.UTC(ey,em-1,ed)-Date.UTC(sy,sm-1,sd))/(7*86400000));
-                return Math.max(1,diff+1);
-              })()} bookings (weekly on same day/time)
-            </div>
-          )}
-        </div>
-      )}
-
-      {isAdmin && isEditing && (
         <div>
-          <label style={S.lbl}>Status</label>
-          <select style={S.inp} value={row.status} onChange={e=>upd("status",e.target.value)}>
-            {Object.entries(STATUS_META).filter(([k])=>!["pending","amua_submit"].includes(k)).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
+          <label style={S.lbl}>Duration</label>
+          <select style={S.inp} value={slot.duration} onChange={e=>upd("duration",parseFloat(e.target.value))}>
+            {(DURATIONS.some(d=>d.value===slot.duration)?DURATIONS:[...DURATIONS,{value:slot.duration,label:slot.duration+" hrs"}].sort((a,b)=>a.value-b.value)).map(d=><option key={d.value} value={d.value}>{d.label}</option>)}
           </select>
         </div>
+      </div>
+      {ready && (
+        adminClashes.length>0
+          ? <div style={{fontSize:12,color:"#b91c1c",fontWeight:600,display:"flex",alignItems:"center",gap:5}}><span style={{width:7,height:7,borderRadius:"50%",background:"#ef4444",display:"inline-block",flexShrink:0}}/>🚫 {facName} is blocked {timeStr} ({adminClashes[0].purpose||"facility block"})</div>
+          : userClashes.length>0
+          ? <div style={{fontSize:12,color:"#c2410c",fontWeight:600,display:"flex",alignItems:"center",gap:5}}><span style={{width:7,height:7,borderRadius:"50%",background:"#f59e0b",display:"inline-block",flexShrink:0}}/>⚠ {facName} overlaps {userClashes.length} booking{userClashes.length>1?"s":""} {timeStr} — shared use allowed</div>
+          : <div style={{fontSize:12,color:"#16a34a",display:"flex",alignItems:"center",gap:5}}><span style={{width:7,height:7,borderRadius:"50%",background:"#22c55e",display:"inline-block",flexShrink:0}}/>{facName} available {timeStr} · {fmtDate(slot.date)}</div>
       )}
-
-      {/* Live availability indicator */}
-      {(()=>{
-        if (!row.date || !row.facility_id || !row.duration) return null;
-        const draft = { id: row.id || "__draft__", facility_id: row.facility_id, date: row.date, start_hour: row.start_hour, duration: row.duration, status: "pending_amua" };
-        const others = allBookings.filter(b => b.id !== draft.id && !["cancelled","rejected"].includes(b.status));
-        const sameClashes = getSameFacilityOverlaps(draft, others);
-        const adminClashes = sameClashes.filter(b => isAdminBooking(b));
-        const userClashes  = sameClashes.filter(b => !isAdminBooking(b));
-        const crossClashes = getCrossFacilityOverlaps(draft, others).filter(b => !isAdminBooking(b));
-        const facName = FACILITIES.find(f=>f.id===row.facility_id)?.name || row.facility_id;
-        return (
-          <div style={{display:"flex",flexDirection:"column",gap:6}}>
-            {adminClashes.length > 0 && (
-              <div style={{background:"#fef2f2",border:"1px solid #fca5a5",borderRadius:8,padding:"10px 12px"}}>
-                <div style={{fontWeight:700,fontSize:12,color:"#b91c1c",marginBottom:4}}>🚫 {facName} is blocked at this time</div>
-                {adminClashes.map(b=>(
-                  <div key={b.id} style={{fontSize:12,color:"#991b1b",padding:"1px 0"}}>
-                    {fmtTime(b.start_hour)}–{fmtTime(b.start_hour+b.duration)} · {b.purpose||"Facility block"}
-                  </div>
-                ))}
-              </div>
-            )}
-            {userClashes.length > 0 && (
-              <div style={{background:"#fff7ed",border:"1px solid #fed7aa",borderRadius:8,padding:"10px 12px"}}>
-                <div style={{fontWeight:700,fontSize:12,color:"#c2410c",marginBottom:4}}>⚠ {facName} has overlapping bookings</div>
-                {userClashes.map(b=>(
-                  <div key={b.id} style={{fontSize:12,color:"#9a3412",padding:"1px 0"}}>
-                    {fmtTime(b.start_hour)}–{fmtTime(b.start_hour+b.duration)} · {b.name||b.email} · {b.purpose}
-                  </div>
-                ))}
-              </div>
-            )}
-            {crossClashes.length > 0 && (
-              <div style={{background:"#fefce8",border:"1px solid #fde68a",borderRadius:8,padding:"10px 12px"}}>
-                <div style={{fontWeight:700,fontSize:12,color:"#854d0e",marginBottom:4}}>ℹ Other facilities also booked at this time</div>
-                {crossClashes.map(b=>{
-                  const cf=FACILITIES.find(f=>f.id===b.facility_id);
-                  return (
-                    <div key={b.id} style={{fontSize:12,color:"#713f12",padding:"1px 0"}}>
-                      {cf?.name||b.facility_id} · {fmtTime(b.start_hour)}–{fmtTime(b.start_hour+b.duration)} · {b.name||b.email}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-            {sameClashes.length === 0 && (
-              <div style={{fontSize:12,color:"#16a34a",display:"flex",alignItems:"center",gap:5}}>
-                <span style={{width:7,height:7,borderRadius:"50%",background:"#22c55e",display:"inline-block"}}/>
-                {facName} is available {fmtTime(row.start_hour)}–{fmtTime(row.start_hour+row.duration)} on {fmtDate(row.date)}
-              </div>
-            )}
-          </div>
-        );
-      })()}
     </div>
   );
 }
@@ -2362,35 +2223,30 @@ function BookingForm({ booking, allBookings, onAddToCart, onClose, isAdmin, logg
   const isEditing  = !!booking?.id && !booking?._multiEdit;
   const isMultiEdit = !!booking?._multiEdit;
 
-  // All hooks must be declared before any conditional return
-  function makeBlankRow(overrides={}) {
-    return {
-      facility_id: FACILITIES[0].id,
-      date:        todayKey(),
-      start_hour:  9,
-      duration:    1,
-      purpose:     "",
-      notes:       "",
-      status:      "pending_amua",
-      recur:       { mode:"none", weeks:4, until:"" },
-      ...overrides,
-    };
+  // A slot is just facility/date/time/duration — shared purpose/notes/repetition live
+  // on the form, so creating several grouped bookings means staging several slots.
+  function blankSlot(o={}) {
+    return { facility_id:FACILITIES[0].id, date:todayKey(), start_hour:9, duration:1, ...o };
   }
-
-  const initRows = isEditing
-    ? [{ id:booking.id, facility_id:booking.facility_id, date:booking.date, start_hour:booking.start_hour,
-         duration:booking.duration, purpose:booking.purpose, notes:booking.notes||"",
-         status:booking.status, recur:booking.recur||{mode:"none",weeks:4,until:""} }]
-    // Multi-day drag (calendar/week view) seeds one row per selected day → a grouped booking.
+  const initSlots = isEditing
+    ? [{ id:booking.id, facility_id:booking.facility_id, date:booking.date, start_hour:booking.start_hour, duration:booking.duration }]
     : (booking && Array.isArray(booking._dates) && booking._dates.length
-      ? booking._dates.map(dt => makeBlankRow({ facility_id:booking.facility_id||FACILITIES[0].id,
-          date:dt, start_hour:booking.start_hour||9, duration:booking.duration||1 }))
-      : [makeBlankRow(booking && !isMultiEdit ? { facility_id:booking.facility_id||FACILITIES[0].id,
-          date:booking.date||todayKey(), start_hour:booking.start_hour||9, duration:booking.duration||1 } : {})]);
+        ? booking._dates.map(dt => blankSlot({ facility_id:booking.facility_id||FACILITIES[0].id, date:dt, start_hour:booking.start_hour||9, duration:booking.duration||1 }))
+        : booking && booking.date && !isMultiEdit
+          ? [blankSlot({ facility_id:booking.facility_id||FACILITIES[0].id, date:booking.date, start_hour:booking.start_hour||9, duration:booking.duration||1 })]
+          : []);
 
   const [name,  setName]  = useState(booking?.name  || "");
   const [email, setEmail] = useState(booking?.email || loggedInEmail || "");
-  const [rows,  setRows]  = useState(initRows);
+  const [purpose, setPurpose] = useState(booking?.purpose || "");
+  const [notes,   setNotes]   = useState(booking?.notes || "");
+  const [status,  setStatus]  = useState(booking?.status || "pending_amua");
+  const [recurMode,  setRecurMode]  = useState("none");
+  const [recurWeeks, setRecurWeeks] = useState(4);
+  const [recurUntil, setRecurUntil] = useState("");
+  const [slots, setSlots] = useState(initSlots);
+  const [pickDate, setPickDate] = useState(initSlots[0]?.date || todayKey());
+  const [showPicker, setShowPicker] = useState(false);
   const [error, setError] = useState("");
   const [warn,  setWarn]  = useState(null);
 
@@ -2399,42 +2255,50 @@ function BookingForm({ booking, allBookings, onAddToCart, onClose, isAdmin, logg
     return <MultiEditForm bookings={booking._bookings} onAddToCart={onAddToCart} onClose={onClose} allBookings={allBookings}/>;
   }
 
-  function updateRow(idx, upd) { setRows(rs=>rs.map((r,i)=>i===idx?upd:r)); }
-  function addRow()   { setRows(rs=>[...rs, makeBlankRow()]); }
-  function removeRow(idx) { setRows(rs=>rs.filter((_,i)=>i!==idx)); }
-  // Apply several day-grid picks at once: the first fills row[idx], the rest are
-  // inserted as new rows (separate bookings) inheriting that row's date/purpose/notes.
-  function applyPickedSlots(idx, picks) {
-    if (!picks || !picks.length) return;
-    setRows(rs => {
-      const base = rs[idx] || makeBlankRow();
-      const built = picks.map((p,i) => i===0
-        ? { ...base, facility_id:p.facility_id, start_hour:p.start_hour, duration:p.duration }
-        : makeBlankRow({ date:base.date, facility_id:p.facility_id, start_hour:p.start_hour, duration:p.duration, purpose:base.purpose, notes:base.notes }));
-      return [...rs.slice(0,idx), ...built, ...rs.slice(idx+1)];
-    });
+  function updateSlot(idx, patch) { setSlots(ss=>ss.map((s,i)=>i===idx?patch:s)); }
+  function removeSlot(idx) { setSlots(ss=>ss.filter((_,i)=>i!==idx)); }
+  // New manual slots inherit the previous slot's field/time/duration (propagate details).
+  function addManualSlot() {
+    const last = slots[slots.length-1];
+    setSlots(ss=>[...ss, blankSlot({ date:pickDate, facility_id:last?.facility_id||FACILITIES[0].id, start_hour:last?.start_hour??9, duration:last?.duration??1 })]);
+  }
+  function addPickedSlots(picks) {
+    if (picks?.length) setSlots(ss=>[...ss, ...picks.map(p=>blankSlot({ facility_id:p.facility_id, date:pickDate, start_hour:p.start_hour, duration:p.duration }))]);
+    setShowPicker(false);
   }
 
-  // Expand recurrence rules into individual booking drafts
+  // Occurrences a slot expands into under the shared repetition rule.
+  function occurrencesFor(dateStr) {
+    if (isEditing || recurMode==="none") return 1;
+    if (recurMode==="weeks") return Math.max(1, recurWeeks);
+    if (recurMode==="until" && recurUntil && dateStr) {
+      const [sy,sm,sd]=dateStr.split("-").map(Number), [ey,em,ed]=recurUntil.split("-").map(Number);
+      const diff=Math.round((Date.UTC(ey,em-1,ed)-Date.UTC(sy,sm-1,sd))/(7*86400000));
+      return Math.max(1, diff+1);
+    }
+    return 1;
+  }
+  const totalToCreate = slots.reduce((s,sl)=>s+occurrencesFor(sl.date), 0);
+
+  // Expand each slot (+ shared repetition) into individual booking drafts. Shared
+  // purpose/notes propagate onto every draft.
   function expandRows() {
     const drafts = [];
-    rows.forEach(row => {
-      const base = { ...row, name, email, id:newId(), created_at:new Date().toISOString(), updated_at:new Date().toISOString() };
+    slots.forEach(slot => {
+      const base = { facility_id:slot.facility_id, date:slot.date, start_hour:slot.start_hour, duration:slot.duration,
+        purpose, notes, status:isEditing?status:"pending_amua", name, email,
+        id:newId(), created_at:new Date().toISOString(), updated_at:new Date().toISOString() };
       drafts.push(base);
-      if (row.recur?.mode !== "none") {
-        // base booking counts as week 1, so generate (total - 1) more
-        const maxAdditional = row.recur.mode === "weeks"
-          ? row.recur.weeks - 1
-          : 103; // safety cap for "until" mode
-        let currentDate = row.date;
-        for (let w = 0; w < maxAdditional; w++) {
+      if (!isEditing && recurMode!=="none") {
+        const maxAdditional = recurMode==="weeks" ? recurWeeks-1 : 103; // 103 = safety cap for "until"
+        let currentDate = slot.date;
+        for (let w=0; w<maxAdditional; w++) {
           currentDate = addDays(currentDate, 7);
-          if (row.recur.mode === "until" && currentDate > row.recur.until) break;
+          if (recurMode==="until" && currentDate > recurUntil) break;
           drafts.push({ ...base, id:newId(), date:currentDate });
         }
       }
     });
-    // For edit: preserve original id
     if (isEditing && drafts.length === 1) drafts[0].id = booking.id;
     return drafts;
   }
@@ -2442,11 +2306,10 @@ function BookingForm({ booking, allBookings, onAddToCart, onClose, isAdmin, logg
   function validate() {
     if (!name.trim()) { setError("Please enter your name."); return false; }
     if (!/\S+@\S+\.\S+/.test(email)) { setError("Please enter a valid email."); return false; }
-    for (let i=0; i<rows.length; i++) {
-      const r = rows[i];
-      if (!r.facility_id || !r.date || !r.purpose.trim()) {
-        setError(`Booking #${i+1}: please fill in facility, date and purpose.`); return false;
-      }
+    if (!purpose.trim()) { setError("Please enter a purpose for the booking."); return false; }
+    if (slots.length === 0) { setError("Add at least one slot — pick on the day grid or add one manually."); return false; }
+    for (let i=0; i<slots.length; i++) {
+      if (!slots[i].facility_id || !slots[i].date) { setError(`Slot #${i+1}: choose a facility and date.`); return false; }
     }
     return true;
   }
@@ -2482,7 +2345,9 @@ function BookingForm({ booking, allBookings, onAddToCart, onClose, isAdmin, logg
   if (warn?.type==="same" && warn.list) return <OverlapWarning title="Same Facility Already Booked" description="This facility already has bookings at this time. Shared use is allowed — confirm you are aware." bookings={warn.list} onProceed={proceedSame} onCancel={()=>setWarn(null)}/>;
   if (warn?.type==="cross" && warn.list) return <OverlapWarning title="Other Facilities Also Booked" description="Other facilities are booked at the same time. Simultaneous use is allowed — heads-up only." bookings={warn.list} onProceed={proceedCross} onCancel={()=>setWarn(null)}/>;
 
-  // Main form
+  const addBtn = { border:"1.5px solid #6366f1", background:"#eef2ff", color:"#4338ca", fontSize:13, padding:"8px 14px", fontWeight:700 };
+
+  // Main form — shared details first, then the staged slots.
   return (
     <div style={{display:"flex",flexDirection:"column",gap:16}}>
       {error&&<div style={{background:"#fff1f2",border:"1px solid #f43f5e",borderRadius:8,padding:"10px 14px",color:"#881337",fontSize:13}}>{error}</div>}
@@ -2500,21 +2365,87 @@ function BookingForm({ booking, allBookings, onAddToCart, onClose, isAdmin, logg
         </div>
       </div>
 
-      {/* Booking rows */}
-      {rows.map((row,i)=>(
-        <BookingRow key={i} row={row} idx={i} onChange={updateRow} onRemove={removeRow} onPickSlots={applyPickedSlots}
-          isOnly={rows.length===1} isAdmin={isAdmin} isEditing={isEditing}
-          allBookings={allBookings} loggedInEmail={loggedInEmail}/>
-      ))}
+      {/* Shared purpose + notes — one of each for the whole grouped booking */}
+      <div>
+        <label style={S.lbl}>Purpose *</label>
+        <input style={S.inp} value={purpose} onChange={e=>setPurpose(e.target.value)} placeholder="e.g. Training, Meeting…"/>
+      </div>
+      <div>
+        <label style={S.lbl}>Notes</label>
+        <textarea style={{...S.inp,resize:"vertical",minHeight:48}} value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Any requirements… (applies to all slots)"/>
+      </div>
 
-      {/* Add another slot (only when not editing) */}
-      {!isEditing && (
-        <button onClick={addRow} style={S.btn({border:"1.5px dashed #cbd5e1",background:"#f8fafc",color:"#475569",width:"100%",padding:"10px"})}>
-          + Add Another Booking
-        </button>
+      {/* Admin status (edit only) */}
+      {isAdmin && isEditing && (
+        <div>
+          <label style={S.lbl}>Status</label>
+          <select style={S.inp} value={status} onChange={e=>setStatus(e.target.value)}>
+            {Object.entries(STATUS_META).filter(([k])=>!["pending","amua_submit"].includes(k)).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
+          </select>
+        </div>
       )}
 
-      <div style={{display:"flex",gap:10,justifyContent:"flex-end",paddingTop:4}}>
+      {/* Shared repetition (new bookings only) */}
+      {!isEditing && (
+        <div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:8,padding:12}}>
+          <label style={{...S.lbl,color:"#16a34a"}}>🔁 Repetition (applies to every slot)</label>
+          <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center"}}>
+            <select style={{...S.inp,width:"auto"}} value={recurMode} onChange={e=>setRecurMode(e.target.value)}>
+              <option value="none">No repetition</option>
+              <option value="weeks">Repeat for N weeks</option>
+              <option value="until">Repeat until date</option>
+            </select>
+            {recurMode==="weeks" && (
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <input type="number" min={1} max={52} value={recurWeeks} onChange={e=>setRecurWeeks(parseInt(e.target.value)||1)} style={{...S.inp,width:70}}/>
+                <span style={{fontSize:13,color:"#475569"}}>weeks</span>
+              </div>
+            )}
+            {recurMode==="until" && (
+              <input type="date" value={recurUntil} min={pickDate||todayKey()} onChange={e=>setRecurUntil(e.target.value)} style={{...S.inp,width:"auto"}}/>
+            )}
+          </div>
+          {recurMode!=="none" && <div style={{fontSize:12,color:"#16a34a",marginTop:6}}>Each slot repeats weekly on its own day/time.</div>}
+        </div>
+      )}
+
+      {/* Slots */}
+      <div style={{display:"flex",flexDirection:"column",gap:10}}>
+        <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+          <span style={{fontSize:12,fontWeight:700,color:"#0f172a",textTransform:"uppercase",letterSpacing:"0.05em"}}>Slots ({slots.length})</span>
+          {!isEditing && (
+            <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginLeft:"auto"}}>
+              <label style={{fontSize:11,color:"#64748b",display:"flex",alignItems:"center",gap:5}}>Day
+                <input type="date" value={pickDate} min={todayKey()} onChange={e=>setPickDate(e.target.value)} style={{...S.inp,width:"auto",padding:"6px 8px",fontSize:12}}/>
+              </label>
+              <button type="button" onClick={()=>setShowPicker(true)} title="Pick one or more slots on the day grid" style={S.btn(addBtn)}>📅 Pick on day grid</button>
+              <button type="button" onClick={addManualSlot} style={S.btn({border:"1.5px solid #cbd5e1",background:"#fff",color:"#475569",fontSize:13,padding:"8px 14px",fontWeight:700})}>✏ Add manually</button>
+            </div>
+          )}
+        </div>
+
+        {showPicker && (
+          <Modal title={`📅 Pick slots — ${pickDate?fmtDate(pickDate):"choose a day"}`} onClose={()=>setShowPicker(false)} width={760}>
+            {pickDate
+              ? <InlineDayPicker date={pickDate} bookings={allBookings} multi onConfirm={addPickedSlots} onPick={(f,s,d)=>addPickedSlots([{facility_id:f,start_hour:s,duration:d}])}/>
+              : <div style={{padding:24,textAlign:"center",color:"#94a3b8",fontSize:13}}>Choose a day first.</div>}
+            <div style={{marginTop:12,display:"flex",justifyContent:"flex-end"}}>
+              <button onClick={()=>setShowPicker(false)} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#475569",fontSize:12})}>Close</button>
+            </div>
+          </Modal>
+        )}
+
+        {slots.length === 0
+          ? <div style={{border:"1.5px dashed #cbd5e1",borderRadius:10,padding:"22px 16px",textAlign:"center",color:"#64748b",fontSize:13,background:"#f8fafc"}}>
+              No slots yet — <strong>Pick on day grid</strong> (select across any fields) or <strong>Add manually</strong>.
+            </div>
+          : slots.map((slot,i)=>(
+              <SlotRow key={i} slot={slot} idx={i} onChange={updateSlot} onRemove={removeSlot} canRemove={!isEditing} allBookings={allBookings}/>
+            ))}
+      </div>
+
+      <div style={{display:"flex",gap:10,justifyContent:"flex-end",alignItems:"center",paddingTop:4}}>
+        {!isEditing && slots.length>0 && <span style={{fontSize:12,color:"#64748b",marginRight:"auto"}}>Will create <strong style={{color:"#0f172a"}}>{totalToCreate}</strong> booking{totalToCreate!==1?"s":""}</span>}
         <button onClick={onClose} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#475569"})}>Cancel</button>
         <button onClick={handleAddToCart} style={S.btn({background:"#2d4a1e",color:"#fff"})}>
           {isEditing ? "✏ Add Edit to Cart" : "➕ Add to Cart"}
