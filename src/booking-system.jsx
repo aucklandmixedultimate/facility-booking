@@ -593,6 +593,22 @@ async function sendApprovalEmail({ to, subject, html }) {
   return sendEmail({ to, subject, html, kind: "approval" });
 }
 
+// Public links surfaced to bookers (the live GTEC field calendar and the GTEC field
+// hire request form). Also shown in the in-app Help tab.
+const GTEC_CALENDAR_URL = "https://www.carltonjuniorsrugby.co.nz/venue-hire-fields-1/field-calendar";
+const GTEC_FORM_URL = "https://www.grammartec.co.nz/viewform/499414";
+// Reusable "useful links" block for booker-facing emails — links the GTEC calendar
+// and the field hire request form so bookers can cross-check and self-serve.
+function emailLinksBlock() {
+  return `<div style="margin-top:20px;padding:14px 16px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px">
+    <div style="font-size:10px;font-weight:700;color:#0369a1;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px">Useful links</div>
+    <div style="font-size:13px;line-height:2">
+      <a href="${GTEC_CALENDAR_URL}" target="_blank" style="color:#0369a1;font-weight:600;text-decoration:none">📅 GTEC field calendar ↗</a><br/>
+      <a href="${GTEC_FORM_URL}" target="_blank" style="color:#0369a1;font-weight:600;text-decoration:none">📝 GTEC field hire request form ↗</a>
+    </div>
+  </div>`;
+}
+
 // Build HTML for booking confirmation email
 function buildOrderEmailHtml({ name, email, bookings: bkgs=[], deletedBookings=[], orderRef=null, isDeletionOnly=false }) {
   const hasAdded   = bkgs.length > 0;
@@ -660,6 +676,7 @@ function buildOrderEmailHtml({ name, email, bookings: bkgs=[], deletedBookings=[
     <p style="margin:0 0 4px;font-size:15px;color:#334155">Hi <strong style="color:#0f172a">${name}</strong>,</p>
     ${addedSection}
     ${deletedSection}
+    ${hasAdded?emailLinksBlock():""}
     <p style="margin:24px 0 0;font-size:12px;color:#94a3b8">If you have questions, please contact the facility administrator directly.</p>
   </td></tr>
   <tr><td style="padding:14px 36px 20px;background:#f8fafc;font-size:11px;color:#94a3b8;text-align:center">FacilityBook · Automated notification · ${email}</td></tr>
@@ -712,6 +729,7 @@ function buildApprovalEmailHtml({ name, email, bookings: bkgs, newStatus, adminN
       <tbody>${rows}</tbody>
     </table>
     ${adminNote?`<div style="margin-top:16px;padding:14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:13px;color:#475569"><strong>Note from admin:</strong> ${adminNote}</div>`:""}
+    ${emailLinksBlock()}
     <p style="margin:24px 0 0;font-size:12px;color:#94a3b8">If you have questions, please contact the facility manager.</p>
   </td></tr>
   <tr><td style="padding:16px 32px 24px;background:#f8fafc;font-size:11px;color:#94a3b8;text-align:center">FacilityBook · Sent to ${email}</td></tr>
@@ -9141,13 +9159,21 @@ export default function App() {
 
     if (!silentMode) {
       const noEmailStatuses = new Set(["pending_cpsa"]);
-      // Status-change emails — one per booker card, unless that card opted out.
+      // Status-change emails — grouped into one email per booker + status, so a booker
+      // with several bookings moving to the same status gets a single confirmation.
+      const statusByKey = {};
       for (const it of statusItems) {
         if (it.skipEmail || noEmailStatuses.has(it.newStatus)) continue;
-        const statusLabel = STATUS_META[it.newStatus]?.label || it.newStatus;
-        sendApprovalEmail({to:it.email,
-          subject:`Your Booking${it.drafts.length>1?"s":""} — ${statusLabel}`,
-          html:buildApprovalEmailHtml({name:it.name, email:it.email, bookings:it.drafts.map(d=>({...d,status:it.newStatus})), newStatus:it.newStatus, adminNote:it.adminNote||""})});
+        const k = it.email.toLowerCase()+"|"+it.newStatus;
+        if (!statusByKey[k]) statusByKey[k] = {name:it.name, email:it.email, newStatus:it.newStatus, drafts:[], notes:[]};
+        statusByKey[k].drafts.push(...it.drafts);
+        if (it.adminNote) statusByKey[k].notes.push(it.adminNote);
+      }
+      for (const g of Object.values(statusByKey)) {
+        const statusLabel = STATUS_META[g.newStatus]?.label || g.newStatus;
+        sendApprovalEmail({to:g.email,
+          subject:`Your Booking${g.drafts.length>1?"s":""} — ${statusLabel}`,
+          html:buildApprovalEmailHtml({name:g.name, email:g.email, bookings:g.drafts.map(d=>({...d,status:g.newStatus})), newStatus:g.newStatus, adminNote:[...new Set(g.notes)].join(" ")})});
       }
       // Notify-only emails: clash alerts, CPSA status notices, mismatch, inform-CPSA.
       for (const item of notifyItems) {
@@ -9183,10 +9209,16 @@ export default function App() {
         sendEmail({to:e, subject:`Booking Request Received [${orderRef}]`,
           html:buildOrderEmailHtml({name:n,email:e,bookings:d,orderRef})});
       }
-      // Edits: send one "Booking Updated" per item (each is a separate edit)
-      for (const item of cart.filter(item => item.isEdit)) {
-        sendApprovalEmail({to:item.email, subject:"Booking Updated",
-          html:buildApprovalEmailHtml({name:item.name,email:item.email,bookings:item.drafts,newStatus:item.drafts[0]?.status,adminNote:""})});
+      // Edits: group by booker into a single "Booking(s) Updated" email.
+      const editByEmail = {};
+      cart.filter(item => item.isEdit).forEach(item => {
+        const k = item.email.toLowerCase();
+        if (!editByEmail[k]) editByEmail[k] = {name:item.name, email:item.email, drafts:[]};
+        editByEmail[k].drafts.push(...item.drafts);
+      });
+      for (const g of Object.values(editByEmail)) {
+        sendApprovalEmail({to:g.email, subject:`Booking${g.drafts.length>1?"s":""} Updated`,
+          html:buildApprovalEmailHtml({name:g.name,email:g.email,bookings:g.drafts,newStatus:g.drafts[0]?.status,adminNote:""})});
       }
     }
 
