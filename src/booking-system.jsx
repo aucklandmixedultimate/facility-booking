@@ -182,13 +182,52 @@ const VENDOR_GTEC = {
 // profileType: "user" | "admin" | "vendor"
 const MONTHS=["January","February","March","April","May","June","July","August","September","October","November","December"];
 
-// Generate sequential IDs like "INV-20260528-001" for a given prefix.
-// Pass the full current records array to ensure uniqueness within a batch.
-function generateDocId(existingRecords, prefix) {
-  const today = new Date().toISOString().slice(0,10).replace(/-/g,"");
-  const todayRecs = (existingRecords||[]).filter(r => r.id && r.id.startsWith(`${prefix}-${today}-`));
-  const seq = String(todayRecs.length + 1).padStart(3,"0");
-  return `${prefix}-${today}-${seq}`;
+// ── 12-char document ID / bank reference ────────────────────────────────────
+// One compact code that doubles as an NZ bank reference (fits a single 12-char field):
+//   T  YY  MMfrom  MMto  RRR  DD
+//   │   │     │      │    │    └ day issued (01–31; +31 on a same-day duplicate → 32–62)
+//   │   │     │      │    └────── 3-char recipient code (booker / vendor / AMUA)
+//   │   │     │      └─────────── period end month
+//   │   │     └────────────────── period start month
+//   │   └──────────────────────── period start year (2 digits)
+//   └──────────────────────────── type: P=PO, I=Invoice, R=Receipt
+// e.g. P260607GTE10 — PO, Jun→Jul 2026, recipient GTE, issued the 10th.
+const RECIPIENT_CODE_AMUA = "AMU";
+const RECIPIENT_CODE_GTEC = "GTE";
+function cleanRecipientCode(code) {
+  return (code||"").toUpperCase().replace(/[^A-Z0-9]/g,"").padEnd(3,"X").slice(0,3);
+}
+// Derive a 3-char recipient code from a name, avoiding any code already in `taken`.
+function deriveRecipientCode(name, taken=[]) {
+  const clean = (name||"").toUpperCase().replace(/[^A-Z0-9 ]/g," ").trim();
+  const words = clean.split(/\s+/).filter(Boolean);
+  let base;
+  if (words.length >= 3)       base = words.slice(0,3).map(w=>w[0]).join("");
+  else if (words.length === 2) base = words[0][0] + words[1].slice(0,2);
+  else                         base = (words[0]||"XXX").slice(0,3);
+  base = cleanRecipientCode(base);
+  const takenSet = new Set((taken||[]).map(cleanRecipientCode));
+  if (!takenSet.has(base)) return base;
+  for (const ch of "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789") {
+    const cand = base.slice(0,2) + ch;
+    if (!takenSet.has(cand)) return cand;
+  }
+  return base;
+}
+function genBankRef({ type, dateFrom, dateTo, recipientCode, existingRefs=[] }) {
+  const T  = (type||"I").toUpperCase().slice(0,1);
+  const df = dateFrom ? new Date(dateFrom+"T00:00:00") : new Date();
+  const dt = dateTo   ? new Date(dateTo  +"T00:00:00") : df;
+  const yy  = String(df.getFullYear()).slice(-2);
+  const mmF = String(df.getMonth()+1).padStart(2,"0");
+  const mmT = String(dt.getMonth()+1).padStart(2,"0");
+  const base = `${T}${yy}${mmF}${mmT}${cleanRecipientCode(recipientCode)}`;
+  const taken = new Set(existingRefs||[]);
+  let day = new Date().getDate();
+  let ref = base + String(day).padStart(2,"0");
+  // Rare same-day duplicate (same type/period/recipient): add 31 → 32–62, still 2 digits.
+  if (taken.has(ref)) { day += 31; ref = base + String(day).padStart(2,"0"); }
+  return ref;
 }
 
 function fmtTime(h) {
@@ -1357,6 +1396,16 @@ function UserMgmtModal({ bookings, aliases, aliasNames, aliasColors={}, onChange
                       <input value={prof.gstNumber||""} onChange={e=>upProfile(primary,"gstNumber",e.target.value)}
                         placeholder="e.g. 123-456-789"
                         style={{...si,width:"auto",maxWidth:180}}/>
+                    )}
+                    {/* Billing recipient code — the 3-char RRR segment of the 12-char document ID / bank reference */}
+                    {fieldRow("Billing code",
+                      <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                        <input value={prof.billingCode||""} maxLength={3}
+                          onChange={e=>upProfile(primary,"billingCode",e.target.value.toUpperCase().replace(/[^A-Z0-9]/g,"").slice(0,3))}
+                          placeholder={deriveRecipientCode(prof.officialName||prof.fullName||(aliasNames||{})[primary]||primary.split("@")[0])}
+                          style={{...si,width:90,fontFamily:"monospace",letterSpacing:"0.12em",textTransform:"uppercase"}}/>
+                        <span style={{fontSize:11,color:"#94a3b8"}}>3-char code used in invoice / PO references (blank = auto)</span>
+                      </div>
                     )}
                     {/* Admin-only: bank account */}
                     {ptype==="admin" && <>
@@ -3800,6 +3849,7 @@ function buildBillingDocHtml(rec, docType, lines) {
       <div style="text-align:right">
         <div style="font-size:28px;font-weight:800;color:#fff">${docLabel}</div>
         <div style="font-size:13px;color:#94a3b8;margin-top:4px">#${docId}</div>
+        <div style="font-size:12px;color:#cbd5e1;margin-top:2px">Bank reference: <strong style="color:#fff;font-family:monospace;letter-spacing:0.04em">${docId}</strong></div>
         <div style="font-size:13px;color:#94a3b8">Date: ${(rec.createdAt||"").slice(0,10)||new Date().toISOString().slice(0,10)}</div>
         ${orderName?`<div style="font-size:13px;color:#94a3b8">Order: ${orderName}</div>`:""}
       </div>
@@ -4983,6 +5033,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
         <div style="text-align:right">
           <div style="font-size:28px;font-weight:800;color:#fff">${docLabel}</div>
           <div style="font-size:13px;color:#94a3b8;margin-top:4px">#${invNumber}</div>
+          <div style="font-size:12px;color:#cbd5e1;margin-top:2px">Bank reference: <strong style="color:#fff;font-family:monospace;letter-spacing:0.04em">${invNumber}</strong></div>
           <div style="font-size:13px;color:#94a3b8">Date: ${todayKey()}</div>
         </div>
       </div>
@@ -5033,7 +5084,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
     ];
     const dateRange = { from: dateFrom, to: dateTo };
     const baseName = invoiceBaseName(bkgsForInvoice);
-    const invNumber = `${todayKey().replace(/-/g,"")}-${bookerEmail.replace(/[^a-z0-9]/gi,"").slice(0,6).toUpperCase()}`;
+    const invNumber = genBankRef({ type: invDocType==="purchase_order"?"P":"I", dateFrom, dateTo, recipientCode: recipientCodeFor(bookerEmail) });
     const html = buildInvoiceHtml({ bookerName, bookerEmail, lines, gstMode: invGst, dateRange, invNumber, docType: invDocType, docName: baseName });
     if (invMarkInvoiced && onMarkInvoiced) onMarkInvoiced(bkgsForInvoice);
     if (format === "html" || format === "print") {
@@ -5072,10 +5123,30 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
   // Build official invoice record (no side-effects) for one scope (one booker).
   // Appends any pending credit adjustments as negative line items so they are
   // discounted from the booker's next invoice automatically.
+  // Resolve a 3-char recipient code for a booker/vendor. An admin override on the
+  // profile (billingCode) wins; otherwise it's derived from the official name and kept
+  // unique against reserved codes, every profile's code, and the rest of this batch.
+  function recipientCodeFor(email, batchRecs=[]) {
+    const e = (email||"").toLowerCase();
+    if (e === "gtec") return RECIPIENT_CODE_GTEC;
+    if (e === "combined" || e === "") return "CMB";
+    const canonKey = (emailAliases[e] || e);
+    const prof = (profiles||{})[canonKey] || {};
+    if (prof.billingCode) return cleanRecipientCode(prof.billingCode);
+    const used = [RECIPIENT_CODE_AMUA, RECIPIENT_CODE_GTEC,
+      ...Object.values(profiles||{}).map(p=>p?.billingCode).filter(Boolean),
+      ...batchRecs.map(r=>r.recipientCode).filter(Boolean)];
+    const name = prof.officialName || prof.fullName || (aliasNames||{})[canonKey] || canonKey.split("@")[0];
+    return deriveRecipientCode(name, used);
+  }
   function buildInvoiceRecord(scope, allRecs) {
-    const invId = generateDocId(allRecs.filter(r=>r.id?.startsWith("INV-")), "INV");
     const canonKey = (emailAliases[scope.email] || scope.email).toLowerCase();
     const prof = (profiles||{})[canonKey] || {};
+    const dates = scope.bkgs.map(b=>b.date).filter(Boolean).sort();
+    const periodFrom = dateFrom || dates[0] || todayKey();
+    const periodTo   = dateTo   || dates[dates.length-1] || todayKey();
+    const recipientCode = recipientCodeFor(scope.email, allRecs);
+    const invId = genBankRef({ type:"I", dateFrom:periodFrom, dateTo:periodTo, recipientCode, existingRefs: allRecs.map(r=>r.id) });
     const groupedLines    = buildInvoiceLines(scope.bkgs, "grouped");
     const individualLines = buildInvoiceLines(scope.bkgs, "individual");
 
@@ -5094,14 +5165,15 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
     const allGroupedLines = [...groupedLines, ...creditLines];
     const subtotal = allGroupedLines.reduce((s,l)=>s+l.cost, 0);
     const { pre, gst, total } = gstAmounts(subtotal, invGst);
-    const dates = scope.bkgs.map(b=>b.date).filter(Boolean).sort();
     return {
       id: invId,
+      bankRef: invId,
+      recipientCode,
       type: "invoice",
       orderName: invOrderName || "",
       createdAt: new Date().toISOString(),
-      dateFrom: dateFrom || dates[0] || todayKey(),
-      dateTo:   dateTo   || dates[dates.length-1] || todayKey(),
+      dateFrom: periodFrom,
+      dateTo:   periodTo,
       bookerEmail: scope.email,
       bookerName:  prof.fullName || (aliasNames||{})[canonKey] || scope.email.split("@")[0],
       bookerAddress: prof.address || "",
@@ -5120,9 +5192,13 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
   // Build one combined PO record (AMUA → GTEC) covering all booker scopes.
   // Lines are one entry per booker showing their subtotal; references invoice IDs.
   function buildGtecPoRecord(scopes, invoiceRecords, allRecs) {
-    const poId = generateDocId(allRecs.filter(r=>r.id?.startsWith("PO-")), "PO");
     const allBkgsFlat = scopes.flatMap(s=>s.bkgs);
     const allDates = allBkgsFlat.map(b=>b.date).filter(Boolean).sort();
+    const poFrom = dateFrom || allDates[0] || todayKey();
+    const poTo   = dateTo   || allDates[allDates.length-1] || todayKey();
+    // A PO is issued TO GTEC, so the recipient code is GTEC's.
+    const recipientCode = RECIPIENT_CODE_GTEC;
+    const poId = genBankRef({ type:"P", dateFrom:poFrom, dateTo:poTo, recipientCode, existingRefs: [...allRecs.map(r=>r.id), ...invoiceRecords.map(r=>r.id)] });
     const poLines = scopes.map(scope=>{
       const canonKey = (emailAliases[scope.email] || scope.email).toLowerCase();
       const prof = (profiles||{})[canonKey] || {};
@@ -5138,11 +5214,13 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
     const sumGst = invoiceRecords.reduce((s,r)=>s+(r.gst||0),0);
     return {
       id: poId,
+      bankRef: poId,
+      recipientCode,
       type: "purchase_order",
       orderName: invOrderName || "",
       createdAt: new Date().toISOString(),
-      dateFrom: dateFrom || allDates[0] || todayKey(),
-      dateTo:   dateTo   || allDates[allDates.length-1] || todayKey(),
+      dateFrom: poFrom,
+      dateTo:   poTo,
       bookerEmail: "gtec",
       bookerName:  VENDOR_GTEC.name,
       bookerAddress: VENDOR_GTEC.address,
