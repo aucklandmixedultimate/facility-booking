@@ -496,6 +496,56 @@ function parseCpsaRefs(sysNotes, notesLegacy) {
   return out;
 }
 
+// ── Cost splitting & manual (function) pricing ──────────────────────────────
+// Co-booker cost split, stored as [SPLIT] email:weight|email:weight in system_notes.
+// The primary booker is always one of the participants. Each booker is invoiced their
+// weight / total-weight share of the booking's cost. Absent ⇒ no split (primary pays all).
+const SPLIT_RE = /\[SPLIT\][^\n]*/g;
+function parseSplit(sysNotes) {
+  const m = (sysNotes||"").match(/\[SPLIT\]\s*([^\n]*)/);
+  if (!m) return null;
+  const parts = m[1].split("|").map(s=>s.trim()).filter(Boolean).map(p=>{
+    const i = p.lastIndexOf(":");
+    const email = (i>=0 ? p.slice(0,i) : p).trim().toLowerCase();
+    const w = i>=0 ? parseFloat(p.slice(i+1)) : 1;
+    return { email, weight: (Number.isNaN(w)||w<=0) ? 1 : w };
+  }).filter(p=>p.email);
+  return parts.length ? parts : null;
+}
+function setSplit(sysNotes, parts) {
+  const base = (sysNotes||"").replace(SPLIT_RE,"").trim();
+  // A split needs at least two participants to be meaningful.
+  if (!parts || parts.length < 2) return base;
+  const marker = `[SPLIT] ${parts.map(p=>`${p.email}:${(+p.weight||1)}`).join("|")}`;
+  return base ? `${base}\n${marker}` : marker;
+}
+// Fraction (0..1) of a booking's cost allocated to a given booker. null ⇒ booking
+// isn't split (caller bills the primary the full amount).
+function splitShareFor(sysNotes, email) {
+  const parts = parseSplit(sysNotes);
+  if (!parts) return null;
+  const total = parts.reduce((s,p)=>s+p.weight,0) || 1;
+  const mine = parts.find(p=>p.email===(email||"").toLowerCase());
+  return mine ? mine.weight/total : 0;
+}
+// Fixed total cost that overrides the hourly calc, stored as [FNCOST] amount.
+// Used for function-room bookings AMUA prices by hand. Absent ⇒ use hourly rates.
+const FNCOST_RE = /\[FNCOST\][^\n]*/g;
+function parseFunctionCost(sysNotes) {
+  const m = (sysNotes||"").match(/\[FNCOST\]\s*(-?[\d.]+)/);
+  if (!m) return null;
+  const v = parseFloat(m[1]);
+  return Number.isNaN(v) ? null : v;
+}
+function setFunctionCost(sysNotes, amount) {
+  const base = (sysNotes||"").replace(FNCOST_RE,"").trim();
+  if (amount===null || amount===undefined || amount==="") return base;
+  const v = parseFloat(amount);
+  if (Number.isNaN(v)) return base;
+  const marker = `[FNCOST] ${v}`;
+  return base ? `${base}\n${marker}` : marker;
+}
+
 // Compare the billed snapshot to a booking's current dimensions. Returns the
 // Day/evening-split cost of a booking-like {start_hour,duration,facility_id} at the
 // given facility rates (5:30pm cutoff). Shared by the mismatch view and billed-change
@@ -2364,7 +2414,7 @@ function BookingForm({ booking, allBookings, onAddToCart, onClose, isAdmin, logg
 }
 
 // ─── Booking Detail ───────────────────────────────────────────────────────────
-function BookingDetail({booking,onEdit,onClose,onCancel,isAdmin,onStatusChange,loggedInEmail,allClashes=[]}) {
+function BookingDetail({booking,onEdit,onClose,onCancel,isAdmin,onStatusChange,onPatch,loggedInEmail,allClashes=[]}) {
   const f=FACILITIES.find(x=>x.id===booking.facility_id);
   const m=STATUS_META[booking.status]||STATUS_META.pending;
   const isPast = booking.date < todayKey();
@@ -2372,6 +2422,30 @@ function BookingDetail({booking,onEdit,onClose,onCancel,isAdmin,onStatusChange,l
   const clashingAdminBks = booking.status==="clash"
     ? allClashes.filter(c=>c.user.id===booking.id).map(c=>c.admin)
     : [];
+  // ── Cost splitting & manual (function) pricing — admin edits, persisted to system_notes ──
+  const primaryEmailLc = (booking.email||"").toLowerCase();
+  const [editPricing,setEditPricing] = useState(false);
+  const [splitParts,setSplitParts]   = useState(()=>parseSplit(booking.system_notes)||[{email:primaryEmailLc,weight:1}]);
+  const [coEmail,setCoEmail]         = useState("");
+  const [fnCost,setFnCost]           = useState(()=>{const v=parseFunctionCost(booking.system_notes);return v==null?"":String(v);});
+  const splitTotalW = splitParts.reduce((s,p)=>s+(p.weight||0),0)||1;
+  function addCo() {
+    const e = coEmail.trim().toLowerCase();
+    if (!/\S+@\S+\.\S+/.test(e)) return;
+    if (!splitParts.some(p=>p.email===e)) setSplitParts([...splitParts,{email:e,weight:1}]);
+    setCoEmail("");
+  }
+  function removeCo(email){ setSplitParts(splitParts.filter(p=>p.email!==email)); }
+  function setWeight(email,w){ setSplitParts(splitParts.map(p=>p.email===email?{...p,weight:Math.max(0,parseFloat(w)||0)}:p)); }
+  function equalize(){ setSplitParts(splitParts.map(p=>({...p,weight:1}))); }
+  function savePricing() {
+    let sn = booking.system_notes||"";
+    sn = setFunctionCost(sn, fnCost===""?null:fnCost);
+    const parts = splitParts.filter(p=>p.email && p.weight>0);
+    sn = setSplit(sn, parts.length>=2?parts:null);
+    onPatch && onPatch(booking,{system_notes:sn});
+    setEditPricing(false);
+  }
   return (
     <div style={{display:"flex",flexDirection:"column",gap:16}}>
       <div style={{background:m.bg,border:`1px solid ${m.border}`,borderRadius:10,padding:"12px 16px"}}>
@@ -2500,6 +2574,76 @@ function BookingDetail({booking,onEdit,onClose,onCancel,isAdmin,onStatusChange,l
             </div>
           )}
         </>;
+      })()}
+      {(()=>{
+        const savedParts = parseSplit(booking.system_notes);
+        const savedFixed = parseFunctionCost(booking.system_notes);
+        if (!isAdmin && !savedParts && savedFixed==null) return null; // nothing to show bookers
+        const aliasName = e => (e===primaryEmailLc && booking.name) ? booking.name : e.split("@")[0];
+        return (
+          <div style={{background:"#faf5ff",border:"1px solid #e9d5ff",borderRadius:10,padding:"12px 16px"}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+              <span style={{fontSize:12,fontWeight:700,color:"#6b21a8",textTransform:"uppercase",letterSpacing:"0.05em"}}>💰 Cost splitting &amp; pricing</span>
+              {isAdmin && !editPricing && <button onClick={()=>setEditPricing(true)} style={{marginLeft:"auto",fontFamily:"inherit",fontSize:11,fontWeight:700,border:"1.5px solid #d8b4fe",background:"#fff",color:"#7e22ce",borderRadius:6,padding:"2px 10px",cursor:"pointer"}}>Edit</button>}
+            </div>
+            {!editPricing ? (
+              <div style={{display:"flex",flexDirection:"column",gap:6,fontSize:13,color:"#0f172a"}}>
+                {savedFixed!=null
+                  ? <div><strong>Fixed price:</strong> {fmtCost(savedFixed)} <span style={{color:"#7e22ce",fontSize:12}}>(overrides hourly rate)</span></div>
+                  : <div style={{color:"#64748b",fontSize:12}}>Hourly facility rate (no fixed price).</div>}
+                {savedParts
+                  ? <div>
+                      <div style={{fontSize:12,fontWeight:700,color:"#6b21a8",marginBottom:3}}>Split between {savedParts.length} bookers:</div>
+                      {(()=>{const tot=savedParts.reduce((s,p)=>s+p.weight,0)||1;return savedParts.map(p=>(
+                        <div key={p.email} style={{display:"flex",justifyContent:"space-between",gap:10,fontSize:12,padding:"1px 0"}}>
+                          <span>{aliasName(p.email)}{p.email===primaryEmailLc?" (primary)":""}</span>
+                          <span style={{fontWeight:700,color:"#7e22ce"}}>{Math.round(p.weight/tot*100)}%</span>
+                        </div>));})()}
+                    </div>
+                  : <div style={{color:"#64748b",fontSize:12}}>Not split — billed to {aliasName(primaryEmailLc)} in full.</div>}
+              </div>
+            ) : (
+              <div style={{display:"flex",flexDirection:"column",gap:12}}>
+                {/* Fixed price */}
+                <div>
+                  <label style={{...S.lbl,color:"#6b21a8"}}>Fixed price — overrides hourly (for function/room bookings)</label>
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    <span style={{fontSize:14,color:"#64748b"}}>$</span>
+                    <input type="number" min={0} step="0.01" value={fnCost} onChange={e=>setFnCost(e.target.value)} placeholder="leave blank = hourly rate" style={{...S.inp,maxWidth:200}}/>
+                  </div>
+                </div>
+                {/* Co-bookers / split */}
+                <div>
+                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+                    <label style={{...S.lbl,color:"#6b21a8",margin:0}}>Split cost between bookers</label>
+                    <button onClick={equalize} style={{fontFamily:"inherit",fontSize:11,fontWeight:700,border:"1.5px solid #d8b4fe",background:"#fff",color:"#7e22ce",borderRadius:6,padding:"1px 8px",cursor:"pointer"}}>Split equally</button>
+                  </div>
+                  <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                    {splitParts.map(p=>(
+                      <div key={p.email} style={{display:"flex",alignItems:"center",gap:8}}>
+                        <span style={{flex:1,fontSize:13,color:"#0f172a",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.email}{p.email===primaryEmailLc?<span style={{color:"#7e22ce",fontWeight:700}}> (primary)</span>:""}</span>
+                        <input type="number" min={0} step="1" value={p.weight} onChange={e=>setWeight(p.email,e.target.value)} title="Relative weight" style={{...S.inp,width:64,padding:"5px 8px"}}/>
+                        <span style={{fontSize:12,fontWeight:700,color:"#7e22ce",width:42,textAlign:"right"}}>{Math.round((p.weight||0)/splitTotalW*100)}%</span>
+                        {p.email!==primaryEmailLc
+                          ? <button onClick={()=>removeCo(p.email)} title="Remove co-booker" style={{border:"none",background:"transparent",color:"#ef4444",cursor:"pointer",fontWeight:700,fontSize:14,lineHeight:1}}>✕</button>
+                          : <span style={{width:14}}/>}
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{display:"flex",gap:6,marginTop:8}}>
+                    <input type="email" value={coEmail} onChange={e=>setCoEmail(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")addCo();}} placeholder="add co-booker email…" style={{...S.inp,flex:1}}/>
+                    <button onClick={addCo} style={S.btn({border:"1.5px solid #d8b4fe",background:"#fff",color:"#7e22ce",fontSize:12,fontWeight:700})}>+ Add</button>
+                  </div>
+                  <div style={{fontSize:11,color:"#94a3b8",marginTop:6}}>Add other bookers to divide this booking's cost. Each is invoiced their share; one participant means no split.</div>
+                </div>
+                <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+                  <button onClick={()=>{setEditPricing(false);setSplitParts(parseSplit(booking.system_notes)||[{email:primaryEmailLc,weight:1}]);setFnCost((v=>v==null?"":String(v))(parseFunctionCost(booking.system_notes)));}} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#475569",fontSize:12})}>Cancel</button>
+                  <button onClick={savePricing} style={S.btn({background:"#7e22ce",color:"#fff",fontSize:12,fontWeight:700})}>Save pricing</button>
+                </div>
+              </div>
+            )}
+          </div>
+        );
       })()}
       <div style={{display:"flex",gap:8,flexWrap:"wrap",paddingTop:8,borderTop:"1px solid #f1f5f9"}}>
         {isAdmin&&<>
@@ -4584,6 +4728,9 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
   // category (day/evening, decided by majority split). In hourly mode the
   // booking is split at 5:30 pm between day and evening rates.
   function getBookingCost(b) {
+    // A manually-set function/room price overrides the hourly calculation entirely.
+    const fixed = parseFunctionCost(b.system_notes);
+    if (fixed != null) return fixed;
     const rates = bRates(b);
     if (isPerBooking) {
       const rate = categoryOf(b) === "evening" ? rates.evening : rates.day;
@@ -4688,10 +4835,41 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
   function canEditDuration(email) { return isAdmin || (loggedInEmail && email.toLowerCase() === loggedInEmail.toLowerCase()); }
 
   // ── Invoice helpers ──────────────────────────────────────────────────────
+  // Full (pre-share) cost of one booking: a manual function price if set, else hourly.
+  function fullLineCost(b) {
+    const fixed = parseFunctionCost(b.system_notes);
+    if (fixed != null) return fixed;
+    const { day, evening } = splitHours(b);
+    const rates = bRates(b);
+    return day * rates.day + evening * rates.evening;
+  }
+  // A booking is "special" (itemised on its own, never merged into shared day/evening
+  // rate buckets) when it has a manual price or a partial cost-split share.
+  function isSpecialLine(b) {
+    return parseFunctionCost(b.system_notes) != null || b.__splitShare != null;
+  }
+  // One itemised line for a fixed-price and/or cost-split booking, applying the
+  // per-booker share carried on b.__splitShare (set when building per-booker scopes).
+  function specialLineFor(b) {
+    const share = b.__splitShare ?? 1;
+    const full = fullLineCost(b);
+    const fac = FACILITIES.find(f => f.id === b.facility_id);
+    const timeStr = `${fmtTime(b.start_hour)}–${fmtTime(b.start_hour + b.duration)}`;
+    const fixed = parseFunctionCost(b.system_notes) != null;
+    const shareNote = share < 1 ? ` · shared ${Math.round(share*100)}% of ${fmtCost(full)}` : "";
+    return {
+      desc:   `${fmtDate(b.date)} · ${fac?.name||b.facility_id} · ${timeStr}`,
+      detail: `${b.purpose||""}${fixed?" · fixed price":""}${shareNote}`,
+      cost:   full * share,
+    };
+  }
   function buildInvoiceLines(bkgs, detail) {
+    const special = bkgs.filter(isSpecialLine);
+    const plain   = bkgs.filter(b => !isSpecialLine(b));
+    const specialLines = special.map(specialLineFor);
     if (detail === "grouped") {
       const groups = {};
-      bkgs.forEach(b => {
+      plain.forEach(b => {
         const { day, evening } = splitHours(b);
         const rates = bRates(b);
         const fac = FACILITIES.find(f => f.id === b.facility_id);
@@ -4707,13 +4885,14 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
           groups[key].hours += evening; groups[key].cost += evening * rates.evening;
         }
       });
-      return Object.values(groups).map(g => ({
+      const groupedLines = Object.values(groups).map(g => ({
         desc:  g.desc,
         detail:`${fmtHrs(g.hours)} @ ${fmtCost(g.rate)}/hr`,
         cost:  g.cost,
       }));
+      return [...groupedLines, ...specialLines];
     } else {
-      return bkgs.map(b => {
+      const indiv = plain.map(b => {
         const { day, evening } = splitHours(b);
         const rates = bRates(b);
         const fac = FACILITIES.find(f => f.id === b.facility_id);
@@ -4725,7 +4904,8 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
           detail: `${b.purpose}${splitNote}`,
           cost,
         };
-      }).sort((a,b)=>a.desc.localeCompare(b.desc));
+      });
+      return [...indiv, ...specialLines].sort((a,b)=>a.desc.localeCompare(b.desc));
     }
   }
 
@@ -4993,19 +5173,42 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
   // Groups active bookings by booker for combined/per-booker export
   function getInvoiceScopes() {
     const sel = [...invSelectedEmails];
+    // A booking is in scope for a selected booker if they're the primary OR a co-booker
+    // on a cost-split. This lets co-bookers be invoiced their share even when they aren't
+    // the primary on the booking.
+    const isSelFor = (b, e) => {
+      const el = e.toLowerCase();
+      if (b.email.toLowerCase() === el) return true;
+      const sh = splitShareFor(b.system_notes, el);
+      return sh != null && sh > 0;
+    };
     const pool = sel.length > 0
-      ? activeForInvoice.filter(b => sel.some(e => b.email.toLowerCase() === e.toLowerCase()))
+      ? activeForInvoice.filter(b => sel.some(e => isSelFor(b, e)))
       : activeForInvoice;
     if (invScope === "combined" || sel.length <= 1) {
+      // Combined / single invoice: everyone is billed together, so the full cost of a
+      // split booking appears once (no per-booker share is applied).
       const email = sel.length === 1 ? sel[0] : "combined";
       const name = sel.length === 1 ? (invMode==="official" ? officialBookerName(sel[0]) : bookerNameMap[sel[0].toLowerCase()] || sel[0]) : "All Bookers";
       return [{ name, email, bkgs: pool }];
     }
-    return sel.map(e => ({
-      name: invMode==="official" ? officialBookerName(e) : (bookerNameMap[e.toLowerCase()] || e),
-      email: e,
-      bkgs: pool.filter(b => b.email.toLowerCase() === e.toLowerCase()),
-    }));
+    return sel.map(e => {
+      const el = e.toLowerCase();
+      const bkgs = [];
+      pool.forEach(b => {
+        const share = splitShareFor(b.system_notes, el);
+        if (share != null) {                       // split booking → bill this booker their share
+          if (share > 0) bkgs.push({ ...b, __splitShare: share });
+        } else if (b.email.toLowerCase() === el) { // unsplit booking → primary pays in full
+          bkgs.push(b);
+        }
+      });
+      return {
+        name: invMode==="official" ? officialBookerName(e) : (bookerNameMap[e.toLowerCase()] || e),
+        email: e,
+        bkgs,
+      };
+    });
   }
 
   // CSV export — all columns from every booking (not filtered)
@@ -8695,6 +8898,21 @@ export default function App() {
     showToast(`${STATUS_META[newStatus]?.label||newStatus} queued in cart.`);
   }
 
+  // Patch a single booking's fields directly (no email, no cart) — used by the booking
+  // detail's cost-splitting / fixed-price editor to persist system_notes changes.
+  async function handlePatchBooking(booking, patch) {
+    const full = { ...patch, updated_at: new Date().toISOString() };
+    if (configured) {
+      try { await sb.update("bookings", booking.id, full); await loadBookings(); }
+      catch(e){ showToast("Save failed: "+e.message, "error"); return; }
+    } else {
+      setBookings(prev => prev.map(b => b.id===booking.id ? { ...b, ...full } : b));
+    }
+    setViewing(prev => prev && prev.id===booking.id ? { ...prev, ...full } : prev);
+    logActivity("booking_edit", { ids:[booking.id], booker: booking.email, pricing: true });
+    showToast("Booking pricing updated.");
+  }
+
   function updateFacilityRate(facilityId, type, value) {
     const existing = typeof facilityRates[facilityId] === "object" ? facilityRates[facilityId] : { day: 0, evening: 0 };
     const newRates = { ...facilityRates, [facilityId]: { ...existing, [type]: parseFloat(value) || 0 } };
@@ -9946,7 +10164,7 @@ export default function App() {
 
       {viewing&&(
         <Modal title="Booking Details" onClose={()=>setViewing(null)}>
-          <BookingDetail booking={viewing} onEdit={()=>openEdit(viewing)} onClose={()=>setViewing(null)} onCancel={()=>queueForRemoval(viewing.id)} isAdmin={isAdmin} onStatusChange={status=>handleStatusChange(viewing,status)} loggedInEmail={loggedInEmail} allClashes={allClashes}/>
+          <BookingDetail booking={viewing} onEdit={()=>openEdit(viewing)} onClose={()=>setViewing(null)} onCancel={()=>queueForRemoval(viewing.id)} isAdmin={isAdmin} onStatusChange={status=>handleStatusChange(viewing,status)} onPatch={handlePatchBooking} loggedInEmail={loggedInEmail} allClashes={allClashes}/>
         </Modal>
       )}
 
