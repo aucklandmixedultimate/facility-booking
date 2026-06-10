@@ -1548,8 +1548,13 @@ function OverlapWarning({title,description,bookings:bkgs,onProceed,onCancel}) {
 
 // ─── Single Booking Row Form ──────────────────────────────────────────────────
 // Used inside BookingForm to represent one item in the cart
-function InlineDayPicker({ date, bookings, onPick }) {
+// onPick(facId,start,dur) fires immediately on release (single-pick / auto-complete).
+// In `multi` mode, releases accumulate into a list across any facility column instead;
+// onConfirm(picks) is called with all staged {facility_id,start_hour,duration} slots so
+// the caller can create several separate bookings at once.
+function InlineDayPicker({ date, bookings, onPick, onConfirm, multi=false }) {
   const [drag, setDrag] = useState(null);
+  const [picks, setPicks] = useState([]); // multi mode: staged slots across facilities
   const SH = 14; // shorter slot height for inline
   const yToSlot = y => Math.max(0, Math.min(Math.floor(y/SH), CAL_TOTAL*2-1));
   const slotToHour = s => CAL_START + s*0.5;
@@ -1568,17 +1573,20 @@ function InlineDayPicker({ date, bookings, onPick }) {
   function up(e, facId) {
     if (!drag || drag.facility!==facId) return;
     const nd = norm(drag);
-    const duration = (nd.hi-nd.lo+1)*0.5;
+    const duration = Math.max(0.5, (nd.hi-nd.lo+1)*0.5);
+    const start_hour = slotToHour(nd.lo);
     setDrag(null);
-    onPick(facId, slotToHour(nd.lo), Math.max(0.5, duration));
+    if (multi) setPicks(ps => [...ps, { facility_id:facId, start_hour, duration }]);
+    else onPick(facId, start_hour, duration);
   }
+  function removePick(i) { setPicks(ps => ps.filter((_,k)=>k!==i)); }
   const nd = norm(drag);
   const dayBkgs = bookings.filter(b=>b.date===date && !["cancelled","rejected"].includes(b.status));
   return (
     <div style={{border:"1.5px solid #e2e8f0",borderRadius:8,background:"#fff",padding:8}}>
       <div style={{fontSize:11,color:"#64748b",marginBottom:6,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
-        <span style={{fontWeight:700,color:"#0f172a"}}>📅 Pick a slot</span>
-        <span>Click or drag a column to set facility, start time and duration.</span>
+        <span style={{fontWeight:700,color:"#0f172a"}}>📅 Pick {multi?"slots":"a slot"}</span>
+        <span>{multi?"Drag one or more slots in any field column — each becomes a separate booking.":"Click or drag a column to set facility, start time and duration."}</span>
         <span style={{color:"#b45309"}}>· 💡 Field #1 is the only floodlit field — its shaded daytime hours are a last resort; use another field during the day.</span>
       </div>
       <div style={{display:"flex",overflowX:"auto"}}>
@@ -1625,6 +1633,14 @@ function InlineDayPicker({ date, bookings, onPick }) {
                     {b.purpose?b.purpose.slice(0,18):""}
                   </div>
                 ))}
+                {/* Staged picks (multi mode) — click a block to remove it */}
+                {picks.map((p,pi)=>({p,pi})).filter(({p})=>p.facility_id===fac.id).map(({p,pi})=>(
+                  <div key={"pick"+pi} title="Click to remove this slot"
+                    onMouseDown={e=>{e.stopPropagation();e.preventDefault();removePick(pi);}}
+                    style={{position:"absolute",left:1,right:1,top:(p.start_hour-CAL_START)*SH*2,height:Math.max(p.duration*SH*2-1,12),background:"rgba(99,102,241,0.85)",border:"1.5px solid #4338ca",borderRadius:4,cursor:"pointer",zIndex:4,overflow:"hidden",fontSize:8,fontWeight:700,color:"#fff",padding:"1px 3px",display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:2}}>
+                    <span>{fmtTimeShort(p.start_hour)}</span><span>✕</span>
+                  </div>
+                ))}
                 {isDragging&&nd&&(
                   <div style={{position:"absolute",left:0,right:0,top:nd.lo*SH,height:(nd.hi-nd.lo+1)*SH,background:"rgba(99,102,241,0.20)",border:"1.5px solid #6366f1",borderRadius:4,pointerEvents:"none",zIndex:3,display:"flex",alignItems:"flex-start",justifyContent:"center",fontSize:8,fontWeight:700,color:"#4338ca",paddingTop:1}}>
                     {fmtTime(slotToHour(nd.lo))}–{fmtTime(slotToHour(nd.hi+1))}
@@ -1635,10 +1651,33 @@ function InlineDayPicker({ date, bookings, onPick }) {
           );
         })}
       </div>
+      {multi&&(
+        <div style={{marginTop:8,borderTop:"1px solid #f1f5f9",paddingTop:8,display:"flex",flexWrap:"wrap",alignItems:"center",gap:6}}>
+          {picks.length===0
+            ? <span style={{fontSize:11,color:"#94a3b8"}}>No slots staged yet — drag in any field column to add one.</span>
+            : picks.map((p,pi)=>{
+                const f=FACILITIES.find(x=>x.id===p.facility_id);
+                return (
+                  <span key={pi} style={{display:"inline-flex",alignItems:"center",gap:4,fontSize:11,fontWeight:700,color:"#3730a3",background:"#eef2ff",border:"1px solid #c7d2fe",borderRadius:6,padding:"2px 6px"}}>
+                    <span style={{width:7,height:7,borderRadius:2,background:f?.color||"#6366f1",display:"inline-block"}}/>
+                    {facShort(p.facility_id)} {fmtTime(p.start_hour)}–{fmtTime(p.start_hour+p.duration)}
+                    <button onClick={()=>removePick(pi)} title="Remove" style={{border:"none",background:"transparent",color:"#6366f1",cursor:"pointer",fontWeight:700,fontSize:12,lineHeight:1,padding:0}}>✕</button>
+                  </span>
+                );
+              })}
+          <div style={{marginLeft:"auto",display:"flex",gap:6}}>
+            {picks.length>0&&<button onClick={()=>setPicks([])} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#475569",fontSize:12})}>Clear</button>}
+            <button onClick={()=>onConfirm&&onConfirm(picks)} disabled={!picks.length}
+              style={S.btn({background:picks.length?"#4338ca":"#cbd5e1",color:"#fff",fontSize:12,fontWeight:700,cursor:picks.length?"pointer":"not-allowed"})}>
+              ✓ Add {picks.length||""} {picks.length===1?"booking":"bookings"}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
-function BookingRow({ row, idx, onChange, onRemove, isOnly, isAdmin, isEditing, allBookings }) {
+function BookingRow({ row, idx, onChange, onRemove, onPickSlots, isOnly, isAdmin, isEditing, allBookings }) {
   const isMobile = useMobile();
   const [recurMode, setRecurMode] = useState(row.recur?.mode || "none");
   const [recurWeeks, setRecurWeeks] = useState(row.recur?.weeks || 4);
@@ -1651,6 +1690,13 @@ function BookingRow({ row, idx, onChange, onRemove, isOnly, isAdmin, isEditing, 
     onChange(idx, {...row, facility_id, start_hour, duration});
     setShowPicker(false);
   }
+  // Multi-pick: first slot fills this row, the rest become additional rows.
+  function confirmPicks(picks) {
+    if (!picks || !picks.length) { setShowPicker(false); return; }
+    onPickSlots ? onPickSlots(idx, picks) : pickSlot(picks[0].facility_id, picks[0].start_hour, picks[0].duration);
+    setShowPicker(false);
+  }
+  const canMultiPick = !isEditing && !!onPickSlots;
   function updRecur(changes) {
     const r = {mode:recurMode, weeks:recurWeeks, until:recurUntil, ...changes};
     if(changes.mode!==undefined) setRecurMode(changes.mode);
@@ -1701,9 +1747,9 @@ function BookingRow({ row, idx, onChange, onRemove, isOnly, isAdmin, isEditing, 
       </div>
 
       {showPicker && (
-        <Modal title={`📅 Pick a slot — ${row.date||"select date first"}`} onClose={()=>setShowPicker(false)} width={760}>
+        <Modal title={`📅 Pick ${canMultiPick?"slots":"a slot"} — ${row.date||"select date first"}`} onClose={()=>setShowPicker(false)} width={760}>
           {row.date
-            ? <InlineDayPicker date={row.date} bookings={allBookings} onPick={pickSlot}/>
+            ? <InlineDayPicker date={row.date} bookings={allBookings} onPick={pickSlot} multi={canMultiPick} onConfirm={confirmPicks}/>
             : <div style={{padding:24,textAlign:"center",color:"#94a3b8",fontSize:13}}>Set a date first, then pick a slot.</div>
           }
           <div style={{marginTop:12,display:"flex",justifyContent:"flex-end"}}>
@@ -2356,6 +2402,18 @@ function BookingForm({ booking, allBookings, onAddToCart, onClose, isAdmin, logg
   function updateRow(idx, upd) { setRows(rs=>rs.map((r,i)=>i===idx?upd:r)); }
   function addRow()   { setRows(rs=>[...rs, makeBlankRow()]); }
   function removeRow(idx) { setRows(rs=>rs.filter((_,i)=>i!==idx)); }
+  // Apply several day-grid picks at once: the first fills row[idx], the rest are
+  // inserted as new rows (separate bookings) inheriting that row's date/purpose/notes.
+  function applyPickedSlots(idx, picks) {
+    if (!picks || !picks.length) return;
+    setRows(rs => {
+      const base = rs[idx] || makeBlankRow();
+      const built = picks.map((p,i) => i===0
+        ? { ...base, facility_id:p.facility_id, start_hour:p.start_hour, duration:p.duration }
+        : makeBlankRow({ date:base.date, facility_id:p.facility_id, start_hour:p.start_hour, duration:p.duration, purpose:base.purpose, notes:base.notes }));
+      return [...rs.slice(0,idx), ...built, ...rs.slice(idx+1)];
+    });
+  }
 
   // Expand recurrence rules into individual booking drafts
   function expandRows() {
@@ -2444,7 +2502,7 @@ function BookingForm({ booking, allBookings, onAddToCart, onClose, isAdmin, logg
 
       {/* Booking rows */}
       {rows.map((row,i)=>(
-        <BookingRow key={i} row={row} idx={i} onChange={updateRow} onRemove={removeRow}
+        <BookingRow key={i} row={row} idx={i} onChange={updateRow} onRemove={removeRow} onPickSlots={applyPickedSlots}
           isOnly={rows.length===1} isAdmin={isAdmin} isEditing={isEditing}
           allBookings={allBookings} loggedInEmail={loggedInEmail}/>
       ))}
