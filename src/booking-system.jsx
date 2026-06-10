@@ -8493,6 +8493,13 @@ export default function App() {
   // on the very next render (no one-frame lag), plus persist to localStorage.
   _emailColorOverrides = aliasColors;
   useEffect(()=>{ try{ localStorage.setItem("fb_alias_colors", JSON.stringify(aliasColors)); }catch{ /* ignore */ } }, [aliasColors]);
+  // Always-current refs for the data the GTEC sync's matcher depends on. A deferred /
+  // auto-triggered sync would otherwise close over stale mount-time values (before
+  // loadSettings populated DB aliases), flagging false mismatches that a later manual
+  // sync — running with current state — then resolves. Reading from refs makes both
+  // paths identical. Assigned in render so they track the latest committed values.
+  const emailAliasesRef = useRef(emailAliases); emailAliasesRef.current = emailAliases;
+  const gtecLinksRef     = useRef(gtecLinks);    gtecLinksRef.current     = gtecLinks;
   const canonEmail = useCallback(em => {
     if (!em) return em;
     const k = em.toLowerCase();
@@ -8638,6 +8645,7 @@ export default function App() {
       // merge (aliases), display names, chip colours and profiles persist across devices.
       if (map.email_aliases && typeof map.email_aliases === "object") {
         setEmailAliases(map.email_aliases); _emailAliases = map.email_aliases;
+        emailAliasesRef.current = map.email_aliases; // keep the sync matcher's ref current immediately
         try{localStorage.setItem("fb_email_aliases",JSON.stringify(map.email_aliases));}catch{ /* ignore */ }
       }
       if (map.alias_names && typeof map.alias_names === "object") {
@@ -8718,7 +8726,7 @@ export default function App() {
         const facilityIds = mapCJRFacility(purpose);
 
         // Check if this CPSA event matches an existing approved user booking
-        const match = findMatchingUserBooking(currentBookings, ev, facilityIds, gtecLinks, emailAliases);
+        const match = findMatchingUserBooking(currentBookings, ev, facilityIds, gtecLinksRef.current, emailAliasesRef.current);
         if (match) {
           // A booking the admin has explicitly marked "✓ Confirmed by GTEC" stays confirmed:
           // its resolution is sticky, so a later non-exact match must never reactivate the
@@ -8920,7 +8928,10 @@ export default function App() {
 
   async function handleSyncAll() {
     const today = todayKey();
-    const future = bookings.filter(b => b.date >= today);
+    // Compute the month set from a fresh booking source so a deferred/auto sync doesn't
+    // miss future months due to a stale `bookings` closure.
+    const srcBookings = configured ? (await sb.select("bookings")) : bookings;
+    const future = srcBookings.filter(b => b.date >= today);
     const months = new Set();
     const now = new Date();
     months.add(`${now.getFullYear()}-${now.getMonth()}`);
@@ -8952,12 +8963,15 @@ export default function App() {
   useEffect(()=>{
     if(!session) return;
     loadBookings();
-    // Auto-sync CPSA if admin and last sync was more than 4 hours ago
+    // Auto-sync CPSA if admin and last sync was more than 4 hours ago.
     if(session.user?.app_metadata?.role==="admin"){
       const last=parseInt(localStorage.getItem("fb_last_sync_at")||"0",10);
       if(Date.now()-last > 4*60*60*1000) {
-        // Defer slightly so bookings load first
-        setTimeout(()=>handleSyncAll(),2000);
+        // Wait for settings (booker aliases / GTEC links) before the auto-sync so the
+        // matcher uses authoritative identity data. Running early — before loadSettings
+        // populates DB aliases — makes the matcher flag false mismatches that a later
+        // manual sync then resolves. handleSyncAll fetches fresh bookings itself.
+        (async()=>{ await loadSettings(); await handleSyncAll(); })();
       }
     }
   },[session]);
