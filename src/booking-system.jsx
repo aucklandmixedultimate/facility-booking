@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useRef, useMemo, Fragment } from "react";
 import { createClient } from "@supabase/supabase-js";
 import logoUrl from "./assets/logo.jpg";
+import { driveConfigured, getDriveToken, ensureFolderPath, ensureFolder, uploadFile, findChildFile, keepLatestRevisionForever, testDriveConnection, downloadDriveFile, disconnectDrive, DRIVE_ROOT_FOLDER } from "./drive-client.js";
+import { htmlToPdfBlob } from "./pdf-utils.js";
 
 // ─── LOGO ─────────────────────────────────────────────────────────────────────
 const LOGO_SRC = logoUrl;
@@ -804,6 +806,7 @@ const ACTIVITY_ADMIN_ACTIONS = new Set([
   "cpsa_sync_start","cpsa_sync_complete","cpsa_confirm","cpsa_review_flag",
   "cpsa_admin_booking_add","cpsa_admin_booking_remove","mismatch_resolution",
   "mismatch_billing_settled","status_change","invoiced","official_invoice_created",
+  "drive_upload","drive_attach",
 ]);
 const ACTIVITY_LABELS = {
   booking_create:"Booking created", booking_edit:"Booking edited", booking_delete:"Booking deleted",
@@ -812,6 +815,7 @@ const ACTIVITY_LABELS = {
   cpsa_admin_booking_add:"GTEC block added", cpsa_admin_booking_remove:"GTEC block removed",
   mismatch_resolution:"Mismatch resolved", mismatch_billing_settled:"Billing settled",
   invoiced:"Invoiced", official_invoice_created:"Invoice created",
+  drive_upload:"Saved to Drive", drive_attach:"GTEC invoice attached",
   email_sent:"Email sent", email_failed:"Email failed", sign_in:"Signed in", sign_out:"Signed out",
 };
 // Who performed the action: explicit stamp from logActivity, else best-effort by action.
@@ -851,6 +855,8 @@ function describeActivity(r) {
     case "mismatch_billing_settled":return `Settled mismatch billing${d.billing_state?` · ${d.billing_state}`:""}`;
     case "invoiced":                return `Marked ${d.count||d.ids?.length||0} booking${(d.count||d.ids?.length)!==1?"s":""} invoiced`;
     case "official_invoice_created":return `Created official invoice · ${d.count||0} item${d.count!==1?"s":""}`;
+    case "drive_upload": return `Saved ${d.doc||"document"} to Drive${d.reason==="status_change"?" · status update":d.reason==="manual"?" · manual sync":""}`;
+    case "drive_attach": return `Attached ${d.file||"file"} · Invoice (from GTEC)`;
     case "email_sent":   return `→ ${d.to||""}${d.subject?` · ${d.subject}`:""}`;
     case "email_failed": return `→ ${d.to||""}${d.subject?` · ${d.subject}`:""}`;
     case "sign_in":  return d.email ? `${d.email}` : "Signed in";
@@ -909,6 +915,7 @@ function ActivityLogModal({onClose, inline=false}) {
     if (a==="booking_delete") return {color:"#b91c1c",bg:"#fef2f2",border:"#fecaca"};
     if (a==="status_change")  return {color:"#a16207",bg:"#fefce8",border:"#fde68a"};
     if (a==="invoiced"||a==="official_invoice_created") return {color:"#3730a3",bg:"#eef2ff",border:"#c7d2fe"};
+    if (a.startsWith("drive_")) return {color:"#15803d",bg:"#f0fdf4",border:"#bbf7d0"};
     if (a==="email_sent")   return {color:"#0e7490",bg:"#ecfeff",border:"#a5f3fc"};
     if (a==="email_failed") return {color:"#b91c1c",bg:"#fef2f2",border:"#fecaca"};
     if (a==="sign_in"||a==="sign_out") return {color:"#475569",bg:"#f8fafc",border:"#e2e8f0"};
@@ -3487,13 +3494,107 @@ const PIPELINE_STATES = [
 ];
 const PIPELINE_KEYS = PIPELINE_STATES.map(s=>s.key);
 
-function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onLoadToSummary, isAdmin=false, loggedInEmail="", emailAliases={}, aliasNames={} }) {
+// ─── Billing document rendering (module scope — shared by BillingTab download
+// and the Drive sync in App) ──────────────────────────────────────────────────
+// Builds invoice/PO HTML from the snapshot stored on the record. Falls back
+// to "draft" formatting (no GST extraction) when fields are missing.
+function buildBillingDocHtml(rec, docType, lines) {
+  const fmtDate = d => d ? new Date(d+"T00:00:00").toLocaleDateString("en-NZ",{day:"numeric",month:"short",year:"numeric"}) : "—";
+  const docLabel = docType === "purchase_order" ? "Purchase Order" : "Invoice";
+  const fmtC = n => "$" + Number(n||0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g,",");
+  const periodStr = rec.dateFrom&&rec.dateTo ? `${fmtDate(rec.dateFrom)} – ${fmtDate(rec.dateTo)}` : "All periods";
+  const docId = docType==="purchase_order" ? (rec.poId||rec.id) : rec.id;
+  const orderName = rec.orderName||"";
+  const rowsHtml = (lines||[]).map(l=>`
+    <tr>
+      <td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;font-size:13px;color:#0f172a">${l.desc||l.description||l.label||"—"}</td>
+      <td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;font-size:12px;color:#64748b">${l.detail||""}</td>
+      <td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;font-size:13px;color:#0f172a;text-align:right;white-space:nowrap">${fmtC(l.cost)}</td>
+    </tr>`).join("");
+  const pre = rec.subtotal!=null ? rec.subtotal : (lines||[]).reduce((s,l)=>s+(l.cost||0),0);
+  const gst = rec.gst!=null ? rec.gst : 0;
+  const total = rec.total!=null ? rec.total : pre + gst;
+  const gstLabel = rec.gstMode==="note"?"":rec.gstMode==="exclusive"?"excl. GST":"incl. GST";
+  const gstRows = rec.gstMode==="note"
+    ? `<tr><td colspan="2" style="padding:8px 16px;font-size:12px;color:#64748b;text-align:right">GST inclusive</td><td style="padding:8px 16px;font-size:13px;font-weight:700;color:#0f172a;text-align:right">${fmtC(total)}</td></tr>`
+    : `<tr style="background:#f8fafc"><td colspan="2" style="padding:8px 16px;font-size:12px;color:#64748b;text-align:right">Subtotal (${gstLabel})</td><td style="padding:8px 16px;font-size:13px;color:#0f172a;text-align:right">${fmtC(pre)}</td></tr>
+       <tr style="background:#f8fafc"><td colspan="2" style="padding:8px 16px;font-size:12px;color:#64748b;text-align:right">GST (15%)</td><td style="padding:8px 16px;font-size:13px;color:#0f172a;text-align:right">${fmtC(gst)}</td></tr>
+       <tr style="background:#f0fdf4"><td colspan="2" style="padding:10px 16px;font-size:14px;font-weight:700;color:#0f172a;text-align:right">Total</td><td style="padding:10px 16px;font-size:16px;font-weight:800;color:#15803d;text-align:right">${fmtC(total)}</td></tr>`;
+  const amuaLines = [AMUA_INFO.address, AMUA_INFO.gstNumber?`GST No: ${AMUA_INFO.gstNumber}`:"", AMUA_INFO.bank].filter(Boolean).map(l=>`<div>${l}</div>`).join("");
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>${docLabel} ${docId}</title><style>
+    @media print { body{margin:0} }
+    body{font-family:'Segoe UI',sans-serif;background:#f8fafc;margin:0;padding:32px 16px}
+    .page{max-width:700px;margin:0 auto;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 4px 32px rgba(0,0,0,0.08)}
+  </style></head><body>
+  <div class="page">
+    <div style="background:#0f172a;padding:32px 40px;display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:16px">
+      <div>
+        <div style="font-size:24px;font-weight:800;color:#fff;letter-spacing:-0.02em">${AMUA_INFO.name}</div>
+        <div style="font-size:13px;color:#94a3b8;margin-top:4px">${amuaLines}</div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:28px;font-weight:800;color:#fff">${docLabel}</div>
+        <div style="font-size:13px;color:#94a3b8;margin-top:4px">#${docId}</div>
+        <div style="font-size:13px;color:#94a3b8">Date: ${(rec.createdAt||"").slice(0,10)||new Date().toISOString().slice(0,10)}</div>
+        ${orderName?`<div style="font-size:13px;color:#94a3b8">Order: ${orderName}</div>`:""}
+      </div>
+    </div>
+    <div style="padding:28px 40px;display:grid;grid-template-columns:1fr 1fr;gap:24px;border-bottom:1px solid #f1f5f9">
+      <div>
+        <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px">Bill To</div>
+        <div style="font-size:15px;font-weight:700;color:#0f172a">${rec.bookerName||"(see email)"}</div>
+        <div style="font-size:13px;color:#475569">${rec.bookerEmail||""}</div>
+        ${rec.bookerAddress?`<div style="font-size:12px;color:#475569;margin-top:4px;white-space:pre-line">${rec.bookerAddress}</div>`:""}
+        ${rec.bookerGst?`<div style="font-size:12px;color:#94a3b8;margin-top:2px">GST: ${rec.bookerGst}</div>`:""}
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px">Period</div>
+        <div style="font-size:14px;font-weight:600;color:#0f172a">${periodStr}</div>
+      </div>
+    </div>
+    <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse">
+      <thead><tr style="background:#f8fafc">
+        <th style="padding:10px 16px;text-align:left;font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;border-bottom:2px solid #f1f5f9">Description</th>
+        <th style="padding:10px 16px;text-align:left;font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;border-bottom:2px solid #f1f5f9">Detail</th>
+        <th style="padding:10px 16px;text-align:right;font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;border-bottom:2px solid #f1f5f9">Amount</th>
+      </tr></thead>
+      <tbody>${rowsHtml}</tbody>
+      <tfoot>${gstRows}</tfoot>
+    </table>
+    <div style="padding:20px 40px 32px;font-size:12px;color:#94a3b8;text-align:center">
+      ${AMUA_INFO.bank?`Bank: ${AMUA_INFO.bank} · `:""}Generated by FacilityBook${rec.status==="draft"?" · DRAFT":""}
+    </div>
+  </div></body></html>`;
+}
+
+// Drive file/folder naming for billing documents. Names are deterministic so
+// re-syncs find-or-update the same files even across browsers/devices.
+const sanitizeDriveName = s => String(s||"").replace(/[/\\]+/g,"-").replace(/\s+/g," ").trim();
+function billingDocBaseName(rec) {
+  const isPO = rec.type === "purchase_order";
+  const docTag = isPO ? "PO" : "Invoice";
+  const orderTag = rec.orderName ? ` - ${sanitizeDriveName(rec.orderName)}` : "";
+  // Invoices add the booker so multiple invoices in one batch don't collide.
+  const whoTag = isPO ? "" : ` - ${sanitizeDriveName(rec.bookerName || (rec.bookerEmail||"").split("@")[0])}`;
+  return `AMUA ${docTag}${orderTag}${whoTag} - ${(rec.dateFrom||"").replace(/-/g,"")}-${(rec.dateTo||"").replace(/-/g,"")}`;
+}
+function driveBatchFolderName(records) {
+  const po = records.find(r=>r.type==="purchase_order") || records[0];
+  const range = `${(po.dateFrom||"").replace(/-/g,"")}-${(po.dateTo||"").replace(/-/g,"")}`;
+  const order = sanitizeDriveName(po.orderName);
+  return order ? `${range} — ${order}` : `${range} — ${po.batchId||po.id}`;
+}
+const DRIVE_SUBFOLDERS = { po:"PO (to GTEC)", fromGtec:"Invoice (from GTEC)", toClubs:"Invoice (to Clubs)" };
+
+function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onLoadToSummary, isAdmin=false, loggedInEmail="", emailAliases={}, aliasNames={}, driveEnabled=false, onDriveSync, onDriveAttach }) {
   const [filterStatus, setFilterStatus] = useState("all");
   const [expandedId, setExpandedId] = useState(null);
   const [expandedBatchId, setExpandedBatchId] = useState(null);
   const [expandedSubId, setExpandedSubId] = useState(null);
   const [exportMode, setExportMode] = useState("grouped"); // "grouped" | "individual"
   const [viewMode, setViewMode] = useState("grouped"); // "grouped" = batch cards | "individual" = flat rows
+  const [driveTest, setDriveTest] = useState(null); // { ok, msg } from Connect & test
+  const [driveBusy, setDriveBusy] = useState(false);
 
   const SHORT_STATUS = { draft:"Draft", submitted:"Sent", gtec_invoiced:"GTEC", club_invoiced:"Club", complete:"Done" };
 
@@ -3551,75 +3652,6 @@ function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onLoadT
   const fmtMoney = n => n!=null ? `$${Number(n).toFixed(2)}` : "—";
 
   // ─── Document download from stored billing record ──────────────────────────
-  // Builds invoice/PO HTML from the snapshot stored on the record. Falls back
-  // to "draft" formatting (no GST extraction) when fields are missing.
-  function buildRecordHtml(rec, docType, lines) {
-    const docLabel = docType === "purchase_order" ? "Purchase Order" : "Invoice";
-    const fmtC = n => "$" + Number(n||0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g,",");
-    const periodStr = rec.dateFrom&&rec.dateTo ? `${fmtDate(rec.dateFrom)} – ${fmtDate(rec.dateTo)}` : "All periods";
-    const docId = docType==="purchase_order" ? (rec.poId||rec.id) : rec.id;
-    const orderName = rec.orderName||"";
-    const rowsHtml = (lines||[]).map(l=>`
-      <tr>
-        <td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;font-size:13px;color:#0f172a">${l.desc||l.description||l.label||"—"}</td>
-        <td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;font-size:12px;color:#64748b">${l.detail||""}</td>
-        <td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;font-size:13px;color:#0f172a;text-align:right;white-space:nowrap">${fmtC(l.cost)}</td>
-      </tr>`).join("");
-    const pre = rec.subtotal!=null ? rec.subtotal : (lines||[]).reduce((s,l)=>s+(l.cost||0),0);
-    const gst = rec.gst!=null ? rec.gst : 0;
-    const total = rec.total!=null ? rec.total : pre + gst;
-    const gstLabel = rec.gstMode==="note"?"":rec.gstMode==="exclusive"?"excl. GST":"incl. GST";
-    const gstRows = rec.gstMode==="note"
-      ? `<tr><td colspan="2" style="padding:8px 16px;font-size:12px;color:#64748b;text-align:right">GST inclusive</td><td style="padding:8px 16px;font-size:13px;font-weight:700;color:#0f172a;text-align:right">${fmtC(total)}</td></tr>`
-      : `<tr style="background:#f8fafc"><td colspan="2" style="padding:8px 16px;font-size:12px;color:#64748b;text-align:right">Subtotal (${gstLabel})</td><td style="padding:8px 16px;font-size:13px;color:#0f172a;text-align:right">${fmtC(pre)}</td></tr>
-         <tr style="background:#f8fafc"><td colspan="2" style="padding:8px 16px;font-size:12px;color:#64748b;text-align:right">GST (15%)</td><td style="padding:8px 16px;font-size:13px;color:#0f172a;text-align:right">${fmtC(gst)}</td></tr>
-         <tr style="background:#f0fdf4"><td colspan="2" style="padding:10px 16px;font-size:14px;font-weight:700;color:#0f172a;text-align:right">Total</td><td style="padding:10px 16px;font-size:16px;font-weight:800;color:#15803d;text-align:right">${fmtC(total)}</td></tr>`;
-    const amuaLines = [AMUA_INFO.address, AMUA_INFO.gstNumber?`GST No: ${AMUA_INFO.gstNumber}`:"", AMUA_INFO.bank].filter(Boolean).map(l=>`<div>${l}</div>`).join("");
-    return `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>${docLabel} ${docId}</title><style>
-      @media print { body{margin:0} }
-      body{font-family:'Segoe UI',sans-serif;background:#f8fafc;margin:0;padding:32px 16px}
-      .page{max-width:700px;margin:0 auto;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 4px 32px rgba(0,0,0,0.08)}
-    </style></head><body>
-    <div class="page">
-      <div style="background:#0f172a;padding:32px 40px;display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:16px">
-        <div>
-          <div style="font-size:24px;font-weight:800;color:#fff;letter-spacing:-0.02em">${AMUA_INFO.name}</div>
-          <div style="font-size:13px;color:#94a3b8;margin-top:4px">${amuaLines}</div>
-        </div>
-        <div style="text-align:right">
-          <div style="font-size:28px;font-weight:800;color:#fff">${docLabel}</div>
-          <div style="font-size:13px;color:#94a3b8;margin-top:4px">#${docId}</div>
-          <div style="font-size:13px;color:#94a3b8">Date: ${(rec.createdAt||"").slice(0,10)||new Date().toISOString().slice(0,10)}</div>
-          ${orderName?`<div style="font-size:13px;color:#94a3b8">Order: ${orderName}</div>`:""}
-        </div>
-      </div>
-      <div style="padding:28px 40px;display:grid;grid-template-columns:1fr 1fr;gap:24px;border-bottom:1px solid #f1f5f9">
-        <div>
-          <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px">Bill To</div>
-          <div style="font-size:15px;font-weight:700;color:#0f172a">${rec.bookerName||"(see email)"}</div>
-          <div style="font-size:13px;color:#475569">${rec.bookerEmail||""}</div>
-          ${rec.bookerAddress?`<div style="font-size:12px;color:#475569;margin-top:4px;white-space:pre-line">${rec.bookerAddress}</div>`:""}
-          ${rec.bookerGst?`<div style="font-size:12px;color:#94a3b8;margin-top:2px">GST: ${rec.bookerGst}</div>`:""}
-        </div>
-        <div style="text-align:right">
-          <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px">Period</div>
-          <div style="font-size:14px;font-weight:600;color:#0f172a">${periodStr}</div>
-        </div>
-      </div>
-      <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse">
-        <thead><tr style="background:#f8fafc">
-          <th style="padding:10px 16px;text-align:left;font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;border-bottom:2px solid #f1f5f9">Description</th>
-          <th style="padding:10px 16px;text-align:left;font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;border-bottom:2px solid #f1f5f9">Detail</th>
-          <th style="padding:10px 16px;text-align:right;font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;border-bottom:2px solid #f1f5f9">Amount</th>
-        </tr></thead>
-        <tbody>${rowsHtml}</tbody>
-        <tfoot>${gstRows}</tfoot>
-      </table>
-      <div style="padding:20px 40px 32px;font-size:12px;color:#94a3b8;text-align:center">
-        ${AMUA_INFO.bank?`Bank: ${AMUA_INFO.bank} · `:""}Generated by FacilityBook${rec.status==="draft"?" · DRAFT":""}
-      </div>
-    </div></body></html>`;
-  }
   function downloadRecord(rec, format, docType, detail) {
     const lines = detail==="individual" ? (rec.individualLines||rec.lines||[]) : (rec.lines||[]);
     const docTag = docType==="purchase_order" ? "PO" : "Invoice";
@@ -3638,7 +3670,7 @@ function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onLoadT
       URL.revokeObjectURL(url);
       return;
     }
-    const html = buildRecordHtml(rec, docType, lines);
+    const html = buildBillingDocHtml(rec, docType, lines);
     const win = window.open("","_blank");
     if (win) {
       win.document.write(html); win.document.close();
@@ -3760,6 +3792,46 @@ function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onLoadT
             ))}
           </div>
         </div>
+        {driveEnabled&&isAdmin&&(()=>{
+          const d = rec.drive||null;
+          const chipBtn = (col,bg,bd)=>({padding:"4px 10px",borderRadius:6,border:`1.5px solid ${bd}`,background:bg,color:col,cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"});
+          return (
+            <div style={{display:"flex",flexDirection:"column",gap:6,padding:"10px 0",borderTop:"1px solid #e2e8f0"}}>
+              <div style={{fontSize:11,fontWeight:700,color:"#475569"}}>📁 Google Drive</div>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",fontSize:11}}>
+                {d?.webViewLink
+                  ? <>
+                      <a href={d.webViewLink} target="_blank" rel="noreferrer" style={{...chipBtn("#0369a1","#f0f9ff","#bae6fd"),textDecoration:"none"}}>↗ Open in Drive</a>
+                      <span style={{color:"#94a3b8"}}>synced {d.uploadedAt?new Date(d.uploadedAt).toLocaleString("en-NZ",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}):""}</span>
+                    </>
+                  : <span style={{color:"#94a3b8",fontStyle:"italic"}}>Not synced to Drive yet.</span>}
+                {onDriveSync&&(
+                  <button onClick={()=>onDriveSync([rec.id])} style={chipBtn("#047857","#ecfdf5","#6ee7b7")}>
+                    {d?.webViewLink?"⟳ Re-sync":"⬆ Sync to Drive"}
+                  </button>
+                )}
+                {d?.error&&<span style={{color:"#b91c1c",background:"#fef2f2",border:"1px solid #fecaca",borderRadius:6,padding:"3px 8px",maxWidth:420,wordBreak:"break-word"}}>⚠ {d.error}</span>}
+              </div>
+              {isPO&&(
+                <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",fontSize:11}}>
+                  <span style={{color:"#64748b",fontWeight:600}}>GTEC invoice received:</span>
+                  {d?.gtecInvoice
+                    ? <>
+                        <button onClick={()=>downloadDriveFile(d.gtecInvoice.id, d.gtecInvoice.name).catch(e=>window.alert("Download failed: "+(e.message||e)))} style={chipBtn("#1d4ed8","#dbeafe","#bfdbfe")}>⬇ {d.gtecInvoice.name}</button>
+                        {d.gtecInvoice.webViewLink&&<a href={d.gtecInvoice.webViewLink} target="_blank" rel="noreferrer" style={{...chipBtn("#0369a1","#f0f9ff","#bae6fd"),textDecoration:"none"}}>↗ Drive</a>}
+                      </>
+                    : <span style={{color:"#94a3b8",fontStyle:"italic"}}>none attached</span>}
+                  {onDriveAttach&&(
+                    <label style={{...chipBtn("#7c3aed","#f5f3ff","#ddd6fe"),display:"inline-flex",alignItems:"center",gap:4}}>
+                      📎 {d?.gtecInvoice?"Replace":"Attach"} file
+                      <input type="file" style={{display:"none"}} onChange={e=>{const f=e.target.files?.[0]; if(f) onDriveAttach(rec, f); e.target.value="";}}/>
+                    </label>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })()}
         {((exportMode==="individual"?(rec.individualLines||rec.lines):rec.lines)||[]).length>0&&(
           <div style={{marginTop:10}}>
             <div style={{fontSize:11,fontWeight:700,color:"#475569",marginBottom:4}}>Invoice Lines ({exportMode==="individual"?"Itemised — per booking":"Summary — grouped"})</div>
@@ -3894,6 +3966,13 @@ function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onLoadT
               style={{padding:"3px 9px",borderRadius:6,border:"1.5px solid #c4b5fd",background:"#ede9fe",color:"#6d28d9",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"}}>
               📥 Download all
             </button>
+            {driveEnabled&&isAdmin&&onDriveSync&&(
+              <button onClick={e=>{e.stopPropagation();onDriveSync(batch.records.map(r=>r.id));}}
+                title="Sync all documents in this batch to Google Drive"
+                style={{padding:"3px 9px",borderRadius:6,border:"1.5px solid #6ee7b7",background:"#ecfdf5",color:"#047857",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"}}>
+                📁 {batch.records.some(r=>r.drive?.webViewLink)?"Re-sync Drive":"Sync to Drive"}
+              </button>
+            )}
             {onLoadToSummary&&(
               <button onClick={e=>{e.stopPropagation();onLoadToSummary({
                 dateFrom: batch.dateFrom, dateTo: batch.dateTo,
@@ -3954,6 +4033,24 @@ function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onLoadT
           })}
         </div>
       </div>
+      {/* Google Drive connection panel — config-gated */}
+      {isAdmin&&driveEnabled&&(
+        <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:12,padding:"8px 12px",background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:8,fontSize:12}}>
+          <span style={{fontWeight:700,color:"#15803d"}}>📁 Google Drive</span>
+          <span style={{color:"#64748b"}}>Official invoices & POs are filed to <strong>{DRIVE_ROOT_FOLDER}</strong> on creation.</span>
+          <button disabled={driveBusy} onClick={async()=>{
+            setDriveBusy(true); setDriveTest(null);
+            try { const r = await testDriveConnection(); setDriveTest({ok:true,msg:`Connected as ${r.email} — folder create/delete OK.`}); }
+            catch(e) { setDriveTest({ok:false,msg:String(e.message||e)}); }
+            finally { setDriveBusy(false); }
+          }} style={{marginLeft:"auto",padding:"4px 12px",borderRadius:6,border:"1.5px solid #6ee7b7",background:"#ecfdf5",color:"#047857",cursor:driveBusy?"wait":"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"}}>
+            {driveBusy?"Testing…":"🔌 Connect & test"}
+          </button>
+          <button onClick={()=>{disconnectDrive(); setDriveTest({ok:true,msg:"Disconnected — the next sync will ask for Google consent again."});}}
+            style={{padding:"4px 10px",borderRadius:6,border:"1px solid #e2e8f0",background:"#fff",color:"#94a3b8",cursor:"pointer",fontSize:11,fontWeight:600,fontFamily:"inherit"}}>Disconnect</button>
+          {driveTest&&<div style={{flexBasis:"100%",color:driveTest.ok?"#15803d":"#b91c1c",fontSize:11,fontWeight:600}}>{driveTest.ok?"✓ ":"⚠ "}{driveTest.msg}</div>}
+        </div>
+      )}
       {/* View mode + export mode */}
       <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:12,padding:"6px 10px",background:"#f8fafc",borderRadius:8,fontSize:11,flexWrap:"wrap"}}>
         <div style={{display:"flex",alignItems:"center",gap:6}}>
@@ -8489,6 +8586,90 @@ export default function App() {
     showToast(`${targets.length} booking${targets.length>1?"s":""} marked invoiced.`);
   }
 
+  // ─── Google Drive sync (config-gated; inert without VITE_GOOGLE_CLIENT_ID) ──
+  // Renders billing records to faithful PDF (+ source HTML) and files them under
+  // AMUA Billing/<year>/<range — order>/<PO (to GTEC) | Invoice (to Clubs)>/.
+  // Re-uploading to the same fileId preserves Drive revision history (draft→final).
+  const setRecordDrive = (id, patch) => setBillingRecords(prev => prev.map(r => r.id===id ? { ...r, drive: { ...(r.drive||{}), ...patch } } : r));
+
+  async function driveSyncRecords(records, { reason="create" } = {}) {
+    if (!driveConfigured() || records.length===0) return;
+    try {
+      await getDriveToken({ interactive:true }); // popup-needing step first, while user activation is fresh
+    } catch(e) {
+      records.forEach(r=>setRecordDrive(r.id, { error:`Not connected: ${e.message||e}`, erroredAt:new Date().toISOString() }));
+      showToast("Drive not connected — documents kept locally. Sync from the Billing tab.", "error");
+      return;
+    }
+    showToast(`Saving ${records.length} document${records.length!==1?"s":""} to Google Drive…`);
+    let okCount = 0;
+    try {
+      const year = String(new Date(records[0].createdAt||Date.now()).getFullYear());
+      const batchFolder = await ensureFolderPath([DRIVE_ROOT_FOLDER, year, driveBatchFolderName(records)]);
+      const subPo    = await ensureFolder(DRIVE_SUBFOLDERS.po, batchFolder.id);
+      const subClubs = await ensureFolder(DRIVE_SUBFOLDERS.toClubs, batchFolder.id);
+      // Always create the drop-point for the invoice GTEC sends us, even though
+      // nothing is uploaded into it here (see handleDriveAttachGtec).
+      await ensureFolder(DRIVE_SUBFOLDERS.fromGtec, batchFolder.id);
+      for (const rec of records) {
+        try {
+          const isPO = rec.type==="purchase_order";
+          const folder = isPO ? subPo : subClubs;
+          const base = billingDocBaseName(rec);
+          const html = buildBillingDocHtml(rec, isPO?"purchase_order":"invoice", rec.lines||[]);
+          const pdfBlob = await htmlToPdfBlob(html);
+          // Prefer the stored id; fall back to name lookup so a different browser
+          // updates the same files instead of duplicating them.
+          const pdfId  = rec.drive?.pdfId  || (await findChildFile(`${base}.pdf`,  folder.id))?.id || null;
+          const pdfFile = await uploadFile({ name:`${base}.pdf`, parentId:folder.id, blob:pdfBlob, mimeType:"application/pdf", fileId:pdfId });
+          const htmlId = rec.drive?.htmlId || (await findChildFile(`${base}.html`, folder.id))?.id || null;
+          const htmlFile = await uploadFile({ name:`${base}.html`, parentId:folder.id, blob:new Blob([html],{type:"text/html"}), mimeType:"text/html", fileId:htmlId });
+          // Pin finalised PDFs so Drive never auto-purges that revision.
+          if ((rec.status||"draft")!=="draft") { try { await keepLatestRevisionForever(pdfFile.id); } catch { /* best-effort */ } }
+          setRecordDrive(rec.id, { pdfId:pdfFile.id, htmlId:htmlFile.id, folderId:folder.id, batchFolderId:batchFolder.id, webViewLink:pdfFile.webViewLink, uploadedAt:new Date().toISOString(), error:null });
+          logActivity("drive_upload", { record_id: rec.id, doc: base, reason });
+          okCount++;
+        } catch(e) {
+          setRecordDrive(rec.id, { error: String(e.message||e), erroredAt:new Date().toISOString() });
+        }
+      }
+      if (okCount===records.length) showToast(`Saved ${okCount} document${okCount!==1?"s":""} to Drive.`);
+      else showToast(`Drive: ${okCount}/${records.length} saved — open the record in Billing for the error.`, "error");
+    } catch(e) {
+      records.forEach(r=>setRecordDrive(r.id, { error: String(e.message||e), erroredAt:new Date().toISOString() }));
+      showToast("Drive upload failed: "+(e.message||e), "error");
+    }
+  }
+
+  // Manual (re-)sync from the Billing tab — group by batch so folder naming stays batch-derived.
+  function handleDriveSync(recordIds) {
+    const recs = billingRecords.filter(r=>recordIds.includes(r.id));
+    const byBatch = {};
+    recs.forEach(r=>{ const k=r.batchId||r.id; if(!byBatch[k]) byBatch[k]=[]; byBatch[k].push(r); });
+    Object.values(byBatch).forEach(group=>{ driveSyncRecords(group, { reason:"manual" }); });
+  }
+
+  // Upload a received GTEC invoice into the batch's "Invoice (from GTEC)" folder
+  // and remember it on the record so the Billing UI can download it later.
+  async function handleDriveAttachGtec(rec, file) {
+    try {
+      await getDriveToken({ interactive:true });
+      const year = String(new Date(rec.createdAt||Date.now()).getFullYear());
+      const batchRecs = billingRecords.filter(r=>r.batchId&&r.batchId===rec.batchId);
+      const batchFolder = rec.drive?.batchFolderId
+        ? { id: rec.drive.batchFolderId }
+        : await ensureFolderPath([DRIVE_ROOT_FOLDER, year, driveBatchFolderName(batchRecs.length?batchRecs:[rec])]);
+      const fromFolder = await ensureFolder(DRIVE_SUBFOLDERS.fromGtec, batchFolder.id);
+      const prevId = (await findChildFile(file.name, fromFolder.id))?.id || null;
+      const up = await uploadFile({ name:file.name, parentId:fromFolder.id, blob:file, mimeType:file.type||"application/octet-stream", fileId:prevId });
+      setRecordDrive(rec.id, { gtecInvoice:{ id:up.id, name:up.name||file.name, webViewLink:up.webViewLink, uploadedAt:new Date().toISOString() }, batchFolderId:batchFolder.id });
+      logActivity("drive_attach", { record_id: rec.id, file: file.name });
+      showToast(`Attached "${file.name}" to Drive (Invoice from GTEC).`);
+    } catch(e) {
+      showToast("Attach failed: "+(e.message||e), "error");
+    }
+  }
+
   function handleCreateOfficialInvoice(newRecords) {
     // No immediate invoicing — bookings are marked invoiced when record leaves Draft.
     const batchId = `BATCH-${Date.now()}`;
@@ -8498,6 +8679,9 @@ export default function App() {
     const invCount = tagged.filter(r=>r.type==="invoice"||!r.type).length;
     const poCount  = tagged.filter(r=>r.type==="purchase_order").length;
     showToast(`Created ${invCount} invoice${invCount!==1?"s":""} + ${poCount} PO.`);
+    // File the batch to Google Drive (no-op when not configured; errors are
+    // recorded on each record with a retry path in the Billing tab).
+    if (driveConfigured()) driveSyncRecords(tagged, { reason:"create" });
   }
 
   // Update a billing record; when status advances from draft, mark linked bookings
@@ -8541,6 +8725,12 @@ export default function App() {
     }
     // Persist invoice-locked pricing snapshots (after setState so state is consistent)
     if (lockedConds.length) savePricingConditions([...pricingConditions, ...lockedConds]);
+    // Drive: refresh the filed document on pipeline transitions so the DRAFT
+    // watermark clears and Drive's revision history records the change.
+    const beforeRec = billingRecords.find(r=>r.id===patch.id);
+    if (driveConfigured() && beforeRec && patch.status && patch.status !== (beforeRec.status||"draft")) {
+      driveSyncRecords([{ ...beforeRec, ...patch }], { reason:"status_change" });
+    }
   }
 
   // Bulk approve/reject — groups by email and sends one summary per person
@@ -9182,7 +9372,7 @@ export default function App() {
         )}
 
         {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<SummaryTab bookings={bookings} loggedInEmail={loggedInEmail} facilityRates={facilityRates} pricingConditions={pricingConditions} onAddPricingCondition={addPricingCondition} onUpdatePricingCondition={updatePricingCondition} onRemovePricingCondition={removePricingCondition} isAdmin={isAdmin} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onUpdateFacilityRate={updateFacilityRate} pricingMode={pricingMode} onSetPricingMode={setPricingMode} onProposeMerge={handleProposeMerge} onBulkApply={handleBulkApply} onMarkInvoiced={handleMarkInvoiced} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} bookerFilter={listBookerFilter} profiles={profiles} emailAliases={emailAliases} aliasNames={aliasNames} onCreateOfficialInvoice={handleCreateOfficialInvoice} onFilterChange={s=>setListBookerFilter(s)} loadRequest={summaryLoadRequest}/>}</div>}
-        {tab==="billing"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<BillingTab billingRecords={billingRecords} onUpdateRecord={handleUpdateBillingRecord} onDeleteRecord={id=>setBillingRecords(prev=>prev.filter(r=>r.id!==id))} onLoadToSummary={handleLoadBillingToSummary} isAdmin={isAdmin} loggedInEmail={loggedInEmail} emailAliases={emailAliases} aliasNames={aliasNames} profiles={profiles}/>}</div>}
+        {tab==="billing"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<BillingTab billingRecords={billingRecords} onUpdateRecord={handleUpdateBillingRecord} onDeleteRecord={id=>setBillingRecords(prev=>prev.filter(r=>r.id!==id))} onLoadToSummary={handleLoadBillingToSummary} isAdmin={isAdmin} loggedInEmail={loggedInEmail} emailAliases={emailAliases} aliasNames={aliasNames} profiles={profiles} driveEnabled={driveConfigured()} onDriveSync={handleDriveSync} onDriveAttach={handleDriveAttachGtec}/>}</div>}
         {tab==="about"&&<div style={{padding:"8px 0"}}><AboutTab/></div>}
         {tab==="admin"&&isAdmin&&<div style={S.card}>
           {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onView={setViewing} onQueueDelete={queueForRemovalSilent} clashes={allClashes} deleteIds={new Set(deleteQueue.map(b=>b.id))} facilityRates={facilityRates} onUpdateFacilityRate={updateFacilityRate} onClearOldUnapproved={handleClearOldUnapproved} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onSyncDB={handleSyncDB} onBulkApply={handleBulkApply} onSaveMismatch={handleSaveMismatch} onInformCpsa={setInformCpsaFor} onQueueNotifications={queueNotifications} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} loggedInEmail={loggedInEmail} syncResults={syncResults} onClearSyncResults={()=>setSyncResults([])} showSyncResults={showSyncPanel} onToggleSyncResults={()=>setShowSyncPanel(v=>!v)} bookerFilter={listBookerFilter} onToggleBooker={toggleBooker} onSetBookerFilter={setListBookerFilter} aliasNames={aliasNames} emailAliases={emailAliases} pricingConditions={pricingConditions} onAddPricingCondition={addPricingCondition} onUpdatePricingCondition={updatePricingCondition} onRemovePricingCondition={removePricingCondition}/>}
