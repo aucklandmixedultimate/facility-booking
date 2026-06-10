@@ -121,6 +121,13 @@ function emailColor(email) {
 }
 
 const CAL_START=7, CAL_END=22, CAL_TOTAL=CAL_END-CAL_START, HOUR_H=56, SLOT_H=HOUR_H*0.5;
+// Boundary between the "day" and "evening" pricing bands (5:30pm). Also used to mark
+// the floodlit Field #1 (f3) as a last resort during daylight: anything that starts
+// and ends before this cutoff is daytime, when an unlit field should be used instead.
+const DAY_EVENING_CUTOFF = 17.5;
+// Field #1 (f3) is the only floodlit field, so daytime use should be avoided to keep
+// it free for evening (post-cutoff) play that genuinely needs the lights.
+const FLOODLIT_FIELD_ID = "f3";
 const DURATIONS = [
   {label:"30 min",value:0.5},{label:"1 hr",value:1},{label:"1.5 hrs",value:1.5},
   {label:"2 hrs",value:2},{label:"2.5 hrs",value:2.5},{label:"3 hrs",value:3},
@@ -494,7 +501,7 @@ function parseCpsaRefs(sysNotes, notesLegacy) {
 // given facility rates (5:30pm cutoff). Shared by the mismatch view and billed-change
 // tracking so both frame credit/deficit identically.
 function bookingCost(v, facilityRates) {
-  const CUTOFF=17.5, end=v.start_hour+v.duration;
+  const CUTOFF=DAY_EVENING_CUTOFF, end=v.start_hour+v.duration;
   const day = v.start_hour>=CUTOFF ? 0 : end>CUTOFF ? CUTOFF-v.start_hour : v.duration;
   const evening = v.duration-day;
   const r=(facilityRates||{})[v.facility_id];
@@ -1452,9 +1459,10 @@ function InlineDayPicker({ date, bookings, onPick }) {
   const dayBkgs = bookings.filter(b=>b.date===date && !["cancelled","rejected"].includes(b.status));
   return (
     <div style={{border:"1.5px solid #e2e8f0",borderRadius:8,background:"#fff",padding:8}}>
-      <div style={{fontSize:11,color:"#64748b",marginBottom:6,display:"flex",alignItems:"center",gap:6}}>
+      <div style={{fontSize:11,color:"#64748b",marginBottom:6,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
         <span style={{fontWeight:700,color:"#0f172a"}}>📅 Pick a slot</span>
         <span>Click or drag a column to set facility, start time and duration.</span>
+        <span style={{color:"#b45309"}}>· 💡 Field #1 is the only floodlit field — its shaded daytime hours are a last resort; use another field during the day.</span>
       </div>
       <div style={{display:"flex",overflowX:"auto"}}>
         {/* Hour labels */}
@@ -1468,11 +1476,15 @@ function InlineDayPicker({ date, bookings, onPick }) {
           const isDragging = drag?.facility===fac.id;
           const facBkgs = dayBkgs.filter(b=>b.facility_id===fac.id);
           const colTint = FACILITY_TINT[fac.id] || "#fff";
+          const isFloodlit = fac.id===FLOODLIT_FIELD_ID;
+          // Daytime band (07:00 → cutoff) where the only floodlit field should be a last resort.
+          const daylightH = Math.max(0, (DAY_EVENING_CUTOFF-CAL_START))*SH*2;
           return (
             <div key={fac.id} style={{flex:1,minWidth:64}}>
-              <div title={fac.name} style={{height:18,display:"flex",alignItems:"center",justifyContent:"center",gap:3,fontSize:9,fontWeight:700,color:fac.color,background:colTint,borderTopLeftRadius:4,borderTopRightRadius:4,borderBottom:`2px solid ${fac.color}`,overflow:"hidden",whiteSpace:"nowrap"}}>
+              <div title={isFloodlit?`${fac.name} — only floodlit field; avoid daytime use (book only as a last resort)`:fac.name} style={{height:18,display:"flex",alignItems:"center",justifyContent:"center",gap:3,fontSize:9,fontWeight:700,color:fac.color,background:colTint,borderTopLeftRadius:4,borderTopRightRadius:4,borderBottom:`2px solid ${fac.color}`,overflow:"hidden",whiteSpace:"nowrap"}}>
                 <span style={{width:6,height:6,borderRadius:"50%",background:fac.color,flexShrink:0}}/>
                 {fac.name.includes("Field")?fac.name.replace("Field ","Fld "):fac.name.split("–")[0].trim().slice(0,8)}
+                {isFloodlit&&<span title="Only floodlit field — avoid daytime use">💡</span>}
               </div>
               <div onMouseDown={e=>down(e,fac.id)} onMouseMove={e=>move(e,fac.id)} onMouseUp={e=>up(e,fac.id)}
                 onMouseLeave={()=>isDragging&&setDrag(null)}
@@ -1482,6 +1494,14 @@ function InlineDayPicker({ date, bookings, onPick }) {
                     <div style={{height:"50%",borderBottom:"1px dashed rgba(0,0,0,0.03)"}}/>
                   </div>
                 ))}
+                {isFloodlit&&daylightH>0&&(
+                  <div title="Daylight hours — Field #1 is the only floodlit field. Use another field during the day; book here only as a last resort."
+                    style={{position:"absolute",left:0,right:0,top:0,height:daylightH,pointerEvents:"none",zIndex:1,
+                      background:"repeating-linear-gradient(45deg,rgba(217,119,6,0.13) 0 6px,rgba(217,119,6,0) 6px 12px)",
+                      borderBottom:"1.5px dashed rgba(217,119,6,0.6)"}}>
+                    <div style={{position:"sticky",top:0,fontSize:8,fontWeight:700,color:"#b45309",textAlign:"center",padding:"2px 1px",lineHeight:1.2}}>☀️ daylight — last resort</div>
+                  </div>
+                )}
                 {facBkgs.map(b=>(
                   <div key={b.id} title={`${b.name||"booking"} · ${fmtTime(b.start_hour)}`}
                     style={{position:"absolute",left:1,right:1,top:(b.start_hour-CAL_START)*SH*2,height:Math.max(b.duration*SH*2-1,12),background:fac.color,opacity:0.75,borderRadius:3,pointerEvents:"none",overflow:"hidden",fontSize:8,color:"#fff",padding:"1px 3px"}}>
@@ -2386,6 +2406,33 @@ function BookingDetail({booking,onEdit,onClose,onCancel,isAdmin,onStatusChange,l
           <div style={{fontSize:11,color:"#a16207",marginTop:8}}>Detected during GTEC sync — reconcile before confirming.</div>
         </div>
       )}
+      {(()=>{
+        // GTEC's held record for this booking, captured at the last sync. Shown so the
+        // booker/admin can see exactly what GTEC has on file alongside our own details.
+        const g = parseGtecSnapshot(booking.system_notes);
+        const hasTime = g && g.start_hour!=null && !Number.isNaN(g.start_hour);
+        if (!g || (!g.name && !hasTime && !(g.facilityIds&&g.facilityIds.length) && !g.date)) return null;
+        const gfacs = (g.facilityIds||[]).map(id=>FACILITIES.find(f=>f.id===id)?.name||id).filter(Boolean);
+        const detRows = [
+          g.name && ["Event", g.name],
+          gfacs.length && ["Field(s)", gfacs.join(", ")],
+          g.date && ["Date", fmtDate(g.date)],
+          hasTime && ["Time", `${fmtTime(g.start_hour)} – ${fmtTime(g.start_hour+(g.duration||0))}`],
+          (g.duration!=null && !Number.isNaN(g.duration)) && ["Duration", DURATIONS.find(d=>d.value===g.duration)?.label||`${g.duration}h`],
+        ].filter(Boolean);
+        return (
+          <div style={{background:"#ecfeff",border:"1px solid #67e8f9",borderRadius:10,padding:"12px 16px"}}>
+            <div style={{fontSize:12,fontWeight:700,color:"#155e75",textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:8,display:"flex",alignItems:"center",gap:6}}>🌐 GTEC booking details</div>
+            <div style={{display:"grid",gridTemplateColumns:"auto 1fr",gap:"4px 12px"}}>
+              {detRows.map(([label,value])=>(<Fragment key={label}>
+                <span style={{fontSize:12,fontWeight:600,color:"#0e7490",whiteSpace:"nowrap"}}>{label}</span>
+                <span style={{fontSize:14,color:"#0f172a"}}>{value}</span>
+              </Fragment>))}
+            </div>
+            <div style={{fontSize:11,color:"#0e7490",marginTop:8}}>As held by GTEC at the most recent sync.</div>
+          </div>
+        );
+      })()}
       {isPast&&<div style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:"8px 12px",fontSize:12,color:"#64748b",display:"flex",alignItems:"center",gap:6}}>🔒 Past booking — {isAdmin?"admin can delete":"read-only"}</div>}
       <div><EmailChip email={booking.email}/></div>
       {[
