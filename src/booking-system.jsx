@@ -2335,8 +2335,12 @@ function BookingForm({ booking, allBookings, onAddToCart, onClose, isAdmin, logg
     ? [{ id:booking.id, facility_id:booking.facility_id, date:booking.date, start_hour:booking.start_hour,
          duration:booking.duration, purpose:booking.purpose, notes:booking.notes||"",
          status:booking.status, recur:booking.recur||{mode:"none",weeks:4,until:""} }]
-    : [makeBlankRow(booking && !isMultiEdit ? { facility_id:booking.facility_id||FACILITIES[0].id,
-        date:booking.date||todayKey(), start_hour:booking.start_hour||9, duration:booking.duration||1 } : {})];
+    // Multi-day drag (calendar/week view) seeds one row per selected day → a grouped booking.
+    : (booking && Array.isArray(booking._dates) && booking._dates.length
+      ? booking._dates.map(dt => makeBlankRow({ facility_id:booking.facility_id||FACILITIES[0].id,
+          date:dt, start_hour:booking.start_hour||9, duration:booking.duration||1 }))
+      : [makeBlankRow(booking && !isMultiEdit ? { facility_id:booking.facility_id||FACILITIES[0].id,
+          date:booking.date||todayKey(), start_hour:booking.start_hour||9, duration:booking.duration||1 } : {})]);
 
   const [name,  setName]  = useState(booking?.name  || "");
   const [email, setEmail] = useState(booking?.email || loggedInEmail || "");
@@ -2710,7 +2714,7 @@ function BookingDetail({booking,onEdit,onClose,onCancel,isAdmin,onStatusChange,o
   );
 }
 
-function WeekCalendar({ bookings, onNewBooking, onBookingClick, selectedFacility, cartSourceIds=new Set(), deleteIds=new Set(), cartNewDrafts=[], focusedDate, setFocusedDate, onOpenDay, bookerFilter=new Set(), aliasNames={}, emailAliases={} }) {
+function WeekCalendar({ bookings, onNewBooking, onNewBookingRange, onBookingClick, selectedFacility, cartSourceIds=new Set(), deleteIds=new Set(), cartNewDrafts=[], focusedDate, setFocusedDate, onOpenDay, bookerFilter=new Set(), aliasNames={}, emailAliases={} }) {
   function calAlias(em) {
     if (!em) return "";
     const primary = (emailAliases[em.toLowerCase()] || em).toLowerCase();
@@ -2732,44 +2736,60 @@ function WeekCalendar({ bookings, onNewBooking, onBookingClick, selectedFacility
 
   function yToSlot(y)      { return Math.max(0, Math.min(Math.floor(y / SLOT_H), CAL_TOTAL * 2 - 1)); }
   function slotToHour(s)   { return CAL_START + s * 0.5; }
-  function normDrag(ds) {
-    if (!ds) return null;
-    const lo = Math.min(ds.startSlot, ds.endSlot), hi = Math.max(ds.startSlot, ds.endSlot);
-    return { ...ds, lo, hi };
-  }
 
-  function handleMouseDown(e, dk) {
+  // Column-aware drag: a vertical drag in one column selects a time band (opens the
+  // day popup); a horizontal drag across columns selects a span of days and creates one
+  // grouped booking (one row per day) at the dragged time band. Coordinates are read
+  // from the columns container so a drag can cross day boundaries.
+  const colsRef = useRef(null);
+  function colFromX(clientX) {
+    const r = colsRef.current?.getBoundingClientRect(); if (!r) return 0;
+    return Math.max(0, Math.min(days.length-1, Math.floor((clientX - r.left) / (r.width / days.length))));
+  }
+  function slotFromY(clientY) {
+    const r = colsRef.current?.getBoundingClientRect(); if (!r) return 0;
+    return yToSlot(clientY - r.top);
+  }
+  function gridDown(e) {
     if (e.button !== 0) return;
     e.preventDefault();
-    const rect = e.currentTarget.getBoundingClientRect();
-    const slot = yToSlot(e.clientY - rect.top);
     dragMoved.current = false;
-    setDragState({ date:dk, startSlot:slot, endSlot:slot, active:true });
+    setDragState({ startCol:colFromX(e.clientX), endCol:colFromX(e.clientX), startSlot:slotFromY(e.clientY), endSlot:slotFromY(e.clientY), active:true });
   }
-
-  function handleMouseMove(e, dk) {
-    if (!dragState?.active || dragState.date !== dk) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const slot = yToSlot(e.clientY - rect.top);
-    if (slot !== dragState.endSlot) {
+  function gridMove(e) {
+    if (!dragState?.active) return;
+    const col = colFromX(e.clientX), slot = slotFromY(e.clientY);
+    if (col !== dragState.endCol || slot !== dragState.endSlot) {
       dragMoved.current = true;
-      setDragState(ds => ({ ...ds, endSlot: slot }));
+      setDragState(ds => ({ ...ds, endCol: col, endSlot: slot }));
     }
   }
-
-  function handleMouseUp(e, dk) {
-    if (!dragState?.active || dragState.date !== dk) return;
-    const nd     = normDrag(dragState);
-    const moved  = dragMoved.current;
+  function gridUp() {
+    if (!dragState?.active) return;
+    const ds = dragState, moved = dragMoved.current;
     dragMoved.current = false;
     setDragState(null);
-    // Interacting with the week grid (click or drag) opens the day timeline popup
-    // centered on the start time, rather than creating a booking directly — so the
-    // user picks a facility column there. (booking chips stopPropagation, so they
-    // never reach here.)
-    if (onOpenDay) onOpenDay(nd.date, slotToHour(nd.lo));
-    else onNewBooking(nd.date, slotToHour(nd.lo), moved ? (nd.hi - nd.lo + 1) * 0.5 : 1);
+    const loCol = Math.min(ds.startCol, ds.endCol), hiCol = Math.max(ds.startCol, ds.endCol);
+    const loSlot = Math.min(ds.startSlot, ds.endSlot), hiSlot = Math.max(ds.startSlot, ds.endSlot);
+    const startHour = slotToHour(loSlot);
+    const duration = moved ? (hiSlot - loSlot + 1) * 0.5 : 1;
+    if (loCol === hiCol) {
+      const dk = dateKey(days[loCol]);
+      if (onOpenDay) onOpenDay(dk, startHour); else onNewBooking(dk, startHour, duration);
+      return;
+    }
+    // Multi-day span → grouped booking (skip past days).
+    const dates = [];
+    for (let c=loCol; c<=hiCol; c++) { const dk = dateKey(days[c]); if (dk >= today) dates.push(dk); }
+    if (dates.length > 1 && onNewBookingRange) onNewBookingRange(dates, startHour, duration);
+    else if (dates.length === 1) (onOpenDay ? onOpenDay(dates[0], startHour) : onNewBooking(dates[0], startHour, duration));
   }
+  const dragSpan = dragState?.active ? {
+    loCol: Math.min(dragState.startCol, dragState.endCol),
+    hiCol: Math.max(dragState.startCol, dragState.endCol),
+    loSlot: Math.min(dragState.startSlot, dragState.endSlot),
+    hiSlot: Math.max(dragState.startSlot, dragState.endSlot),
+  } : null;
 
   function getStackStyle(b, dayBkgs) {
     const ov = dayBkgs.filter(o => o.id !== b.id && o.start_hour < b.start_hour+b.duration && o.start_hour+o.duration > b.start_hour);
@@ -2779,8 +2799,6 @@ function WeekCalendar({ bookings, onNewBooking, onBookingClick, selectedFacility
     return { left:`${2+idx*w}%`, width:`${w-1}%`, right:"auto" };
   }
 
-  const nd = normDrag(dragState);
-
   return (
     <div>
       <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:14 }}>
@@ -2789,7 +2807,7 @@ function WeekCalendar({ bookings, onNewBooking, onBookingClick, selectedFacility
             style={S.btn({ border:"1.5px solid #e2e8f0", background:"#fff", color:"#475569" })}>{lbl}</button>
         ))}
         <span style={{ fontSize:15, fontWeight:700, color:"#0f172a", marginLeft:4 }}>{days[0].toLocaleDateString("en-NZ",{month:"long",year:"numeric"})}</span>
-        {window.innerWidth>=768&&<span style={{ fontSize:12, color:"#94a3b8", marginLeft:8 }}>Click or drag to create a booking</span>}
+        {window.innerWidth>=768&&<span style={{ fontSize:12, color:"#94a3b8", marginLeft:8 }}>Click or drag a day; drag across days for a grouped booking</span>}
       </div>
       <div style={{ overflowX:"auto" }} ref={gridRef} onMouseLeave={()=>{ dragMoved.current=false; setDragState(null); }}>
         <div style={{ minWidth:680 }}>
@@ -2818,18 +2836,26 @@ function WeekCalendar({ bookings, onNewBooking, onBookingClick, selectedFacility
                 </div>
               ))}
             </div>
-            {/* Day columns */}
-            <div style={{ flex:1, display:"flex" }}>
+            {/* Day columns — drag handled at the container so a drag can cross days */}
+            <div ref={colsRef} style={{ flex:1, display:"flex", position:"relative", cursor:dragState?.active?"crosshair":"crosshair" }}
+              onMouseDown={gridDown} onMouseMove={gridMove} onMouseUp={gridUp}>
+              {/* Cross-day / time drag preview spanning the selected columns × time band */}
+              {dragSpan && (
+                <div style={{ position:"absolute", zIndex:3, pointerEvents:"none",
+                  left:`${dragSpan.loCol/days.length*100}%`, width:`${(dragSpan.hiCol-dragSpan.loCol+1)/days.length*100}%`,
+                  top:dragSpan.loSlot*SLOT_H, height:(dragSpan.hiSlot-dragSpan.loSlot+1)*SLOT_H,
+                  background:"rgba(99,102,241,0.15)", border:"2px solid rgba(99,102,241,0.5)", borderRadius:6 }}>
+                  <div style={{ position:"absolute", top:4, left:6, fontSize:10, fontWeight:700, color:"#4f46e5", whiteSpace:"nowrap" }}>
+                    {fmtTime(slotToHour(dragSpan.loSlot))} – {fmtTime(slotToHour(dragSpan.hiSlot+1))}{dragSpan.hiCol>dragSpan.loCol?` · ${dragSpan.hiCol-dragSpan.loCol+1} days`:""}
+                  </div>
+                </div>
+              )}
               {days.map(d=>{
                 const dk=dateKey(d);
                 const dayBkgs=visible.filter(b=>b.date===dk);
-                const isDragging=dragState?.active&&dragState.date===dk;
                 return (
                   <div key={dk}
-                    style={{ flex:1, position:"relative", borderLeft:"1px solid #f1f5f9", cursor:isDragging?"ns-resize":"crosshair" }}
-                    onMouseDown={e=>handleMouseDown(e,dk)}
-                    onMouseMove={e=>handleMouseMove(e,dk)}
-                    onMouseUp={e=>handleMouseUp(e,dk)}
+                    style={{ flex:1, position:"relative", borderLeft:"1px solid #f1f5f9" }}
                   >
                     {/* Hour cells */}
                     {Array.from({length:CAL_TOTAL},(_,i)=>i).map(i=>(
@@ -2837,12 +2863,6 @@ function WeekCalendar({ bookings, onNewBooking, onBookingClick, selectedFacility
                         <div style={{ height:"50%", borderBottom:"1px dashed #f5f5f5" }}/>
                       </div>
                     ))}
-                    {/* Drag preview */}
-                    {isDragging && nd && (
-                      <div style={{ position:"absolute", left:2, right:2, top:nd.lo*SLOT_H, height:(nd.hi-nd.lo+1)*SLOT_H, background:"rgba(99,102,241,0.15)", border:"2px solid rgba(99,102,241,0.5)", borderRadius:6, pointerEvents:"none", zIndex:3 }}>
-                        <div style={{ position:"absolute", top:4, left:6, fontSize:10, fontWeight:700, color:"#4f46e5" }}>{fmtTime(slotToHour(nd.lo))} – {fmtTime(slotToHour(nd.hi+1))}</div>
-                      </div>
-                    )}
                     {/* Booking blocks */}
                     {dayBkgs.map(b=>{
                       const fac=FACILITIES.find(x=>x.id===b.facility_id);
@@ -2910,7 +2930,7 @@ function WeekCalendar({ bookings, onNewBooking, onBookingClick, selectedFacility
 }
 
 // ─── Month Calendar (multi-select + status chips) ───────────────────────────────
-function MonthCalendar({ bookings, onBookingClick, onNewBooking, selectedFacility, loggedInEmail, isAdmin, onMultiDelete, onMultiAddToCart, cartSourceIds=new Set(), deleteIds=new Set(), cartNewDrafts=[], onOpenDay, onGotoWeek, bookerFilter=new Set(), aliasNames={}, emailAliases={} }) {
+function MonthCalendar({ bookings, onBookingClick, onNewBooking, onNewBookingRange, selectedFacility, loggedInEmail, isAdmin, onMultiDelete, onMultiAddToCart, cartSourceIds=new Set(), deleteIds=new Set(), cartNewDrafts=[], onOpenDay, onGotoWeek, bookerFilter=new Set(), aliasNames={}, emailAliases={} }) {
   function calAlias(em) {
     if (!em) return "";
     const primary = (emailAliases[em.toLowerCase()] || em).toLowerCase();
@@ -2971,6 +2991,45 @@ function MonthCalendar({ bookings, onBookingClick, onNewBooking, selectedFacilit
   const selBtn = {border:"1.5px solid #e2e8f0",background:"#fff",color:"#475569"};
   const selBtnActive = {border:"1.5px solid #6366f1",background:"#eef2ff",color:"#6366f1"};
 
+  // ── Multi-day drag-to-create (grouped booking) ──────────────────────────────
+  // Press a day cell and drag across consecutive days to create one grouped booking
+  // (one row per day) in the form. A plain click (no drag) creates a single booking.
+  const [dragSel, setDragSel] = useState(null); // { anchor:dk, current:dk }
+  const dragMovedRef = useRef(false);
+  function dragRangeKeys(sel) {
+    if (!sel) return [];
+    const a = new Date(sel.anchor+"T00:00:00"), b = new Date(sel.current+"T00:00:00");
+    const lo = a<b?a:b, hi = a<b?b:a, out = [];
+    for (let d=new Date(lo); d<=hi; d.setDate(d.getDate()+1)) out.push(dateKey(new Date(d)));
+    return out;
+  }
+  function startCellDrag(dk) {
+    if (selMode || dk < today) return;
+    dragMovedRef.current = false;
+    setDragSel({ anchor:dk, current:dk });
+  }
+  function extendCellDrag(dk) {
+    setDragSel(s => { if(!s||dk===s.current) return s; dragMovedRef.current=true; return {...s, current:dk}; });
+  }
+  function finishCellDrag() {
+    if (dragSel) {
+      const keys = dragRangeKeys(dragSel).filter(k => k >= today); // never create in the past
+      if (keys.length > 1 && onNewBookingRange) onNewBookingRange(keys, 9, 1);
+      else if (keys.length >= 1) onNewBooking(keys[0], 9, 1);
+    }
+    setDragSel(null);
+    dragMovedRef.current = false;
+  }
+  const dragKeys = new Set(dragRangeKeys(dragSel));
+
+  // Weeks of the displayed month, for the "Jump to week" buttons. One representative
+  // date per grid row; jumping focuses the week view on that week.
+  const weekRows = [];
+  for (let i=0; i<cells.length; i+=7) {
+    const fr = cells.slice(i, i+7).find(Boolean);
+    if (fr) weekRows.push(fr);
+  }
+
   return (
     <div>
       <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:16, flexWrap:"wrap" }}>
@@ -2982,7 +3041,23 @@ function MonthCalendar({ bookings, onBookingClick, onNewBooking, selectedFacilit
           style={S.btn(selMode ? selBtnActive : selBtn)}>
           {selMode?"✕ Exit Select":"☑ Select"}
         </button>
+        {!selMode&&<span style={{fontSize:11,color:"#94a3b8",marginLeft:"auto"}}>Drag across days to create a grouped booking</span>}
       </div>
+
+      {onGotoWeek&&(
+        <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:12, flexWrap:"wrap" }}>
+          <span style={{ fontSize:11, fontWeight:700, color:"#64748b", textTransform:"uppercase", letterSpacing:"0.04em" }}>Jump to week:</span>
+          {weekRows.map((fr,wi)=>{
+            const mon = getWeekDates(fr)[0];
+            return (
+              <button key={wi} onClick={()=>onGotoWeek(dateKey(fr))} title={`Open the week of ${mon.toLocaleDateString("en-NZ",{day:"numeric",month:"short"})} in week view`}
+                style={{ border:"1.5px solid #c7d2fe", background:"#eef2ff", color:"#4338ca", borderRadius:8, padding:"4px 10px", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>
+                📅 {mon.toLocaleDateString("en-NZ",{day:"numeric",month:"short"})}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {selMode && selIds.size > 0 && (
         <div style={{ display:"flex", gap:10, alignItems:"center", flexWrap:"wrap", padding:"12px 14px", background:"#f0f0ff", border:"1.5px solid #c7d2fe", borderRadius:10, marginBottom:12 }}>
@@ -3005,10 +3080,12 @@ function MonthCalendar({ bookings, onBookingClick, onNewBooking, selectedFacilit
       <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:2, marginBottom:4 }}>
         {["M","T","W","T","F","S","S"].map((d,i)=><div key={i} style={{ textAlign:"center", fontSize:10, fontWeight:700, color:"#94a3b8", textTransform:"uppercase", letterSpacing:"0.04em", padding:"4px 0" }}>{d}</div>)}
       </div>
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:2 }}>
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:2 }}
+        onMouseUp={finishCellDrag} onMouseLeave={()=>setDragSel(null)}>
         {cells.map((d,ci)=>{
           if (!d) return <div key={"p"+ci} style={{ minHeight:80, background:"#fafafa", borderRadius:6 }}/>;
           const dk=dateKey(d), isToday=dk===today, isPast=dk<today;
+          const inDragRange=dragKeys.has(dk);
           const dayBkgs=visible.filter(b=>b.date===dk)
             .sort((a,b)=>{
               const ai=isAdminBooking(a)?1:0,bi=isAdminBooking(b)?1:0;
@@ -3025,11 +3102,11 @@ function MonthCalendar({ bookings, onBookingClick, onNewBooking, selectedFacilit
           const cellBorder = hasSelected?"1.5px solid #6366f1":isToday?"1.5px solid #4a90d9":"1px solid #f1f5f9";
           return (
             <div key={dk}
-              onClick={()=>{ if(!selMode&&!isPast) onNewBooking(dk,9,1); }}
-              style={{ minHeight:80, background:cellBg, border:cellBorder, borderRadius:6, padding:"4px 4px 3px", cursor:selMode||isPast?"default":"pointer", overflow:"hidden" }}
-              onMouseEnter={e=>{ if(!selMode&&!isPast) e.currentTarget.style.boxShadow="0 2px 8px rgba(0,0,0,0.08)"; }}
-              onMouseLeave={e=>e.currentTarget.style.boxShadow="none"}>
-              <div onClick={e=>{ e.stopPropagation(); onGotoWeek&&onGotoWeek(dk); }} title="Open this day in week view"
+              onMouseDown={e=>{ if(e.button===0) startCellDrag(dk); }}
+              onMouseEnter={e=>{ if(dragSel) extendCellDrag(dk); else if(!selMode&&!isPast) e.currentTarget.style.boxShadow="0 2px 8px rgba(0,0,0,0.08)"; }}
+              onMouseLeave={e=>e.currentTarget.style.boxShadow="none"}
+              style={{ minHeight:80, background:inDragRange?"#e0e7ff":cellBg, border:inDragRange?"1.5px solid #6366f1":cellBorder, borderRadius:6, padding:"4px 4px 3px", cursor:selMode||isPast?"default":"pointer", overflow:"hidden", userSelect:"none" }}>
+              <div onMouseDown={e=>e.stopPropagation()} onClick={e=>{ e.stopPropagation(); onGotoWeek&&onGotoWeek(dk); }} title="Open this day in week view"
                 style={{ fontSize:12, fontWeight:isToday?800:500, color:isToday?"#1d4ed8":isPast?"#cbd5e1":"#0f172a", marginBottom:4, textAlign:"right", cursor:onGotoWeek?"pointer":"default" }}>{d.getDate()}</div>
               <div style={{ display:"flex", flexDirection:"column", gap:2 }}>
                 {dayBkgs.slice(0,3).map(b=>{
@@ -3049,6 +3126,7 @@ function MonthCalendar({ bookings, onBookingClick, onNewBooking, selectedFacilit
                   const facSocial = !isAdmin_bk && isSocialFac(b.facility_id);
                   return (
                     <div key={b.id}
+                      onMouseDown={e=>e.stopPropagation()}
                       onClick={e=>{ e.stopPropagation(); if(isDimmed) return; if(selMode) toggleSel(b.id); else onBookingClick(b); }}
                       title={(()=>{const r=parseMismatchNote(b.system_notes,b.notes);return `${b.name} · ${fac?.name} · ${fmtTime(b.start_hour)}–${fmtTime(b.start_hour+b.duration)}`+(b.status==="cpsa_review_needed"&&r.length?`\n⚠ GTEC inconsistencies:\n${r.join("\n")}`:b.status==="cpsa_confirmed"?"\n🌐 GTEC confirmed":"");})()}
                       className={facSocial?(chipTxt==="#fff"?"fac-social-tex":"fac-social-tex-dark"):undefined}
@@ -3065,7 +3143,7 @@ function MonthCalendar({ bookings, onBookingClick, onNewBooking, selectedFacilit
                     </div>
                   );
                 })}
-                {dayBkgs.length>3&&<div onClick={e=>{ e.stopPropagation(); onOpenDay&&onOpenDay(dk); }} title="View all bookings this day"
+                {dayBkgs.length>3&&<div onMouseDown={e=>e.stopPropagation()} onClick={e=>{ e.stopPropagation(); onOpenDay&&onOpenDay(dk); }} title="View all bookings this day"
                   style={{ fontSize:10, color:"#6366f1", fontWeight:700, paddingLeft:2, cursor:onOpenDay?"pointer":"default" }}>+{dayBkgs.length-3} more</div>}
                 {cartNewDrafts.filter(d=>d.date===dk).map((d,gi)=>{
                   const fac=FACILITIES.find(x=>x.id===d.facility_id);
@@ -8988,6 +9066,8 @@ export default function App() {
   },[]);
 
   const openNew=useCallback((date,startHour,duration=1,facility=null)=>{setEditing(null);setPrefill({date,startHour,duration,facility});setDayPopupDate(null);setShowForm(true);},[]);
+  // Open the booking form pre-seeded with one row per day (grouped multi-day booking).
+  const openNewRange=useCallback((dates,startHour=9,duration=1,facility=null)=>{setEditing(null);setPrefill({dates,startHour,duration,facility});setDayPopupDate(null);setShowForm(true);},[]);
   const openDay=useCallback((dk,focusHour=null)=>{setDayPopupDate(dk);setDayPopupFocus(focusHour);},[]);
   const openEdit=useCallback((b)=>{setEditing({...b});setViewing(null);setShowForm(true);},[]);
 
@@ -9892,8 +9972,8 @@ export default function App() {
 
         {(tab==="calendar"||tab==="month"||tab==="list")&&<FacilityPills/>}
 
-        {tab==="calendar"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<WeekCalendar bookings={bookings} selectedFacility={selFac} onNewBooking={openNew} onBookingClick={setViewing} cartSourceIds={new Set(cart.flatMap(i=>i.sourceIds||[]))} deleteIds={new Set(deleteQueue.map(b=>b.id))} cartNewDrafts={cart.flatMap(i=>!i.notifyOnly&&!i.statusChange&&(i.sourceIds||[]).length===0?i.drafts:[])} focusedDate={focusedDate} setFocusedDate={setFocusedDate} onOpenDay={openDay} bookerFilter={listBookerFilter} aliasNames={aliasNames} emailAliases={emailAliases}/>}</div>}
-        {tab==="month"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<MonthCalendar bookings={bookings} selectedFacility={selFac} onBookingClick={setViewing} onNewBooking={openNew} onMultiDelete={queueMultiForRemoval} onMultiAddToCart={handleMultiAddToCart} loggedInEmail={loggedInEmail} isAdmin={isAdmin} cartSourceIds={new Set(cart.flatMap(i=>i.sourceIds||[]))} deleteIds={new Set(deleteQueue.map(b=>b.id))} cartNewDrafts={cart.flatMap(i=>!i.notifyOnly&&!i.statusChange&&(i.sourceIds||[]).length===0?i.drafts:[])} onOpenDay={openDay} onGotoWeek={dk=>{ setFocusedDate(new Date(dk+"T00:00:00")); setTab("calendar"); }} bookerFilter={listBookerFilter} aliasNames={aliasNames} emailAliases={emailAliases}/>}</div>}
+        {tab==="calendar"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<WeekCalendar bookings={bookings} selectedFacility={selFac} onNewBooking={openNew} onNewBookingRange={openNewRange} onBookingClick={setViewing} cartSourceIds={new Set(cart.flatMap(i=>i.sourceIds||[]))} deleteIds={new Set(deleteQueue.map(b=>b.id))} cartNewDrafts={cart.flatMap(i=>!i.notifyOnly&&!i.statusChange&&(i.sourceIds||[]).length===0?i.drafts:[])} focusedDate={focusedDate} setFocusedDate={setFocusedDate} onOpenDay={openDay} bookerFilter={listBookerFilter} aliasNames={aliasNames} emailAliases={emailAliases}/>}</div>}
+        {tab==="month"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<MonthCalendar bookings={bookings} selectedFacility={selFac} onBookingClick={setViewing} onNewBooking={openNew} onNewBookingRange={openNewRange} onMultiDelete={queueMultiForRemoval} onMultiAddToCart={handleMultiAddToCart} loggedInEmail={loggedInEmail} isAdmin={isAdmin} cartSourceIds={new Set(cart.flatMap(i=>i.sourceIds||[]))} deleteIds={new Set(deleteQueue.map(b=>b.id))} cartNewDrafts={cart.flatMap(i=>!i.notifyOnly&&!i.statusChange&&(i.sourceIds||[]).length===0?i.drafts:[])} onOpenDay={openDay} onGotoWeek={dk=>{ setFocusedDate(new Date(dk+"T00:00:00")); setTab("calendar"); }} bookerFilter={listBookerFilter} aliasNames={aliasNames} emailAliases={emailAliases}/>}</div>}
 
         {tab==="list"&&(
           <div style={S.card}>
@@ -10278,7 +10358,7 @@ export default function App() {
       {showForm&&(
         <Modal title={editing?"Edit Booking":"New Booking Request"} onClose={()=>{setShowForm(false);setEditing(null);}} width={620}>
           <BookingForm
-            booking={editing!==null?editing:(prefill.date?{date:prefill.date,start_hour:prefill.startHour,duration:prefill.duration,...(prefill.facility?{facility_id:prefill.facility}:{})}:null)}
+            booking={editing!==null?editing:(Array.isArray(prefill.dates)&&prefill.dates.length?{_dates:prefill.dates,start_hour:prefill.startHour,duration:prefill.duration,...(prefill.facility?{facility_id:prefill.facility}:{})}:prefill.date?{date:prefill.date,start_hour:prefill.startHour,duration:prefill.duration,...(prefill.facility?{facility_id:prefill.facility}:{})}:null)}
             allBookings={bookings}
             onSave={handleSave}
             onAddToCart={handleAddToCart}
