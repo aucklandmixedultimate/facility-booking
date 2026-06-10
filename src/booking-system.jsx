@@ -322,6 +322,7 @@ function CopyableTable({ children, style, align="left" }){
 // booking.system_notes — separate from user-editable booking.notes. All read helpers
 // fall back to booking.notes for rows that pre-date the system_notes column migration.
 const CPSA_MISMATCH_RE = /\[CPSA-MISMATCH\][^\n]*/g;
+const CPSA_GTEC_RE = /\[CPSA-GTEC\][^\n]*/g;
 function setMismatchNote(sysNotes, reasons) {
   const base = (sysNotes||"").replace(CPSA_MISMATCH_RE,"").trim();
   if (!reasons || !reasons.length) return base;
@@ -334,7 +335,62 @@ function parseMismatchNote(sysNotes, notesLegacy) {
   const m = src.match(/\[CPSA-MISMATCH\]\s*([^\n]*)/);
   return m ? m[1].split("|").map(s=>s.trim()).filter(Boolean) : [];
 }
-function stripMismatchNote(sysNotes) { return (sysNotes||"").replace(CPSA_MISMATCH_RE,"").trim(); }
+// Stripping the mismatch flag also clears the incoming-event snapshot below, so
+// every confirm/resolve/reset path that already calls this keeps notes clean.
+function stripMismatchNote(sysNotes) { return (sysNotes||"").replace(CPSA_MISMATCH_RE,"").replace(CPSA_GTEC_RE,"").trim(); }
+// Full snapshot of the incoming GTEC/CPSA event a booking was matched against —
+// name + parsed dimensions — so mismatch views can show everything known from the
+// sync pull, not just the fields that differ. Stored as name|date|start|dur|facs.
+function setGtecSnapshot(sysNotes, gtec) {
+  const base = (sysNotes||"").replace(CPSA_GTEC_RE,"").trim();
+  if (!gtec) return base;
+  const enc = v => String(v==null?"":v).replace(/[|\n]/g," ").trim();
+  const marker = `[CPSA-GTEC] ${[enc(gtec.name),enc(gtec.date),enc(gtec.start_hour),enc(gtec.duration),enc((gtec.facilityIds||[]).join(","))].join("|")}`;
+  return base ? `${base}\n${marker}` : marker;
+}
+function parseGtecSnapshot(sysNotes) {
+  const m = (sysNotes||"").match(/\[CPSA-GTEC\]\s*([^\n]*)/);
+  if (!m) return null;
+  const [name,date,start,dur,facs] = m[1].split("|").map(s=>s.trim());
+  return { name, date, start_hour: start!==""?parseFloat(start):null, duration: dur!==""?parseFloat(dur):null, facilityIds: facs?facs.split(",").filter(Boolean):[] };
+}
+// One-line summary of an incoming GTEC event snapshot (name + facility + date + time).
+function fmtGtecEvent(g) {
+  if (!g) return "";
+  const facs = (g.facilityIds||[]).map(facShort).filter(Boolean).join("/");
+  const time = (g.start_hour!=null && !Number.isNaN(g.start_hour))
+    ? `${fmtTimeShort(g.start_hour)}–${fmtTimeShort(g.start_hour+(g.duration||0))}` : "";
+  return [g.name||"(unnamed)", facs, g.date?fmtDateShort(g.date):"", time].filter(Boolean).join(" · ");
+}
+// Both-sides view of a clash: the incoming GTEC event and the AMUA booking with
+// every dimension, so the admin can judge whether they are the same booking (and
+// why matching didn't link them). Field/time/duration are green when they agree,
+// red when they differ — leaving identity/name as the usual reason they diverge.
+function ClashPair({ admin, user }) {
+  const facName = id => FACILITIES.find(x=>x.id===id)?.name || id;
+  const dim = same => ({ color: same?"#16a34a":"#dc2626", fontWeight:700 });
+  const sameFac=admin.facility_id===user.facility_id, sameTime=admin.start_hour===user.start_hour, sameDur=admin.duration===user.duration;
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:3,minWidth:0,flex:1}}>
+      <div style={{display:"flex",gap:6,alignItems:"baseline",flexWrap:"wrap"}}>
+        <span style={{fontWeight:700,color:"#9f1239",whiteSpace:"nowrap"}}>🔒 GTEC</span>
+        <span style={{fontWeight:600}}>{admin.purpose||"Admin booking"}</span>
+        <span style={{color:"#64748b"}}>· {facName(admin.facility_id)} · {fmtDate(admin.date)} · {fmtTime(admin.start_hour)}–{fmtTime(admin.start_hour+admin.duration)} · {admin.duration}h</span>
+      </div>
+      <div style={{display:"flex",gap:6,alignItems:"baseline",flexWrap:"wrap"}}>
+        <span style={{fontWeight:700,color:"#0369a1",whiteSpace:"nowrap"}}>👤 AMUA</span>
+        <EmailChip email={user.email}/>
+        {user.name&&<span style={{color:"#475569"}}>{user.name}</span>}
+        <span style={{color:"#475569"}}>&ldquo;{user.purpose||"—"}&rdquo;</span>
+        <span style={dim(sameFac)}>{facName(user.facility_id)}</span>
+        <span style={{color:"#cbd5e1"}}>·</span>
+        <span style={dim(sameTime)}>{fmtTime(user.start_hour)}–{fmtTime(user.start_hour+user.duration)}</span>
+        <span style={dim(sameDur)}>{user.duration}h</span>
+      </div>
+      {sameFac&&sameTime&&sameDur&&<span style={{fontSize:10,color:"#16a34a",fontWeight:700}}>↳ field, time &amp; duration identical — likely the same booking; only name/identity differs</span>}
+    </div>
+  );
+}
 // Split a succinct reason "Label: old → new" into structured parts for old/new columns.
 function splitReason(r) {
   const m = (r||"").match(/^(.+?):\s*(.*?)\s*→\s*(.*)$/);
@@ -3812,23 +3868,28 @@ function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onLoadT
                 )}
                 {d?.error&&<span style={{color:"#b91c1c",background:"#fef2f2",border:"1px solid #fecaca",borderRadius:6,padding:"3px 8px",maxWidth:420,wordBreak:"break-word"}}>⚠ {d.error}</span>}
               </div>
-              {isPO&&(
+              {isPO&&(()=>{
+                const gtecList = d?.gtecInvoices || (d?.gtecInvoice ? [d.gtecInvoice] : []);
+                return (
                 <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",fontSize:11}}>
-                  <span style={{color:"#64748b",fontWeight:600}}>GTEC invoice received:</span>
-                  {d?.gtecInvoice
-                    ? <>
-                        <button onClick={()=>downloadDriveFile(d.gtecInvoice.id, d.gtecInvoice.name).catch(e=>window.alert("Download failed: "+(e.message||e)))} style={chipBtn("#1d4ed8","#dbeafe","#bfdbfe")}>⬇ {d.gtecInvoice.name}</button>
-                        {d.gtecInvoice.webViewLink&&<a href={d.gtecInvoice.webViewLink} target="_blank" rel="noreferrer" style={{...chipBtn("#0369a1","#f0f9ff","#bae6fd"),textDecoration:"none"}}>↗ Drive</a>}
-                      </>
+                  <span style={{color:"#64748b",fontWeight:600}}>GTEC invoices received{gtecList.length?` (${gtecList.length})`:""}:</span>
+                  {gtecList.length
+                    ? gtecList.map((gi,i)=>(
+                        <span key={gi.id||i} style={{display:"inline-flex",alignItems:"center",gap:0,border:"1px solid #bfdbfe",borderRadius:6,overflow:"hidden"}}>
+                          <button onClick={()=>downloadDriveFile(gi.id, gi.name).catch(e=>window.alert("Download failed: "+(e.message||e)))} title="Download" style={{...chipBtn("#1d4ed8","#dbeafe","#bfdbfe"),border:"none",borderRadius:0}}>⬇ {gi.name}</button>
+                          {gi.webViewLink&&<a href={gi.webViewLink} target="_blank" rel="noreferrer" title="Open in Drive" style={{...chipBtn("#0369a1","#f0f9ff","#bae6fd"),textDecoration:"none",border:"none",borderLeft:"1px solid #bfdbfe",borderRadius:0}}>↗</a>}
+                        </span>
+                      ))
                     : <span style={{color:"#94a3b8",fontStyle:"italic"}}>none attached</span>}
                   {onDriveAttach&&(
                     <label style={{...chipBtn("#7c3aed","#f5f3ff","#ddd6fe"),display:"inline-flex",alignItems:"center",gap:4}}>
-                      📎 {d?.gtecInvoice?"Replace":"Attach"} file
-                      <input type="file" style={{display:"none"}} onChange={e=>{const f=e.target.files?.[0]; if(f) onDriveAttach(rec, f); e.target.value="";}}/>
+                      📎 {gtecList.length?"Add file(s)":"Attach file(s)"}
+                      <input type="file" multiple style={{display:"none"}} onChange={e=>{const fs=e.target.files; if(fs&&fs.length) onDriveAttach(rec, fs); e.target.value="";}}/>
                     </label>
                   )}
                 </div>
-              )}
+                );
+              })()}
             </div>
           );
         })()}
@@ -6141,6 +6202,11 @@ function SyncFlaggedRow({ snap, bookings, onView, kind }) {
       <div style={{display:"flex",flexDirection:"column",minWidth:0}}>
         <span>{fmtDate(snap.date)} · {span} · {f?.name||snap.facility_id} · {snap.name||snap.email}{snap.purpose?` · ${snap.purpose}`:""}</span>
         {kind==="review" && snap.reasons?.length>0 && <span style={{color:"#b45309"}}>{snap.reasons.join(" · ")}</span>}
+        {/* Full details of the incoming GTEC event(s) this booking was matched/clashed against. */}
+        {kind==="review" && snap.gtec && <span style={{color:"#0e7490"}}>↳ GTEC event: {fmtGtecEvent(snap.gtec)}</span>}
+        {kind==="clash" && Array.isArray(snap.gtec) && snap.gtec.map((g,i)=>(
+          <span key={i} style={{color:"#9f1239"}}>↳ 🔒 GTEC event: {fmtGtecEvent(g)}</span>
+        ))}
       </div>
       {live && onView
         ? <button onClick={()=>onView(live)} style={{marginLeft:"auto",fontSize:10,fontWeight:700,color:"#0369a1",background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:6,padding:"1px 7px",cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>View ↗</button>
@@ -6770,16 +6836,11 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
             <div style={{display:"flex",flexDirection:"column",gap:6,maxHeight:260,overflowY:"auto"}}>
               {clashGrouped
                 ? groups.map((g,i)=>{
-                    const fa=FACILITIES.find(x=>x.id===g.admin.facility_id);
                     const isRecurring=g.instances.length>=2;
                     return (
-                      <div key={i} style={{background:"#fff",border:`1px solid ${isRecurring?"#f43f5e44":"#fecdd3"}`,borderRadius:8,padding:"8px 12px",fontSize:12,color:"#0f172a",display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-                        {isRecurring&&<span style={{fontWeight:700,color:"#f43f5e",fontSize:11,background:"#fff1f2",borderRadius:4,padding:"1px 6px",whiteSpace:"nowrap"}}>×{g.instances.length} recurring</span>}
-                        <span style={{fontWeight:700,color:"#9f1239"}}>🔒 {g.admin.purpose||"Admin booking"}</span>
-                        <span style={{color:"#94a3b8"}}>vs</span>
-                        <EmailChip email={g.user.email}/>
-                        <span style={{color:"#475569"}}>{g.user.purpose||"User booking"}</span>
-                        <span style={{color:"#94a3b8",marginLeft:"auto",fontSize:11}}>{fa?.name} · {g.dn} ~{fmtTime(g.admin.start_hour)}</span>
+                      <div key={i} style={{background:"#fff",border:`1px solid ${isRecurring?"#f43f5e44":"#fecdd3"}`,borderRadius:8,padding:"8px 12px",fontSize:12,color:"#0f172a",display:"flex",gap:8,alignItems:"flex-start",flexWrap:"wrap"}}>
+                        {isRecurring&&<span style={{fontWeight:700,color:"#f43f5e",fontSize:11,background:"#fff1f2",borderRadius:4,padding:"1px 6px",whiteSpace:"nowrap",marginTop:2}}>×{g.instances.length} recurring · {g.dn}</span>}
+                        <ClashPair admin={g.admin} user={g.user}/>
                         {isRecurring&&(
                           <button onClick={()=>setClashPatternModal({email:g.user.email,name:g.user.name||g.user.email,pk:`${g.dn}_${g.admin.start_hour}`,bkgs:g.userBkgs,canEdit:true})}
                             style={S.btn({background:"#f43f5e",color:"#fff",fontSize:11,padding:"3px 8px"})}>
@@ -6789,18 +6850,11 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                       </div>
                     );
                   })
-                : filtered.map((c,i)=>{
-                    const fa=FACILITIES.find(x=>x.id===c.admin.facility_id);
-                    return(
-                      <div key={i} style={{background:"#fff",border:"1px solid #fecdd3",borderRadius:8,padding:"8px 12px",fontSize:12,color:"#0f172a",display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-                        <span style={{fontWeight:700,color:"#9f1239"}}>🔒 {c.admin.purpose||"Admin booking"}</span>
-                        <span style={{color:"#94a3b8"}}>vs</span>
-                        <EmailChip email={c.user.email}/>
-                        <span style={{color:"#475569"}}>{c.user.purpose||"User booking"}</span>
-                        <span style={{color:"#94a3b8",marginLeft:"auto"}}>{fa?.name} · {fmtDate(c.admin.date)} {fmtTime(c.admin.start_hour)}–{fmtTime(c.admin.start_hour+c.admin.duration)}</span>
-                      </div>
-                    );
-                  })
+                : filtered.map((c,i)=>(
+                    <div key={i} style={{background:"#fff",border:"1px solid #fecdd3",borderRadius:8,padding:"8px 12px",fontSize:12,color:"#0f172a",display:"flex",gap:8,alignItems:"flex-start",flexWrap:"wrap"}}>
+                      <ClashPair admin={c.admin} user={c.user}/>
+                    </div>
+                  ))
               }
             </div>
             {clashPatternModal&&(
@@ -7082,6 +7136,11 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
               <td style={tdS2}>
                 <div style={{fontWeight:600,color:"#0f172a",whiteSpace:"nowrap"}}>{b.name}</div>
                 <div style={{color:"#64748b",fontSize:10}}>{b.email}</div>
+                {(()=>{ const g=parseGtecSnapshot(b.system_notes); return g ? (
+                  <div title="The incoming GTEC event this booking was matched against" style={{marginTop:3,fontSize:10,color:"#0e7490",background:"#ecfeff",border:"1px solid #a5f3fc",borderRadius:4,padding:"1px 5px",display:"inline-block",maxWidth:200,whiteSpace:"normal"}}>
+                    🌐 GTEC: {fmtGtecEvent(g)}
+                  </div>
+                ) : null; })()}
                 {b.invoiced&&<span style={{fontSize:10,fontWeight:700,background:"#f5f3ff",color:"#5b21b6",border:"1px solid #ddd6fe",borderRadius:4,padding:"1px 4px",display:"inline-block",marginTop:2}}>🧾 invoiced</span>}
                 {cpsaRefs.map((r,i)=>(
                   <a key={i} href={r.url} target="_blank" rel="noopener noreferrer" title={`GTEC submission ${r.ref} — open the booking on Sporty`}
@@ -8117,9 +8176,13 @@ export default function App() {
             }
           }
 
-          // Record/clear mismatch reasons in system_notes (separate from user notes).
+          // Full snapshot of the incoming GTEC event, so the mismatch views show
+          // everything known from the sync — not just the differing fields.
+          const gtecSnap = { name: ev.EventName || "", date, start_hour, duration, facilityIds };
+          // Record/clear mismatch reasons + GTEC snapshot in system_notes (separate
+          // from user notes). stripMismatchNote clears both on confirm.
           const newSysNotes = targetStatus === "cpsa_review_needed"
-            ? setMismatchNote(match.booking.system_notes, match.reasons)
+            ? setGtecSnapshot(setMismatchNote(match.booking.system_notes, match.reasons), gtecSnap)
             : stripMismatchNote(match.booking.system_notes);
           const statusChanged = match.booking.status !== targetStatus;
           const sysNotesChanged = (match.booking.system_notes || "") !== newSysNotes;
@@ -8138,7 +8201,7 @@ export default function App() {
             if (match.exact) cpsaConfirmed++; else {
               cpsaReviewNeeded++;
               const b = match.booking;
-              reviewBookings.push({ id:b.id, date:b.date, facility_id:b.facility_id, start_hour:b.start_hour, duration:b.duration, purpose:b.purpose, name:b.name, email:b.email, reasons: match.reasons||[] });
+              reviewBookings.push({ id:b.id, date:b.date, facility_id:b.facility_id, start_hour:b.start_hour, duration:b.duration, purpose:b.purpose, name:b.name, email:b.email, reasons: match.reasons||[], gtec: gtecSnap });
             }
             logActivity(match.exact?"cpsa_confirm":"cpsa_review_flag", { booking_id: match.booking.id, from: match.booking.status, to: targetStatus, reasons: match.reasons||[] });
             // First-time transition into a CPSA status → queue a notify-only cart item.
@@ -8223,7 +8286,11 @@ export default function App() {
         // Skip bookings already matched/confirmed via CPSA — their admin slot was removed above
         if (matchedUserIds.has(ub.id)) continue;
         if (ub.status === "cpsa_confirmed" || ub.status === "cpsa_review_needed") continue;
-        const hasClash = adminBks.some(ab => ab.facility_id === ub.facility_id && timeOverlaps(ab, ub));
+        // The specific GTEC events this booking overlaps — captured in full so the
+        // clash views can show what the incoming event actually was (informs whether
+        // a match was possible).
+        const clashAdmins = adminBks.filter(ab => ab.facility_id === ub.facility_id && timeOverlaps(ab, ub));
+        const hasClash = clashAdmins.length > 0;
         if (hasClash && ub.status !== "clash") {
           // Flag as clash, remembering the stage it was at so it can be restored later.
           const sysNotes = setClashPrevStatus(ub.system_notes, ub.status);
@@ -8233,7 +8300,8 @@ export default function App() {
           } else {
             setBookings(prev => prev.map(b => b.id === ub.id ? {...b, status:"clash", system_notes: sysNotes} : b));
           }
-          clashBookings.push({ id:ub.id, date:ub.date, facility_id:ub.facility_id, start_hour:ub.start_hour, duration:ub.duration, purpose:ub.purpose, name:ub.name, email:ub.email });
+          clashBookings.push({ id:ub.id, date:ub.date, facility_id:ub.facility_id, start_hour:ub.start_hour, duration:ub.duration, purpose:ub.purpose, name:ub.name, email:ub.email,
+            gtec: clashAdmins.map(ab=>({ name: ab.purpose||"", date: ab.date, start_hour: ab.start_hour, duration: ab.duration, facilityIds: [ab.facility_id] })) });
           clashUpdates++;
         } else if (!hasClash && ub.status === "clash") {
           // Clash resolved (admin slot gone) → restore the prior workflow stage.
@@ -8651,7 +8719,11 @@ export default function App() {
 
   // Upload a received GTEC invoice into the batch's "Invoice (from GTEC)" folder
   // and remember it on the record so the Billing UI can download it later.
-  async function handleDriveAttachGtec(rec, file) {
+  // Upload one or more received GTEC invoices into the batch's "Invoice (from GTEC)"
+  // folder, appending to the record's list (same-named files update in place).
+  async function handleDriveAttachGtec(rec, fileList) {
+    const files = Array.from(fileList || []);
+    if (!files.length) return;
     try {
       await getDriveToken({ interactive:true });
       const year = String(new Date(rec.createdAt||Date.now()).getFullYear());
@@ -8660,11 +8732,16 @@ export default function App() {
         ? { id: rec.drive.batchFolderId }
         : await ensureFolderPath([DRIVE_ROOT_FOLDER, year, driveBatchFolderName(batchRecs.length?batchRecs:[rec])]);
       const fromFolder = await ensureFolder(DRIVE_SUBFOLDERS.fromGtec, batchFolder.id);
-      const prevId = (await findChildFile(file.name, fromFolder.id))?.id || null;
-      const up = await uploadFile({ name:file.name, parentId:fromFolder.id, blob:file, mimeType:file.type||"application/octet-stream", fileId:prevId });
-      setRecordDrive(rec.id, { gtecInvoice:{ id:up.id, name:up.name||file.name, webViewLink:up.webViewLink, uploadedAt:new Date().toISOString() }, batchFolderId:batchFolder.id });
-      logActivity("drive_attach", { record_id: rec.id, file: file.name });
-      showToast(`Attached "${file.name}" to Drive (Invoice from GTEC).`);
+      const existing = rec.drive?.gtecInvoices || (rec.drive?.gtecInvoice ? [rec.drive.gtecInvoice] : []);
+      const byName = new Map(existing.map(x=>[x.name, x]));
+      for (const file of files) {
+        const prevId = byName.get(file.name)?.id || (await findChildFile(file.name, fromFolder.id))?.id || null;
+        const up = await uploadFile({ name:file.name, parentId:fromFolder.id, blob:file, mimeType:file.type||"application/octet-stream", fileId:prevId });
+        byName.set(file.name, { id:up.id, name:up.name||file.name, webViewLink:up.webViewLink, uploadedAt:new Date().toISOString() });
+        logActivity("drive_attach", { record_id: rec.id, file: file.name });
+      }
+      setRecordDrive(rec.id, { gtecInvoices: Array.from(byName.values()), gtecInvoice: null, batchFolderId:batchFolder.id });
+      showToast(`Attached ${files.length} file${files.length!==1?"s":""} to Drive (Invoice from GTEC).`);
     } catch(e) {
       showToast("Attach failed: "+(e.message||e), "error");
     }
