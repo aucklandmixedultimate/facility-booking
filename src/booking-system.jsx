@@ -6436,6 +6436,13 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
       // field; ours elsewhere). Falls back to all-CPSA values for legacy callers.
       Object.assign(patch, effectiveVals || extractCpsaAmendValues(reasons, booking), { status: "cpsa_confirmed" });
       sysNotes = stripMismatchNote(sysNotes);
+    } else if (resolution === "proposed") {
+      // Manual proposal: amend our record to admin-proposed values (neither ours nor
+      // GTEC's). GTEC and the booker still need to confirm, so we KEEP the mismatch
+      // flag/snapshot and leave the booking in review — it stays in the queue with a
+      // "proposed" chip and the usual GTEC follow-up (Inform GTEC / Confirmed by GTEC).
+      sysNotes = setCpsaOrig(sysNotes, booking);
+      Object.assign(patch, effectiveVals || {});
     } else if (resolution === "confirmed") {
       // CPSA verbally confirmed our original is correct: keep our values, mark confirmed, clear the mismatch.
       patch.status = "cpsa_confirmed";
@@ -6996,6 +7003,8 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
           //  • kept ours → GTEC must change their record   → "GTEC to update"
           //  • took GTEC → our booking is amended to match  → "BOOKER to acknowledge"
           const PILL_GTEC   = `<span style="display:inline-block;margin-left:6px;padding:1px 6px;border-radius:8px;background:#dbeafe;color:#1e3a8a;border:1px solid #93c5fd;font-size:10px;font-weight:700;white-space:nowrap">GTEC to update</span>`;
+          // Manual proposal: a new value neither ours nor GTEC's — both sides confirm.
+          const PILL_PROPOSED = `<span style="display:inline-block;margin-left:6px;padding:1px 6px;border-radius:8px;background:#ffedd5;color:#9a3412;border:1px solid #fdba74;font-size:10px;font-weight:700;white-space:nowrap">PROPOSED — GTEC &amp; booker to confirm</span>`;
           // The BOOKER pill carries the booker's own coloured chip (alias + colour) so
           // it's clear which booker needs to acknowledge the change.
           const bookerPill = b => {
@@ -7012,8 +7021,24 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
             if (cv.duration!==b.duration)       list.push({key:"duration",label:"Dur",our:`${b.duration}h`,gtec:`${cv.duration}h`});
             return list;
           }
-          // Changes cell reflects the admin's current (unsaved) selections from mismatchResState.
+          // Fields that differ between our booking and an admin proposal.
+          function proposalFieldsOf(b, prop) {
+            const facName=id=>FACILITIES.find(x=>x.id===id)?.name||id;
+            const list=[];
+            if(prop.facility_id!==b.facility_id) list.push({label:"Field",our:facName(b.facility_id),val:facName(prop.facility_id)});
+            if(prop.start_hour!==b.start_hour)   list.push({label:"Time",our:`${fmtTime(b.start_hour)}–${fmtTime(b.start_hour+b.duration)}`,val:`${fmtTime(prop.start_hour)}–${fmtTime(prop.start_hour+prop.duration)}`});
+            if(prop.duration!==b.duration)       list.push({label:"Dur",our:`${b.duration}h`,val:`${prop.duration}h`});
+            return list;
+          }
+          // Changes cell reflects the admin's current (unsaved) selections from mismatchResState
+          // — a manual proposal takes precedence over the per-field keep/switch choices.
           function changesHtml(b, cv) {
+            const prop=mismatchResState[b.id]?.proposal;
+            if(prop){
+              const pf=proposalFieldsOf(b,prop);
+              if(!pf.length) return `<span style="color:#94a3b8">—</span>`;
+              return pf.map(f=>`<div style="margin:2px 0"><strong>${f.label}:</strong> ${f.our} → <span style="color:#9a3412;font-weight:700">${f.val}</span>${PILL_PROPOSED}</div>`).join("");
+            }
             const sel=(mismatchResState[b.id]?.fieldSel)||{};
             const fields=changedFieldsOf(b, cv);
             if(!fields.length) return `<span style="color:#94a3b8">—</span>`;
@@ -7025,6 +7050,10 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
             }).join("");
           }
           function changesText(b, cv) {
+            const prop=mismatchResState[b.id]?.proposal;
+            if(prop){
+              return proposalFieldsOf(b,prop).map(f=>`${f.label}: ${f.our} → ${f.val} [PROPOSED — GTEC & ${adminAlias(b.email)} to confirm]`).join("; ");
+            }
             const sel=(mismatchResState[b.id]?.fieldSel)||{};
             return changedFieldsOf(b, cv).map(f=>{
               const s=sel[f.key];
@@ -7102,12 +7131,16 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
           const saved=parseCpsaResolution(b.system_notes);
           const local=mismatchResState[b.id];
           const fieldSel=local?.fieldSel||{};
+          const proposal=local?.proposal||null; // admin-proposed {facility_id,start_hour,duration}
           const curBilling=local?.billingState??saved?.billingState??"none";
           const alreadySettled=saved?.billingState==="credited"||saved?.billingState==="invoiced";
           const [showWarn,setShowWarn]=useState(false);
+          const [showPropose,setShowPropose]=useState(false);
 
-          // Derive resolution from per-field selections
-          const curRes=deriveResolution(changedFields, fieldSel);
+          // A manual proposal overrides per-field selection: the booking is amended to
+          // the proposed values, with GTEC + booker still to confirm. Otherwise the
+          // resolution is derived from the per-field keep/switch buttons.
+          const curRes=proposal?"proposed":deriveResolution(changedFields, fieldSel);
 
           // CPSA submission link(s) + ref ("submission id") for this booking.
           const cpsaRefs=parseCpsaRefs(b.system_notes,b.notes);
@@ -7123,7 +7156,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
           }
           const rowCostOf = v => bookingCost(v, facilityRates);
           const origCost=rowCostOf(b);
-          const effectiveVals=effectiveFrom(fieldSel); // what we save to the booking
+          const effectiveVals=proposal||effectiveFrom(fieldSel); // what we save to the booking
           // Billing follows the KEPT (effective) values, not CPSA's full record — the booker is
           // billed for what we actually keep. A credit/deficit appears only when the kept booking
           // costs less/more than originally billed; keeping the original duration & rate (even
@@ -7158,6 +7191,23 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
           }
           function setBilling(bs) {
             setMismatchResState(prev=>({...prev,[b.id]:{...prev[b.id],resolution:curRes,billingState:bs}}));
+          }
+          // Capture an admin-proposed change (from the day grid) as the resolution.
+          // Auto-arm billing from the proposed cost vs what was billed (invoiced rows).
+          function setProposal(vals) {
+            const cd=rowCostOf(vals)-origCost;
+            const auto=b.invoiced?(cd<0?"credit_pending":cd>0?"invoice_pending":"nochange"):"none";
+            setMismatchResState(prev=>({...prev,[b.id]:{...prev[b.id],resolution:"proposed",proposal:vals,billingState:prev[b.id]?.billingState??auto}}));
+            setShowPropose(false);
+          }
+          function clearProposal() {
+            setMismatchResState(prev=>{
+              const n={...prev}; const cur=n[b.id]; if(!cur) return n;
+              const c={...cur}; delete c.proposal;
+              c.resolution=deriveResolution(changedFields,c.fieldSel||{});
+              if(Object.keys(c.fieldSel||{}).length===0 && c.billingState==null) delete n[b.id]; else n[b.id]=c;
+              return n;
+            });
           }
           function doSave() { saveMismatchResolution(b,curRes,curBilling,effectiveVals); }
 
@@ -7253,45 +7303,73 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
               {/* Actions: status indicator + billing + save */}
               <td style={{...tdS2,minWidth:170}}>
                 <div style={{display:"flex",flexDirection:"column",gap:5}}>
-                  {/* Resolution status derived from field buttons */}
-                  {curRes!=="pending"&&(
-                    <div
-                      title={curRes==="amended"
-                        ? "Resolved: our record has been amended to GTEC's values."
-                        : "Pending: GTEC to correct on their side. Becomes 'corrected' once GTEC acknowledges."}
-                      style={{fontSize:10,fontWeight:700,
-                        color:curRes==="amended"?"#a16207":"#5b21b6",
-                        background:curRes==="amended"?"#fef9c3":"#f5f3ff",
-                        border:`1px solid ${curRes==="amended"?"#fde68a":"#ddd6fe"}`,
-                        borderRadius:4,padding:"2px 7px",display:"inline-block",cursor:"help"}}>
-                      {curRes==="amended"?"✓ Amended":"↩ GTEC to correct"}
-                    </div>
-                  )}
+                  {/* Resolution status derived from field buttons or a manual proposal */}
+                  {curRes!=="pending"&&(()=>{
+                    const meta=curRes==="amended"
+                      ? {label:"✓ Amended",color:"#a16207",bg:"#fef9c3",bd:"#fde68a",tip:"Resolved: our record has been amended to GTEC's values."}
+                      : curRes==="proposed"
+                      ? {label:"📅 Proposed change",color:"#9a3412",bg:"#ffedd5",bd:"#fdba74",tip:"Our record will be amended to the admin-proposed values. GTEC and the booker still need to confirm."}
+                      : {label:"↩ GTEC to correct",color:"#5b21b6",bg:"#f5f3ff",bd:"#ddd6fe",tip:"Pending: GTEC to correct on their side. Becomes 'corrected' once GTEC acknowledges."};
+                    return (
+                      <div title={meta.tip} style={{fontSize:10,fontWeight:700,color:meta.color,background:meta.bg,border:`1px solid ${meta.bd}`,borderRadius:4,padding:"2px 7px",display:"inline-block",cursor:"help"}}>
+                        {meta.label}
+                      </div>
+                    );
+                  })()}
+                  {/* Proposed values summary + edit/clear */}
+                  {proposal&&(()=>{
+                    const pf=FACILITIES.find(x=>x.id===proposal.facility_id);
+                    return (
+                      <div style={{fontSize:10,color:"#9a3412",background:"#fff7ed",border:"1px solid #fed7aa",borderRadius:4,padding:"3px 7px"}}>
+                        <div style={{fontWeight:700}}>{pf?.name||proposal.facility_id} · {fmtTime(proposal.start_hour)}–{fmtTime(proposal.start_hour+proposal.duration)} · {proposal.duration}h</div>
+                        <div style={{display:"flex",gap:6,marginTop:3}}>
+                          <button onClick={()=>setShowPropose(true)} style={{fontFamily:"inherit",fontSize:10,fontWeight:700,border:"none",background:"transparent",color:"#c2410c",cursor:"pointer",padding:0,textDecoration:"underline"}}>edit</button>
+                          <button onClick={clearProposal} style={{fontFamily:"inherit",fontSize:10,fontWeight:700,border:"none",background:"transparent",color:"#94a3b8",cursor:"pointer",padding:0,textDecoration:"underline"}}>clear</button>
+                        </div>
+                      </div>
+                    );
+                  })()}
                   {saved?.date&&(
                     <div style={{fontSize:9,color:"#94a3b8",marginTop:-2}} title="When this resolution was last logged / updated">
                       🕗 logged {fmtLoggedAt(saved.date)}
                     </div>
                   )}
-                  {curRes==="to_correct"&&(
+                  {(curRes==="to_correct"||curRes==="proposed")&&(
                     <div style={{display:"flex",flexDirection:"column",gap:4,marginTop:2}}>
                       <div style={{fontSize:10,color:"#64748b",fontWeight:700}}>GTEC follow-up:</div>
                       <button onClick={()=>saveMismatchResolution(b,"confirmed","none")}
-                        title="GTEC verbally confirmed our original is correct - keep our values and mark the booking confirmed"
+                        title={curRes==="proposed"?"GTEC accepted the proposed change — keep the proposed values and mark the booking confirmed":"GTEC verbally confirmed our original is correct - keep our values and mark the booking confirmed"}
                         style={{fontFamily:"inherit",fontSize:11,fontWeight:700,borderRadius:5,padding:"3px 9px",cursor:"pointer",background:"#ecfdf5",border:"1.5px solid #6ee7b7",color:"#047857",whiteSpace:"nowrap",textAlign:"left"}}>✓ Confirmed by GTEC</button>
                       <button onClick={()=>onInformCpsa&&onInformCpsa(b)}
-                        title="Cart an email to a vendor asking GTEC to correct their schedule to match our record. Does not resolve the mismatch."
+                        title={curRes==="proposed"?"Cart an email asking GTEC to update their schedule to the proposed values. Does not resolve the mismatch.":"Cart an email to a vendor asking GTEC to correct their schedule to match our record. Does not resolve the mismatch."}
                         style={{fontFamily:"inherit",fontSize:11,fontWeight:700,borderRadius:5,padding:"3px 9px",cursor:"pointer",background:"#f0f9ff",border:"1.5px solid #7dd3fc",color:"#0369a1",whiteSpace:"nowrap",textAlign:"left"}}>📨 Inform GTEC</button>
                     </div>
                   )}
                   {curRes==="pending"&&changedFields.length>0&&(
                     <div style={{fontSize:10,color:"#94a3b8"}}>← Click values to resolve</div>
                   )}
+                  {!proposal&&(
+                    <button onClick={()=>setShowPropose(true)}
+                      title="Manually propose a different field/time/duration (neither ours nor GTEC's) on the day grid. Amends our record and is flagged for GTEC + the booker to confirm."
+                      style={{fontFamily:"inherit",fontSize:11,fontWeight:700,borderRadius:5,padding:"3px 9px",cursor:"pointer",background:"#fff7ed",border:"1.5px solid #fdba74",color:"#c2410c",whiteSpace:"nowrap",textAlign:"left"}}>📅 Propose change…</button>
+                  )}
+                  {showPropose&&(
+                    <Modal title={`📅 Propose a change — ${fmtDate(b.date)}`} onClose={()=>setShowPropose(false)} width={760}>
+                      <div style={{fontSize:12,color:"#9a3412",background:"#fff7ed",border:"1px solid #fed7aa",borderRadius:8,padding:"8px 12px",marginBottom:10}}>
+                        Drag a slot to propose a new field, start time and duration for <strong>{b.name||b.email}</strong>. Our record will be amended to this proposal, and GTEC &amp; the booker flagged to confirm.
+                      </div>
+                      <InlineDayPicker date={b.date} bookings={bookings} onPick={(facId,start,dur)=>setProposal({facility_id:facId,start_hour:start,duration:dur})}/>
+                      <div style={{marginTop:12,display:"flex",justifyContent:"flex-end"}}>
+                        <button onClick={()=>setShowPropose(false)} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#475569",fontSize:12})}>Close</button>
+                      </div>
+                    </Modal>
+                  )}
                   {/* Warning when billing already settled */}
                   {showWarn&&alreadySettled&&(
                     <div style={{fontSize:10,background:"#fef2f2",border:"1px solid #fecaca",borderRadius:4,padding:"3px 7px",color:"#b91c1c"}}>⚠ Billing already settled from invoice view</div>
                   )}
-                  {/* Billing follow-up — only relevant when amended */}
-                  {curRes==="amended"&&(()=>{
+                  {/* Billing follow-up — relevant when our record changes (amended or proposed) */}
+                  {(curRes==="amended"||curRes==="proposed")&&(()=>{
                     const ghost=(col)=>({fontFamily:"inherit",fontSize:11,fontWeight:700,borderRadius:5,padding:"3px 9px",cursor:"pointer",background:"transparent",border:`1.5px solid ${col}`,color:col});
                     const newCost = rowCostOf(effectiveVals);
                     const hasCostInfo = origCost > 0 || newCost > 0;
@@ -8812,6 +8890,8 @@ export default function App() {
     logActivity("mismatch_resolution", { booking_id:booking.id, resolution:logPayload.resolution, billing_state:logPayload.billing_state });
     const msg = logPayload.resolution === "amended"
       ? "Booking updated to GTEC values."
+      : logPayload.resolution === "proposed"
+      ? "Booking amended to proposed values — GTEC & booker to confirm."
       : logPayload.resolution === "to_correct"
       ? "Flagged for GTEC to correct."
       : "Resolution saved.";
