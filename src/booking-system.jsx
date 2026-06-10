@@ -121,6 +121,13 @@ function emailColor(email) {
 }
 
 const CAL_START=7, CAL_END=22, CAL_TOTAL=CAL_END-CAL_START, HOUR_H=56, SLOT_H=HOUR_H*0.5;
+// Boundary between the "day" and "evening" pricing bands (5:30pm). Also used to mark
+// the floodlit Field #1 (f3) as a last resort during daylight: anything that starts
+// and ends before this cutoff is daytime, when an unlit field should be used instead.
+const DAY_EVENING_CUTOFF = 17.5;
+// Field #1 (f3) is the only floodlit field, so daytime use should be avoided to keep
+// it free for evening (post-cutoff) play that genuinely needs the lights.
+const FLOODLIT_FIELD_ID = "f3";
 const DURATIONS = [
   {label:"30 min",value:0.5},{label:"1 hr",value:1},{label:"1.5 hrs",value:1.5},
   {label:"2 hrs",value:2},{label:"2.5 hrs",value:2.5},{label:"3 hrs",value:3},
@@ -489,12 +496,62 @@ function parseCpsaRefs(sysNotes, notesLegacy) {
   return out;
 }
 
+// ── Cost splitting & manual (function) pricing ──────────────────────────────
+// Co-booker cost split, stored as [SPLIT] email:weight|email:weight in system_notes.
+// The primary booker is always one of the participants. Each booker is invoiced their
+// weight / total-weight share of the booking's cost. Absent ⇒ no split (primary pays all).
+const SPLIT_RE = /\[SPLIT\][^\n]*/g;
+function parseSplit(sysNotes) {
+  const m = (sysNotes||"").match(/\[SPLIT\]\s*([^\n]*)/);
+  if (!m) return null;
+  const parts = m[1].split("|").map(s=>s.trim()).filter(Boolean).map(p=>{
+    const i = p.lastIndexOf(":");
+    const email = (i>=0 ? p.slice(0,i) : p).trim().toLowerCase();
+    const w = i>=0 ? parseFloat(p.slice(i+1)) : 1;
+    return { email, weight: (Number.isNaN(w)||w<=0) ? 1 : w };
+  }).filter(p=>p.email);
+  return parts.length ? parts : null;
+}
+function setSplit(sysNotes, parts) {
+  const base = (sysNotes||"").replace(SPLIT_RE,"").trim();
+  // A split needs at least two participants to be meaningful.
+  if (!parts || parts.length < 2) return base;
+  const marker = `[SPLIT] ${parts.map(p=>`${p.email}:${(+p.weight||1)}`).join("|")}`;
+  return base ? `${base}\n${marker}` : marker;
+}
+// Fraction (0..1) of a booking's cost allocated to a given booker. null ⇒ booking
+// isn't split (caller bills the primary the full amount).
+function splitShareFor(sysNotes, email) {
+  const parts = parseSplit(sysNotes);
+  if (!parts) return null;
+  const total = parts.reduce((s,p)=>s+p.weight,0) || 1;
+  const mine = parts.find(p=>p.email===(email||"").toLowerCase());
+  return mine ? mine.weight/total : 0;
+}
+// Fixed total cost that overrides the hourly calc, stored as [FNCOST] amount.
+// Used for function-room bookings AMUA prices by hand. Absent ⇒ use hourly rates.
+const FNCOST_RE = /\[FNCOST\][^\n]*/g;
+function parseFunctionCost(sysNotes) {
+  const m = (sysNotes||"").match(/\[FNCOST\]\s*(-?[\d.]+)/);
+  if (!m) return null;
+  const v = parseFloat(m[1]);
+  return Number.isNaN(v) ? null : v;
+}
+function setFunctionCost(sysNotes, amount) {
+  const base = (sysNotes||"").replace(FNCOST_RE,"").trim();
+  if (amount===null || amount===undefined || amount==="") return base;
+  const v = parseFloat(amount);
+  if (Number.isNaN(v)) return base;
+  const marker = `[FNCOST] ${v}`;
+  return base ? `${base}\n${marker}` : marker;
+}
+
 // Compare the billed snapshot to a booking's current dimensions. Returns the
 // Day/evening-split cost of a booking-like {start_hour,duration,facility_id} at the
 // given facility rates (5:30pm cutoff). Shared by the mismatch view and billed-change
 // tracking so both frame credit/deficit identically.
 function bookingCost(v, facilityRates) {
-  const CUTOFF=17.5, end=v.start_hour+v.duration;
+  const CUTOFF=DAY_EVENING_CUTOFF, end=v.start_hour+v.duration;
   const day = v.start_hour>=CUTOFF ? 0 : end>CUTOFF ? CUTOFF-v.start_hour : v.duration;
   const evening = v.duration-day;
   const r=(facilityRates||{})[v.facility_id];
@@ -586,6 +643,22 @@ async function sendApprovalEmail({ to, subject, html }) {
   return sendEmail({ to, subject, html, kind: "approval" });
 }
 
+// Public links surfaced to bookers (the live GTEC field calendar and the GTEC field
+// hire request form). Also shown in the in-app Help tab.
+const GTEC_CALENDAR_URL = "https://www.carltonjuniorsrugby.co.nz/venue-hire-fields-1/field-calendar";
+const GTEC_FORM_URL = "https://www.grammartec.co.nz/viewform/499414";
+// Reusable "useful links" block for booker-facing emails — links the GTEC calendar
+// and the field hire request form so bookers can cross-check and self-serve.
+function emailLinksBlock() {
+  return `<div style="margin-top:20px;padding:14px 16px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px">
+    <div style="font-size:10px;font-weight:700;color:#0369a1;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px">Useful links</div>
+    <div style="font-size:13px;line-height:2">
+      <a href="${GTEC_CALENDAR_URL}" target="_blank" style="color:#0369a1;font-weight:600;text-decoration:none">📅 GTEC field calendar ↗</a><br/>
+      <a href="${GTEC_FORM_URL}" target="_blank" style="color:#0369a1;font-weight:600;text-decoration:none">📝 GTEC field hire request form ↗</a>
+    </div>
+  </div>`;
+}
+
 // Build HTML for booking confirmation email
 function buildOrderEmailHtml({ name, email, bookings: bkgs=[], deletedBookings=[], orderRef=null, isDeletionOnly=false }) {
   const hasAdded   = bkgs.length > 0;
@@ -653,6 +726,7 @@ function buildOrderEmailHtml({ name, email, bookings: bkgs=[], deletedBookings=[
     <p style="margin:0 0 4px;font-size:15px;color:#334155">Hi <strong style="color:#0f172a">${name}</strong>,</p>
     ${addedSection}
     ${deletedSection}
+    ${hasAdded?emailLinksBlock():""}
     <p style="margin:24px 0 0;font-size:12px;color:#94a3b8">If you have questions, please contact the facility administrator directly.</p>
   </td></tr>
   <tr><td style="padding:14px 36px 20px;background:#f8fafc;font-size:11px;color:#94a3b8;text-align:center">FacilityBook · Automated notification · ${email}</td></tr>
@@ -705,6 +779,7 @@ function buildApprovalEmailHtml({ name, email, bookings: bkgs, newStatus, adminN
       <tbody>${rows}</tbody>
     </table>
     ${adminNote?`<div style="margin-top:16px;padding:14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:13px;color:#475569"><strong>Note from admin:</strong> ${adminNote}</div>`:""}
+    ${emailLinksBlock()}
     <p style="margin:24px 0 0;font-size:12px;color:#94a3b8">If you have questions, please contact the facility manager.</p>
   </td></tr>
   <tr><td style="padding:16px 32px 24px;background:#f8fafc;font-size:11px;color:#94a3b8;text-align:center">FacilityBook · Sent to ${email}</td></tr>
@@ -1452,9 +1527,10 @@ function InlineDayPicker({ date, bookings, onPick }) {
   const dayBkgs = bookings.filter(b=>b.date===date && !["cancelled","rejected"].includes(b.status));
   return (
     <div style={{border:"1.5px solid #e2e8f0",borderRadius:8,background:"#fff",padding:8}}>
-      <div style={{fontSize:11,color:"#64748b",marginBottom:6,display:"flex",alignItems:"center",gap:6}}>
+      <div style={{fontSize:11,color:"#64748b",marginBottom:6,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
         <span style={{fontWeight:700,color:"#0f172a"}}>📅 Pick a slot</span>
         <span>Click or drag a column to set facility, start time and duration.</span>
+        <span style={{color:"#b45309"}}>· 💡 Field #1 is the only floodlit field — its shaded daytime hours are a last resort; use another field during the day.</span>
       </div>
       <div style={{display:"flex",overflowX:"auto"}}>
         {/* Hour labels */}
@@ -1468,11 +1544,15 @@ function InlineDayPicker({ date, bookings, onPick }) {
           const isDragging = drag?.facility===fac.id;
           const facBkgs = dayBkgs.filter(b=>b.facility_id===fac.id);
           const colTint = FACILITY_TINT[fac.id] || "#fff";
+          const isFloodlit = fac.id===FLOODLIT_FIELD_ID;
+          // Daytime band (07:00 → cutoff) where the only floodlit field should be a last resort.
+          const daylightH = Math.max(0, (DAY_EVENING_CUTOFF-CAL_START))*SH*2;
           return (
             <div key={fac.id} style={{flex:1,minWidth:64}}>
-              <div title={fac.name} style={{height:18,display:"flex",alignItems:"center",justifyContent:"center",gap:3,fontSize:9,fontWeight:700,color:fac.color,background:colTint,borderTopLeftRadius:4,borderTopRightRadius:4,borderBottom:`2px solid ${fac.color}`,overflow:"hidden",whiteSpace:"nowrap"}}>
+              <div title={isFloodlit?`${fac.name} — only floodlit field; avoid daytime use (book only as a last resort)`:fac.name} style={{height:18,display:"flex",alignItems:"center",justifyContent:"center",gap:3,fontSize:9,fontWeight:700,color:fac.color,background:colTint,borderTopLeftRadius:4,borderTopRightRadius:4,borderBottom:`2px solid ${fac.color}`,overflow:"hidden",whiteSpace:"nowrap"}}>
                 <span style={{width:6,height:6,borderRadius:"50%",background:fac.color,flexShrink:0}}/>
                 {fac.name.includes("Field")?fac.name.replace("Field ","Fld "):fac.name.split("–")[0].trim().slice(0,8)}
+                {isFloodlit&&<span title="Only floodlit field — avoid daytime use">💡</span>}
               </div>
               <div onMouseDown={e=>down(e,fac.id)} onMouseMove={e=>move(e,fac.id)} onMouseUp={e=>up(e,fac.id)}
                 onMouseLeave={()=>isDragging&&setDrag(null)}
@@ -1482,6 +1562,14 @@ function InlineDayPicker({ date, bookings, onPick }) {
                     <div style={{height:"50%",borderBottom:"1px dashed rgba(0,0,0,0.03)"}}/>
                   </div>
                 ))}
+                {isFloodlit&&daylightH>0&&(
+                  <div title="Daylight hours — Field #1 is the only floodlit field. Use another field during the day; book here only as a last resort."
+                    style={{position:"absolute",left:0,right:0,top:0,height:daylightH,pointerEvents:"none",zIndex:1,
+                      background:"repeating-linear-gradient(45deg,rgba(217,119,6,0.13) 0 6px,rgba(217,119,6,0) 6px 12px)",
+                      borderBottom:"1.5px dashed rgba(217,119,6,0.6)"}}>
+                    <div style={{position:"sticky",top:0,fontSize:8,fontWeight:700,color:"#b45309",textAlign:"center",padding:"2px 1px",lineHeight:1.2}}>☀️ daylight — last resort</div>
+                  </div>
+                )}
                 {facBkgs.map(b=>(
                   <div key={b.id} title={`${b.name||"booking"} · ${fmtTime(b.start_hour)}`}
                     style={{position:"absolute",left:1,right:1,top:(b.start_hour-CAL_START)*SH*2,height:Math.max(b.duration*SH*2-1,12),background:fac.color,opacity:0.75,borderRadius:3,pointerEvents:"none",overflow:"hidden",fontSize:8,color:"#fff",padding:"1px 3px"}}>
@@ -2326,7 +2414,7 @@ function BookingForm({ booking, allBookings, onAddToCart, onClose, isAdmin, logg
 }
 
 // ─── Booking Detail ───────────────────────────────────────────────────────────
-function BookingDetail({booking,onEdit,onClose,onCancel,isAdmin,onStatusChange,loggedInEmail,allClashes=[]}) {
+function BookingDetail({booking,onEdit,onClose,onCancel,isAdmin,onStatusChange,onPatch,loggedInEmail,allClashes=[]}) {
   const f=FACILITIES.find(x=>x.id===booking.facility_id);
   const m=STATUS_META[booking.status]||STATUS_META.pending;
   const isPast = booking.date < todayKey();
@@ -2334,6 +2422,30 @@ function BookingDetail({booking,onEdit,onClose,onCancel,isAdmin,onStatusChange,l
   const clashingAdminBks = booking.status==="clash"
     ? allClashes.filter(c=>c.user.id===booking.id).map(c=>c.admin)
     : [];
+  // ── Cost splitting & manual (function) pricing — admin edits, persisted to system_notes ──
+  const primaryEmailLc = (booking.email||"").toLowerCase();
+  const [editPricing,setEditPricing] = useState(false);
+  const [splitParts,setSplitParts]   = useState(()=>parseSplit(booking.system_notes)||[{email:primaryEmailLc,weight:1}]);
+  const [coEmail,setCoEmail]         = useState("");
+  const [fnCost,setFnCost]           = useState(()=>{const v=parseFunctionCost(booking.system_notes);return v==null?"":String(v);});
+  const splitTotalW = splitParts.reduce((s,p)=>s+(p.weight||0),0)||1;
+  function addCo() {
+    const e = coEmail.trim().toLowerCase();
+    if (!/\S+@\S+\.\S+/.test(e)) return;
+    if (!splitParts.some(p=>p.email===e)) setSplitParts([...splitParts,{email:e,weight:1}]);
+    setCoEmail("");
+  }
+  function removeCo(email){ setSplitParts(splitParts.filter(p=>p.email!==email)); }
+  function setWeight(email,w){ setSplitParts(splitParts.map(p=>p.email===email?{...p,weight:Math.max(0,parseFloat(w)||0)}:p)); }
+  function equalize(){ setSplitParts(splitParts.map(p=>({...p,weight:1}))); }
+  function savePricing() {
+    let sn = booking.system_notes||"";
+    sn = setFunctionCost(sn, fnCost===""?null:fnCost);
+    const parts = splitParts.filter(p=>p.email && p.weight>0);
+    sn = setSplit(sn, parts.length>=2?parts:null);
+    onPatch && onPatch(booking,{system_notes:sn});
+    setEditPricing(false);
+  }
   return (
     <div style={{display:"flex",flexDirection:"column",gap:16}}>
       <div style={{background:m.bg,border:`1px solid ${m.border}`,borderRadius:10,padding:"12px 16px"}}>
@@ -2386,6 +2498,33 @@ function BookingDetail({booking,onEdit,onClose,onCancel,isAdmin,onStatusChange,l
           <div style={{fontSize:11,color:"#a16207",marginTop:8}}>Detected during GTEC sync — reconcile before confirming.</div>
         </div>
       )}
+      {(()=>{
+        // GTEC's held record for this booking, captured at the last sync. Shown so the
+        // booker/admin can see exactly what GTEC has on file alongside our own details.
+        const g = parseGtecSnapshot(booking.system_notes);
+        const hasTime = g && g.start_hour!=null && !Number.isNaN(g.start_hour);
+        if (!g || (!g.name && !hasTime && !(g.facilityIds&&g.facilityIds.length) && !g.date)) return null;
+        const gfacs = (g.facilityIds||[]).map(id=>FACILITIES.find(f=>f.id===id)?.name||id).filter(Boolean);
+        const detRows = [
+          g.name && ["Event", g.name],
+          gfacs.length && ["Field(s)", gfacs.join(", ")],
+          g.date && ["Date", fmtDate(g.date)],
+          hasTime && ["Time", `${fmtTime(g.start_hour)} – ${fmtTime(g.start_hour+(g.duration||0))}`],
+          (g.duration!=null && !Number.isNaN(g.duration)) && ["Duration", DURATIONS.find(d=>d.value===g.duration)?.label||`${g.duration}h`],
+        ].filter(Boolean);
+        return (
+          <div style={{background:"#ecfeff",border:"1px solid #67e8f9",borderRadius:10,padding:"12px 16px"}}>
+            <div style={{fontSize:12,fontWeight:700,color:"#155e75",textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:8,display:"flex",alignItems:"center",gap:6}}>🌐 GTEC booking details</div>
+            <div style={{display:"grid",gridTemplateColumns:"auto 1fr",gap:"4px 12px"}}>
+              {detRows.map(([label,value])=>(<Fragment key={label}>
+                <span style={{fontSize:12,fontWeight:600,color:"#0e7490",whiteSpace:"nowrap"}}>{label}</span>
+                <span style={{fontSize:14,color:"#0f172a"}}>{value}</span>
+              </Fragment>))}
+            </div>
+            <div style={{fontSize:11,color:"#0e7490",marginTop:8}}>As held by GTEC at the most recent sync.</div>
+          </div>
+        );
+      })()}
       {isPast&&<div style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:"8px 12px",fontSize:12,color:"#64748b",display:"flex",alignItems:"center",gap:6}}>🔒 Past booking — {isAdmin?"admin can delete":"read-only"}</div>}
       <div><EmailChip email={booking.email}/></div>
       {[
@@ -2435,6 +2574,76 @@ function BookingDetail({booking,onEdit,onClose,onCancel,isAdmin,onStatusChange,l
             </div>
           )}
         </>;
+      })()}
+      {(()=>{
+        const savedParts = parseSplit(booking.system_notes);
+        const savedFixed = parseFunctionCost(booking.system_notes);
+        if (!isAdmin && !savedParts && savedFixed==null) return null; // nothing to show bookers
+        const aliasName = e => (e===primaryEmailLc && booking.name) ? booking.name : e.split("@")[0];
+        return (
+          <div style={{background:"#faf5ff",border:"1px solid #e9d5ff",borderRadius:10,padding:"12px 16px"}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+              <span style={{fontSize:12,fontWeight:700,color:"#6b21a8",textTransform:"uppercase",letterSpacing:"0.05em"}}>💰 Cost splitting &amp; pricing</span>
+              {isAdmin && !editPricing && <button onClick={()=>setEditPricing(true)} style={{marginLeft:"auto",fontFamily:"inherit",fontSize:11,fontWeight:700,border:"1.5px solid #d8b4fe",background:"#fff",color:"#7e22ce",borderRadius:6,padding:"2px 10px",cursor:"pointer"}}>Edit</button>}
+            </div>
+            {!editPricing ? (
+              <div style={{display:"flex",flexDirection:"column",gap:6,fontSize:13,color:"#0f172a"}}>
+                {savedFixed!=null
+                  ? <div><strong>Fixed price:</strong> {fmtCost(savedFixed)} <span style={{color:"#7e22ce",fontSize:12}}>(overrides hourly rate)</span></div>
+                  : <div style={{color:"#64748b",fontSize:12}}>Hourly facility rate (no fixed price).</div>}
+                {savedParts
+                  ? <div>
+                      <div style={{fontSize:12,fontWeight:700,color:"#6b21a8",marginBottom:3}}>Split between {savedParts.length} bookers:</div>
+                      {(()=>{const tot=savedParts.reduce((s,p)=>s+p.weight,0)||1;return savedParts.map(p=>(
+                        <div key={p.email} style={{display:"flex",justifyContent:"space-between",gap:10,fontSize:12,padding:"1px 0"}}>
+                          <span>{aliasName(p.email)}{p.email===primaryEmailLc?" (primary)":""}</span>
+                          <span style={{fontWeight:700,color:"#7e22ce"}}>{Math.round(p.weight/tot*100)}%</span>
+                        </div>));})()}
+                    </div>
+                  : <div style={{color:"#64748b",fontSize:12}}>Not split — billed to {aliasName(primaryEmailLc)} in full.</div>}
+              </div>
+            ) : (
+              <div style={{display:"flex",flexDirection:"column",gap:12}}>
+                {/* Fixed price */}
+                <div>
+                  <label style={{...S.lbl,color:"#6b21a8"}}>Fixed price — overrides hourly (for function/room bookings)</label>
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    <span style={{fontSize:14,color:"#64748b"}}>$</span>
+                    <input type="number" min={0} step="0.01" value={fnCost} onChange={e=>setFnCost(e.target.value)} placeholder="leave blank = hourly rate" style={{...S.inp,maxWidth:200}}/>
+                  </div>
+                </div>
+                {/* Co-bookers / split */}
+                <div>
+                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+                    <label style={{...S.lbl,color:"#6b21a8",margin:0}}>Split cost between bookers</label>
+                    <button onClick={equalize} style={{fontFamily:"inherit",fontSize:11,fontWeight:700,border:"1.5px solid #d8b4fe",background:"#fff",color:"#7e22ce",borderRadius:6,padding:"1px 8px",cursor:"pointer"}}>Split equally</button>
+                  </div>
+                  <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                    {splitParts.map(p=>(
+                      <div key={p.email} style={{display:"flex",alignItems:"center",gap:8}}>
+                        <span style={{flex:1,fontSize:13,color:"#0f172a",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.email}{p.email===primaryEmailLc?<span style={{color:"#7e22ce",fontWeight:700}}> (primary)</span>:""}</span>
+                        <input type="number" min={0} step="1" value={p.weight} onChange={e=>setWeight(p.email,e.target.value)} title="Relative weight" style={{...S.inp,width:64,padding:"5px 8px"}}/>
+                        <span style={{fontSize:12,fontWeight:700,color:"#7e22ce",width:42,textAlign:"right"}}>{Math.round((p.weight||0)/splitTotalW*100)}%</span>
+                        {p.email!==primaryEmailLc
+                          ? <button onClick={()=>removeCo(p.email)} title="Remove co-booker" style={{border:"none",background:"transparent",color:"#ef4444",cursor:"pointer",fontWeight:700,fontSize:14,lineHeight:1}}>✕</button>
+                          : <span style={{width:14}}/>}
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{display:"flex",gap:6,marginTop:8}}>
+                    <input type="email" value={coEmail} onChange={e=>setCoEmail(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")addCo();}} placeholder="add co-booker email…" style={{...S.inp,flex:1}}/>
+                    <button onClick={addCo} style={S.btn({border:"1.5px solid #d8b4fe",background:"#fff",color:"#7e22ce",fontSize:12,fontWeight:700})}>+ Add</button>
+                  </div>
+                  <div style={{fontSize:11,color:"#94a3b8",marginTop:6}}>Add other bookers to divide this booking's cost. Each is invoiced their share; one participant means no split.</div>
+                </div>
+                <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+                  <button onClick={()=>{setEditPricing(false);setSplitParts(parseSplit(booking.system_notes)||[{email:primaryEmailLc,weight:1}]);setFnCost((v=>v==null?"":String(v))(parseFunctionCost(booking.system_notes)));}} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#475569",fontSize:12})}>Cancel</button>
+                  <button onClick={savePricing} style={S.btn({background:"#7e22ce",color:"#fff",fontSize:12,fontWeight:700})}>Save pricing</button>
+                </div>
+              </div>
+            )}
+          </div>
+        );
       })()}
       <div style={{display:"flex",gap:8,flexWrap:"wrap",paddingTop:8,borderTop:"1px solid #f1f5f9"}}>
         {isAdmin&&<>
@@ -4519,6 +4728,9 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
   // category (day/evening, decided by majority split). In hourly mode the
   // booking is split at 5:30 pm between day and evening rates.
   function getBookingCost(b) {
+    // A manually-set function/room price overrides the hourly calculation entirely.
+    const fixed = parseFunctionCost(b.system_notes);
+    if (fixed != null) return fixed;
     const rates = bRates(b);
     if (isPerBooking) {
       const rate = categoryOf(b) === "evening" ? rates.evening : rates.day;
@@ -4623,10 +4835,41 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
   function canEditDuration(email) { return isAdmin || (loggedInEmail && email.toLowerCase() === loggedInEmail.toLowerCase()); }
 
   // ── Invoice helpers ──────────────────────────────────────────────────────
+  // Full (pre-share) cost of one booking: a manual function price if set, else hourly.
+  function fullLineCost(b) {
+    const fixed = parseFunctionCost(b.system_notes);
+    if (fixed != null) return fixed;
+    const { day, evening } = splitHours(b);
+    const rates = bRates(b);
+    return day * rates.day + evening * rates.evening;
+  }
+  // A booking is "special" (itemised on its own, never merged into shared day/evening
+  // rate buckets) when it has a manual price or a partial cost-split share.
+  function isSpecialLine(b) {
+    return parseFunctionCost(b.system_notes) != null || b.__splitShare != null;
+  }
+  // One itemised line for a fixed-price and/or cost-split booking, applying the
+  // per-booker share carried on b.__splitShare (set when building per-booker scopes).
+  function specialLineFor(b) {
+    const share = b.__splitShare ?? 1;
+    const full = fullLineCost(b);
+    const fac = FACILITIES.find(f => f.id === b.facility_id);
+    const timeStr = `${fmtTime(b.start_hour)}–${fmtTime(b.start_hour + b.duration)}`;
+    const fixed = parseFunctionCost(b.system_notes) != null;
+    const shareNote = share < 1 ? ` · shared ${Math.round(share*100)}% of ${fmtCost(full)}` : "";
+    return {
+      desc:   `${fmtDate(b.date)} · ${fac?.name||b.facility_id} · ${timeStr}`,
+      detail: `${b.purpose||""}${fixed?" · fixed price":""}${shareNote}`,
+      cost:   full * share,
+    };
+  }
   function buildInvoiceLines(bkgs, detail) {
+    const special = bkgs.filter(isSpecialLine);
+    const plain   = bkgs.filter(b => !isSpecialLine(b));
+    const specialLines = special.map(specialLineFor);
     if (detail === "grouped") {
       const groups = {};
-      bkgs.forEach(b => {
+      plain.forEach(b => {
         const { day, evening } = splitHours(b);
         const rates = bRates(b);
         const fac = FACILITIES.find(f => f.id === b.facility_id);
@@ -4642,13 +4885,14 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
           groups[key].hours += evening; groups[key].cost += evening * rates.evening;
         }
       });
-      return Object.values(groups).map(g => ({
+      const groupedLines = Object.values(groups).map(g => ({
         desc:  g.desc,
         detail:`${fmtHrs(g.hours)} @ ${fmtCost(g.rate)}/hr`,
         cost:  g.cost,
       }));
+      return [...groupedLines, ...specialLines];
     } else {
-      return bkgs.map(b => {
+      const indiv = plain.map(b => {
         const { day, evening } = splitHours(b);
         const rates = bRates(b);
         const fac = FACILITIES.find(f => f.id === b.facility_id);
@@ -4660,7 +4904,8 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
           detail: `${b.purpose}${splitNote}`,
           cost,
         };
-      }).sort((a,b)=>a.desc.localeCompare(b.desc));
+      });
+      return [...indiv, ...specialLines].sort((a,b)=>a.desc.localeCompare(b.desc));
     }
   }
 
@@ -4928,19 +5173,42 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
   // Groups active bookings by booker for combined/per-booker export
   function getInvoiceScopes() {
     const sel = [...invSelectedEmails];
+    // A booking is in scope for a selected booker if they're the primary OR a co-booker
+    // on a cost-split. This lets co-bookers be invoiced their share even when they aren't
+    // the primary on the booking.
+    const isSelFor = (b, e) => {
+      const el = e.toLowerCase();
+      if (b.email.toLowerCase() === el) return true;
+      const sh = splitShareFor(b.system_notes, el);
+      return sh != null && sh > 0;
+    };
     const pool = sel.length > 0
-      ? activeForInvoice.filter(b => sel.some(e => b.email.toLowerCase() === e.toLowerCase()))
+      ? activeForInvoice.filter(b => sel.some(e => isSelFor(b, e)))
       : activeForInvoice;
     if (invScope === "combined" || sel.length <= 1) {
+      // Combined / single invoice: everyone is billed together, so the full cost of a
+      // split booking appears once (no per-booker share is applied).
       const email = sel.length === 1 ? sel[0] : "combined";
       const name = sel.length === 1 ? (invMode==="official" ? officialBookerName(sel[0]) : bookerNameMap[sel[0].toLowerCase()] || sel[0]) : "All Bookers";
       return [{ name, email, bkgs: pool }];
     }
-    return sel.map(e => ({
-      name: invMode==="official" ? officialBookerName(e) : (bookerNameMap[e.toLowerCase()] || e),
-      email: e,
-      bkgs: pool.filter(b => b.email.toLowerCase() === e.toLowerCase()),
-    }));
+    return sel.map(e => {
+      const el = e.toLowerCase();
+      const bkgs = [];
+      pool.forEach(b => {
+        const share = splitShareFor(b.system_notes, el);
+        if (share != null) {                       // split booking → bill this booker their share
+          if (share > 0) bkgs.push({ ...b, __splitShare: share });
+        } else if (b.email.toLowerCase() === el) { // unsplit booking → primary pays in full
+          bkgs.push(b);
+        }
+      });
+      return {
+        name: invMode==="official" ? officialBookerName(e) : (bookerNameMap[e.toLowerCase()] || e),
+        email: e,
+        bkgs,
+      };
+    });
   }
 
   // CSV export — all columns from every booking (not filtered)
@@ -6371,6 +6639,13 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
       // field; ours elsewhere). Falls back to all-CPSA values for legacy callers.
       Object.assign(patch, effectiveVals || extractCpsaAmendValues(reasons, booking), { status: "cpsa_confirmed" });
       sysNotes = stripMismatchNote(sysNotes);
+    } else if (resolution === "proposed") {
+      // Manual proposal: amend our record to admin-proposed values (neither ours nor
+      // GTEC's). GTEC and the booker still need to confirm, so we KEEP the mismatch
+      // flag/snapshot and leave the booking in review — it stays in the queue with a
+      // "proposed" chip and the usual GTEC follow-up (Inform GTEC / Confirmed by GTEC).
+      sysNotes = setCpsaOrig(sysNotes, booking);
+      Object.assign(patch, effectiveVals || {});
     } else if (resolution === "confirmed") {
       // CPSA verbally confirmed our original is correct: keep our values, mark confirmed, clear the mismatch.
       patch.status = "cpsa_confirmed";
@@ -6931,6 +7206,8 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
           //  • kept ours → GTEC must change their record   → "GTEC to update"
           //  • took GTEC → our booking is amended to match  → "BOOKER to acknowledge"
           const PILL_GTEC   = `<span style="display:inline-block;margin-left:6px;padding:1px 6px;border-radius:8px;background:#dbeafe;color:#1e3a8a;border:1px solid #93c5fd;font-size:10px;font-weight:700;white-space:nowrap">GTEC to update</span>`;
+          // Manual proposal: a new value neither ours nor GTEC's — both sides confirm.
+          const PILL_PROPOSED = `<span style="display:inline-block;margin-left:6px;padding:1px 6px;border-radius:8px;background:#ffedd5;color:#9a3412;border:1px solid #fdba74;font-size:10px;font-weight:700;white-space:nowrap">PROPOSED — GTEC &amp; booker to confirm</span>`;
           // The BOOKER pill carries the booker's own coloured chip (alias + colour) so
           // it's clear which booker needs to acknowledge the change.
           const bookerPill = b => {
@@ -6947,8 +7224,24 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
             if (cv.duration!==b.duration)       list.push({key:"duration",label:"Dur",our:`${b.duration}h`,gtec:`${cv.duration}h`});
             return list;
           }
-          // Changes cell reflects the admin's current (unsaved) selections from mismatchResState.
+          // Fields that differ between our booking and an admin proposal.
+          function proposalFieldsOf(b, prop) {
+            const facName=id=>FACILITIES.find(x=>x.id===id)?.name||id;
+            const list=[];
+            if(prop.facility_id!==b.facility_id) list.push({label:"Field",our:facName(b.facility_id),val:facName(prop.facility_id)});
+            if(prop.start_hour!==b.start_hour)   list.push({label:"Time",our:`${fmtTime(b.start_hour)}–${fmtTime(b.start_hour+b.duration)}`,val:`${fmtTime(prop.start_hour)}–${fmtTime(prop.start_hour+prop.duration)}`});
+            if(prop.duration!==b.duration)       list.push({label:"Dur",our:`${b.duration}h`,val:`${prop.duration}h`});
+            return list;
+          }
+          // Changes cell reflects the admin's current (unsaved) selections from mismatchResState
+          // — a manual proposal takes precedence over the per-field keep/switch choices.
           function changesHtml(b, cv) {
+            const prop=mismatchResState[b.id]?.proposal;
+            if(prop){
+              const pf=proposalFieldsOf(b,prop);
+              if(!pf.length) return `<span style="color:#94a3b8">—</span>`;
+              return pf.map(f=>`<div style="margin:2px 0"><strong>${f.label}:</strong> ${f.our} → <span style="color:#9a3412;font-weight:700">${f.val}</span>${PILL_PROPOSED}</div>`).join("");
+            }
             const sel=(mismatchResState[b.id]?.fieldSel)||{};
             const fields=changedFieldsOf(b, cv);
             if(!fields.length) return `<span style="color:#94a3b8">—</span>`;
@@ -6960,6 +7253,10 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
             }).join("");
           }
           function changesText(b, cv) {
+            const prop=mismatchResState[b.id]?.proposal;
+            if(prop){
+              return proposalFieldsOf(b,prop).map(f=>`${f.label}: ${f.our} → ${f.val} [PROPOSED — GTEC & ${adminAlias(b.email)} to confirm]`).join("; ");
+            }
             const sel=(mismatchResState[b.id]?.fieldSel)||{};
             return changedFieldsOf(b, cv).map(f=>{
               const s=sel[f.key];
@@ -7037,12 +7334,16 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
           const saved=parseCpsaResolution(b.system_notes);
           const local=mismatchResState[b.id];
           const fieldSel=local?.fieldSel||{};
+          const proposal=local?.proposal||null; // admin-proposed {facility_id,start_hour,duration}
           const curBilling=local?.billingState??saved?.billingState??"none";
           const alreadySettled=saved?.billingState==="credited"||saved?.billingState==="invoiced";
           const [showWarn,setShowWarn]=useState(false);
+          const [showPropose,setShowPropose]=useState(false);
 
-          // Derive resolution from per-field selections
-          const curRes=deriveResolution(changedFields, fieldSel);
+          // A manual proposal overrides per-field selection: the booking is amended to
+          // the proposed values, with GTEC + booker still to confirm. Otherwise the
+          // resolution is derived from the per-field keep/switch buttons.
+          const curRes=proposal?"proposed":deriveResolution(changedFields, fieldSel);
 
           // CPSA submission link(s) + ref ("submission id") for this booking.
           const cpsaRefs=parseCpsaRefs(b.system_notes,b.notes);
@@ -7058,7 +7359,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
           }
           const rowCostOf = v => bookingCost(v, facilityRates);
           const origCost=rowCostOf(b);
-          const effectiveVals=effectiveFrom(fieldSel); // what we save to the booking
+          const effectiveVals=proposal||effectiveFrom(fieldSel); // what we save to the booking
           // Billing follows the KEPT (effective) values, not CPSA's full record — the booker is
           // billed for what we actually keep. A credit/deficit appears only when the kept booking
           // costs less/more than originally billed; keeping the original duration & rate (even
@@ -7093,6 +7394,23 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
           }
           function setBilling(bs) {
             setMismatchResState(prev=>({...prev,[b.id]:{...prev[b.id],resolution:curRes,billingState:bs}}));
+          }
+          // Capture an admin-proposed change (from the day grid) as the resolution.
+          // Auto-arm billing from the proposed cost vs what was billed (invoiced rows).
+          function setProposal(vals) {
+            const cd=rowCostOf(vals)-origCost;
+            const auto=b.invoiced?(cd<0?"credit_pending":cd>0?"invoice_pending":"nochange"):"none";
+            setMismatchResState(prev=>({...prev,[b.id]:{...prev[b.id],resolution:"proposed",proposal:vals,billingState:prev[b.id]?.billingState??auto}}));
+            setShowPropose(false);
+          }
+          function clearProposal() {
+            setMismatchResState(prev=>{
+              const n={...prev}; const cur=n[b.id]; if(!cur) return n;
+              const c={...cur}; delete c.proposal;
+              c.resolution=deriveResolution(changedFields,c.fieldSel||{});
+              if(Object.keys(c.fieldSel||{}).length===0 && c.billingState==null) delete n[b.id]; else n[b.id]=c;
+              return n;
+            });
           }
           function doSave() { saveMismatchResolution(b,curRes,curBilling,effectiveVals); }
 
@@ -7188,45 +7506,73 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
               {/* Actions: status indicator + billing + save */}
               <td style={{...tdS2,minWidth:170}}>
                 <div style={{display:"flex",flexDirection:"column",gap:5}}>
-                  {/* Resolution status derived from field buttons */}
-                  {curRes!=="pending"&&(
-                    <div
-                      title={curRes==="amended"
-                        ? "Resolved: our record has been amended to GTEC's values."
-                        : "Pending: GTEC to correct on their side. Becomes 'corrected' once GTEC acknowledges."}
-                      style={{fontSize:10,fontWeight:700,
-                        color:curRes==="amended"?"#a16207":"#5b21b6",
-                        background:curRes==="amended"?"#fef9c3":"#f5f3ff",
-                        border:`1px solid ${curRes==="amended"?"#fde68a":"#ddd6fe"}`,
-                        borderRadius:4,padding:"2px 7px",display:"inline-block",cursor:"help"}}>
-                      {curRes==="amended"?"✓ Amended":"↩ GTEC to correct"}
-                    </div>
-                  )}
+                  {/* Resolution status derived from field buttons or a manual proposal */}
+                  {curRes!=="pending"&&(()=>{
+                    const meta=curRes==="amended"
+                      ? {label:"✓ Amended",color:"#a16207",bg:"#fef9c3",bd:"#fde68a",tip:"Resolved: our record has been amended to GTEC's values."}
+                      : curRes==="proposed"
+                      ? {label:"📅 Proposed change",color:"#9a3412",bg:"#ffedd5",bd:"#fdba74",tip:"Our record will be amended to the admin-proposed values. GTEC and the booker still need to confirm."}
+                      : {label:"↩ GTEC to correct",color:"#5b21b6",bg:"#f5f3ff",bd:"#ddd6fe",tip:"Pending: GTEC to correct on their side. Becomes 'corrected' once GTEC acknowledges."};
+                    return (
+                      <div title={meta.tip} style={{fontSize:10,fontWeight:700,color:meta.color,background:meta.bg,border:`1px solid ${meta.bd}`,borderRadius:4,padding:"2px 7px",display:"inline-block",cursor:"help"}}>
+                        {meta.label}
+                      </div>
+                    );
+                  })()}
+                  {/* Proposed values summary + edit/clear */}
+                  {proposal&&(()=>{
+                    const pf=FACILITIES.find(x=>x.id===proposal.facility_id);
+                    return (
+                      <div style={{fontSize:10,color:"#9a3412",background:"#fff7ed",border:"1px solid #fed7aa",borderRadius:4,padding:"3px 7px"}}>
+                        <div style={{fontWeight:700}}>{pf?.name||proposal.facility_id} · {fmtTime(proposal.start_hour)}–{fmtTime(proposal.start_hour+proposal.duration)} · {proposal.duration}h</div>
+                        <div style={{display:"flex",gap:6,marginTop:3}}>
+                          <button onClick={()=>setShowPropose(true)} style={{fontFamily:"inherit",fontSize:10,fontWeight:700,border:"none",background:"transparent",color:"#c2410c",cursor:"pointer",padding:0,textDecoration:"underline"}}>edit</button>
+                          <button onClick={clearProposal} style={{fontFamily:"inherit",fontSize:10,fontWeight:700,border:"none",background:"transparent",color:"#94a3b8",cursor:"pointer",padding:0,textDecoration:"underline"}}>clear</button>
+                        </div>
+                      </div>
+                    );
+                  })()}
                   {saved?.date&&(
                     <div style={{fontSize:9,color:"#94a3b8",marginTop:-2}} title="When this resolution was last logged / updated">
                       🕗 logged {fmtLoggedAt(saved.date)}
                     </div>
                   )}
-                  {curRes==="to_correct"&&(
+                  {(curRes==="to_correct"||curRes==="proposed")&&(
                     <div style={{display:"flex",flexDirection:"column",gap:4,marginTop:2}}>
                       <div style={{fontSize:10,color:"#64748b",fontWeight:700}}>GTEC follow-up:</div>
                       <button onClick={()=>saveMismatchResolution(b,"confirmed","none")}
-                        title="GTEC verbally confirmed our original is correct - keep our values and mark the booking confirmed"
+                        title={curRes==="proposed"?"GTEC accepted the proposed change — keep the proposed values and mark the booking confirmed":"GTEC verbally confirmed our original is correct - keep our values and mark the booking confirmed"}
                         style={{fontFamily:"inherit",fontSize:11,fontWeight:700,borderRadius:5,padding:"3px 9px",cursor:"pointer",background:"#ecfdf5",border:"1.5px solid #6ee7b7",color:"#047857",whiteSpace:"nowrap",textAlign:"left"}}>✓ Confirmed by GTEC</button>
                       <button onClick={()=>onInformCpsa&&onInformCpsa(b)}
-                        title="Cart an email to a vendor asking GTEC to correct their schedule to match our record. Does not resolve the mismatch."
+                        title={curRes==="proposed"?"Cart an email asking GTEC to update their schedule to the proposed values. Does not resolve the mismatch.":"Cart an email to a vendor asking GTEC to correct their schedule to match our record. Does not resolve the mismatch."}
                         style={{fontFamily:"inherit",fontSize:11,fontWeight:700,borderRadius:5,padding:"3px 9px",cursor:"pointer",background:"#f0f9ff",border:"1.5px solid #7dd3fc",color:"#0369a1",whiteSpace:"nowrap",textAlign:"left"}}>📨 Inform GTEC</button>
                     </div>
                   )}
                   {curRes==="pending"&&changedFields.length>0&&(
                     <div style={{fontSize:10,color:"#94a3b8"}}>← Click values to resolve</div>
                   )}
+                  {!proposal&&(
+                    <button onClick={()=>setShowPropose(true)}
+                      title="Manually propose a different field/time/duration (neither ours nor GTEC's) on the day grid. Amends our record and is flagged for GTEC + the booker to confirm."
+                      style={{fontFamily:"inherit",fontSize:11,fontWeight:700,borderRadius:5,padding:"3px 9px",cursor:"pointer",background:"#fff7ed",border:"1.5px solid #fdba74",color:"#c2410c",whiteSpace:"nowrap",textAlign:"left"}}>📅 Propose change…</button>
+                  )}
+                  {showPropose&&(
+                    <Modal title={`📅 Propose a change — ${fmtDate(b.date)}`} onClose={()=>setShowPropose(false)} width={760}>
+                      <div style={{fontSize:12,color:"#9a3412",background:"#fff7ed",border:"1px solid #fed7aa",borderRadius:8,padding:"8px 12px",marginBottom:10}}>
+                        Drag a slot to propose a new field, start time and duration for <strong>{b.name||b.email}</strong>. Our record will be amended to this proposal, and GTEC &amp; the booker flagged to confirm.
+                      </div>
+                      <InlineDayPicker date={b.date} bookings={bookings} onPick={(facId,start,dur)=>setProposal({facility_id:facId,start_hour:start,duration:dur})}/>
+                      <div style={{marginTop:12,display:"flex",justifyContent:"flex-end"}}>
+                        <button onClick={()=>setShowPropose(false)} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#475569",fontSize:12})}>Close</button>
+                      </div>
+                    </Modal>
+                  )}
                   {/* Warning when billing already settled */}
                   {showWarn&&alreadySettled&&(
                     <div style={{fontSize:10,background:"#fef2f2",border:"1px solid #fecaca",borderRadius:4,padding:"3px 7px",color:"#b91c1c"}}>⚠ Billing already settled from invoice view</div>
                   )}
-                  {/* Billing follow-up — only relevant when amended */}
-                  {curRes==="amended"&&(()=>{
+                  {/* Billing follow-up — relevant when our record changes (amended or proposed) */}
+                  {(curRes==="amended"||curRes==="proposed")&&(()=>{
                     const ghost=(col)=>({fontFamily:"inherit",fontSize:11,fontWeight:700,borderRadius:5,padding:"3px 9px",cursor:"pointer",background:"transparent",border:`1.5px solid ${col}`,color:col});
                     const newCost = rowCostOf(effectiveVals);
                     const hasCostInfo = origCost > 0 || newCost > 0;
@@ -8552,6 +8898,21 @@ export default function App() {
     showToast(`${STATUS_META[newStatus]?.label||newStatus} queued in cart.`);
   }
 
+  // Patch a single booking's fields directly (no email, no cart) — used by the booking
+  // detail's cost-splitting / fixed-price editor to persist system_notes changes.
+  async function handlePatchBooking(booking, patch) {
+    const full = { ...patch, updated_at: new Date().toISOString() };
+    if (configured) {
+      try { await sb.update("bookings", booking.id, full); await loadBookings(); }
+      catch(e){ showToast("Save failed: "+e.message, "error"); return; }
+    } else {
+      setBookings(prev => prev.map(b => b.id===booking.id ? { ...b, ...full } : b));
+    }
+    setViewing(prev => prev && prev.id===booking.id ? { ...prev, ...full } : prev);
+    logActivity("booking_edit", { ids:[booking.id], booker: booking.email, pricing: true });
+    showToast("Booking pricing updated.");
+  }
+
   function updateFacilityRate(facilityId, type, value) {
     const existing = typeof facilityRates[facilityId] === "object" ? facilityRates[facilityId] : { day: 0, evening: 0 };
     const newRates = { ...facilityRates, [facilityId]: { ...existing, [type]: parseFloat(value) || 0 } };
@@ -8747,6 +9108,8 @@ export default function App() {
     logActivity("mismatch_resolution", { booking_id:booking.id, resolution:logPayload.resolution, billing_state:logPayload.billing_state });
     const msg = logPayload.resolution === "amended"
       ? "Booking updated to GTEC values."
+      : logPayload.resolution === "proposed"
+      ? "Booking amended to proposed values — GTEC & booker to confirm."
       : logPayload.resolution === "to_correct"
       ? "Flagged for GTEC to correct."
       : "Resolution saved.";
@@ -9094,13 +9457,21 @@ export default function App() {
 
     if (!silentMode) {
       const noEmailStatuses = new Set(["pending_cpsa"]);
-      // Status-change emails — one per booker card, unless that card opted out.
+      // Status-change emails — grouped into one email per booker + status, so a booker
+      // with several bookings moving to the same status gets a single confirmation.
+      const statusByKey = {};
       for (const it of statusItems) {
         if (it.skipEmail || noEmailStatuses.has(it.newStatus)) continue;
-        const statusLabel = STATUS_META[it.newStatus]?.label || it.newStatus;
-        sendApprovalEmail({to:it.email,
-          subject:`Your Booking${it.drafts.length>1?"s":""} — ${statusLabel}`,
-          html:buildApprovalEmailHtml({name:it.name, email:it.email, bookings:it.drafts.map(d=>({...d,status:it.newStatus})), newStatus:it.newStatus, adminNote:it.adminNote||""})});
+        const k = it.email.toLowerCase()+"|"+it.newStatus;
+        if (!statusByKey[k]) statusByKey[k] = {name:it.name, email:it.email, newStatus:it.newStatus, drafts:[], notes:[]};
+        statusByKey[k].drafts.push(...it.drafts);
+        if (it.adminNote) statusByKey[k].notes.push(it.adminNote);
+      }
+      for (const g of Object.values(statusByKey)) {
+        const statusLabel = STATUS_META[g.newStatus]?.label || g.newStatus;
+        sendApprovalEmail({to:g.email,
+          subject:`Your Booking${g.drafts.length>1?"s":""} — ${statusLabel}`,
+          html:buildApprovalEmailHtml({name:g.name, email:g.email, bookings:g.drafts.map(d=>({...d,status:g.newStatus})), newStatus:g.newStatus, adminNote:[...new Set(g.notes)].join(" ")})});
       }
       // Notify-only emails: clash alerts, CPSA status notices, mismatch, inform-CPSA.
       for (const item of notifyItems) {
@@ -9136,10 +9507,16 @@ export default function App() {
         sendEmail({to:e, subject:`Booking Request Received [${orderRef}]`,
           html:buildOrderEmailHtml({name:n,email:e,bookings:d,orderRef})});
       }
-      // Edits: send one "Booking Updated" per item (each is a separate edit)
-      for (const item of cart.filter(item => item.isEdit)) {
-        sendApprovalEmail({to:item.email, subject:"Booking Updated",
-          html:buildApprovalEmailHtml({name:item.name,email:item.email,bookings:item.drafts,newStatus:item.drafts[0]?.status,adminNote:""})});
+      // Edits: group by booker into a single "Booking(s) Updated" email.
+      const editByEmail = {};
+      cart.filter(item => item.isEdit).forEach(item => {
+        const k = item.email.toLowerCase();
+        if (!editByEmail[k]) editByEmail[k] = {name:item.name, email:item.email, drafts:[]};
+        editByEmail[k].drafts.push(...item.drafts);
+      });
+      for (const g of Object.values(editByEmail)) {
+        sendApprovalEmail({to:g.email, subject:`Booking${g.drafts.length>1?"s":""} Updated`,
+          html:buildApprovalEmailHtml({name:g.name,email:g.email,bookings:g.drafts,newStatus:g.drafts[0]?.status,adminNote:""})});
       }
     }
 
@@ -9787,7 +10164,7 @@ export default function App() {
 
       {viewing&&(
         <Modal title="Booking Details" onClose={()=>setViewing(null)}>
-          <BookingDetail booking={viewing} onEdit={()=>openEdit(viewing)} onClose={()=>setViewing(null)} onCancel={()=>queueForRemoval(viewing.id)} isAdmin={isAdmin} onStatusChange={status=>handleStatusChange(viewing,status)} loggedInEmail={loggedInEmail} allClashes={allClashes}/>
+          <BookingDetail booking={viewing} onEdit={()=>openEdit(viewing)} onClose={()=>setViewing(null)} onCancel={()=>queueForRemoval(viewing.id)} isAdmin={isAdmin} onStatusChange={status=>handleStatusChange(viewing,status)} onPatch={handlePatchBooking} loggedInEmail={loggedInEmail} allClashes={allClashes}/>
         </Modal>
       )}
 
