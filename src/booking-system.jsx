@@ -8748,7 +8748,17 @@ export default function App() {
       if (configured && (clashUpdates > 0 || clashResolved > 0)) await loadBookings();
 
       // Queue CPSA status-change notifications in the cart (notify-only, no booking edits).
-      if (cpsaNotifications.length) setCart(prev => [...prev, ...cpsaNotifications]);
+      if (cpsaNotifications.length) {
+        // Group per booker + status so a booker whose multiple bookings transition in
+        // one sync receives a single email listing them all, not one email per booking.
+        const groupedNotifs = {};
+        for (const it of cpsaNotifications) {
+          const k = it.email.toLowerCase()+"|"+it.newStatus;
+          if (!groupedNotifs[k]) groupedNotifs[k] = { ...it, drafts: [] };
+          groupedNotifs[k].drafts.push(...it.drafts);
+        }
+        setCart(prev => [...prev, ...Object.values(groupedNotifs)]);
+      }
 
       const label = `${MONTHS[month]} ${year}`;
       const monthKey = `${year}-${String(month+1).padStart(2,"0")}`;
@@ -9490,8 +9500,8 @@ export default function App() {
           sendApprovalEmail({to:item.email, subject:"⚡ GTEC Booking Mismatch – Please Review",
             html:buildMismatchEmailHtml({name:item.name, email:item.email, bookings:item.drafts})});
         } else {
-          sendApprovalEmail({to:item.email, subject:"Booking Confirmed by GTEC",
-            html:buildApprovalEmailHtml({name:item.name, email:item.email, bookings:[b], newStatus:item.newStatus, adminNote:""})});
+          sendApprovalEmail({to:item.email, subject:`Booking${item.drafts.length>1?"s":""} Confirmed by GTEC`,
+            html:buildApprovalEmailHtml({name:item.name, email:item.email, bookings:item.drafts, newStatus:item.newStatus, adminNote:""})});
         }
       }
       // New bookings: group by email and send one order confirmation each
