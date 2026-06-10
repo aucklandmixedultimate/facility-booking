@@ -6,8 +6,12 @@ name: Deploy to GitHub Pages
 # `send-email` Supabase Edge Function, so no email secrets are needed here.)
 #
 # Required repo secrets (Settings → Secrets and variables → Actions):
-#   VITE_SUPABASE_URL    e.g. https://YOUR_PROJECT.supabase.co
-#   VITE_SUPABASE_ANON   the public anon/publishable key (RLS-protected)
+#   VITE_SUPABASE_URL       e.g. https://YOUR_PROJECT.supabase.co
+#   VITE_SUPABASE_ANON      the public anon/publishable key (RLS-protected)
+# Optional:
+#   VITE_GOOGLE_CLIENT_ID   Google OAuth web client id (public) — enables the
+#                           Google Drive billing export; feature stays hidden
+#                           when unset.
 
 on:
   push:
@@ -43,6 +47,7 @@ jobs:
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON: ${{ secrets.VITE_SUPABASE_ANON }}
+          VITE_GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID }}
         run: |
           if [ -z "$VITE_SUPABASE_URL" ] || [ -z "$VITE_SUPABASE_ANON" ]; then
             echo "::error::Missing VITE_SUPABASE_URL / VITE_SUPABASE_ANON repo secrets — the build would ship without Supabase credentials and break sign-in."
