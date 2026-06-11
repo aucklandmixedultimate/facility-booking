@@ -585,6 +585,19 @@ function setFunctionCost(sysNotes, amount) {
   return base ? `${base}\n${marker}` : marker;
 }
 
+// Bookings created together — a recurrence, a multi-day span, a multi-facility pick or
+// any grouped variant — share a group id so the cart and summary present them as one
+// group (the same treatment weekly recurrences already get). Stored as [GRP] id.
+const GRP_RE = /\[GRP\][^\n]*/g;
+function parseGroupRef(sysNotes) { const m=(sysNotes||"").match(/\[GRP\]\s*(\S+)/); return m?m[1]:null; }
+function setGroupRef(sysNotes, id) {
+  const base=(sysNotes||"").replace(GRP_RE,"").trim();
+  if(!id) return base;
+  const marker=`[GRP] ${id}`;
+  return base?`${base}\n${marker}`:marker;
+}
+function newGroupRef() { return "G"+Date.now().toString(36)+Math.random().toString(36).slice(2,5); }
+
 // Compare the billed snapshot to a booking's current dimensions. Returns the
 // Day/evening-split cost of a booking-like {start_hour,duration,facility_id} at the
 // given facility rates (5:30pm cutoff). Shared by the mismatch view and billed-change
@@ -956,7 +969,7 @@ function Modal({title,onClose,children,width=560}) {
     return ()=>window.removeEventListener("keydown",onKey);
   },[onClose]);
   return (
-    <div onClick={e=>e.target===e.currentTarget&&onClose()} style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.55)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:1000,padding:"0",backdropFilter:"blur(2px)"}}
+    <div style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.55)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:1000,padding:"0",backdropFilter:"blur(2px)"}}
       className="modal-backdrop">
       <div style={{background:"#fff",borderRadius:"16px 16px 0 0",width:"100%",maxWidth:width,maxHeight:"92vh",display:"flex",flexDirection:"column",boxShadow:"0 -8px 40px rgba(0,0,0,0.2)"}}
         onClick={e=>e.stopPropagation()}>
@@ -1553,40 +1566,57 @@ function OverlapWarning({title,description,bookings:bkgs,onProceed,onCancel}) {
 // onConfirm(picks) is called with all staged {facility_id,start_hour,duration} slots so
 // the caller can create several separate bookings at once.
 function InlineDayPicker({ date, bookings, onPick, onConfirm, multi=false }) {
-  const [drag, setDrag] = useState(null);
+  const [drag, setDrag] = useState(null); // { startCol,endCol,startSlot,endSlot }
   const [picks, setPicks] = useState([]); // multi mode: staged slots across facilities
-  const SH = 14; // shorter slot height for inline
-  const yToSlot = y => Math.max(0, Math.min(Math.floor(y/SH), CAL_TOTAL*2-1));
+  const SH = 14;       // shorter slot height for inline
+  const HEAD_H = 18;   // facility-header height above each column's grid
+  const colsRef = useRef(null);
   const slotToHour = s => CAL_START + s*0.5;
-  const norm = ds => ds ? { ...ds, lo:Math.min(ds.startSlot,ds.endSlot), hi:Math.max(ds.startSlot,ds.endSlot) } : null;
-  function down(e, facId) {
-    if (e.button!==0) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    setDrag({ facility:facId, startSlot:yToSlot(e.clientY-rect.top), endSlot:yToSlot(e.clientY-rect.top) });
+  // Map a pointer event to a facility column + half-hour slot within the columns area.
+  function geom(e) {
+    const r = colsRef.current?.getBoundingClientRect();
+    if (!r) return null;
+    const col  = Math.max(0, Math.min(FACILITIES.length-1, Math.floor((e.clientX - r.left) / (r.width / FACILITIES.length))));
+    const slot = Math.max(0, Math.min(Math.floor((e.clientY - r.top - HEAD_H) / SH), CAL_TOTAL*2-1));
+    return { col, slot };
   }
-  function move(e, facId) {
-    if (!drag || drag.facility!==facId) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const slot = yToSlot(e.clientY-rect.top);
-    if (slot!==drag.endSlot) setDrag(ds=>({ ...ds, endSlot:slot }));
+  function gridDown(e) {
+    if (e.button !== 0) return;
+    const g = geom(e); if (!g) return;
+    e.preventDefault();
+    setDrag({ startCol:g.col, endCol:g.col, startSlot:g.slot, endSlot:g.slot });
   }
-  function up(e, facId) {
-    if (!drag || drag.facility!==facId) return;
-    const nd = norm(drag);
-    const duration = Math.max(0.5, (nd.hi-nd.lo+1)*0.5);
-    const start_hour = slotToHour(nd.lo);
+  function gridMove(e) {
+    if (!drag) return;
+    const g = geom(e); if (!g) return;
+    if (g.col !== drag.endCol || g.slot !== drag.endSlot) setDrag(d => ({ ...d, endCol:g.col, endSlot:g.slot }));
+  }
+  function gridUp() {
+    if (!drag) return;
+    const loC = Math.min(drag.startCol,drag.endCol), hiC = Math.max(drag.startCol,drag.endCol);
+    const loS = Math.min(drag.startSlot,drag.endSlot), hiS = Math.max(drag.startSlot,drag.endSlot);
     setDrag(null);
-    if (multi) setPicks(ps => [...ps, { facility_id:facId, start_hour, duration }]);
-    else onPick(facId, start_hour, duration);
+    const start_hour = slotToHour(loS), duration = Math.max(0.5, (hiS-loS+1)*0.5);
+    if (multi) {
+      // One pick per facility column the drag spans — same time in several fields at once.
+      const added = [];
+      for (let c=loC; c<=hiC; c++) added.push({ facility_id:FACILITIES[c].id, start_hour, duration });
+      setPicks(ps => [...ps, ...added]);
+    } else {
+      onPick(FACILITIES[loC].id, start_hour, duration);
+    }
   }
   function removePick(i) { setPicks(ps => ps.filter((_,k)=>k!==i)); }
-  const nd = norm(drag);
+  const span = drag ? {
+    loC: Math.min(drag.startCol,drag.endCol), hiC: Math.max(drag.startCol,drag.endCol),
+    loS: Math.min(drag.startSlot,drag.endSlot), hiS: Math.max(drag.startSlot,drag.endSlot),
+  } : null;
   const dayBkgs = bookings.filter(b=>b.date===date && !["cancelled","rejected"].includes(b.status));
   return (
     <div style={{border:"1.5px solid #e2e8f0",borderRadius:8,background:"#fff",padding:8}}>
       <div style={{fontSize:11,color:"#64748b",marginBottom:6,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
         <span style={{fontWeight:700,color:"#0f172a"}}>📅 Pick {multi?"slots":"a slot"}</span>
-        <span>{multi?"Drag one or more slots in any field column — each becomes a separate booking.":"Click or drag a column to set facility, start time and duration."}</span>
+        <span>{multi?"Drag a slot — drag across columns to pick the same time in several fields. Each becomes a separate booking.":"Click or drag a column to set facility, start time and duration."}</span>
         <span style={{color:"#b45309"}}>· 💡 Field #1 is the only floodlit field — its shaded daytime hours are a last resort; use another field during the day.</span>
       </div>
       <div style={{display:"flex",overflowX:"auto"}}>
@@ -1597,8 +1627,18 @@ function InlineDayPicker({ date, bookings, onPick, onConfirm, multi=false }) {
             <div key={h} style={{height:SH*2,fontSize:9,color:"#94a3b8",textAlign:"right",paddingRight:4}}>{fmtTime(h)}</div>
           ))}
         </div>
+        <div ref={colsRef} style={{display:"flex",flex:1,position:"relative"}}
+          onMouseDown={gridDown} onMouseMove={gridMove} onMouseUp={gridUp} onMouseLeave={()=>setDrag(null)}>
+        {span&&(
+          <div style={{position:"absolute",zIndex:5,pointerEvents:"none",
+            left:`${span.loC/FACILITIES.length*100}%`, width:`${(span.hiC-span.loC+1)/FACILITIES.length*100}%`,
+            top:HEAD_H+span.loS*SH, height:(span.hiS-span.loS+1)*SH,
+            background:"rgba(99,102,241,0.20)",border:"1.5px solid #6366f1",borderRadius:4,
+            display:"flex",alignItems:"flex-start",justifyContent:"center",fontSize:8,fontWeight:700,color:"#4338ca",paddingTop:1}}>
+            {fmtTime(slotToHour(span.loS))}–{fmtTime(slotToHour(span.hiS+1))}{span.hiC>span.loC?` · ${span.hiC-span.loC+1} fields`:""}
+          </div>
+        )}
         {FACILITIES.map(fac=>{
-          const isDragging = drag?.facility===fac.id;
           const facBkgs = dayBkgs.filter(b=>b.facility_id===fac.id);
           const colTint = FACILITY_TINT[fac.id] || "#fff";
           const isFloodlit = fac.id===FLOODLIT_FIELD_ID;
@@ -1611,9 +1651,7 @@ function InlineDayPicker({ date, bookings, onPick, onConfirm, multi=false }) {
                 {fac.name.includes("Field")?fac.name.replace("Field ","Fld "):fac.name.split("–")[0].trim().slice(0,8)}
                 {isFloodlit&&<span title="Only floodlit field — avoid daytime use">💡</span>}
               </div>
-              <div onMouseDown={e=>down(e,fac.id)} onMouseMove={e=>move(e,fac.id)} onMouseUp={e=>up(e,fac.id)}
-                onMouseLeave={()=>isDragging&&setDrag(null)}
-                style={{position:"relative",cursor:"crosshair",background:colTint,height:CAL_TOTAL*SH*2,borderLeft:"1px solid #f1f5f9"}}>
+              <div style={{position:"relative",cursor:"crosshair",background:colTint,height:CAL_TOTAL*SH*2,borderLeft:"1px solid #f1f5f9"}}>
                 {Array.from({length:CAL_TOTAL},(_,i)=>(
                   <div key={i} style={{height:SH*2,borderBottom:"1px solid rgba(0,0,0,0.05)"}}>
                     <div style={{height:"50%",borderBottom:"1px dashed rgba(0,0,0,0.03)"}}/>
@@ -1641,15 +1679,11 @@ function InlineDayPicker({ date, bookings, onPick, onConfirm, multi=false }) {
                     <span>{fmtTimeShort(p.start_hour)}</span><span>✕</span>
                   </div>
                 ))}
-                {isDragging&&nd&&(
-                  <div style={{position:"absolute",left:0,right:0,top:nd.lo*SH,height:(nd.hi-nd.lo+1)*SH,background:"rgba(99,102,241,0.20)",border:"1.5px solid #6366f1",borderRadius:4,pointerEvents:"none",zIndex:3,display:"flex",alignItems:"flex-start",justifyContent:"center",fontSize:8,fontWeight:700,color:"#4338ca",paddingTop:1}}>
-                    {fmtTime(slotToHour(nd.lo))}–{fmtTime(slotToHour(nd.hi+1))}
-                  </div>
-                )}
               </div>
             </div>
           );
         })}
+        </div>
       </div>
       {multi&&(
         <div style={{marginTop:8,borderTop:"1px solid #f1f5f9",paddingTop:8,display:"flex",flexWrap:"wrap",alignItems:"center",gap:6}}>
@@ -1773,15 +1807,25 @@ function CartModal({ cart, setCart, onClose, onSubmit, openNew, silentMode=false
     setEditingDraft(null);
   }
 
-  // Detect recurring groups: consecutive weekly drafts with same purpose+facility
+  // Group drafts for compact display: first by a shared group id (any grouped variant —
+  // recurrence / multi-day / multi-facility), then fall back to the legacy weekly
+  // heuristic (consecutive weekly drafts with same facility/time) for untagged drafts.
   function groupDrafts(drafts) {
     const groups = [];
     let i = 0;
     while(i < drafts.length) {
       const d = drafts[i];
+      const gid = parseGroupRef(d.system_notes);
+      if(gid) {
+        let j = i+1;
+        while(j < drafts.length && parseGroupRef(drafts[j].system_notes) === gid) j++;
+        groups.push({type:'group', drafts:drafts.slice(i,j), startIdx:i});
+        i = j; continue;
+      }
       let j = i+1;
       while(j < drafts.length) {
         const next = drafts[j];
+        if(parseGroupRef(next.system_notes)) break;
         const prevDate = drafts[j-1].date;
         const isWeekApart = (() => {
           const [py,pm,pd] = prevDate.split('-').map(Number);
@@ -1826,30 +1870,36 @@ function CartModal({ cart, setCart, onClose, onSubmit, openNew, silentMode=false
                       </div>
                     </div>
                     {groups.map((g,gi2)=>{
-                      if(g.type==='recur') {
-                        const f=FACILITIES.find(x=>x.id===g.drafts[0].facility_id);
-                        const first=g.drafts[0], last=g.drafts[g.drafts.length-1];
+                      if(g.type==='recur'||g.type==='group') {
+                        const first=g.drafts[0];
+                        const f=FACILITIES.find(x=>x.id===first.facility_id);
+                        const n=g.drafts.length;
+                        const uniform=g.drafts.every(x=>x.facility_id===first.facility_id&&x.start_hour===first.start_hour&&x.duration===first.duration);
+                        const facs=[...new Set(g.drafts.map(x=>x.facility_id))];
+                        const dates=g.drafts.map(x=>x.date).filter(Boolean).sort();
+                        const label=g.type==='recur'?`🔁 ${n}× weekly`:uniform?`🔁 ${n}× repeat`:`🔗 ${n} grouped`;
                         return (
                           <div key={gi2} style={{background:'#f0fdf4',borderBottom:'1px solid #e2e8f0',padding:'10px 14px'}}>
                             <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
-                              <span style={{width:8,height:8,borderRadius:'50%',background:f?.color,flexShrink:0,display:'inline-block'}}/>
-                              <span style={{fontSize:11,fontWeight:700,color:'#16a34a',background:'#dcfce7',border:'1px solid #bbf7d0',borderRadius:4,padding:'1px 7px'}}>🔁 {g.drafts.length}× weekly</span>
-                              <span style={{fontSize:12,fontWeight:600,color:'#0f172a',flex:1}}>{f?.name}</span>
+                              <span style={{width:8,height:8,borderRadius:'50%',background:facs.length===1?f?.color:'#16a34a',flexShrink:0,display:'inline-block'}}/>
+                              <span style={{fontSize:11,fontWeight:700,color:'#16a34a',background:'#dcfce7',border:'1px solid #bbf7d0',borderRadius:4,padding:'1px 7px'}}>{label}</span>
+                              <span style={{fontSize:12,fontWeight:600,color:'#0f172a',flex:1}}>{facs.length===1?f?.name:`${facs.length} fields`}</span>
                             </div>
                             <div style={{fontSize:12,color:'#64748b',paddingLeft:16}}>
-                              {fmtDate(first.date)} → {fmtDate(last.date)} · {fmtTime(first.start_hour)}–{fmtTime(first.start_hour+first.duration)} · {first.purpose}
+                              {fmtDate(dates[0])} → {fmtDate(dates[dates.length-1])}{uniform?` · ${fmtTime(first.start_hour)}–${fmtTime(first.start_hour+first.duration)}`:''} · {first.purpose}
                             </div>
                             <div style={{paddingLeft:16,marginTop:6,display:'flex',flexDirection:'column',gap:3}}>
                               {g.drafts.map((d,k)=>{
                                 const di = g.startIdx+k;
                                 const isEditing2 = editingDraft?.gi===gi && editingDraft?.di===di;
+                                const df=FACILITIES.find(x=>x.id===d.facility_id);
                                 return (
                                   <div key={k} style={{display:'flex',alignItems:'center',gap:6}}>
                                     {isEditing2 ? (
                                       <InlineDraftEditor draft={d} onSave={p=>updateDraft(gi,di,p)} onCancel={()=>setEditingDraft(null)}/>
                                     ) : (
                                       <>
-                                        <span style={{fontSize:11,color:'#64748b',flex:1}}>{fmtDate(d.date)}</span>
+                                        <span style={{fontSize:11,color:'#64748b',flex:1}}>{fmtDate(d.date)}{uniform?'':` · ${facShort(df?.id||d.facility_id)} ${fmtTime(d.start_hour)}–${fmtTime(d.start_hour+d.duration)}`}</span>
                                         <button onClick={()=>setEditingDraft({gi,di,draft:d})} style={{background:'none',border:'none',cursor:'pointer',color:'#6366f1',fontSize:12,padding:'1px 5px'}}>✏</button>
                                         <button onClick={()=>removeDraft(gi,di)} style={{background:'none',border:'none',cursor:'pointer',color:'#f43f5e',fontSize:13,padding:'1px 5px'}}>✕</button>
                                       </>
@@ -2300,6 +2350,14 @@ function BookingForm({ booking, allBookings, onAddToCart, onClose, isAdmin, logg
       }
     });
     if (isEditing && drafts.length === 1) drafts[0].id = booking.id;
+    // Tag multi-slot submissions (multi-day / multi-facility / mixed) with a shared group
+    // id so the cart and summary present them as one group — the same treatment weekly
+    // recurrences get. A single slot's weekly recurrence keeps its existing weekday-pattern
+    // grouping (untagged), so that presentation is preserved.
+    if (!isEditing && slots.length > 1) {
+      const gid = newGroupRef();
+      drafts.forEach(d => { d.system_notes = setGroupRef(d.system_notes, gid); });
+    }
     return drafts;
   }
 
@@ -3409,6 +3467,10 @@ function buildOverlapPatternMap(active, facSensitive, canon) {
     const dn=dayName(b.date);
     if(!patternMap[email]) patternMap[email]={};
     const emailPats=patternMap[email];
+    // Bookings tagged with a shared group id (recurrence / multi-day / multi-facility)
+    // collapse into one pattern regardless of weekday — the same as a weekly recurrence.
+    const gid=parseGroupRef(b.system_notes);
+    if(gid){ const gk=`grp:${gid}`; (emailPats[gk]=emailPats[gk]||[]).push(b); return; }
     let matchedPk=null;
     for(const [pk,bkgs] of Object.entries(emailPats)){
       const parts=pk.split("_");
@@ -3430,13 +3492,14 @@ function buildOverlapPatternMap(active, facSensitive, canon) {
 
 function PatternModal({ email, name, pk, bkgs, isAdmin, canEdit: canEditProp, onClose, onBulkApply }) {
   const canEdit = canEditProp !== undefined ? canEditProp : isAdmin;
+  const isGroup = pk.startsWith("grp:"); // a grouped booking (multi-day/multi-facility/etc.)
   const parts = pk.split("_");
   const startH = parseFloat(parts[parts.length-1]);
   const dn = parts[parts.length-2]||"";
-  const facId = parts.length>2 ? parts[0] : null;
+  const facId = !isGroup && parts.length>2 ? parts[0] : null;
   const fac = facId ? FACILITIES.find(f=>f.id===facId) : null;
 
-  const [bulkTime, setBulkTime] = useState(startH);
+  const [bulkTime, setBulkTime] = useState(Number.isNaN(startH)?(bkgs[0]?.start_hour??9):startH);
   const [bulkDur, setBulkDur] = useState(bkgs[0]?.duration ?? 2);
   const [bulkFac, setBulkFac] = useState(bkgs[0]?.facility_id ?? "");
   const [cancelFrom, setCancelFrom] = useState("");
@@ -3446,10 +3509,11 @@ function PatternModal({ email, name, pk, bkgs, isAdmin, canEdit: canEditProp, on
   const si = {border:"1px solid #e2e8f0",borderRadius:6,padding:"4px 8px",fontSize:13,fontFamily:"inherit",background:"#fff"};
 
   return (
-    <Modal title={`Pattern: ${dn} ${fmtTime(startH)} — ${name}`} onClose={onClose}>
+    <Modal title={isGroup?`🔗 Grouped booking — ${name}`:`Pattern: ${dn} ${fmtTime(startH)} — ${name}`} onClose={onClose}>
       <div style={{fontSize:12,color:"#64748b",marginBottom:12}}>
         {bkgs.length} booking{bkgs.length!==1?"s":""} · {email}
         {fac && <span> · {fac.name}</span>}
+        {isGroup && <span> · created together</span>}
       </div>
 
       <div style={{overflowY:"auto",maxHeight:280,marginBottom:16}}>
@@ -3627,6 +3691,20 @@ function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkApply, o
     const canEdit = isAdmin || email.toLowerCase() === loggedInEmail?.toLowerCase();
     const chips = [];
     for (const [pk, bkgs] of recurring) {
+      if (pk.startsWith("grp:")) {
+        // A grouped booking (recurrence / multi-day / multi-facility) created together.
+        const dates=bkgs.map(b=>b.date).filter(Boolean).sort();
+        const facIds=[...new Set(bkgs.map(b=>b.facility_id))];
+        const facLabel=facIds.map(fid=>{const f=FACILITIES.find(x=>x.id===fid);return f?(f.name.includes("Field")?f.name.replace("Field ","Fld "):f.name.split("–")[0].trim().slice(0,6)):fid;}).join(", ");
+        const uniform=bkgs.every(b=>b.start_hour===bkgs[0].start_hour&&b.duration===bkgs[0].duration&&b.facility_id===bkgs[0].facility_id);
+        chips.push(
+          <span key={pk} title="Grouped booking" onClick={()=>setPatternModal({email,name:nameDisplay,pk,bkgs,canEdit})}
+            style={{display:"inline-flex",alignItems:"center",gap:3,background:ec+"22",color:ec,border:`1px solid ${ec}55`,borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:600,whiteSpace:"nowrap",cursor:"pointer"}}>
+            🔗 {fmtDateShort(dates[0])}–{fmtDateShort(dates[dates.length-1])} · {facLabel}{uniform?` · ${fmtTime(bkgs[0].start_hour)}`:""} ×{bkgs.length}
+          </span>
+        );
+        continue;
+      }
       const splitKey = `${email}::${pk}`;
       const isSplit = splitPatterns.has(splitKey);
       const startHours = [...new Set(bkgs.map(b=>b.start_hour))];
@@ -6279,24 +6357,33 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
                               {row.recurring.map(([pk,bkgs])=>{
                                 const selKey = `${row.email}::${pk}`;
                                 const isSel = sandboxSelected.has(selKey);
-                                const parts = pk.split("_");
-                                const startH = parseFloat(parts[parts.length-1]);
-                                const dn = parts[parts.length-2]||"";
-                                const durs = [...new Set(bkgs.map(b=>b.duration))];
-                                const durLabel = durs.length===1 ? `${durs[0]}h` : `~${Math.round(durs.reduce((s,d)=>s+d,0)/durs.length*2)/2}h`;
-                                let facLabel;
-                                if(scheduleFacSensitive){
-                                  const facId = pk.split("_")[0];
-                                  const fac = FACILITIES.find(f=>f.id===facId);
-                                  facLabel = fac ? fac.name.split("–")[0].split("#")[0].trim().replace("Field","Fld") : facId;
+                                let label;
+                                if(pk.startsWith("grp:")){
+                                  const dates=bkgs.map(b=>b.date).filter(Boolean).sort();
+                                  const facIds=[...new Set(bkgs.map(b=>b.facility_id))];
+                                  const facLabel=facIds.map(fid=>{const f=FACILITIES.find(x=>x.id===fid);return f?(f.name.includes("Field")?f.name.replace("Field ","Fld "):f.name.split("–")[0].trim().slice(0,6)):fid;}).join(", ");
+                                  const uniform=bkgs.every(b=>b.start_hour===bkgs[0].start_hour);
+                                  label=`🔗 ${fmtDateShort(dates[0])}–${fmtDateShort(dates[dates.length-1])} · ${facLabel}${uniform?` · ${fmtTime(bkgs[0].start_hour)}`:""} ×${bkgs.length}`;
                                 } else {
-                                  const facIds = [...new Set(bkgs.map(b=>b.facility_id))];
-                                  facLabel = facIds.map(fid=>{
-                                    const f=FACILITIES.find(x=>x.id===fid);
-                                    return f ? (f.name.includes("Field") ? f.name.replace("Field ","Fld ") : f.name.split("–")[0].trim().slice(0,6)) : fid;
-                                  }).join(", ");
+                                  const parts = pk.split("_");
+                                  const startH = parseFloat(parts[parts.length-1]);
+                                  const dn = parts[parts.length-2]||"";
+                                  const durs = [...new Set(bkgs.map(b=>b.duration))];
+                                  const durLabel = durs.length===1 ? `${durs[0]}h` : `~${Math.round(durs.reduce((s,d)=>s+d,0)/durs.length*2)/2}h`;
+                                  let facLabel;
+                                  if(scheduleFacSensitive){
+                                    const facId = pk.split("_")[0];
+                                    const fac = FACILITIES.find(f=>f.id===facId);
+                                    facLabel = fac ? fac.name.split("–")[0].split("#")[0].trim().replace("Field","Fld") : facId;
+                                  } else {
+                                    const facIds = [...new Set(bkgs.map(b=>b.facility_id))];
+                                    facLabel = facIds.map(fid=>{
+                                      const f=FACILITIES.find(x=>x.id===fid);
+                                      return f ? (f.name.includes("Field") ? f.name.replace("Field ","Fld ") : f.name.split("–")[0].trim().slice(0,6)) : fid;
+                                    }).join(", ");
+                                  }
+                                  label = `${dn} ${fmtTime(startH)} · ${durLabel} · ${facLabel} ×${bkgs.length}`;
                                 }
-                                const label = `${dn} ${fmtTime(startH)} · ${durLabel} · ${facLabel} ×${bkgs.length}`;
                                 return (
                                   <div key={pk} style={{display:"flex",alignItems:"center",gap:4}}>
                                     {sandboxMode&&(
