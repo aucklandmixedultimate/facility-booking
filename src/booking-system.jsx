@@ -585,6 +585,19 @@ function setFunctionCost(sysNotes, amount) {
   return base ? `${base}\n${marker}` : marker;
 }
 
+// Bookings created together — a recurrence, a multi-day span, a multi-facility pick or
+// any grouped variant — share a group id so the cart and summary present them as one
+// group (the same treatment weekly recurrences already get). Stored as [GRP] id.
+const GRP_RE = /\[GRP\][^\n]*/g;
+function parseGroupRef(sysNotes) { const m=(sysNotes||"").match(/\[GRP\]\s*(\S+)/); return m?m[1]:null; }
+function setGroupRef(sysNotes, id) {
+  const base=(sysNotes||"").replace(GRP_RE,"").trim();
+  if(!id) return base;
+  const marker=`[GRP] ${id}`;
+  return base?`${base}\n${marker}`:marker;
+}
+function newGroupRef() { return "G"+Date.now().toString(36)+Math.random().toString(36).slice(2,5); }
+
 // Compare the billed snapshot to a booking's current dimensions. Returns the
 // Day/evening-split cost of a booking-like {start_hour,duration,facility_id} at the
 // given facility rates (5:30pm cutoff). Shared by the mismatch view and billed-change
@@ -1794,15 +1807,25 @@ function CartModal({ cart, setCart, onClose, onSubmit, openNew, silentMode=false
     setEditingDraft(null);
   }
 
-  // Detect recurring groups: consecutive weekly drafts with same purpose+facility
+  // Group drafts for compact display: first by a shared group id (any grouped variant —
+  // recurrence / multi-day / multi-facility), then fall back to the legacy weekly
+  // heuristic (consecutive weekly drafts with same facility/time) for untagged drafts.
   function groupDrafts(drafts) {
     const groups = [];
     let i = 0;
     while(i < drafts.length) {
       const d = drafts[i];
+      const gid = parseGroupRef(d.system_notes);
+      if(gid) {
+        let j = i+1;
+        while(j < drafts.length && parseGroupRef(drafts[j].system_notes) === gid) j++;
+        groups.push({type:'group', drafts:drafts.slice(i,j), startIdx:i});
+        i = j; continue;
+      }
       let j = i+1;
       while(j < drafts.length) {
         const next = drafts[j];
+        if(parseGroupRef(next.system_notes)) break;
         const prevDate = drafts[j-1].date;
         const isWeekApart = (() => {
           const [py,pm,pd] = prevDate.split('-').map(Number);
@@ -1847,30 +1870,36 @@ function CartModal({ cart, setCart, onClose, onSubmit, openNew, silentMode=false
                       </div>
                     </div>
                     {groups.map((g,gi2)=>{
-                      if(g.type==='recur') {
-                        const f=FACILITIES.find(x=>x.id===g.drafts[0].facility_id);
-                        const first=g.drafts[0], last=g.drafts[g.drafts.length-1];
+                      if(g.type==='recur'||g.type==='group') {
+                        const first=g.drafts[0];
+                        const f=FACILITIES.find(x=>x.id===first.facility_id);
+                        const n=g.drafts.length;
+                        const uniform=g.drafts.every(x=>x.facility_id===first.facility_id&&x.start_hour===first.start_hour&&x.duration===first.duration);
+                        const facs=[...new Set(g.drafts.map(x=>x.facility_id))];
+                        const dates=g.drafts.map(x=>x.date).filter(Boolean).sort();
+                        const label=g.type==='recur'?`🔁 ${n}× weekly`:uniform?`🔁 ${n}× repeat`:`🔗 ${n} grouped`;
                         return (
                           <div key={gi2} style={{background:'#f0fdf4',borderBottom:'1px solid #e2e8f0',padding:'10px 14px'}}>
                             <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
-                              <span style={{width:8,height:8,borderRadius:'50%',background:f?.color,flexShrink:0,display:'inline-block'}}/>
-                              <span style={{fontSize:11,fontWeight:700,color:'#16a34a',background:'#dcfce7',border:'1px solid #bbf7d0',borderRadius:4,padding:'1px 7px'}}>🔁 {g.drafts.length}× weekly</span>
-                              <span style={{fontSize:12,fontWeight:600,color:'#0f172a',flex:1}}>{f?.name}</span>
+                              <span style={{width:8,height:8,borderRadius:'50%',background:facs.length===1?f?.color:'#16a34a',flexShrink:0,display:'inline-block'}}/>
+                              <span style={{fontSize:11,fontWeight:700,color:'#16a34a',background:'#dcfce7',border:'1px solid #bbf7d0',borderRadius:4,padding:'1px 7px'}}>{label}</span>
+                              <span style={{fontSize:12,fontWeight:600,color:'#0f172a',flex:1}}>{facs.length===1?f?.name:`${facs.length} fields`}</span>
                             </div>
                             <div style={{fontSize:12,color:'#64748b',paddingLeft:16}}>
-                              {fmtDate(first.date)} → {fmtDate(last.date)} · {fmtTime(first.start_hour)}–{fmtTime(first.start_hour+first.duration)} · {first.purpose}
+                              {fmtDate(dates[0])} → {fmtDate(dates[dates.length-1])}{uniform?` · ${fmtTime(first.start_hour)}–${fmtTime(first.start_hour+first.duration)}`:''} · {first.purpose}
                             </div>
                             <div style={{paddingLeft:16,marginTop:6,display:'flex',flexDirection:'column',gap:3}}>
                               {g.drafts.map((d,k)=>{
                                 const di = g.startIdx+k;
                                 const isEditing2 = editingDraft?.gi===gi && editingDraft?.di===di;
+                                const df=FACILITIES.find(x=>x.id===d.facility_id);
                                 return (
                                   <div key={k} style={{display:'flex',alignItems:'center',gap:6}}>
                                     {isEditing2 ? (
                                       <InlineDraftEditor draft={d} onSave={p=>updateDraft(gi,di,p)} onCancel={()=>setEditingDraft(null)}/>
                                     ) : (
                                       <>
-                                        <span style={{fontSize:11,color:'#64748b',flex:1}}>{fmtDate(d.date)}</span>
+                                        <span style={{fontSize:11,color:'#64748b',flex:1}}>{fmtDate(d.date)}{uniform?'':` · ${facShort(df?.id||d.facility_id)} ${fmtTime(d.start_hour)}–${fmtTime(d.start_hour+d.duration)}`}</span>
                                         <button onClick={()=>setEditingDraft({gi,di,draft:d})} style={{background:'none',border:'none',cursor:'pointer',color:'#6366f1',fontSize:12,padding:'1px 5px'}}>✏</button>
                                         <button onClick={()=>removeDraft(gi,di)} style={{background:'none',border:'none',cursor:'pointer',color:'#f43f5e',fontSize:13,padding:'1px 5px'}}>✕</button>
                                       </>
@@ -2321,6 +2350,14 @@ function BookingForm({ booking, allBookings, onAddToCart, onClose, isAdmin, logg
       }
     });
     if (isEditing && drafts.length === 1) drafts[0].id = booking.id;
+    // Tag multi-slot submissions (multi-day / multi-facility / mixed) with a shared group
+    // id so the cart and summary present them as one group — the same treatment weekly
+    // recurrences get. A single slot's weekly recurrence keeps its existing weekday-pattern
+    // grouping (untagged), so that presentation is preserved.
+    if (!isEditing && slots.length > 1) {
+      const gid = newGroupRef();
+      drafts.forEach(d => { d.system_notes = setGroupRef(d.system_notes, gid); });
+    }
     return drafts;
   }
 
@@ -3430,6 +3467,10 @@ function buildOverlapPatternMap(active, facSensitive, canon) {
     const dn=dayName(b.date);
     if(!patternMap[email]) patternMap[email]={};
     const emailPats=patternMap[email];
+    // Bookings tagged with a shared group id (recurrence / multi-day / multi-facility)
+    // collapse into one pattern regardless of weekday — the same as a weekly recurrence.
+    const gid=parseGroupRef(b.system_notes);
+    if(gid){ const gk=`grp:${gid}`; (emailPats[gk]=emailPats[gk]||[]).push(b); return; }
     let matchedPk=null;
     for(const [pk,bkgs] of Object.entries(emailPats)){
       const parts=pk.split("_");
@@ -3451,13 +3492,14 @@ function buildOverlapPatternMap(active, facSensitive, canon) {
 
 function PatternModal({ email, name, pk, bkgs, isAdmin, canEdit: canEditProp, onClose, onBulkApply }) {
   const canEdit = canEditProp !== undefined ? canEditProp : isAdmin;
+  const isGroup = pk.startsWith("grp:"); // a grouped booking (multi-day/multi-facility/etc.)
   const parts = pk.split("_");
   const startH = parseFloat(parts[parts.length-1]);
   const dn = parts[parts.length-2]||"";
-  const facId = parts.length>2 ? parts[0] : null;
+  const facId = !isGroup && parts.length>2 ? parts[0] : null;
   const fac = facId ? FACILITIES.find(f=>f.id===facId) : null;
 
-  const [bulkTime, setBulkTime] = useState(startH);
+  const [bulkTime, setBulkTime] = useState(Number.isNaN(startH)?(bkgs[0]?.start_hour??9):startH);
   const [bulkDur, setBulkDur] = useState(bkgs[0]?.duration ?? 2);
   const [bulkFac, setBulkFac] = useState(bkgs[0]?.facility_id ?? "");
   const [cancelFrom, setCancelFrom] = useState("");
@@ -3467,10 +3509,11 @@ function PatternModal({ email, name, pk, bkgs, isAdmin, canEdit: canEditProp, on
   const si = {border:"1px solid #e2e8f0",borderRadius:6,padding:"4px 8px",fontSize:13,fontFamily:"inherit",background:"#fff"};
 
   return (
-    <Modal title={`Pattern: ${dn} ${fmtTime(startH)} — ${name}`} onClose={onClose}>
+    <Modal title={isGroup?`🔗 Grouped booking — ${name}`:`Pattern: ${dn} ${fmtTime(startH)} — ${name}`} onClose={onClose}>
       <div style={{fontSize:12,color:"#64748b",marginBottom:12}}>
         {bkgs.length} booking{bkgs.length!==1?"s":""} · {email}
         {fac && <span> · {fac.name}</span>}
+        {isGroup && <span> · created together</span>}
       </div>
 
       <div style={{overflowY:"auto",maxHeight:280,marginBottom:16}}>
@@ -3648,6 +3691,20 @@ function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkApply, o
     const canEdit = isAdmin || email.toLowerCase() === loggedInEmail?.toLowerCase();
     const chips = [];
     for (const [pk, bkgs] of recurring) {
+      if (pk.startsWith("grp:")) {
+        // A grouped booking (recurrence / multi-day / multi-facility) created together.
+        const dates=bkgs.map(b=>b.date).filter(Boolean).sort();
+        const facIds=[...new Set(bkgs.map(b=>b.facility_id))];
+        const facLabel=facIds.map(fid=>{const f=FACILITIES.find(x=>x.id===fid);return f?(f.name.includes("Field")?f.name.replace("Field ","Fld "):f.name.split("–")[0].trim().slice(0,6)):fid;}).join(", ");
+        const uniform=bkgs.every(b=>b.start_hour===bkgs[0].start_hour&&b.duration===bkgs[0].duration&&b.facility_id===bkgs[0].facility_id);
+        chips.push(
+          <span key={pk} title="Grouped booking" onClick={()=>setPatternModal({email,name:nameDisplay,pk,bkgs,canEdit})}
+            style={{display:"inline-flex",alignItems:"center",gap:3,background:ec+"22",color:ec,border:`1px solid ${ec}55`,borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:600,whiteSpace:"nowrap",cursor:"pointer"}}>
+            🔗 {fmtDateShort(dates[0])}–{fmtDateShort(dates[dates.length-1])} · {facLabel}{uniform?` · ${fmtTime(bkgs[0].start_hour)}`:""} ×{bkgs.length}
+          </span>
+        );
+        continue;
+      }
       const splitKey = `${email}::${pk}`;
       const isSplit = splitPatterns.has(splitKey);
       const startHours = [...new Set(bkgs.map(b=>b.start_hour))];
@@ -6300,24 +6357,33 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
                               {row.recurring.map(([pk,bkgs])=>{
                                 const selKey = `${row.email}::${pk}`;
                                 const isSel = sandboxSelected.has(selKey);
-                                const parts = pk.split("_");
-                                const startH = parseFloat(parts[parts.length-1]);
-                                const dn = parts[parts.length-2]||"";
-                                const durs = [...new Set(bkgs.map(b=>b.duration))];
-                                const durLabel = durs.length===1 ? `${durs[0]}h` : `~${Math.round(durs.reduce((s,d)=>s+d,0)/durs.length*2)/2}h`;
-                                let facLabel;
-                                if(scheduleFacSensitive){
-                                  const facId = pk.split("_")[0];
-                                  const fac = FACILITIES.find(f=>f.id===facId);
-                                  facLabel = fac ? fac.name.split("–")[0].split("#")[0].trim().replace("Field","Fld") : facId;
+                                let label;
+                                if(pk.startsWith("grp:")){
+                                  const dates=bkgs.map(b=>b.date).filter(Boolean).sort();
+                                  const facIds=[...new Set(bkgs.map(b=>b.facility_id))];
+                                  const facLabel=facIds.map(fid=>{const f=FACILITIES.find(x=>x.id===fid);return f?(f.name.includes("Field")?f.name.replace("Field ","Fld "):f.name.split("–")[0].trim().slice(0,6)):fid;}).join(", ");
+                                  const uniform=bkgs.every(b=>b.start_hour===bkgs[0].start_hour);
+                                  label=`🔗 ${fmtDateShort(dates[0])}–${fmtDateShort(dates[dates.length-1])} · ${facLabel}${uniform?` · ${fmtTime(bkgs[0].start_hour)}`:""} ×${bkgs.length}`;
                                 } else {
-                                  const facIds = [...new Set(bkgs.map(b=>b.facility_id))];
-                                  facLabel = facIds.map(fid=>{
-                                    const f=FACILITIES.find(x=>x.id===fid);
-                                    return f ? (f.name.includes("Field") ? f.name.replace("Field ","Fld ") : f.name.split("–")[0].trim().slice(0,6)) : fid;
-                                  }).join(", ");
+                                  const parts = pk.split("_");
+                                  const startH = parseFloat(parts[parts.length-1]);
+                                  const dn = parts[parts.length-2]||"";
+                                  const durs = [...new Set(bkgs.map(b=>b.duration))];
+                                  const durLabel = durs.length===1 ? `${durs[0]}h` : `~${Math.round(durs.reduce((s,d)=>s+d,0)/durs.length*2)/2}h`;
+                                  let facLabel;
+                                  if(scheduleFacSensitive){
+                                    const facId = pk.split("_")[0];
+                                    const fac = FACILITIES.find(f=>f.id===facId);
+                                    facLabel = fac ? fac.name.split("–")[0].split("#")[0].trim().replace("Field","Fld") : facId;
+                                  } else {
+                                    const facIds = [...new Set(bkgs.map(b=>b.facility_id))];
+                                    facLabel = facIds.map(fid=>{
+                                      const f=FACILITIES.find(x=>x.id===fid);
+                                      return f ? (f.name.includes("Field") ? f.name.replace("Field ","Fld ") : f.name.split("–")[0].trim().slice(0,6)) : fid;
+                                    }).join(", ");
+                                  }
+                                  label = `${dn} ${fmtTime(startH)} · ${durLabel} · ${facLabel} ×${bkgs.length}`;
                                 }
-                                const label = `${dn} ${fmtTime(startH)} · ${durLabel} · ${facLabel} ×${bkgs.length}`;
                                 return (
                                   <div key={pk} style={{display:"flex",alignItems:"center",gap:4}}>
                                     {sandboxMode&&(
