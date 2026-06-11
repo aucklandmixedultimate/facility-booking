@@ -956,7 +956,7 @@ function Modal({title,onClose,children,width=560}) {
     return ()=>window.removeEventListener("keydown",onKey);
   },[onClose]);
   return (
-    <div onClick={e=>e.target===e.currentTarget&&onClose()} style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.55)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:1000,padding:"0",backdropFilter:"blur(2px)"}}
+    <div style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.55)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:1000,padding:"0",backdropFilter:"blur(2px)"}}
       className="modal-backdrop">
       <div style={{background:"#fff",borderRadius:"16px 16px 0 0",width:"100%",maxWidth:width,maxHeight:"92vh",display:"flex",flexDirection:"column",boxShadow:"0 -8px 40px rgba(0,0,0,0.2)"}}
         onClick={e=>e.stopPropagation()}>
@@ -1553,40 +1553,57 @@ function OverlapWarning({title,description,bookings:bkgs,onProceed,onCancel}) {
 // onConfirm(picks) is called with all staged {facility_id,start_hour,duration} slots so
 // the caller can create several separate bookings at once.
 function InlineDayPicker({ date, bookings, onPick, onConfirm, multi=false }) {
-  const [drag, setDrag] = useState(null);
+  const [drag, setDrag] = useState(null); // { startCol,endCol,startSlot,endSlot }
   const [picks, setPicks] = useState([]); // multi mode: staged slots across facilities
-  const SH = 14; // shorter slot height for inline
-  const yToSlot = y => Math.max(0, Math.min(Math.floor(y/SH), CAL_TOTAL*2-1));
+  const SH = 14;       // shorter slot height for inline
+  const HEAD_H = 18;   // facility-header height above each column's grid
+  const colsRef = useRef(null);
   const slotToHour = s => CAL_START + s*0.5;
-  const norm = ds => ds ? { ...ds, lo:Math.min(ds.startSlot,ds.endSlot), hi:Math.max(ds.startSlot,ds.endSlot) } : null;
-  function down(e, facId) {
-    if (e.button!==0) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    setDrag({ facility:facId, startSlot:yToSlot(e.clientY-rect.top), endSlot:yToSlot(e.clientY-rect.top) });
+  // Map a pointer event to a facility column + half-hour slot within the columns area.
+  function geom(e) {
+    const r = colsRef.current?.getBoundingClientRect();
+    if (!r) return null;
+    const col  = Math.max(0, Math.min(FACILITIES.length-1, Math.floor((e.clientX - r.left) / (r.width / FACILITIES.length))));
+    const slot = Math.max(0, Math.min(Math.floor((e.clientY - r.top - HEAD_H) / SH), CAL_TOTAL*2-1));
+    return { col, slot };
   }
-  function move(e, facId) {
-    if (!drag || drag.facility!==facId) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const slot = yToSlot(e.clientY-rect.top);
-    if (slot!==drag.endSlot) setDrag(ds=>({ ...ds, endSlot:slot }));
+  function gridDown(e) {
+    if (e.button !== 0) return;
+    const g = geom(e); if (!g) return;
+    e.preventDefault();
+    setDrag({ startCol:g.col, endCol:g.col, startSlot:g.slot, endSlot:g.slot });
   }
-  function up(e, facId) {
-    if (!drag || drag.facility!==facId) return;
-    const nd = norm(drag);
-    const duration = Math.max(0.5, (nd.hi-nd.lo+1)*0.5);
-    const start_hour = slotToHour(nd.lo);
+  function gridMove(e) {
+    if (!drag) return;
+    const g = geom(e); if (!g) return;
+    if (g.col !== drag.endCol || g.slot !== drag.endSlot) setDrag(d => ({ ...d, endCol:g.col, endSlot:g.slot }));
+  }
+  function gridUp() {
+    if (!drag) return;
+    const loC = Math.min(drag.startCol,drag.endCol), hiC = Math.max(drag.startCol,drag.endCol);
+    const loS = Math.min(drag.startSlot,drag.endSlot), hiS = Math.max(drag.startSlot,drag.endSlot);
     setDrag(null);
-    if (multi) setPicks(ps => [...ps, { facility_id:facId, start_hour, duration }]);
-    else onPick(facId, start_hour, duration);
+    const start_hour = slotToHour(loS), duration = Math.max(0.5, (hiS-loS+1)*0.5);
+    if (multi) {
+      // One pick per facility column the drag spans — same time in several fields at once.
+      const added = [];
+      for (let c=loC; c<=hiC; c++) added.push({ facility_id:FACILITIES[c].id, start_hour, duration });
+      setPicks(ps => [...ps, ...added]);
+    } else {
+      onPick(FACILITIES[loC].id, start_hour, duration);
+    }
   }
   function removePick(i) { setPicks(ps => ps.filter((_,k)=>k!==i)); }
-  const nd = norm(drag);
+  const span = drag ? {
+    loC: Math.min(drag.startCol,drag.endCol), hiC: Math.max(drag.startCol,drag.endCol),
+    loS: Math.min(drag.startSlot,drag.endSlot), hiS: Math.max(drag.startSlot,drag.endSlot),
+  } : null;
   const dayBkgs = bookings.filter(b=>b.date===date && !["cancelled","rejected"].includes(b.status));
   return (
     <div style={{border:"1.5px solid #e2e8f0",borderRadius:8,background:"#fff",padding:8}}>
       <div style={{fontSize:11,color:"#64748b",marginBottom:6,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
         <span style={{fontWeight:700,color:"#0f172a"}}>📅 Pick {multi?"slots":"a slot"}</span>
-        <span>{multi?"Drag one or more slots in any field column — each becomes a separate booking.":"Click or drag a column to set facility, start time and duration."}</span>
+        <span>{multi?"Drag a slot — drag across columns to pick the same time in several fields. Each becomes a separate booking.":"Click or drag a column to set facility, start time and duration."}</span>
         <span style={{color:"#b45309"}}>· 💡 Field #1 is the only floodlit field — its shaded daytime hours are a last resort; use another field during the day.</span>
       </div>
       <div style={{display:"flex",overflowX:"auto"}}>
@@ -1597,8 +1614,18 @@ function InlineDayPicker({ date, bookings, onPick, onConfirm, multi=false }) {
             <div key={h} style={{height:SH*2,fontSize:9,color:"#94a3b8",textAlign:"right",paddingRight:4}}>{fmtTime(h)}</div>
           ))}
         </div>
+        <div ref={colsRef} style={{display:"flex",flex:1,position:"relative"}}
+          onMouseDown={gridDown} onMouseMove={gridMove} onMouseUp={gridUp} onMouseLeave={()=>setDrag(null)}>
+        {span&&(
+          <div style={{position:"absolute",zIndex:5,pointerEvents:"none",
+            left:`${span.loC/FACILITIES.length*100}%`, width:`${(span.hiC-span.loC+1)/FACILITIES.length*100}%`,
+            top:HEAD_H+span.loS*SH, height:(span.hiS-span.loS+1)*SH,
+            background:"rgba(99,102,241,0.20)",border:"1.5px solid #6366f1",borderRadius:4,
+            display:"flex",alignItems:"flex-start",justifyContent:"center",fontSize:8,fontWeight:700,color:"#4338ca",paddingTop:1}}>
+            {fmtTime(slotToHour(span.loS))}–{fmtTime(slotToHour(span.hiS+1))}{span.hiC>span.loC?` · ${span.hiC-span.loC+1} fields`:""}
+          </div>
+        )}
         {FACILITIES.map(fac=>{
-          const isDragging = drag?.facility===fac.id;
           const facBkgs = dayBkgs.filter(b=>b.facility_id===fac.id);
           const colTint = FACILITY_TINT[fac.id] || "#fff";
           const isFloodlit = fac.id===FLOODLIT_FIELD_ID;
@@ -1611,9 +1638,7 @@ function InlineDayPicker({ date, bookings, onPick, onConfirm, multi=false }) {
                 {fac.name.includes("Field")?fac.name.replace("Field ","Fld "):fac.name.split("–")[0].trim().slice(0,8)}
                 {isFloodlit&&<span title="Only floodlit field — avoid daytime use">💡</span>}
               </div>
-              <div onMouseDown={e=>down(e,fac.id)} onMouseMove={e=>move(e,fac.id)} onMouseUp={e=>up(e,fac.id)}
-                onMouseLeave={()=>isDragging&&setDrag(null)}
-                style={{position:"relative",cursor:"crosshair",background:colTint,height:CAL_TOTAL*SH*2,borderLeft:"1px solid #f1f5f9"}}>
+              <div style={{position:"relative",cursor:"crosshair",background:colTint,height:CAL_TOTAL*SH*2,borderLeft:"1px solid #f1f5f9"}}>
                 {Array.from({length:CAL_TOTAL},(_,i)=>(
                   <div key={i} style={{height:SH*2,borderBottom:"1px solid rgba(0,0,0,0.05)"}}>
                     <div style={{height:"50%",borderBottom:"1px dashed rgba(0,0,0,0.03)"}}/>
@@ -1641,15 +1666,11 @@ function InlineDayPicker({ date, bookings, onPick, onConfirm, multi=false }) {
                     <span>{fmtTimeShort(p.start_hour)}</span><span>✕</span>
                   </div>
                 ))}
-                {isDragging&&nd&&(
-                  <div style={{position:"absolute",left:0,right:0,top:nd.lo*SH,height:(nd.hi-nd.lo+1)*SH,background:"rgba(99,102,241,0.20)",border:"1.5px solid #6366f1",borderRadius:4,pointerEvents:"none",zIndex:3,display:"flex",alignItems:"flex-start",justifyContent:"center",fontSize:8,fontWeight:700,color:"#4338ca",paddingTop:1}}>
-                    {fmtTime(slotToHour(nd.lo))}–{fmtTime(slotToHour(nd.hi+1))}
-                  </div>
-                )}
               </div>
             </div>
           );
         })}
+        </div>
       </div>
       {multi&&(
         <div style={{marginTop:8,borderTop:"1px solid #f1f5f9",paddingTop:8,display:"flex",flexWrap:"wrap",alignItems:"center",gap:6}}>
