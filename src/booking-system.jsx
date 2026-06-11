@@ -8872,6 +8872,19 @@ export default function App() {
         logActivity("cpsa_admin_booking_remove", { id: sb_bk.id, date: sb_bk.date, facility_id: sb_bk.facility_id, purpose: sb_bk.purpose });
       }
 
+      // GTEC often lists several events that overlap one booking — a split time-slot,
+      // a duplicate listing, or one booking spanning two fields. findMatchingUserBooking
+      // returns that same booking for each, so resolving and writing per-event made the
+      // LAST overlapping event win: a non-exact event arriving after the exact one falsely
+      // flagged a mismatch. Because the proxy feed returns events in a varying order, it
+      // took several manual syncs to land an order where the exact match happened to win
+      // last. Resolve the BEST match per booking across all events first (exact/confirmed
+      // beats mismatch; fewer reasons breaks ties), then apply once — order-independent,
+      // and convergent in a single pass.
+      const bestByBooking = new Map(); // bookingId -> { match, gtecSnap, effectiveExact, rank }
+      const matchedSlots = [];         // every matched event's slot, for admin-booking cleanup
+      const unmatchedEvents = [];      // events with no user booking → become admin bookings
+
       for (const ev of events) {
         const date = parseCJRDate(ev.EventStartDate);
         if (!date) { skipped++; continue; }
@@ -8881,66 +8894,78 @@ export default function App() {
 
         // Check if this CPSA event matches an existing approved user booking
         const match = findMatchingUserBooking(currentBookings, ev, facilityIds, gtecLinksRef.current, emailAliasesRef.current);
-        if (match) {
-          // A booking the admin has explicitly marked "✓ Confirmed by GTEC" stays confirmed:
-          // its resolution is sticky, so a later non-exact match must never reactivate the
-          // mismatch (drop it back to cpsa_review_needed) on it.
-          const confirmedByGtec = parseCpsaResolution(match.booking.system_notes)?.resolution === "confirmed";
-          const targetStatus = (match.exact || confirmedByGtec) ? "cpsa_confirmed" : "cpsa_review_needed";
-          matchedUserIds.add(match.booking.id);
+        if (!match) { unmatchedEvents.push({ date, start_hour, duration, purpose, facilityIds }); continue; }
 
-          // Remove any pre-existing admin bookings at this slot (from prior syncs)
-          for (const facility_id of facilityIds) {
-            const slotBk = { date, facility_id, start_hour, duration, id: "_sentinel_" };
-            const oldAdmin = currentBookings.find(b => isAdminBooking(b) && timeOverlaps(b, slotBk));
-            if (oldAdmin) {
-              if (configured) await sb.remove("bookings", oldAdmin.id);
-              else setBookings(prev => prev.filter(b => b.id !== oldAdmin.id));
-            }
-          }
+        matchedUserIds.add(match.booking.id);
+        matchedSlots.push({ date, start_hour, duration, facilityIds });
+        // A booking the admin has explicitly marked "✓ Confirmed by GTEC" stays confirmed:
+        // its resolution is sticky, so a non-exact match must never reactivate the mismatch
+        // (drop it back to cpsa_review_needed) on it.
+        const confirmedByGtec = parseCpsaResolution(match.booking.system_notes)?.resolution === "confirmed";
+        const effectiveExact = match.exact || confirmedByGtec;
+        // Rank: exact/confirmed (2) beats mismatch (1); ties → fewest reasons wins.
+        const rank = (effectiveExact ? 2 : 1) * 1000 - (match.reasons?.length || 0);
+        const gtecSnap = { name: ev.EventName || "", date, start_hour, duration, facilityIds };
+        const prev = bestByBooking.get(match.booking.id);
+        if (!prev || rank > prev.rank) bestByBooking.set(match.booking.id, { match, gtecSnap, effectiveExact, rank });
+      }
 
-          // Full snapshot of the incoming GTEC event, so the mismatch views show
-          // everything known from the sync — not just the differing fields.
-          const gtecSnap = { name: ev.EventName || "", date, start_hour, duration, facilityIds };
-          // Record/clear mismatch reasons + GTEC snapshot in system_notes (separate
-          // from user notes). stripMismatchNote clears both on confirm; matching a
-          // previously-clashing booking also clears its stale clash marker.
-          const baseNotes = stripClashPrevStatus(match.booking.system_notes);
-          const newSysNotes = targetStatus === "cpsa_review_needed"
-            ? setGtecSnapshot(setMismatchNote(baseNotes, match.reasons), gtecSnap)
-            : stripMismatchNote(baseNotes);
-          const statusChanged = match.booking.status !== targetStatus;
-          const sysNotesChanged = (match.booking.system_notes || "") !== newSysNotes;
-          if (statusChanged || sysNotesChanged) {
-            if (configured) {
-              // Always update status first — this is the critical write.
-              if (statusChanged) await sb.update("bookings", match.booking.id, { status: targetStatus, updated_at: new Date().toISOString() });
-              // system_notes is best-effort: silently no-ops until migration is run.
-              if (sysNotesChanged) sb.update("bookings", match.booking.id, { system_notes: newSysNotes }).catch(() => {});
-            } else {
-              const patch = { status: targetStatus, system_notes: newSysNotes, updated_at: new Date().toISOString() };
-              setBookings(prev => prev.map(b => b.id === match.booking.id ? { ...b, ...patch } : b));
-            }
+      // Apply the winning match for each booking exactly once.
+      for (const { match, gtecSnap, effectiveExact } of bestByBooking.values()) {
+        const booking = match.booking;
+        const targetStatus = effectiveExact ? "cpsa_confirmed" : "cpsa_review_needed";
+        // Record/clear mismatch reasons + GTEC snapshot in system_notes (separate from
+        // user notes). stripMismatchNote clears both on confirm; matching a previously-
+        // clashing booking also clears its stale clash marker.
+        const baseNotes = stripClashPrevStatus(booking.system_notes);
+        const newSysNotes = targetStatus === "cpsa_review_needed"
+          ? setGtecSnapshot(setMismatchNote(baseNotes, match.reasons), gtecSnap)
+          : stripMismatchNote(baseNotes);
+        const statusChanged = booking.status !== targetStatus;
+        const sysNotesChanged = (booking.system_notes || "") !== newSysNotes;
+        if (statusChanged || sysNotesChanged) {
+          if (configured) {
+            // Always update status first — this is the critical write.
+            if (statusChanged) await sb.update("bookings", booking.id, { status: targetStatus, updated_at: new Date().toISOString() });
+            // system_notes is best-effort: silently no-ops until migration is run.
+            if (sysNotesChanged) sb.update("bookings", booking.id, { system_notes: newSysNotes }).catch(() => {});
+          } else {
+            const patch = { status: targetStatus, system_notes: newSysNotes, updated_at: new Date().toISOString() };
+            setBookings(prev => prev.map(b => b.id === booking.id ? { ...b, ...patch } : b));
           }
-          if (statusChanged) {
-            if (match.exact) cpsaConfirmed++; else {
-              cpsaReviewNeeded++;
-              const b = match.booking;
-              reviewBookings.push({ id:b.id, date:b.date, facility_id:b.facility_id, start_hour:b.start_hour, duration:b.duration, purpose:b.purpose, name:b.name, email:b.email, reasons: match.reasons||[], gtec: gtecSnap });
-            }
-            logActivity(match.exact?"cpsa_confirm":"cpsa_review_flag", { booking_id: match.booking.id, from: match.booking.status, to: targetStatus, reasons: match.reasons||[] });
-            // First-time transition into a CPSA status → queue a notify-only cart item.
-            if (match.booking.email && !isAdminBooking(match.booking)) {
-              cpsaNotifications.push({
-                drafts: [{ ...match.booking, status: targetStatus, system_notes: newSysNotes }],
-                name: match.booking.name, email: match.booking.email,
-                notifyOnly: true, newStatus: targetStatus,
-              });
-            }
-          }
-          continue;
         }
+        if (statusChanged) {
+          if (effectiveExact) cpsaConfirmed++; else {
+            cpsaReviewNeeded++;
+            reviewBookings.push({ id:booking.id, date:booking.date, facility_id:booking.facility_id, start_hour:booking.start_hour, duration:booking.duration, purpose:booking.purpose, name:booking.name, email:booking.email, reasons: match.reasons||[], gtec: gtecSnap });
+          }
+          logActivity(effectiveExact?"cpsa_confirm":"cpsa_review_flag", { booking_id: booking.id, from: booking.status, to: targetStatus, reasons: match.reasons||[] });
+          // First-time transition into a CPSA status → queue a notify-only cart item.
+          if (booking.email && !isAdminBooking(booking)) {
+            cpsaNotifications.push({
+              drafts: [{ ...booking, status: targetStatus, system_notes: newSysNotes }],
+              name: booking.name, email: booking.email,
+              notifyOnly: true, newStatus: targetStatus,
+            });
+          }
+        }
+      }
 
+      // Remove pre-existing admin bookings at every matched slot (from prior syncs) so the
+      // now-linked user booking owns the slot instead of clashing with a stale GTEC import.
+      for (const slot of matchedSlots) {
+        for (const facility_id of slot.facilityIds) {
+          const slotBk = { date: slot.date, facility_id, start_hour: slot.start_hour, duration: slot.duration, id: "_sentinel_" };
+          const oldAdmin = currentBookings.find(b => isAdminBooking(b) && timeOverlaps(b, slotBk));
+          if (oldAdmin) {
+            if (configured) await sb.remove("bookings", oldAdmin.id);
+            else setBookings(prev => prev.filter(b => b.id !== oldAdmin.id));
+          }
+        }
+      }
+
+      // Events with no matching user booking become admin (GTEC-owned) bookings.
+      for (const { date, start_hour, duration, purpose, facilityIds } of unmatchedEvents) {
         for (const facility_id of facilityIds) {
           const dup = currentBookings.find(b =>
             b.date === date &&
