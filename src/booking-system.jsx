@@ -333,10 +333,13 @@ function serializeTableEl(table){
   if(!table) return { html:"", text:"" };
   const rows = [...table.rows];
   const cellText = c => (c.innerText||c.textContent||"").replace(/\s+/g," ").trim();
-  const text = rows.map(r => [...r.cells].map(cellText).join("\t")).join("\n");
+  // Cells/columns flagged data-nocopy (e.g. per-row action buttons) are excluded so the
+  // clipboard table holds only the meaningful data.
+  const copyCells = r => [...r.cells].filter(c => !c.hasAttribute("data-nocopy"));
+  const text = rows.map(r => copyCells(r).map(cellText).join("\t")).join("\n");
   const htmlRows = rows.map(r => {
     const head = r.parentElement && r.parentElement.tagName === "THEAD";
-    return "<tr>" + [...r.cells].map(c => {
+    return "<tr>" + copyCells(r).map(c => {
       const th = c.tagName === "TH" || head;
       return `<${th?"th":"td"} style="border:1px solid #cbd5e1;padding:4px 8px;text-align:left;font-size:12px;${th?"background:#f1f5f9;font-weight:700":""}">${escTableText(cellText(c))}</${th?"th":"td"}>`;
     }).join("") + "</tr>";
@@ -497,6 +500,16 @@ function parseClashPrevStatus(sysNotes) {
   return m ? m[1].trim() : null;
 }
 function stripClashPrevStatus(sysNotes) { return (sysNotes||"").replace(CLASH_PREV_RE,"").trim(); }
+// Statuses meaning a booking has been submitted to GTEC's schedule (queued for GTEC
+// and beyond). Once here, GTEC holds the slot, so a later cancellation must be
+// requested from GTEC for purging — not just removed from our records. A booking
+// flagged "clash" hides its real stage in [CLASH-PREV]; resolve through to that.
+const GTEC_QUEUE_STATUSES = new Set(["queued_cpsa","amua_submit","pending_cpsa","approved","cpsa_confirmed","cpsa_review_needed"]);
+function reachedGtecQueue(b) {
+  let s = b?.status;
+  if (s === "clash") s = parseClashPrevStatus(b?.system_notes) || s;
+  return GTEC_QUEUE_STATUSES.has(s);
+}
 // Parse the compact time strings produced by fmtTimeShort, e.g. "6p" → 18, "6:30p" → 18.5.
 function parseFmtTimeShort(s) {
   const m = (s||"").trim().toLowerCase().match(/^(\d+)(?::(\d+))?([ap])$/);
@@ -1024,9 +1037,9 @@ function describeActivity(r) {
   const d = r.detail || {};
   const statusLabel = s => (STATUS_META[s]?.label || s || "").replace(/^\(\d\/\d\)\s*/,"");
   switch (r.action) {
-    case "booking_create": return `Created ${activityItemsSummary(d.items,d.count)}`;
-    case "booking_edit":   return `Edited ${activityItemsSummary(d.items,d.count)}`;
-    case "booking_delete": return `Deleted ${activityItemsSummary(d.items,d.count)}`;
+    case "booking_create": return `Created ${activityItemsSummary(d.items,d.count)}${d.gtecQueued?` · ${d.gtecQueued} already queued for GTEC`:""}`;
+    case "booking_edit":   return `Edited ${activityItemsSummary(d.items,d.count)}${d.gtecQueued?` · ${d.gtecQueued} queued for GTEC — may need GTEC notice`:""}`;
+    case "booking_delete": return `Deleted ${activityItemsSummary(d.items,d.count)}${d.gtecPurge?` · ${d.gtecPurge} need GTEC purge`:""}`;
     case "status_change":  return `Set ${d.count||d.ids?.length||0} booking${(d.count||d.ids?.length)!==1?"s":""} → ${statusLabel(d.to)}`;
     case "cpsa_sync_start":    return `Started GTEC sync${d.months?` · ${d.months} month${d.months!==1?"s":""}`:""}`;
     case "cpsa_sync_complete": return `Completed GTEC sync${d.months?` · ${d.months} month${d.months!==1?"s":""}`:""}`;
@@ -6830,7 +6843,7 @@ function SyncedItemRow({ ab, bookings }) {
 }
 
 // ─── Admin Panel with action queue, bulk approve, facility rates ──────────────
-function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,clashes=[],deleteIds=new Set(),facilityRates={},onClearOldUnapproved,onBulkApply,onSaveMismatch,onInformCpsa,onQueueNotifications,onMarkAdjustmentSettled,onLinkClash,loggedInEmail,syncResults=[],onClearSyncResults,showSyncResults=false,onToggleSyncResults,bookerFilter=new Set(),onToggleBooker,onSetBookerFilter,aliasNames={},emailAliases={},pricingConditions=[],onAddPricingCondition,onUpdatePricingCondition,onRemovePricingCondition}) {
+function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,clashes=[],deleteIds=new Set(),facilityRates={},onClearOldUnapproved,onBulkApply,onSaveMismatch,onInformCpsa,onQueueNotifications,onMarkAdjustmentSettled,onLinkClash,loggedInEmail,syncResults=[],onClearSyncResults,showSyncResults=false,onToggleSyncResults,bookerFilter=new Set(),onToggleBooker,onSetBookerFilter,aliasNames={},emailAliases={},pricingConditions=[],onAddPricingCondition,onUpdatePricingCondition,onRemovePricingCondition,cpsaDeleteLog=[],onClearDeleteLogEntry,onClearDeleteLog}) {
   const [showSchedulePanel, setShowSchedulePanel] = useState(false);
   const [showActivityPanel, setShowActivityPanel] = useState(false);
   // Which sync-result months are expanded in the grouped dropdown (monthKey set).
@@ -6891,6 +6904,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
   const [mismatchSort,setMismatchSort]=useState({key:"date",dir:"asc"});
   const [showTrackChanges,setShowTrackChanges]=useState(false);
   const [showPricingRules,setShowPricingRules]=useState(false);
+  const [showDeleteLogPanel,setShowDeleteLogPanel]=useState(false);
 
   // Collapsible admin sections — only one open at a time, unless Ctrl/⌘ is held.
   // Sync Results is parent-controlled (toggle-only), so its setter toggles to reach
@@ -6903,6 +6917,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
     { open: showMismatchPanel, set: v => setShowMismatchPanel(v) },
     { open: showTrackChanges,  set: v => setShowTrackChanges(v) },
     { open: showPricingRules,  set: v => setShowPricingRules(v) },
+    { open: showDeleteLogPanel, set: v => setShowDeleteLogPanel(v) },
   ];
   function toggleSection(idx, e) {
     const additive = e && (e.ctrlKey || e.metaKey);
@@ -7114,6 +7129,9 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
         {onAddPricingCondition&&<button onClick={e=>toggleSection(6,e)} title="Ctrl/⌘-click to keep other sections open" style={S.btn({border:`1.5px solid ${pricingConditions.length>0?"#c7d2fe":"#e2e8f0"}`,background:showPricingRules?"#eef2ff":"#fff",color:pricingConditions.length>0?"#4338ca":"#94a3b8",fontSize:12,fontWeight:pricingConditions.length>0?700:500})}>
           💲 Pricing Rules ({pricingConditions.length}) {showPricingRules?"▴":"▾"}
         </button>}
+        <button onClick={e=>toggleSection(7,e)} title="Cancellations of bookings already submitted to GTEC — request GTEC to purge these. Ctrl/⌘-click to keep other sections open" style={S.btn({border:`1.5px solid ${cpsaDeleteLog.length>0?"#fecaca":"#e2e8f0"}`,background:showDeleteLogPanel?"#fef2f2":"#fff",color:cpsaDeleteLog.length>0?"#b91c1c":"#94a3b8",fontSize:12,fontWeight:cpsaDeleteLog.length>0?700:500})}>
+          🗑 GTEC Purge Requests ({cpsaDeleteLog.length}) {showDeleteLogPanel?"▴":"▾"}
+        </button>
       </div>
 
       {/* Inline sync results panel */}
@@ -7304,6 +7322,58 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
           onAdd={onAddPricingCondition} onUpdate={onUpdatePricingCondition} onRemove={onRemovePricingCondition}
           aliasFor={em=>aliasNames[(em||"").toLowerCase()]}/>
       )}
+      {/* GTEC purge-request delete log — cancellations of bookings GTEC already holds.
+          Light-red theme; copy as a table to email GTEC asking them to purge the slots. */}
+      {showDeleteLogPanel&&(()=>{
+        const canon = em => (emailAliases[(em||"").toLowerCase()] || (em||"").toLowerCase());
+        const clubOf = b => aliasNames[canon(b.email)] || b.name || (b.email||"").split("@")[0];
+        const DAYS = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+        const dayOf = d => { const dt = new Date(`${d}T00:00:00`); return Number.isNaN(dt.getTime()) ? "" : DAYS[dt.getDay()]; };
+        const facName = id => FACILITIES.find(f=>f.id===id)?.name || id;
+        const rows = [...cpsaDeleteLog].sort((a,b)=>(a.date||"").localeCompare(b.date||"")||(a.start_hour||0)-(b.start_hour||0));
+        return (
+          <div style={{background:"#fef2f2",border:"1.5px solid #fecaca",borderRadius:12,padding:16,display:"flex",flexDirection:"column",gap:10}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+              <span style={{fontWeight:700,fontSize:14,color:"#b91c1c"}}>🗑 GTEC Purge Requests ({rows.length})</span>
+              <span style={{fontSize:11,color:"#dc2626"}}>Bookings cancelled after reaching GTEC&apos;s schedule — copy this table and email GTEC to purge the slots.</span>
+              {rows.length>0&&onClearDeleteLog&&<button onClick={()=>{ if(window.confirm(`Clear all ${rows.length} purge request${rows.length!==1?"s":""}? Do this once GTEC has confirmed the slots are purged.`)) onClearDeleteLog(); }} style={{marginLeft:"auto",padding:"3px 10px",borderRadius:6,border:"1px solid #fca5a5",background:"#fff",color:"#b91c1c",cursor:"pointer",fontSize:11,fontWeight:600,fontFamily:"inherit"}}>Clear all</button>}
+            </div>
+            {rows.length===0
+              ? <div style={{background:"#fff",border:"1px dashed #fecaca",borderRadius:8,padding:14,fontSize:12,color:"#94a3b8",textAlign:"center"}}>No purge requests. Cancelling a booking that has reached &ldquo;Queued for GTEC&rdquo; or later adds it here.</div>
+              : (
+                <CopyableTable align="right">
+                  <table style={{borderCollapse:"collapse",width:"100%",fontSize:12,background:"#fff"}}>
+                    <thead>
+                      <tr style={{background:"#fee2e2",color:"#991b1b"}}>
+                        {["Club","Email","Day","Date","Facility","Start","End","Action"].map(h=>(
+                          <th key={h} style={{border:"1px solid #fecaca",padding:"5px 8px",textAlign:"left",fontWeight:700}}>{h}</th>
+                        ))}
+                        <th data-nocopy="" style={{border:"1px solid #fecaca",padding:"5px 8px"}}></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map(r=>(
+                        <tr key={r.id}>
+                          <td style={{border:"1px solid #fecaca",padding:"5px 8px",fontWeight:600}}>{clubOf(r)}</td>
+                          <td style={{border:"1px solid #fecaca",padding:"5px 8px"}}>{r.email}</td>
+                          <td style={{border:"1px solid #fecaca",padding:"5px 8px"}}>{dayOf(r.date)}</td>
+                          <td style={{border:"1px solid #fecaca",padding:"5px 8px"}}>{fmtDateShort(r.date)}</td>
+                          <td style={{border:"1px solid #fecaca",padding:"5px 8px"}}>{facName(r.facility_id)}</td>
+                          <td style={{border:"1px solid #fecaca",padding:"5px 8px"}}>{fmtTime(r.start_hour)}</td>
+                          <td style={{border:"1px solid #fecaca",padding:"5px 8px"}}>{fmtTime((r.start_hour||0)+(r.duration||0))}</td>
+                          <td style={{border:"1px solid #fecaca",padding:"5px 8px",color:"#b91c1c",fontWeight:600}}>Cancel - Delete</td>
+                          <td data-nocopy="" style={{border:"1px solid #fecaca",padding:"5px 8px",textAlign:"center"}}>
+                            {onClearDeleteLogEntry&&<button onClick={()=>onClearDeleteLogEntry(r.id)} title="Remove from purge list (GTEC has purged this slot)" style={{cursor:"pointer",border:"none",background:"transparent",color:"#dc2626",fontSize:13,fontFamily:"inherit"}}>✕</button>}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </CopyableTable>
+              )}
+          </div>
+        );
+      })()}
       {/* Per-row action queue submission panel */}
       {actionQueue.length>0&&(
         <div style={{background:"#f0fdf4",border:"1.5px solid #86efac",borderRadius:12,padding:16,display:"flex",flexDirection:"column",gap:10}}>
@@ -8601,6 +8671,12 @@ export default function App() {
   const [prefill,  setPrefill]  =useState({date:null,startHour:9,duration:1});
   const [toast,    setToast]    =useState(null);
   const [syncingMonth, setSyncingMonth] = useState(false);
+  // Synchronous re-entrancy guard for the GTEC sync. The `syncingMonth` state can't
+  // gate concurrent runs — a manual click and the on-mount auto-sync (or a double
+  // click) both read the old state before React commits the update, so both proceed
+  // and each creates its own copy of every admin block. A ref flips synchronously, so
+  // the second caller sees it immediately and bails.
+  const syncRunningRef = useRef(false);
   // Cumulative sync log across all months ever synced (persisted so the monthly
   // log survives reloads; old entries are purged per the admin retention setting).
   // Each entry: { monthKey, label, added, skipped, removed, cpsaConfirmed,
@@ -8678,6 +8754,14 @@ export default function App() {
     try{ return JSON.parse(localStorage.getItem("fb_billing_records")||"[]"); }catch{ return []; }
   });
   useEffect(()=>{ try{ localStorage.setItem("fb_billing_records", JSON.stringify(billingRecords)); }catch{ /* ignore */ } }, [billingRecords]);
+  // fb_cpsa_delete_log: cancellations of bookings that had already reached GTEC's
+  // schedule (queued for GTEC or beyond). GTEC still holds these slots, so they must
+  // be emailed to GTEC for purging. Each entry snapshots the booking at deletion:
+  //   { id, name, email, date, facility_id, start_hour, duration, status, deletedAt }
+  const [cpsaDeleteLog, setCpsaDeleteLog] = useState(()=>{
+    try{ return JSON.parse(localStorage.getItem("fb_cpsa_delete_log")||"[]"); }catch{ return []; }
+  });
+  useEffect(()=>{ try{ localStorage.setItem("fb_cpsa_delete_log", JSON.stringify(cpsaDeleteLog)); }catch{ /* ignore */ } }, [cpsaDeleteLog]);
   // Bumped each time the user clicks "↗ Summary" on a billing row; SummaryTab
   // reacts to the version change rather than the payload itself so repeated
   // loads of the same record still take effect.
@@ -8870,6 +8954,26 @@ export default function App() {
         }
         removed++;
         logActivity("cpsa_admin_booking_remove", { id: sb_bk.id, date: sb_bk.date, facility_id: sb_bk.facility_id, purpose: sb_bk.purpose });
+      }
+
+      // Collapse duplicate admin (GTEC) bookings — the same GTEC event imported more than
+      // once. Past concurrent syncs each snapshotted bookings before either inserted, so
+      // both passed the "already exists?" check and inserted, leaving 2+ identical blocks
+      // for one slot. Keep the first occurrence of each slot+purpose, remove the rest.
+      // (The sync lock below stops new duplicates; this cleans up historical ones.)
+      const adminSlotSeen = new Set();
+      const dupAdminBks = currentBookings.filter(b => {
+        if (!isAdminBooking(b) || !b.date.startsWith(monthStr)) return false;
+        const key = `${b.date}|${b.facility_id}|${b.start_hour}|${b.duration}|${b.purpose}`;
+        if (adminSlotSeen.has(key)) return true;
+        adminSlotSeen.add(key);
+        return false;
+      });
+      for (const dupBk of dupAdminBks) {
+        if (configured) await sb.remove("bookings", dupBk.id);
+        else setBookings(prev => prev.filter(b => b.id !== dupBk.id));
+        removed++;
+        logActivity("cpsa_admin_booking_remove", { id: dupBk.id, date: dupBk.date, facility_id: dupBk.facility_id, purpose: dupBk.purpose, duplicate: true });
       }
 
       // GTEC often lists several events that overlap one booking — a split time-slot,
@@ -9106,36 +9210,44 @@ export default function App() {
   }
 
   async function handleSyncAll() {
-    const today = todayKey();
-    // Compute the month set from a fresh booking source so a deferred/auto sync doesn't
-    // miss future months due to a stale `bookings` closure.
-    const srcBookings = configured ? (await sb.select("bookings")) : bookings;
-    const future = srcBookings.filter(b => b.date >= today);
-    const months = new Set();
-    const now = new Date();
-    months.add(`${now.getFullYear()}-${now.getMonth()}`);
-    for (const b of future) {
-      const [y,m] = b.date.split("-");
-      months.add(`${parseInt(y)}-${parseInt(m)-1}`);
+    // Re-entrancy guard — never let two syncs run at once (they each duplicate every
+    // admin block). Covers a double-click and the on-mount auto-sync racing a manual run.
+    if (syncRunningRef.current) { showToast("A sync is already running…", "info"); return; }
+    syncRunningRef.current = true;
+    try {
+      const today = todayKey();
+      // Compute the month set from a fresh booking source so a deferred/auto sync doesn't
+      // miss future months due to a stale `bookings` closure.
+      const srcBookings = configured ? (await sb.select("bookings")) : bookings;
+      const future = srcBookings.filter(b => b.date >= today);
+      const months = new Set();
+      const now = new Date();
+      months.add(`${now.getFullYear()}-${now.getMonth()}`);
+      for (const b of future) {
+        const [y,m] = b.date.split("-");
+        months.add(`${parseInt(y)}-${parseInt(m)-1}`);
+      }
+      const sorted = [...months].map(k=>k.split("-").map(Number)).sort((a,b)=>a[0]-b[0]||a[1]-b[1]);
+      // Drop months that have aged out of the retention window before re-syncing.
+      purgeOldLogs();
+      logActivity("cpsa_sync_start", { months: sorted.length });
+      for (const [y,m] of sorted) {
+        await handleSyncMonth(y, m);
+      }
+      try{localStorage.setItem("fb_last_sync_at", String(Date.now()));}catch{ /* ignore */ }
+      logActivity("cpsa_sync_complete", { months: sorted.length });
+      purgeOldLogs();
+      // Notify with a non-intrusive toast
+      setSyncResults(cur => {
+        const total = cur.reduce((s,r)=>s+(r.added||0),0);
+        showToast(`🔄 Sync complete — ${sorted.length} month${sorted.length!==1?"s":""}, ${total} new booking${total!==1?"s":""}`);
+        return cur;
+      });
+      setShowSyncPanel(true);
+      setTab("admin");
+    } finally {
+      syncRunningRef.current = false;
     }
-    const sorted = [...months].map(k=>k.split("-").map(Number)).sort((a,b)=>a[0]-b[0]||a[1]-b[1]);
-    // Drop months that have aged out of the retention window before re-syncing.
-    purgeOldLogs();
-    logActivity("cpsa_sync_start", { months: sorted.length });
-    for (const [y,m] of sorted) {
-      await handleSyncMonth(y, m);
-    }
-    try{localStorage.setItem("fb_last_sync_at", String(Date.now()));}catch{ /* ignore */ }
-    logActivity("cpsa_sync_complete", { months: sorted.length });
-    purgeOldLogs();
-    // Notify with a non-intrusive toast
-    setSyncResults(cur => {
-      const total = cur.reduce((s,r)=>s+(r.added||0),0);
-      showToast(`🔄 Sync complete — ${sorted.length} month${sorted.length!==1?"s":""}, ${total} new booking${total!==1?"s":""}`);
-      return cur;
-    });
-    setShowSyncPanel(true);
-    setTab("admin");
   }
 
   // All hooks before any conditional return
@@ -9207,7 +9319,10 @@ export default function App() {
       count: draftsArr.length,
       ids: draftsArr.map(d=>d.id),
       booker: bookerEmail || draftsArr[0]?.email,
-      items: draftsArr.slice(0,8).map(d=>({ date:d.date, facility_id:d.facility_id, start_hour:d.start_hour, duration:d.duration })),
+      // Flag edits/creates that touch GTEC-submitted bookings so track-changes shows
+      // post-queue changes distinctly (GTEC may need notifying of the change).
+      gtecQueued: draftsArr.filter(reachedGtecQueue).length,
+      items: draftsArr.slice(0,8).map(d=>({ date:d.date, facility_id:d.facility_id, start_hour:d.start_hour, duration:d.duration, status:d.status })),
     });
     showToast(isNew?`${draftsArr.length} booking${draftsArr.length>1?"s":""} submitted!`:"Booking updated!");
 
@@ -9691,10 +9806,20 @@ export default function App() {
   async function handleDeleteCartSubmit(adminNote, skipEmail=false) {
     if(deleteQueue.length === 0) return;
     const ids = deleteQueue.map(b=>b.id);
+    // Bookings that already reached GTEC's schedule need a purge request to GTEC — record
+    // them in the delete log before they're gone so the admin can email GTEC to remove them.
+    const purgeEntries = deleteQueue.filter(reachedGtecQueue).map(b=>({
+      id: b.id, name: b.name, email: b.email, date: b.date, facility_id: b.facility_id,
+      start_hour: b.start_hour, duration: b.duration, status: b.status, deletedAt: new Date().toISOString(),
+    }));
     if(configured){
       try{ await Promise.all(ids.map(id=>sb.remove("bookings",id))); await loadBookings(); }
       catch(e){showToast("Delete failed: "+e.message,"error");return;}
     } else { setBookings(prev=>prev.filter(b=>!ids.includes(b.id))); }
+    if(purgeEntries.length){
+      // De-dupe by booking id so re-deleting (shouldn't happen) can't double-list a slot.
+      setCpsaDeleteLog(prev => { const have=new Set(prev.map(e=>e.id)); return [...prev, ...purgeEntries.filter(e=>!have.has(e.id))]; });
+    }
 
     if(!skipEmail){
       // Group by email and send one summary per booker via order template (deletions section)
@@ -9714,7 +9839,8 @@ export default function App() {
       count: deleteQueue.length,
       ids,
       booker: deleteQueue[0]?.email,
-      items: deleteQueue.slice(0,8).map(b=>({ date:b.date, facility_id:b.facility_id, start_hour:b.start_hour, duration:b.duration })),
+      gtecPurge: purgeEntries.length,
+      items: deleteQueue.slice(0,8).map(b=>({ date:b.date, facility_id:b.facility_id, start_hour:b.start_hour, duration:b.duration, status:b.status })),
     });
     showToast(`${ids.length} booking${ids.length>1?"s":""} removed.`);
     setDeleteQueue([]);
@@ -10302,7 +10428,7 @@ export default function App() {
         {tab==="billing"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<BillingTab billingRecords={billingRecords} onUpdateRecord={handleUpdateBillingRecord} onDeleteRecord={id=>setBillingRecords(prev=>prev.filter(r=>r.id!==id))} onCreateReceipt={handleCreateReceipt} onLoadToSummary={handleLoadBillingToSummary} isAdmin={isAdmin} loggedInEmail={loggedInEmail} emailAliases={emailAliases} aliasNames={aliasNames} profiles={profiles} driveEnabled={driveConfigured()} onDriveSync={handleDriveSync} onDriveAttach={handleDriveAttachGtec}/>}</div>}
         {tab==="about"&&<div style={{padding:"8px 0"}}><AboutTab/></div>}
         {tab==="admin"&&isAdmin&&<div style={S.card}>
-          {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onView={setViewing} onQueueDelete={queueForRemovalSilent} clashes={allClashes} deleteIds={new Set(deleteQueue.map(b=>b.id))} facilityRates={facilityRates} onUpdateFacilityRate={updateFacilityRate} onClearOldUnapproved={handleClearOldUnapproved} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onSyncDB={handleSyncDB} onBulkApply={handleBulkApply} onSaveMismatch={handleSaveMismatch} onInformCpsa={setInformCpsaFor} onQueueNotifications={queueNotifications} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} onLinkClash={handleLinkClashToGtec} loggedInEmail={loggedInEmail} syncResults={syncResults} onClearSyncResults={()=>setSyncResults([])} showSyncResults={showSyncPanel} onToggleSyncResults={()=>setShowSyncPanel(v=>!v)} bookerFilter={listBookerFilter} onToggleBooker={toggleBooker} onSetBookerFilter={setListBookerFilter} aliasNames={aliasNames} emailAliases={emailAliases} pricingConditions={pricingConditions} onAddPricingCondition={addPricingCondition} onUpdatePricingCondition={updatePricingCondition} onRemovePricingCondition={removePricingCondition}/>}
+          {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onView={setViewing} onQueueDelete={queueForRemovalSilent} clashes={allClashes} deleteIds={new Set(deleteQueue.map(b=>b.id))} facilityRates={facilityRates} onUpdateFacilityRate={updateFacilityRate} onClearOldUnapproved={handleClearOldUnapproved} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onSyncDB={handleSyncDB} onBulkApply={handleBulkApply} onSaveMismatch={handleSaveMismatch} onInformCpsa={setInformCpsaFor} onQueueNotifications={queueNotifications} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} onLinkClash={handleLinkClashToGtec} loggedInEmail={loggedInEmail} syncResults={syncResults} onClearSyncResults={()=>setSyncResults([])} showSyncResults={showSyncPanel} onToggleSyncResults={()=>setShowSyncPanel(v=>!v)} bookerFilter={listBookerFilter} onToggleBooker={toggleBooker} onSetBookerFilter={setListBookerFilter} aliasNames={aliasNames} emailAliases={emailAliases} pricingConditions={pricingConditions} onAddPricingCondition={addPricingCondition} onUpdatePricingCondition={updatePricingCondition} onRemovePricingCondition={removePricingCondition} cpsaDeleteLog={cpsaDeleteLog} onClearDeleteLogEntry={id=>setCpsaDeleteLog(prev=>prev.filter(e=>e.id!==id))} onClearDeleteLog={()=>setCpsaDeleteLog([])}/>}
         </div>}
       </div>
 
