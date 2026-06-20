@@ -1047,7 +1047,7 @@ function describeActivity(r) {
     case "cpsa_review_flag": return `Flagged a GTEC mismatch${d.reasons?.length?` · ${d.reasons.join(", ")}`:""}`;
     case "cpsa_admin_booking_add":    return `Added GTEC block · ${activitySlot(d)}${d.purpose?` · ${d.purpose}`:""}`;
     case "cpsa_admin_booking_remove": return `Removed GTEC block · ${d.date?fmtDateShort(d.date):""} · ${activityFacName(d.facility_id)}${d.purpose?` · ${d.purpose}`:""}`;
-    case "mismatch_resolution":     return `Resolved mismatch · ${d.resolution||""}${d.billing_state&&d.billing_state!=="none"?` (${d.billing_state})`:""}`;
+    case "mismatch_resolution":     return d.resolution==="swapped"&&d.swap_to ? `Reassigned mismatch · ${d.swap_from||"?"} → ${d.swap_to}` : `Resolved mismatch · ${d.resolution||""}${d.billing_state&&d.billing_state!=="none"?` (${d.billing_state})`:""}`;
     case "mismatch_billing_settled":return `Settled mismatch billing${d.billing_state?` · ${d.billing_state}`:""}`;
     case "invoiced":                return `Marked ${d.count||d.ids?.length||0} booking${(d.count||d.ids?.length)!==1?"s":""} invoiced`;
     case "official_invoice_created":return `Created official invoice · ${d.count||0} item${d.count!==1?"s":""}`;
@@ -6932,11 +6932,20 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
   const today=todayKey();
 
   // Build and persist a mismatch resolution for one booking.
-  async function saveMismatchResolution(booking, resolution, billingState, effectiveVals) {
+  async function saveMismatchResolution(booking, resolution, billingState, effectiveVals, opts={}) {
     const reasons = parseMismatchNote(booking.system_notes, booking.notes);
     let sysNotes = booking.system_notes || "";
     const patch = { updated_at: new Date().toISOString() };
-    if (resolution === "amended") {
+    if (resolution === "swapped" && opts.swapTo?.email) {
+      // The slot was handed to another club — GTEC now lists them. Reassign our record
+      // to the new booker (and accept GTEC's dimensions), then mark confirmed. The old
+      // booker is left untouched on GTEC's own schedule, as expected for a swap.
+      sysNotes = setCpsaOrig(sysNotes, booking);
+      Object.assign(patch, effectiveVals || extractCpsaAmendValues(reasons, booking), {
+        status: "cpsa_confirmed", email: opts.swapTo.email, name: opts.swapTo.name || opts.swapTo.email,
+      });
+      sysNotes = stripMismatchNote(sysNotes);
+    } else if (resolution === "amended") {
       sysNotes = setCpsaOrig(sysNotes, booking);
       // Apply the per-field effective values (CPSA only where the admin switched that
       // field; ours elsewhere). Falls back to all-CPSA values for legacy callers.
@@ -6956,7 +6965,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
     }
     sysNotes = setCpsaResolution(sysNotes, resolution, billingState);
     patch.system_notes = sysNotes;
-    const ok = await onSaveMismatch(booking, patch, { reasons: reasons.join(" | "), resolution, billing_state: billingState });
+    const ok = await onSaveMismatch(booking, patch, { reasons: reasons.join(" | "), resolution, billing_state: billingState, ...(opts.swapTo?.email ? { swap_from: booking.email, swap_to: opts.swapTo.email } : {}) });
     if (ok !== false) setMismatchResState(prev => { const n={...prev}; delete n[booking.id]; return n; });
   }
 
@@ -7519,6 +7528,15 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
       {showMismatchPanel&&(()=>{
         const rawMismatches=bookings.filter(b=>b.status==="cpsa_review_needed"&&!isAdminBooking(b)&&inBookerFilter(b.email));
         const sortKey=mismatchSort.key, sortDir=mismatchSort.dir;
+        // Every booker already recognised in the system (canonical email → display name).
+        // Used by the swap control: a mismatch can be reassigned to any of these.
+        const canonOf = em => (emailAliases[(em||"").toLowerCase()] || (em||"").toLowerCase());
+        const bookerOptions = [...new Map(
+          bookings.filter(b=>!isAdminBooking(b)&&b.email).map(b=>{
+            const primary = canonOf(b.email);
+            return [primary, { email: primary, name: aliasNames[primary] || b.name || primary.split("@")[0] }];
+          })
+        ).values()].sort((a,b)=>a.name.localeCompare(b.name));
         const facName = id => FACILITIES.find(f=>f.id===id)?.name || id;
         const valOf = (b, k) => {
           switch (k) {
@@ -7698,10 +7716,10 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
           const [showWarn,setShowWarn]=useState(false);
           const [showPropose,setShowPropose]=useState(false);
 
-          // A manual proposal overrides per-field selection: the booking is amended to
-          // the proposed values, with GTEC + booker still to confirm. Otherwise the
-          // resolution is derived from the per-field keep/switch buttons.
-          const curRes=proposal?"proposed":deriveResolution(changedFields, fieldSel);
+          // A swap reassigns the booking to another known booker; a manual proposal amends
+          // to admin values; otherwise the resolution derives from the per-field buttons.
+          const swapTo=local?.swapTo||null; // { email, name } the booking is being reassigned to
+          const curRes=swapTo?"swapped":proposal?"proposed":deriveResolution(changedFields, fieldSel);
 
           // CPSA submission link(s) + ref ("submission id") for this booking.
           const cpsaRefs=parseCpsaRefs(b.system_notes,b.notes);
@@ -7770,7 +7788,20 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
               return n;
             });
           }
-          function doSave() { saveMismatchResolution(b,curRes,curBilling,effectiveVals); }
+          // Reassign (swap) the booking to another known booker, or clear the selection.
+          function setSwap(email) {
+            if (!email) {
+              setMismatchResState(prev=>{
+                const n={...prev}; const c={...(n[b.id]||{})}; delete c.swapTo;
+                if(Object.keys(c.fieldSel||{}).length===0 && !c.proposal && c.billingState==null) delete n[b.id]; else n[b.id]=c;
+                return n;
+              });
+              return;
+            }
+            const opt=bookerOptions.find(o=>o.email===email);
+            setMismatchResState(prev=>({...prev,[b.id]:{...prev[b.id],swapTo:opt,resolution:"swapped"}}));
+          }
+          function doSave() { saveMismatchResolution(b,curRes,curBilling,effectiveVals,{swapTo}); }
 
           const isDirty=!!local;
           const rowBg=rowIdx%2===0?"#fff":"#fffbeb";
@@ -7868,6 +7899,8 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                   {curRes!=="pending"&&(()=>{
                     const meta=curRes==="amended"
                       ? {label:"✓ Amended",color:"#a16207",bg:"#fef9c3",bd:"#fde68a",tip:"Resolved: our record has been amended to GTEC's values."}
+                      : curRes==="swapped"
+                      ? {label:`🔄 Reassign → ${swapTo?.name||swapTo?.email||""}`,color:"#7c3aed",bg:"#f5f3ff",bd:"#ddd6fe",tip:"The booking will be reassigned to this booker and marked GTEC-confirmed. The previous booker is left on GTEC's own schedule (a swap)."}
                       : curRes==="proposed"
                       ? {label:"📅 Proposed change",color:"#9a3412",bg:"#ffedd5",bd:"#fdba74",tip:"Our record will be amended to the admin-proposed values. GTEC and the booker still need to confirm."}
                       : {label:"↩ GTEC to correct",color:"#5b21b6",bg:"#f5f3ff",bd:"#ddd6fe",tip:"Pending: GTEC to correct on their side. Becomes 'corrected' once GTEC acknowledges."};
@@ -7909,10 +7942,25 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                   {curRes==="pending"&&changedFields.length>0&&(
                     <div style={{fontSize:10,color:"#94a3b8"}}>← Click values to resolve</div>
                   )}
-                  {!proposal&&(
+                  {!proposal&&!swapTo&&(
                     <button onClick={()=>setShowPropose(true)}
                       title="Manually propose a different field/time/duration (neither ours nor GTEC's) on the day grid. Amends our record and is flagged for GTEC + the booker to confirm."
                       style={{fontFamily:"inherit",fontSize:11,fontWeight:700,borderRadius:5,padding:"3px 9px",cursor:"pointer",background:"#fff7ed",border:"1.5px solid #fdba74",color:"#c2410c",whiteSpace:"nowrap",textAlign:"left"}}>📅 Propose change…</button>
+                  )}
+                  {/* Swap — reassign this slot to another club already known to the system.
+                      The previous booker remains on GTEC's own schedule (a genuine swap). */}
+                  {!proposal&&(
+                    <div style={{display:"flex",alignItems:"center",gap:4}}>
+                      <select value={swapTo?.email||""} onChange={e=>setSwap(e.target.value)}
+                        title="Reassign this booking to another club already in the system (a swap). The previous booker remains on GTEC's schedule."
+                        style={{fontFamily:"inherit",fontSize:11,borderRadius:5,padding:"3px 6px",border:`1.5px solid ${swapTo?"#a78bfa":"#ddd6fe"}`,background:swapTo?"#f5f3ff":"#fff",color:"#5b21b6",maxWidth:160}}>
+                        <option value="">🔄 Reassign booker…</option>
+                        {bookerOptions.filter(o=>o.email!==canonOf(b.email)).map(o=>(
+                          <option key={o.email} value={o.email}>{o.name}</option>
+                        ))}
+                      </select>
+                      {swapTo&&<button onClick={()=>setSwap("")} title="Cancel reassignment" style={{fontFamily:"inherit",fontSize:11,border:"1.5px solid #cbd5e1",borderRadius:4,background:"transparent",color:"#94a3b8",cursor:"pointer",padding:"1px 5px"}}>↩</button>}
+                    </div>
                   )}
                   {showPropose&&(
                     <Modal title={`📅 Propose a change — ${fmtDate(b.date)}`} onClose={()=>setShowPropose(false)} width={760}>
@@ -9559,9 +9607,11 @@ export default function App() {
     } else {
       setBookings(prev => prev.map(b => b.id === booking.id ? { ...b, ...patch } : b));
     }
-    logActivity("mismatch_resolution", { booking_id:booking.id, resolution:logPayload.resolution, billing_state:logPayload.billing_state });
+    logActivity("mismatch_resolution", { booking_id:booking.id, resolution:logPayload.resolution, billing_state:logPayload.billing_state, ...(logPayload.swap_to ? { swap_from: logPayload.swap_from, swap_to: logPayload.swap_to } : {}) });
     const msg = logPayload.resolution === "amended"
       ? "Booking updated to GTEC values."
+      : logPayload.resolution === "swapped"
+      ? `Booking reassigned to ${logPayload.swap_to}.`
       : logPayload.resolution === "proposed"
       ? "Booking amended to proposed values — GTEC & booker to confirm."
       : logPayload.resolution === "to_correct"
@@ -9808,7 +9858,7 @@ export default function App() {
     const ids = deleteQueue.map(b=>b.id);
     // Bookings that already reached GTEC's schedule need a purge request to GTEC — record
     // them in the delete log before they're gone so the admin can email GTEC to remove them.
-    const purgeEntries = deleteQueue.filter(reachedGtecQueue).map(b=>({
+    const purgeEntries = deleteQueue.filter(b=>!isAdminBooking(b)&&reachedGtecQueue(b)).map(b=>({
       id: b.id, name: b.name, email: b.email, date: b.date, facility_id: b.facility_id,
       start_hour: b.start_hour, duration: b.duration, status: b.status, deletedAt: new Date().toISOString(),
     }));
