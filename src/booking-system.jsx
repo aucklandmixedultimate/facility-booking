@@ -6901,6 +6901,11 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
   const [showClashPanel,setShowClashPanel]=useState(false);
   const [showMismatchPanel,setShowMismatchPanel]=useState(false);
   const [mismatchResState,setMismatchResState]=useState({}); // { [bookingId]: { resolution, billingState } }
+  // Transient per-row UI flags (propose-modal open, settled-billing warning). Lifted out
+  // of the row so the row can be a plain keyed render function instead of a component
+  // defined during render — the latter remounts every row on each click, snapping the
+  // table scroll back to the top. { [bookingId]: { showWarn, showPropose } }
+  const [mismatchRowUI,setMismatchRowUI]=useState({});
   const [mismatchSort,setMismatchSort]=useState({key:"date",dir:"asc"});
   const [showTrackChanges,setShowTrackChanges]=useState(false);
   const [showPricingRules,setShowPricingRules]=useState(false);
@@ -7693,7 +7698,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
         const BILLING_LABEL = {none:"—",credit_pending:"Credit pending",invoice_pending:"Invoice pending",credited:"Credited ✓",invoiced:"Invoiced ✓"};
 
         // Each row is a component so it can hold its own useState hooks.
-        function MismatchRow({b, rowIdx}) {
+        const renderMismatchRow = (b, rowIdx) => {
           const reasons=parseMismatchNote(b.system_notes,b.notes);
           const cpsaVals=extractCpsaAmendValues(reasons,b);
           const fac=FACILITIES.find(x=>x.id===b.facility_id);
@@ -7713,8 +7718,10 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
           const proposal=local?.proposal||null; // admin-proposed {facility_id,start_hour,duration}
           const curBilling=local?.billingState??saved?.billingState??"none";
           const alreadySettled=saved?.billingState==="credited"||saved?.billingState==="invoiced";
-          const [showWarn,setShowWarn]=useState(false);
-          const [showPropose,setShowPropose]=useState(false);
+          const showWarn=!!mismatchRowUI[b.id]?.showWarn;
+          const showPropose=!!mismatchRowUI[b.id]?.showPropose;
+          const setShowWarn=v=>setMismatchRowUI(prev=>({...prev,[b.id]:{...prev[b.id],showWarn:v}}));
+          const setShowPropose=v=>setMismatchRowUI(prev=>({...prev,[b.id]:{...prev[b.id],showPropose:v}}));
 
           // A swap reassigns the booking to another known booker; a manual proposal amends
           // to admin values; otherwise the resolution derives from the per-field buttons.
@@ -7854,7 +7861,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
           }
 
           return (
-            <tr style={{background:rowBg}}>
+            <tr key={b.id} style={{background:rowBg}}>
               {/* Booker */}
               <td style={tdS2}>
                 <div style={{fontWeight:600,color:"#0f172a",whiteSpace:"nowrap"}}>{b.name}</div>
@@ -7878,19 +7885,19 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
               <td style={tdS2}>
                 <div style={{display:"inline-flex",alignItems:"flex-start",gap:4}}>
                   <span style={{width:7,height:7,borderRadius:2,background:fac?.color||"#94a3b8",display:"inline-block",flexShrink:0,marginTop:5}}/>
-                  <ValPair field="facility" ourVal={fac?.name||b.facility_id} cpsaVal={cpsaFac?.name||cpsaVals.facility_id} changed={facChanged}/>
+                  {ValPair({field:"facility", ourVal:fac?.name||b.facility_id, cpsaVal:cpsaFac?.name||cpsaVals.facility_id, changed:facChanged})}
                 </div>
               </td>
               {/* Time — button pair if changed */}
               <td style={tdS2}>
-                <ValPair field="time"
-                  ourVal={`${fmtTime(b.start_hour)}–${fmtTime(b.start_hour+b.duration)}`}
-                  cpsaVal={`${fmtTime(cpsaVals.start_hour)}–${fmtTime(cpsaVals.start_hour+cpsaVals.duration)}`}
-                  changed={timeChanged}/>
+                {ValPair({field:"time",
+                  ourVal:`${fmtTime(b.start_hour)}–${fmtTime(b.start_hour+b.duration)}`,
+                  cpsaVal:`${fmtTime(cpsaVals.start_hour)}–${fmtTime(cpsaVals.start_hour+cpsaVals.duration)}`,
+                  changed:timeChanged})}
               </td>
               {/* Duration — button pair if changed */}
               <td style={tdS2}>
-                <ValPair field="duration" ourVal={`${b.duration}h`} cpsaVal={`${cpsaVals.duration}h`} changed={durChanged}/>
+                {ValPair({field:"duration", ourVal:`${b.duration}h`, cpsaVal:`${cpsaVals.duration}h`, changed:durChanged})}
               </td>
               {/* Actions: status indicator + billing + save */}
               <td style={{...tdS2,minWidth:170}}>
@@ -8123,7 +8130,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                       </tr>
                     </thead>
                     <tbody>
-                      {mismatches.map((b,i)=><MismatchRow key={b.id} b={b} rowIdx={i}/>)}
+                      {mismatches.map((b,i)=>renderMismatchRow(b,i))}
                     </tbody>
                   </table>
                   </CopyableTable>
