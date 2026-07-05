@@ -2910,10 +2910,11 @@ function WeekCalendar({ bookings, onNewBooking, onNewBookingRange, onBookingClic
           </div>
           {/* Grid */}
           <div style={{ display:"flex" }}>
-            {/* Hour labels */}
+            {/* Hour labels — border-box so paddingTop doesn't inflate rows past HOUR_H
+                (a 3px/hour drift that pushed labels progressively below their gridlines) */}
             <div style={{ width:52, flexShrink:0 }}>
               {Array.from({length:CAL_TOTAL+1},(_,i)=>CAL_START+i).map(h=>(
-                <div key={h} style={{ height:HOUR_H, display:"flex", alignItems:"flex-start", justifyContent:"flex-end", paddingRight:8, paddingTop:3 }}>
+                <div key={h} style={{ height:HOUR_H, boxSizing:"border-box", display:"flex", alignItems:"flex-start", justifyContent:"flex-end", paddingRight:8, paddingTop:3 }}>
                   <span style={{ fontSize:10, color:"#94a3b8", whiteSpace:"nowrap" }}>{fmtTime(h)}</span>
                 </div>
               ))}
@@ -3313,7 +3314,7 @@ function DayTimelinePopup({ date, bookings, onClose, onBookingClick, onNewBookin
           <div style={{width:48,flexShrink:0,position:"sticky",left:0,zIndex:6,background:"#fff"}}>
             <div style={{height:24,position:"sticky",top:0,zIndex:7,background:"#fff"}}/>
             {Array.from({length:CAL_TOTAL+1},(_,i)=>CAL_START+i).map(h=>(
-              <div key={h} style={{height:HOUR_H,display:"flex",alignItems:"flex-start",justifyContent:"flex-end",paddingRight:6,paddingTop:3}}>
+              <div key={h} style={{height:HOUR_H,boxSizing:"border-box",display:"flex",alignItems:"flex-start",justifyContent:"flex-end",paddingRight:6,paddingTop:3}}>
                 <span style={{fontSize:10,color:"#94a3b8",whiteSpace:"nowrap"}}>{fmtTime(h)}</span>
               </div>
             ))}
