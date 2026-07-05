@@ -1000,7 +1000,7 @@ function Modal({title,onClose,children,width=560}) {
 // English instead of raw JSON like {"ids":[...],"count":1}.
 const ACTIVITY_ADMIN_ACTIONS = new Set([
   "cpsa_sync_start","cpsa_sync_complete","cpsa_confirm","cpsa_review_flag",
-  "cpsa_admin_booking_add","cpsa_admin_booking_remove","mismatch_resolution",
+  "cpsa_admin_booking_add","cpsa_admin_booking_remove","cpsa_admin_convert","mismatch_resolution",
   "mismatch_billing_settled","status_change","invoiced","official_invoice_created",
   "drive_upload","drive_attach",
 ]);
@@ -1009,6 +1009,7 @@ const ACTIVITY_LABELS = {
   status_change:"Status changed", cpsa_sync_start:"Sync started", cpsa_sync_complete:"Sync completed",
   cpsa_confirm:"GTEC confirmed", cpsa_review_flag:"Mismatch flagged",
   cpsa_admin_booking_add:"GTEC block added", cpsa_admin_booking_remove:"GTEC block removed",
+  cpsa_admin_convert:"GTEC block converted",
   mismatch_resolution:"Mismatch resolved", mismatch_billing_settled:"Billing settled",
   invoiced:"Invoiced", official_invoice_created:"Invoice created",
   drive_upload:"Saved to Drive", drive_attach:"GTEC invoice attached",
@@ -1047,6 +1048,7 @@ function describeActivity(r) {
     case "cpsa_review_flag": return `Flagged a GTEC mismatch${d.reasons?.length?` · ${d.reasons.join(", ")}`:""}`;
     case "cpsa_admin_booking_add":    return `Added GTEC block · ${activitySlot(d)}${d.purpose?` · ${d.purpose}`:""}`;
     case "cpsa_admin_booking_remove": return `Removed GTEC block · ${d.date?fmtDateShort(d.date):""} · ${activityFacName(d.facility_id)}${d.purpose?` · ${d.purpose}`:""}`;
+    case "cpsa_admin_convert": return `Converted GTEC block → AMUA booking · ${d.to||""} · ${activitySlot(d)}`;
     case "mismatch_resolution":     return d.resolution==="swapped"&&d.swap_to ? `Reassigned mismatch · ${d.swap_from||"?"} → ${d.swap_to}` : `Resolved mismatch · ${d.resolution||""}${d.billing_state&&d.billing_state!=="none"?` (${d.billing_state})`:""}`;
     case "mismatch_billing_settled":return `Settled mismatch billing${d.billing_state?` · ${d.billing_state}`:""}`;
     case "invoiced":                return `Marked ${d.count||d.ids?.length||0} booking${(d.count||d.ids?.length)!==1?"s":""} invoiced`;
@@ -1067,7 +1069,7 @@ function ActivityLogModal({onClose, inline=false}) {
   const [filter, setFilter] = useState("all"); // all | sync | admin | booker
   const SYNC_ACTIONS = useMemo(()=>new Set([
     "cpsa_sync_start","cpsa_sync_complete","cpsa_confirm","cpsa_review_flag",
-    "cpsa_admin_booking_add","cpsa_admin_booking_remove","mismatch_resolution","mismatch_billing_settled"
+    "cpsa_admin_booking_add","cpsa_admin_booking_remove","cpsa_admin_convert","mismatch_resolution","mismatch_billing_settled"
   ]),[]);
   useEffect(()=>{
     (async ()=>{
@@ -1104,7 +1106,7 @@ function ActivityLogModal({onClose, inline=false}) {
     if (a.startsWith("cpsa_sync")) return {color:"#0e7490",bg:"#ecfeff",border:"#a5f3fc"};
     if (a==="cpsa_confirm") return {color:"#0e7490",bg:"#ecfeff",border:"#a5f3fc"};
     if (a==="cpsa_review_flag") return {color:"#b45309",bg:"#fffbeb",border:"#fde68a"};
-    if (a.startsWith("cpsa_admin_booking")) return {color:"#475569",bg:"#f8fafc",border:"#e2e8f0"};
+    if (a.startsWith("cpsa_admin")) return {color:"#475569",bg:"#f8fafc",border:"#e2e8f0"};
     if (a.startsWith("mismatch")) return {color:"#7c3aed",bg:"#f5f3ff",border:"#ddd6fe"};
     if (a==="booking_create") return {color:"#15803d",bg:"#f0fdf4",border:"#bbf7d0"};
     if (a==="booking_edit")   return {color:"#0369a1",bg:"#f0f9ff",border:"#bae6fd"};
@@ -2527,11 +2529,15 @@ function BookingForm({ booking, allBookings, onAddToCart, onClose, isAdmin, logg
 }
 
 // ─── Booking Detail ───────────────────────────────────────────────────────────
-function BookingDetail({booking,onEdit,onClose,onCancel,isAdmin,onStatusChange,onPatch,loggedInEmail,allClashes=[]}) {
+function BookingDetail({booking,onEdit,onClose,onCancel,isAdmin,onStatusChange,onPatch,loggedInEmail,allClashes=[],bookers=[],onConvertAdmin}) {
   const f=FACILITIES.find(x=>x.id===booking.facility_id);
   const m=STATUS_META[booking.status]||STATUS_META.pending;
   const isPast = booking.date < todayKey();
   const isOwn  = booking.email?.toLowerCase() === loggedInEmail?.toLowerCase();
+  const isAdminBk = isAdminBooking(booking);
+  const [convertEmail,setConvertEmail] = useState("");
+  const [convertName,setConvertName]   = useState("");
+  const convertValid = /\S+@\S+\.\S+/.test(convertEmail.trim());
   const clashingAdminBks = booking.status==="clash"
     ? allClashes.filter(c=>c.user.id===booking.id).map(c=>c.admin)
     : [];
@@ -2758,6 +2764,22 @@ function BookingDetail({booking,onEdit,onClose,onCancel,isAdmin,onStatusChange,o
           </div>
         );
       })()}
+      {isAdmin&&isAdminBk&&onConvertAdmin&&(
+        <div style={{background:"#ecfdf5",border:"1px solid #6ee7b7",borderRadius:10,padding:"12px 16px",display:"flex",flexDirection:"column",gap:8}}>
+          <div style={{fontSize:12,fontWeight:700,color:"#047857",textTransform:"uppercase",letterSpacing:"0.05em"}}>🔁 Convert to AMUA booking</div>
+          <div style={{fontSize:12,color:"#065f46"}}>Assign this GTEC-held block to a booker. It becomes a GTEC-confirmed AMUA booking under their name; the next sync keeps it linked instead of re-importing the block.</div>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+            <input list="convert-booker-list" type="email" value={convertEmail}
+              onChange={e=>{ const v=e.target.value; setConvertEmail(v); const mBk=bookers.find(bk=>bk.email===v.trim().toLowerCase()); if(mBk) setConvertName(mBk.name); }}
+              placeholder="booker email…" style={{...S.inp,flex:1,minWidth:180}}/>
+            <datalist id="convert-booker-list">{bookers.map(bk=><option key={bk.email} value={bk.email}>{bk.name}</option>)}</datalist>
+            <input value={convertName} onChange={e=>setConvertName(e.target.value)} placeholder="booker / club name…" style={{...S.inp,flex:1,minWidth:140}}/>
+            <button disabled={!convertValid}
+              onClick={()=>onConvertAdmin(booking,{email:convertEmail.trim().toLowerCase(),name:convertName.trim()||convertEmail.trim()})}
+              style={S.btn({background:"#059669",color:"#fff",fontWeight:700,opacity:convertValid?1:0.5,cursor:convertValid?"pointer":"not-allowed"})}>✓ Convert</button>
+          </div>
+        </div>
+      )}
       <div style={{display:"flex",gap:8,flexWrap:"wrap",paddingTop:8,borderTop:"1px solid #f1f5f9"}}>
         {isAdmin&&<>
           {!isPast&&<button onClick={onEdit} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#0f172a"})}>Edit</button>}
@@ -9341,6 +9363,14 @@ export default function App() {
 
   bookings.forEach(b=>emailColor(b.email));
   if(loggedInEmail)emailColor(loggedInEmail);
+  // Every booker already known to the system (canonical email → display name), for the
+  // admin-block "convert to AMUA booking" picker. Deduped by canonical (primary) email.
+  const knownBookers = [...new Map(
+    bookings.filter(b=>!isAdminBooking(b)&&b.email).map(b=>{
+      const primary = emailAliases[b.email.toLowerCase()] || b.email.toLowerCase();
+      return [primary, { email: primary, name: aliasNames[primary] || b.name || primary.split("@")[0] }];
+    })
+  ).values()].sort((a,b)=>a.name.localeCompare(b.name));
 
   // Login gate — after all hooks
   if(session === undefined) return null; // auth session still loading
@@ -9420,6 +9450,31 @@ export default function App() {
     setViewing(prev => prev && prev.id===booking.id ? { ...prev, ...full } : prev);
     logActivity("booking_edit", { ids:[booking.id], booker: booking.email, pricing: true });
     showToast("Booking pricing updated.");
+  }
+
+  // Convert a GTEC-held admin block into a real, GTEC-confirmed AMUA booking assigned to
+  // a booker. GTEC already holds the slot, so it lands as cpsa_confirmed. A sticky
+  // "confirmed" resolution + a taught org→email link stop the next sync from re-flagging
+  // it as a mismatch or re-importing the same GTEC event as a fresh duplicate admin block.
+  async function handleConvertAdminBooking(booking, { email, name }) {
+    const em = (email||"").trim().toLowerCase();
+    if (!/\S+@\S+\.\S+/.test(em)) { showToast("Enter a valid booker email.", "error"); return; }
+    const canonEm = emailAliases[em] || em;
+    const bkName = (name||"").trim() || displayNameFor(canonEm);
+    let sysNotes = setCpsaResolution(booking.system_notes || "", "confirmed", "none");
+    sysNotes = setGtecSnapshot(sysNotes, { name: booking.purpose||"", date: booking.date, start_hour: booking.start_hour, duration: booking.duration, facilityIds: [booking.facility_id] });
+    const patch = { email: canonEm, name: bkName, status: "cpsa_confirmed", system_notes: sysNotes, updated_at: new Date().toISOString() };
+    if (configured) {
+      try { await sb.update("bookings", booking.id, patch); await loadBookings(); }
+      catch(e){ showToast("Convert failed: "+e.message, "error"); return; }
+    } else {
+      setBookings(prev => prev.map(b => b.id===booking.id ? { ...b, ...patch } : b));
+    }
+    const teachKey = gtecTeamKey(booking.purpose||"");
+    if (teachKey && teachKey.length >= 3) setGtecLinks(prev => ({ ...prev, [teachKey]: canonEm }));
+    logActivity("cpsa_admin_convert", { booking_id: booking.id, to: canonEm, date: booking.date, facility_id: booking.facility_id, start_hour: booking.start_hour, duration: booking.duration });
+    setViewing(prev => prev && prev.id===booking.id ? { ...prev, ...patch } : prev);
+    showToast(`Converted to AMUA booking for ${bkName}.`);
   }
 
   function updateFacilityRate(facilityId, type, value) {
@@ -10699,7 +10754,7 @@ export default function App() {
 
       {viewing&&(
         <Modal title="Booking Details" onClose={()=>setViewing(null)}>
-          <BookingDetail booking={viewing} onEdit={()=>openEdit(viewing)} onClose={()=>setViewing(null)} onCancel={()=>queueForRemoval(viewing.id)} isAdmin={isAdmin} onStatusChange={status=>handleStatusChange(viewing,status)} onPatch={handlePatchBooking} loggedInEmail={loggedInEmail} allClashes={allClashes}/>
+          <BookingDetail booking={viewing} onEdit={()=>openEdit(viewing)} onClose={()=>setViewing(null)} onCancel={()=>queueForRemoval(viewing.id)} isAdmin={isAdmin} onStatusChange={status=>handleStatusChange(viewing,status)} onPatch={handlePatchBooking} loggedInEmail={loggedInEmail} allClashes={allClashes} bookers={knownBookers} onConvertAdmin={handleConvertAdminBooking}/>
         </Modal>
       )}
 
