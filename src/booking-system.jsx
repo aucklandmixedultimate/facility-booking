@@ -8666,7 +8666,9 @@ const FIELD_ID_BY_NUM = { 1:"f3", 2:"f4", 3:"f5" };
 // A keyword must precede the number, so times/dates elsewhere in the string can't be
 // mistaken for field references. Digits only chain through an explicit separator.
 function fieldIdsFromText(s) {
-  const txt = (s || "").toLowerCase();
+  // Names arrive HTML-escaped ("Fields 1, 2 &amp; 3"), which would otherwise break the
+  // digit chain at the entity and drop every field after the first "&".
+  const txt = (s || "").toLowerCase().replace(/&amp;/g, "&").replace(/&#(?:38|x26);/g, "&");
   if (!txt) return [];
   const out = [];
   const re = /\b(?:field|fld|turf|pitch)s?\b[\s#:.-]*(\d(?:\s*(?:&|\+|,|and|\/)\s*\d)*)/g;
@@ -8679,29 +8681,33 @@ function fieldIdsFromText(s) {
   }
   return out;
 }
-// The feed's location/venue text. The scraped payload isn't consistent about which key
-// carries it, so accept the usual spellings rather than depending on a single one.
-function cjrEventLocation(ev) {
-  if (!ev) return "";
-  for (const k of ["EventLocation","Location","EventVenue","Venue","EventPlace","Place","EventField","Field"]) {
-    const v = ev[k];
-    if (typeof v === "string" && v.trim()) return v;
-  }
-  // Fall back to any location-ish key so an unexpected spelling still works. Matches on the
-  // key NAME only — never scans free text such as EventDetails, which can mention a field
-  // that isn't the one booked.
-  for (const [k, v] of Object.entries(ev)) {
-    if (typeof v === "string" && v.trim() && /location|venue|place|field|ground/i.test(k)) return v;
-  }
-  return "";
+// Fields named by an event's location/venue ("Location: Field 2" on the GTEC calendar).
+// The payload isn't consistent about which key carries this, so try the usual spellings and
+// then any location-ish key name. Returns the first key that actually names a field, so an
+// unrelated key that merely matches the name pattern can't shadow the real one. Key names
+// only — free text such as EventDetails is never scanned, since it can mention a field other
+// than the one booked.
+function locationFieldIds(ev) {
+  if (!ev) return [];
+  const firstNaming = keys => {
+    for (const k of keys) {
+      const v = ev[k];
+      if (typeof v !== "string" || !v.trim()) continue;
+      const ids = fieldIdsFromText(v);
+      if (ids.length) return ids;
+    }
+    return [];
+  };
+  const known = firstNaming(["EventLocation","Location","EventVenue","Venue","EventPlace","Place","EventField","Field"]);
+  if (known.length) return known;
+  return firstNaming(Object.keys(ev).filter(k => /location|venue|place|field|ground/i.test(k)));
 }
-// Maps a GTEC event to internal facility ids. The location/venue field names the field
-// actually booked, so it wins over the event name — the name often carries only a team or
-// activity label ("U12 Open", "AMUA Training"). Consulting the name alone meant any event
-// whose name omitted a field number silently fell back to Field #1, even when its location
-// said Field #2.
-function mapCJRFacility(eventName, eventLocation = "") {
-  const fromLocation = fieldIdsFromText(eventLocation);
+// Maps a GTEC event to internal facility ids. The location names the field actually booked,
+// so it wins over the event name — the name often carries only a team or activity label
+// ("Leulumoega Tuai", "U12 Open"). Consulting the name alone meant any event whose name
+// omitted a field number silently fell back to Field #1 even when its location said Field #2.
+function mapCJRFacility(eventName, ev = null) {
+  const fromLocation = locationFieldIds(ev);
   if (fromLocation.length) return fromLocation;
   const fromName = fieldIdsFromText(eventName);
   if (fromName.length) return fromName;
@@ -9050,7 +9056,7 @@ export default function App() {
         if (!date) continue;
         const { start_hour, duration } = parseCJRDateTime(ev.EventDateTime);
         const purpose = ev.EventName || "External Booking";
-        const facilityIds = mapCJRFacility(purpose, cjrEventLocation(ev));
+        const facilityIds = mapCJRFacility(purpose, ev);
         feedSlots.push({ date, start_hour, duration });
         for (const facility_id of facilityIds) {
           feedKeys.add(`${date}|${facility_id}|${start_hour}|${purpose}`);
@@ -9114,7 +9120,7 @@ export default function App() {
         if (!date) { skipped++; continue; }
         const { start_hour, duration } = parseCJRDateTime(ev.EventDateTime);
         const purpose = ev.EventName || "External Booking";
-        const facilityIds = mapCJRFacility(purpose, cjrEventLocation(ev));
+        const facilityIds = mapCJRFacility(purpose, ev);
 
         // Check if this CPSA event matches an existing approved user booking
         const match = findMatchingUserBooking(currentBookings, ev, facilityIds, gtecLinksRef.current, emailAliasesRef.current);
