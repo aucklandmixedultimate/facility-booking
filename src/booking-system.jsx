@@ -8656,13 +8656,55 @@ function findMatchingUserBooking(allBookings, ev, facilityIds, gtecLinks={}, ema
 }
 
 // Maps facility mentions in EventName to internal facility IDs
-function mapCJRFacility(eventName) {
-  const n = eventName || "";
-  // Extract "(Field 1)", "(Field 2)", "Field 1, 2" style references
-  if (/field\s*1.*2|field\s*2.*1/i.test(n)) return ["f3","f4"]; // both fields
-  if (/field\s*1\b/i.test(n)) return ["f3"];
-  if (/field\s*2\b/i.test(n)) return ["f4"];
-  if (/field\s*3\b/i.test(n)) return ["f5"];
+// Internal ids for the three playing fields, by the number GTEC writes.
+const FIELD_ID_BY_NUM = { 1:"f3", 2:"f4", 3:"f5" };
+// Every field referenced in a fragment of text, in the order written:
+//   "Field 2"            → ["f4"]
+//   "Field 1 & 2"        → ["f3","f4"]
+//   "Fields 1, 2 and 3"  → ["f3","f4","f5"]
+//   "Carlton Park - Fld #2" → ["f4"]
+// A keyword must precede the number, so times/dates elsewhere in the string can't be
+// mistaken for field references. Digits only chain through an explicit separator.
+function fieldIdsFromText(s) {
+  const txt = (s || "").toLowerCase();
+  if (!txt) return [];
+  const out = [];
+  const re = /\b(?:field|fld|turf|pitch)s?\b[\s#:.-]*(\d(?:\s*(?:&|\+|,|and|\/)\s*\d)*)/g;
+  let m;
+  while ((m = re.exec(txt)) !== null) {
+    for (const d of m[1].match(/\d/g) || []) {
+      const id = FIELD_ID_BY_NUM[parseInt(d, 10)];
+      if (id && !out.includes(id)) out.push(id);
+    }
+  }
+  return out;
+}
+// The feed's location/venue text. The scraped payload isn't consistent about which key
+// carries it, so accept the usual spellings rather than depending on a single one.
+function cjrEventLocation(ev) {
+  if (!ev) return "";
+  for (const k of ["EventLocation","Location","EventVenue","Venue","EventPlace","Place","EventField","Field"]) {
+    const v = ev[k];
+    if (typeof v === "string" && v.trim()) return v;
+  }
+  // Fall back to any location-ish key so an unexpected spelling still works. Matches on the
+  // key NAME only — never scans free text such as EventDetails, which can mention a field
+  // that isn't the one booked.
+  for (const [k, v] of Object.entries(ev)) {
+    if (typeof v === "string" && v.trim() && /location|venue|place|field|ground/i.test(k)) return v;
+  }
+  return "";
+}
+// Maps a GTEC event to internal facility ids. The location/venue field names the field
+// actually booked, so it wins over the event name — the name often carries only a team or
+// activity label ("U12 Open", "AMUA Training"). Consulting the name alone meant any event
+// whose name omitted a field number silently fell back to Field #1, even when its location
+// said Field #2.
+function mapCJRFacility(eventName, eventLocation = "") {
+  const fromLocation = fieldIdsFromText(eventLocation);
+  if (fromLocation.length) return fromLocation;
+  const fromName = fieldIdsFromText(eventName);
+  if (fromName.length) return fromName;
   // All-facilities events (mowing, refs, etc.) default to Field 1
   return ["f3"];
 }
@@ -9008,7 +9050,7 @@ export default function App() {
         if (!date) continue;
         const { start_hour, duration } = parseCJRDateTime(ev.EventDateTime);
         const purpose = ev.EventName || "External Booking";
-        const facilityIds = mapCJRFacility(purpose);
+        const facilityIds = mapCJRFacility(purpose, cjrEventLocation(ev));
         feedSlots.push({ date, start_hour, duration });
         for (const facility_id of facilityIds) {
           feedKeys.add(`${date}|${facility_id}|${start_hour}|${purpose}`);
@@ -9072,7 +9114,7 @@ export default function App() {
         if (!date) { skipped++; continue; }
         const { start_hour, duration } = parseCJRDateTime(ev.EventDateTime);
         const purpose = ev.EventName || "External Booking";
-        const facilityIds = mapCJRFacility(purpose);
+        const facilityIds = mapCJRFacility(purpose, cjrEventLocation(ev));
 
         // Check if this CPSA event matches an existing approved user booking
         const match = findMatchingUserBooking(currentBookings, ev, facilityIds, gtecLinksRef.current, emailAliasesRef.current);
