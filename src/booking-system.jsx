@@ -120,7 +120,15 @@ function emailColor(email) {
   return _ecc[k];
 }
 
-const CAL_START=7, CAL_END=22, CAL_TOTAL=CAL_END-CAL_START, HOUR_H=56, SLOT_H=HOUR_H*0.5;
+const CAL_START=7, CAL_END=22, CAL_TOTAL=CAL_END-CAL_START, HOUR_H=56;
+// Booking granularity. Every grid drag, start-time list and duration option derives from
+// this, so the whole app moves together — 4 = quarter-hour (:00/:15/:30/:45) intervals.
+const SLOTS_PER_HOUR = 4;
+const SLOT_HOURS = 1/SLOTS_PER_HOUR;          // one slot expressed in hours (0.25)
+const SLOT_H = HOUR_H*SLOT_HOURS;             // …and in pixels on the hour grids (14px)
+const CAL_SLOTS = CAL_TOTAL*SLOTS_PER_HOUR;   // selectable slots in a day column
+// Every selectable start time, CAL_START…CAL_END inclusive.
+const START_TIMES = Array.from({length:CAL_SLOTS+1},(_,i)=>CAL_START+i*SLOT_HOURS).filter(h=>h<=CAL_END);
 // Boundary between the "day" and "evening" pricing bands (5:30pm). Also used to mark
 // the floodlit Field #1 (f3) as a last resort during daylight: anything that starts
 // and ends before this cutoff is daytime, when an unlit field should be used instead.
@@ -128,11 +136,19 @@ const DAY_EVENING_CUTOFF = 17.5;
 // Field #1 (f3) is the only floodlit field, so daytime use should be avoided to keep
 // it free for evening (post-cutoff) play that genuinely needs the lights.
 const FLOODLIT_FIELD_ID = "f3";
+// "45 min", "1 hr", "2 hrs 15 min" — one spelling for every duration, so the quarter-hour
+// options read consistently alongside the whole-hour ones.
+function fmtDuration(h) {
+  const hh = Math.floor(h), m = Math.round((h-hh)*60);
+  if (!hh) return `${m} min`;
+  return `${hh} hr${hh!==1?"s":""}${m?` ${m} min`:""}`;
+}
+// Quarter-hour steps up to 3 hrs (where bookings actually vary), then coarser for the
+// long all-day hires. Any other value still shows: the pickers fall back to the raw hours.
 const DURATIONS = [
-  {label:"30 min",value:0.5},{label:"1 hr",value:1},{label:"1.5 hrs",value:1.5},
-  {label:"2 hrs",value:2},{label:"2.5 hrs",value:2.5},{label:"3 hrs",value:3},
-  {label:"4 hrs",value:4},{label:"6 hrs",value:6},{label:"8 hrs",value:8},
-];
+  ...Array.from({length:12},(_,i)=>(i+1)*SLOT_HOURS), // 15 min … 3 hrs
+  3.5, 4, 5, 6, 8,
+].map(value=>({ value, label: fmtDuration(value) }));
 const STATUS_META = {
   pending_amua: {bg:"#fff8e1",border:"#f59e0b",text:"#92400e",dot:"#f59e0b",label:"(1/4) Pending AMUA Review"},
   queued_cpsa:  {bg:"#dbeafe",border:"#93c5fd",text:"#1e40af",dot:"#3b82f6",label:"(2/4) Queued for GTEC"},
@@ -1583,16 +1599,20 @@ function OverlapWarning({title,description,bookings:bkgs,onProceed,onCancel}) {
 function InlineDayPicker({ date, bookings, onPick, onConfirm, multi=false }) {
   const [drag, setDrag] = useState(null); // { startCol,endCol,startSlot,endSlot }
   const [picks, setPicks] = useState([]); // multi mode: staged slots across facilities
-  const SH = 14;       // shorter slot height for inline
+  // Roomier than the old half-hour grid so a quarter-hour slot stays comfortably
+  // clickable (12px rather than the 7px a 28px hour would give). The picker sits in a
+  // scrollable modal, so the extra height costs nothing but a little scrolling.
+  const INLINE_HOUR_H = 48;
+  const SH = INLINE_HOUR_H/SLOTS_PER_HOUR; // one slot's height
   const HEAD_H = 18;   // facility-header height above each column's grid
   const colsRef = useRef(null);
-  const slotToHour = s => CAL_START + s*0.5;
-  // Map a pointer event to a facility column + half-hour slot within the columns area.
+  const slotToHour = s => CAL_START + s*SLOT_HOURS;
+  // Map a pointer event to a facility column + slot within the columns area.
   function geom(e) {
     const r = colsRef.current?.getBoundingClientRect();
     if (!r) return null;
     const col  = Math.max(0, Math.min(FACILITIES.length-1, Math.floor((e.clientX - r.left) / (r.width / FACILITIES.length))));
-    const slot = Math.max(0, Math.min(Math.floor((e.clientY - r.top - HEAD_H) / SH), CAL_TOTAL*2-1));
+    const slot = Math.max(0, Math.min(Math.floor((e.clientY - r.top - HEAD_H) / SH), CAL_SLOTS-1));
     return { col, slot };
   }
   function gridDown(e) {
@@ -1611,7 +1631,7 @@ function InlineDayPicker({ date, bookings, onPick, onConfirm, multi=false }) {
     const loC = Math.min(drag.startCol,drag.endCol), hiC = Math.max(drag.startCol,drag.endCol);
     const loS = Math.min(drag.startSlot,drag.endSlot), hiS = Math.max(drag.startSlot,drag.endSlot);
     setDrag(null);
-    const start_hour = slotToHour(loS), duration = Math.max(0.5, (hiS-loS+1)*0.5);
+    const start_hour = slotToHour(loS), duration = Math.max(SLOT_HOURS, (hiS-loS+1)*SLOT_HOURS);
     if (multi) {
       // One pick per facility column the drag spans — same time in several fields at once.
       const added = [];
@@ -1639,7 +1659,7 @@ function InlineDayPicker({ date, bookings, onPick, onConfirm, multi=false }) {
         <div style={{width:36,flexShrink:0}}>
           <div style={{height:18}}/>
           {Array.from({length:CAL_TOTAL+1},(_,i)=>CAL_START+i).map(h=>(
-            <div key={h} style={{height:SH*2,fontSize:9,color:"#94a3b8",textAlign:"right",paddingRight:4}}>{fmtTime(h)}</div>
+            <div key={h} style={{height:INLINE_HOUR_H,fontSize:9,color:"#94a3b8",textAlign:"right",paddingRight:4}}>{fmtTime(h)}</div>
           ))}
         </div>
         <div ref={colsRef} style={{display:"flex",flex:1,position:"relative"}}
@@ -1658,7 +1678,7 @@ function InlineDayPicker({ date, bookings, onPick, onConfirm, multi=false }) {
           const colTint = FACILITY_TINT[fac.id] || "#fff";
           const isFloodlit = fac.id===FLOODLIT_FIELD_ID;
           // Daytime band (07:00 → cutoff) where the only floodlit field should be a last resort.
-          const daylightH = Math.max(0, (DAY_EVENING_CUTOFF-CAL_START))*SH*2;
+          const daylightH = Math.max(0, (DAY_EVENING_CUTOFF-CAL_START))*INLINE_HOUR_H;
           return (
             <div key={fac.id} style={{flex:1,minWidth:64}}>
               <div title={isFloodlit?`${fac.name} — only floodlit field; avoid daytime use (book only as a last resort)`:fac.name} style={{height:18,display:"flex",alignItems:"center",justifyContent:"center",gap:3,fontSize:9,fontWeight:700,color:fac.color,background:colTint,borderTopLeftRadius:4,borderTopRightRadius:4,borderBottom:`2px solid ${fac.color}`,overflow:"hidden",whiteSpace:"nowrap"}}>
@@ -1666,9 +1686,9 @@ function InlineDayPicker({ date, bookings, onPick, onConfirm, multi=false }) {
                 {fac.name.includes("Field")?fac.name.replace("Field ","Fld "):fac.name.split("–")[0].trim().slice(0,8)}
                 {isFloodlit&&<span title="Only floodlit field — avoid daytime use">💡</span>}
               </div>
-              <div style={{position:"relative",cursor:"crosshair",background:colTint,height:CAL_TOTAL*SH*2,borderLeft:"1px solid #f1f5f9"}}>
+              <div style={{position:"relative",cursor:"crosshair",background:colTint,height:CAL_TOTAL*INLINE_HOUR_H,borderLeft:"1px solid #f1f5f9"}}>
                 {Array.from({length:CAL_TOTAL},(_,i)=>(
-                  <div key={i} style={{height:SH*2,borderBottom:"1px solid rgba(0,0,0,0.05)"}}>
+                  <div key={i} style={{height:INLINE_HOUR_H,borderBottom:"1px solid rgba(0,0,0,0.05)"}}>
                     <div style={{height:"50%",borderBottom:"1px dashed rgba(0,0,0,0.03)"}}/>
                   </div>
                 ))}
@@ -1682,7 +1702,7 @@ function InlineDayPicker({ date, bookings, onPick, onConfirm, multi=false }) {
                 )}
                 {facBkgs.map(b=>(
                   <div key={b.id} title={`${b.name||"booking"} · ${fmtTime(b.start_hour)}`}
-                    style={{position:"absolute",left:1,right:1,top:(b.start_hour-CAL_START)*SH*2,height:Math.max(b.duration*SH*2-1,12),background:fac.color,opacity:0.75,borderRadius:3,pointerEvents:"none",overflow:"hidden",fontSize:8,color:"#fff",padding:"1px 3px"}}>
+                    style={{position:"absolute",left:1,right:1,top:(b.start_hour-CAL_START)*INLINE_HOUR_H,height:Math.max(b.duration*INLINE_HOUR_H-1,12),background:fac.color,opacity:0.75,borderRadius:3,pointerEvents:"none",overflow:"hidden",fontSize:8,color:"#fff",padding:"1px 3px"}}>
                     {b.purpose?b.purpose.slice(0,18):""}
                   </div>
                 ))}
@@ -1690,7 +1710,7 @@ function InlineDayPicker({ date, bookings, onPick, onConfirm, multi=false }) {
                 {picks.map((p,pi)=>({p,pi})).filter(({p})=>p.facility_id===fac.id).map(({p,pi})=>(
                   <div key={"pick"+pi} title="Click to remove this slot"
                     onMouseDown={e=>{e.stopPropagation();e.preventDefault();removePick(pi);}}
-                    style={{position:"absolute",left:1,right:1,top:(p.start_hour-CAL_START)*SH*2,height:Math.max(p.duration*SH*2-1,12),background:"rgba(99,102,241,0.85)",border:"1.5px solid #4338ca",borderRadius:4,cursor:"pointer",zIndex:4,overflow:"hidden",fontSize:8,fontWeight:700,color:"#fff",padding:"1px 3px",display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:2}}>
+                    style={{position:"absolute",left:1,right:1,top:(p.start_hour-CAL_START)*INLINE_HOUR_H,height:Math.max(p.duration*INLINE_HOUR_H-1,12),background:"rgba(99,102,241,0.85)",border:"1.5px solid #4338ca",borderRadius:4,cursor:"pointer",zIndex:4,overflow:"hidden",fontSize:8,fontWeight:700,color:"#fff",padding:"1px 3px",display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:2}}>
                     <span>{fmtTimeShort(p.start_hour)}</span><span>✕</span>
                   </div>
                 ))}
@@ -1756,7 +1776,7 @@ function SlotRow({ slot, idx, onChange, onRemove, canRemove, allBookings }) {
         <div>
           <label style={S.lbl}>Start</label>
           <select style={S.inp} value={slot.start_hour} onChange={e=>upd("start_hour",parseFloat(e.target.value))}>
-            {Array.from({length:CAL_TOTAL*2+1},(_,i)=>CAL_START+i*0.5).filter(h=>h<=CAL_END).map(h=><option key={h} value={h}>{fmtTime(h)}</option>)}
+            {START_TIMES.map(h=><option key={h} value={h}>{fmtTime(h)}</option>)}
           </select>
         </div>
         <div>
@@ -2112,7 +2132,7 @@ function InlineDraftEditor({ draft, onSave, onCancel }) {
         <div>
           <label style={S.lbl}>Start Time</label>
           <select style={{...S.inp,fontSize:12}} value={hour} onChange={e=>setHour(parseFloat(e.target.value))}>
-            {Array.from({length:CAL_TOTAL*2+1},(_,i)=>CAL_START+i*0.5).filter(h=>h<=CAL_END).map(h=><option key={h} value={h}>{fmtTime(h)}</option>)}
+            {START_TIMES.map(h=><option key={h} value={h}>{fmtTime(h)}</option>)}
           </select>
         </div>
         <div>
@@ -2250,7 +2270,7 @@ function MultiEditForm({ bookings: srcBookings, onAddToCart, onClose, allBooking
         <div>
           <label style={S.lbl}>Start Time</label>
           <select style={S.inp} value={newHour} onChange={e=>setNewHour(parseFloat(e.target.value))}>
-            {Array.from({length:CAL_TOTAL*2+1},(_,i)=>CAL_START+i*0.5).filter(h=>h<=CAL_END).map(h=><option key={h} value={h}>{fmtTime(h)}</option>)}
+            {START_TIMES.map(h=><option key={h} value={h}>{fmtTime(h)}</option>)}
           </select>
         </div>
         <div>
@@ -2816,8 +2836,8 @@ function WeekCalendar({ bookings, onNewBooking, onNewBookingRange, onBookingClic
   const visible = (selectedFacility === "all" ? bookings : bookings.filter(b => b.facility_id === selectedFacility))
     .filter(b => !["cancelled","rejected"].includes(b.status));
 
-  function yToSlot(y)      { return Math.max(0, Math.min(Math.floor(y / SLOT_H), CAL_TOTAL * 2 - 1)); }
-  function slotToHour(s)   { return CAL_START + s * 0.5; }
+  function yToSlot(y)      { return Math.max(0, Math.min(Math.floor(y / SLOT_H), CAL_SLOTS - 1)); }
+  function slotToHour(s)   { return CAL_START + s * SLOT_HOURS; }
 
   // Column-aware drag: a vertical drag in one column selects a time band (opens the
   // day popup); a horizontal drag across columns selects a span of days and creates one
@@ -2854,7 +2874,7 @@ function WeekCalendar({ bookings, onNewBooking, onNewBookingRange, onBookingClic
     const loCol = Math.min(ds.startCol, ds.endCol), hiCol = Math.max(ds.startCol, ds.endCol);
     const loSlot = Math.min(ds.startSlot, ds.endSlot), hiSlot = Math.max(ds.startSlot, ds.endSlot);
     const startHour = slotToHour(loSlot);
-    const duration = moved ? (hiSlot - loSlot + 1) * 0.5 : 1;
+    const duration = moved ? (hiSlot - loSlot + 1) * SLOT_HOURS : 1;
     if (loCol === hiCol) {
       const dk = dateKey(days[loCol]);
       if (onOpenDay) onOpenDay(dk, startHour); else onNewBooking(dk, startHour, duration);
@@ -3269,8 +3289,8 @@ function DayTimelinePopup({ date, bookings, onClose, onBookingClick, onNewBookin
   const dObj = typeof date === "string" ? new Date(date+"T00:00:00") : date;
   const dayBkgs = bookings.filter(b=>b.date===dk && !["cancelled","rejected"].includes(b.status));
 
-  const yToSlot   = y => Math.max(0, Math.min(Math.floor(y/SLOT_H), CAL_TOTAL*2-1));
-  const slotToHour= s => CAL_START + s*0.5;
+  const yToSlot   = y => Math.max(0, Math.min(Math.floor(y/SLOT_H), CAL_SLOTS-1));
+  const slotToHour= s => CAL_START + s*SLOT_HOURS;
   const norm = ds => ds ? { ...ds, lo:Math.min(ds.startSlot,ds.endSlot), hi:Math.max(ds.startSlot,ds.endSlot) } : null;
 
   function down(e, facId) {
@@ -3299,7 +3319,7 @@ function DayTimelinePopup({ date, bookings, onClose, onBookingClick, onNewBookin
       justDragged.current = true;
       setPendingSel({ facility:facId, lo:ndUp.lo, hi:ndUp.hi });
     } else if (!wasOnBooking) {
-      setPendingSel({ facility:facId, lo:ndUp.lo, hi:Math.min(ndUp.lo+1, CAL_TOTAL*2-1) });
+      setPendingSel({ facility:facId, lo:ndUp.lo, hi:Math.min(ndUp.lo+SLOTS_PER_HOUR-1, CAL_SLOTS-1) });
     }
   }
 
