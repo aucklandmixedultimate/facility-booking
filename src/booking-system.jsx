@@ -339,6 +339,34 @@ function timeOverlaps(a,b) {
   return a.start_hour<b.start_hour+b.duration && a.start_hour+a.duration>b.start_hour;
 }
 function isAdminBooking(b)  { return b.email === "admin"; }
+// Lay overlapping bookings out in side-by-side lanes so none is hidden behind another —
+// drawing them all full-width means whichever renders last wins and the rest are invisible.
+// Bookings are grouped into clusters of mutually-overlapping runs; within a cluster each
+// takes the first lane free at its start time, and every member of a cluster is drawn at
+// the same width so the column reads as an even grid. Non-overlapping bookings keep the
+// full width. Returns [{ booking, lane, lanes }].
+function layoutOverlapLanes(items) {
+  const sorted = [...items].sort((a,b)=>
+    a.start_hour-b.start_hour || b.duration-a.duration || String(a.id).localeCompare(String(b.id)));
+  const out = [];
+  let cluster = [], laneEnds = [], clusterEnd = -Infinity;
+  const flush = () => {
+    for (const e of cluster) e.lanes = laneEnds.length;
+    out.push(...cluster);
+    cluster = []; laneEnds = []; clusterEnd = -Infinity;
+  };
+  for (const b of sorted) {
+    const end = b.start_hour + b.duration;
+    if (cluster.length && b.start_hour >= clusterEnd) flush(); // gap → start a new cluster
+    let lane = laneEnds.findIndex(e => e <= b.start_hour);     // reuse a lane that has ended
+    if (lane === -1) { lane = laneEnds.length; laneEnds.push(end); }
+    else laneEnds[lane] = end;
+    cluster.push({ booking: b, lane, lanes: 1 });
+    clusterEnd = Math.max(clusterEnd, end);
+  }
+  if (cluster.length) flush();
+  return out;
+}
 
 // ─── Copy any rendered table to the clipboard ────────────────────────────────
 // Serialises a live <table> DOM node to clean HTML + tab-separated text so it
@@ -3413,17 +3441,22 @@ function DayTimelinePopup({ date, bookings, onClose, onBookingClick, onNewBookin
                     </div>
                   )}
                   {/* Booking blocks (only this facility's own, non-admin shown in colour; admin as grey background) */}
-                  {dayBkgs.filter(b=>b.facility_id===fac.id).map(b=>{
+                  {layoutOverlapLanes(dayBkgs.filter(b=>b.facility_id===fac.id)).map(({booking:b, lane, lanes})=>{
                     const ec=emailColor(b.email);
                     const isAdmin_bk=isAdminBooking(b);
                     const isCpsa=b.status==="cpsa_confirmed"||b.status==="cpsa_review_needed";
                     const bg=isAdmin_bk?"#94a3b8":isCpsa?"#78909c":fac.color;
+                    // Overlapping bookings share the column width instead of covering each other.
+                    const wPct = 100/lanes;
+                    const laneStyle = lanes>1
+                      ? { left:`calc(${lane*wPct}% + 2px)`, width:`calc(${wPct}% - 4px)` }
+                      : { left:3, right:3 };
                     return (
                       <div key={b.id}
                         onMouseDown={()=>{ downBooking.current = true; }}
                         onClick={e=>{ e.stopPropagation(); if(justDragged.current){ justDragged.current=false; return; } onBookingClick(b); }}
-                        title={`${b.name} · ${fmtTime(b.start_hour)}`}
-                        style={{position:"absolute",top:(b.start_hour-CAL_START)*HOUR_H,height:Math.max(b.duration*HOUR_H-2,18),left:3,right:3,background:bg,borderRadius:6,padding:"2px 5px",cursor:"pointer",overflow:"hidden",opacity:REVIEW_STATUSES.has(b.status)?0.78:0.95,borderLeft:isAdmin_bk?undefined:`4px solid ${ec}`,zIndex:2,boxShadow:"0 1px 3px rgba(0,0,0,0.15)"}}>
+                        title={`${b.name} · ${fmtTime(b.start_hour)}–${fmtTime(b.start_hour+b.duration)}${lanes>1?` · ${lanes} overlapping bookings`:""}`}
+                        style={{position:"absolute",top:(b.start_hour-CAL_START)*HOUR_H,height:Math.max(b.duration*HOUR_H-2,18),...laneStyle,background:bg,borderRadius:6,padding:"2px 5px",cursor:"pointer",overflow:"hidden",opacity:REVIEW_STATUSES.has(b.status)?0.78:0.95,borderLeft:isAdmin_bk?undefined:`4px solid ${ec}`,zIndex:2,boxShadow:"0 1px 3px rgba(0,0,0,0.15)"}}>
                         <div style={{fontSize:10,fontWeight:700,color:"#fff",lineHeight:1.2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",paddingRight:15}}>{b.purpose||b.name}</div>
                         {b.duration*HOUR_H>30&&<div style={{fontSize:9,color:"rgba(255,255,255,0.85)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{b.name}</div>}
                         {/* Explicit handle: opens details on mousedown, so it works regardless of
@@ -8770,9 +8803,13 @@ function locationFieldIds(ev) {
     }
     return [];
   };
-  const known = firstNaming(["EventLocation","Location","EventVenue","Venue","EventPlace","Place","EventField","Field"]);
+  // "Who" is included because GTEC's calendar puts the field there on some events — the
+  // event popup shows "Who: Field 2" where others show "Location: Field 2". It is only
+  // ever consulted when its value actually names a field, so a Who holding a person's
+  // name is simply skipped.
+  const known = firstNaming(["EventLocation","Location","EventVenue","Venue","EventPlace","Place","EventField","Field","EventWho","Who"]);
   if (known.length) return known;
-  return firstNaming(Object.keys(ev).filter(k => /location|venue|place|field|ground/i.test(k)));
+  return firstNaming(Object.keys(ev).filter(k => /location|venue|place|field|ground|who/i.test(k)));
 }
 // Maps a GTEC event to internal facility ids. The location names the field actually booked,
 // so it wins over the event name — the name often carries only a team or activity label
