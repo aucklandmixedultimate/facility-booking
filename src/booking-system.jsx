@@ -1599,6 +1599,7 @@ function OverlapWarning({title,description,bookings:bkgs,onProceed,onCancel}) {
 function InlineDayPicker({ date, bookings, onPick, onConfirm, multi=false }) {
   const [drag, setDrag] = useState(null); // { startCol,endCol,startSlot,endSlot }
   const [picks, setPicks] = useState([]); // multi mode: staged slots across facilities
+  const [inspect, setInspect] = useState(null); // booking whose details are expanded below
   // Roomier than the old half-hour grid so a quarter-hour slot stays comfortably
   // clickable (12px rather than the 7px a 28px hour would give). The picker sits in a
   // scrollable modal, so the extra height costs nothing but a little scrolling.
@@ -1652,6 +1653,7 @@ function InlineDayPicker({ date, bookings, onPick, onConfirm, multi=false }) {
       <div style={{fontSize:11,color:"#64748b",marginBottom:6,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
         <span style={{fontWeight:700,color:"#0f172a"}}>📅 Pick {multi?"slots":"a slot"}</span>
         <span>{multi?"Drag a slot — drag across columns to pick the same time in several fields. Each becomes a separate booking.":"Click or drag a column to set facility, start time and duration."}</span>
+        <span style={{color:"#475569"}}>· Existing bookings stay click-through so you can book over them — tap <strong>⤢</strong> on one to see its details.</span>
         <span style={{color:"#b45309"}}>· 💡 Field #1 is the only floodlit field — its shaded daytime hours are a last resort; use another field during the day.</span>
       </div>
       <div style={{display:"flex",overflowX:"auto"}}>
@@ -1701,10 +1703,19 @@ function InlineDayPicker({ date, bookings, onPick, onConfirm, multi=false }) {
                   </div>
                 )}
                 {facBkgs.map(b=>(
-                  <div key={b.id} title={`${b.name||"booking"} · ${fmtTime(b.start_hour)}`}
-                    style={{position:"absolute",left:1,right:1,top:(b.start_hour-CAL_START)*INLINE_HOUR_H,height:Math.max(b.duration*INLINE_HOUR_H-1,12),background:fac.color,opacity:0.75,borderRadius:3,pointerEvents:"none",overflow:"hidden",fontSize:8,color:"#fff",padding:"1px 3px"}}>
-                    {b.purpose?b.purpose.slice(0,18):""}
-                  </div>
+                  <Fragment key={b.id}>
+                    <div title={`${b.name||"booking"} · ${fmtTime(b.start_hour)}`}
+                      style={{position:"absolute",left:1,right:1,top:(b.start_hour-CAL_START)*INLINE_HOUR_H,height:Math.max(b.duration*INLINE_HOUR_H-1,12),background:fac.color,opacity:0.75,borderRadius:3,pointerEvents:"none",overflow:"hidden",fontSize:8,color:"#fff",padding:"1px 3px"}}>
+                      {b.purpose?b.purpose.slice(0,18):""}
+                    </div>
+                    {/* The block itself stays click-through so a drag can run straight over it to
+                        book an overlapping slot. This corner handle is the one hit target that
+                        does respond — it expands the booking's details below the grid. Uses
+                        mousedown (not click) so the grid's drag never starts underneath it. */}
+                    <button type="button" title={`Inspect: ${b.purpose||b.name||"booking"} · ${fmtTime(b.start_hour)}–${fmtTime(b.start_hour+b.duration)}`}
+                      onMouseDown={e=>{e.stopPropagation();e.preventDefault();setInspect(prev=>prev?.id===b.id?null:b);}}
+                      style={{position:"absolute",right:1,top:(b.start_hour-CAL_START)*INLINE_HOUR_H+1,width:13,height:13,padding:0,lineHeight:"11px",textAlign:"center",borderRadius:3,cursor:"pointer",zIndex:3,pointerEvents:"auto",fontSize:8,fontFamily:"inherit",fontWeight:700,color:"#fff",background:inspect?.id===b.id?"rgba(15,23,42,0.9)":"rgba(15,23,42,0.45)",border:"1px solid rgba(255,255,255,0.65)"}}>⤢</button>
+                  </Fragment>
                 ))}
                 {/* Staged picks (multi mode) — click a block to remove it */}
                 {picks.map((p,pi)=>({p,pi})).filter(({p})=>p.facility_id===fac.id).map(({p,pi})=>(
@@ -1720,6 +1731,37 @@ function InlineDayPicker({ date, bookings, onPick, onConfirm, multi=false }) {
         })}
         </div>
       </div>
+      {/* Expanded booking details. Rendered in normal flow below the grid rather than as a
+          popover — the grid scrolls horizontally, which would clip an overlay. */}
+      {inspect&&(()=>{
+        const f=FACILITIES.find(x=>x.id===inspect.facility_id);
+        const meta=STATUS_META[inspect.status];
+        const rows=[
+          ["Field", f?.name||inspect.facility_id],
+          ["Time", `${fmtTime(inspect.start_hour)} – ${fmtTime(inspect.start_hour+inspect.duration)}`],
+          ["Duration", fmtDuration(inspect.duration)],
+          ["Purpose", inspect.purpose||"—"],
+          ["Booked by", isAdminBooking(inspect) ? "GTEC (external)" : (inspect.name||"—")],
+          ...(isAdminBooking(inspect) ? [] : [["Email", inspect.email||"—"]]),
+        ];
+        return (
+          <div style={{marginTop:8,border:"1.5px solid #e2e8f0",borderRadius:8,background:"#f8fafc",padding:"8px 10px"}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6,flexWrap:"wrap"}}>
+              <span style={{width:8,height:8,borderRadius:2,background:f?.color||"#94a3b8",display:"inline-block",flexShrink:0}}/>
+              <span style={{fontSize:12,fontWeight:700,color:"#0f172a"}}>{inspect.purpose||inspect.name||"Booking"}</span>
+              {meta&&<span style={{fontSize:10,fontWeight:700,color:meta.text,background:meta.bg,border:`1px solid ${meta.border}`,borderRadius:5,padding:"1px 6px"}}>{meta.label}</span>}
+              <button onClick={()=>setInspect(null)} title="Close details"
+                style={{marginLeft:"auto",border:"1px solid #e2e8f0",background:"#fff",color:"#64748b",cursor:"pointer",fontFamily:"inherit",fontSize:11,fontWeight:700,borderRadius:5,padding:"1px 7px"}}>✕</button>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"auto 1fr",gap:"2px 10px"}}>
+              {rows.map(([k,v])=>(<Fragment key={k}>
+                <span style={{fontSize:10,fontWeight:700,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.04em",whiteSpace:"nowrap"}}>{k}</span>
+                <span style={{fontSize:11,color:"#0f172a",wordBreak:"break-word"}}>{v}</span>
+              </Fragment>))}
+            </div>
+          </div>
+        );
+      })()}
       {multi&&(
         <div style={{marginTop:8,borderTop:"1px solid #f1f5f9",paddingTop:8,display:"flex",flexWrap:"wrap",alignItems:"center",gap:6}}>
           {picks.length===0
@@ -3298,6 +3340,11 @@ function DayTimelinePopup({ date, bookings, onClose, onBookingClick, onNewBookin
     const rect = e.currentTarget.getBoundingClientRect();
     const slot = yToSlot(e.clientY - rect.top);
     dragMoved.current = false;
+    // Start every gesture clean. justDragged suppresses the click that follows a drag's
+    // mouseup, but it was only ever cleared by a booking's own click handler — so a drag
+    // ending on empty grid left it set, and the next click on a booking was swallowed
+    // (bookings appeared unselectable until clicked twice).
+    justDragged.current = false;
     setPendingSel(null);
     setDragState({ facility:facId, startSlot:slot, endSlot:slot });
   }
@@ -3327,7 +3374,7 @@ function DayTimelinePopup({ date, bookings, onClose, onBookingClick, onNewBookin
 
   return (
     <Modal title={`📅 ${dObj.toLocaleDateString("en-NZ",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}`} onClose={onClose} width={760}>
-      <div style={{fontSize:12,color:"#94a3b8",marginBottom:8}}>Click a booking to view it · click or drag an empty area to select a time, then press Create booking.</div>
+      <div style={{fontSize:12,color:"#94a3b8",marginBottom:8}}>Click a booking — or its <strong>⤢</strong> handle — to view it · click or drag an empty area to select a time, then press Create booking.</div>
       <div ref={scrollRef} style={{overflow:"auto",maxHeight:"60vh"}}>
         <div style={{display:"flex",minWidth:560}}>
           {/* Hour labels (sticky on horizontal scroll) */}
@@ -3377,8 +3424,13 @@ function DayTimelinePopup({ date, bookings, onClose, onBookingClick, onNewBookin
                         onClick={e=>{ e.stopPropagation(); if(justDragged.current){ justDragged.current=false; return; } onBookingClick(b); }}
                         title={`${b.name} · ${fmtTime(b.start_hour)}`}
                         style={{position:"absolute",top:(b.start_hour-CAL_START)*HOUR_H,height:Math.max(b.duration*HOUR_H-2,18),left:3,right:3,background:bg,borderRadius:6,padding:"2px 5px",cursor:"pointer",overflow:"hidden",opacity:REVIEW_STATUSES.has(b.status)?0.78:0.95,borderLeft:isAdmin_bk?undefined:`4px solid ${ec}`,zIndex:2,boxShadow:"0 1px 3px rgba(0,0,0,0.15)"}}>
-                        <div style={{fontSize:10,fontWeight:700,color:"#fff",lineHeight:1.2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{b.purpose||b.name}</div>
+                        <div style={{fontSize:10,fontWeight:700,color:"#fff",lineHeight:1.2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",paddingRight:15}}>{b.purpose||b.name}</div>
                         {b.duration*HOUR_H>30&&<div style={{fontSize:9,color:"rgba(255,255,255,0.85)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{b.name}</div>}
+                        {/* Explicit handle: opens details on mousedown, so it works regardless of
+                            the drag-vs-click heuristics the block itself depends on. */}
+                        <button type="button" title="Inspect booking details"
+                          onMouseDown={e=>{e.stopPropagation();e.preventDefault();onBookingClick(b);}}
+                          style={{position:"absolute",top:1,right:1,width:14,height:14,padding:0,lineHeight:"12px",textAlign:"center",borderRadius:3,cursor:"pointer",zIndex:3,fontSize:9,fontFamily:"inherit",fontWeight:700,color:"#fff",background:"rgba(15,23,42,0.45)",border:"1px solid rgba(255,255,255,0.65)"}}>⤢</button>
                       </div>
                     );
                   })}
