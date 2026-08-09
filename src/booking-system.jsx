@@ -4383,6 +4383,7 @@ function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onCreat
   const [showEmailModal, setShowEmailModal] = useState(false);
   const [emailMode, setEmailMode] = useState("official"); // "preview" | "official"
   const [emailSendMode, setEmailSendMode] = useState("grouped"); // "grouped" = one email per booker | "individual" = one per invoice
+  const [emailViewMode, setEmailViewMode] = useState("grouped");  // how the picker lists records — mirrors the Billing list's View
   const [emailSelIds, setEmailSelIds] = useState(new Set()); // record ids staged to send
   const [emailNote, setEmailNote] = useState("");
   const [emailBusy, setEmailBusy] = useState(false);
@@ -4922,12 +4923,12 @@ function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onCreat
         {isAdmin&&onEmailOfficial&&(<>
           <div style={{width:1,height:18,background:"#e2e8f0",flexShrink:0}}/>
           <span style={{color:"#64748b",fontWeight:600,whiteSpace:"nowrap"}}>Email:</span>
-          <button onClick={()=>{ setEmailMode("preview"); setEmailSelIds(new Set()); setEmailNote(""); setShowEmailModal(true); }}
+          <button onClick={()=>{ setEmailMode("preview"); setEmailViewMode(viewMode); setEmailSelIds(new Set()); setEmailNote(""); setShowEmailModal(true); }}
             title="Email unofficial previews. Drafts and issued invoices can both be queued; several for one booker bundle into a single email."
             style={{padding:"3px 10px",borderRadius:6,border:"1px solid #b45309",background:"#b45309",color:"#fff",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"}}>
             ✉ Draft / preview
           </button>
-          <button onClick={()=>{ setEmailMode("official"); setEmailSelIds(new Set()); setEmailNote(""); setShowEmailModal(true); }}
+          <button onClick={()=>{ setEmailMode("official"); setEmailViewMode(viewMode); setEmailSelIds(new Set()); setEmailNote(""); setShowEmailModal(true); }}
             title="Email official payable invoices. Several invoices for one booker bundle into a single email."
             style={{padding:"3px 10px",borderRadius:6,border:"1px solid #0369a1",background:"#0369a1",color:"#fff",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"}}>
             ✉ Official invoices
@@ -4954,7 +4955,10 @@ function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onCreat
           .map(b => ({ ...b, recs: b.invRecs.filter(eligible) }))
           .filter(b => b.recs.length);
         const emailSingles = ungrouped.filter(eligible);
-        const allSendable = [...emailBatches.flatMap(b=>b.recs), ...emailSingles];
+        // One pool either way — View only changes how it is presented, never what can be
+        // picked — so a selection survives flipping between Grouped and Individual.
+        const allSendable = sorted.filter(eligible);
+        const groupedView = emailViewMode === "grouped";
         const selectedRecs = allSendable.filter(r => emailSelIds.has(r.id));
 
         // Bundling unit: one email per booker, or one per invoice.
@@ -5038,6 +5042,16 @@ function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onCreat
               </div>
 
               <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",flexShrink:0}}>
+                <span style={{fontSize:11,fontWeight:700,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.05em"}}>View</span>
+                {[{k:"grouped",l:"Grouped",t:"Batch cards with their invoices nested — as in the Billing list"},
+                  {k:"individual",l:"Individual",t:"Every invoice as its own row — as in the Billing list"}].map(o=>(
+                  <button key={o.k} onClick={()=>setEmailViewMode(o.k)} title={o.t}
+                    style={{padding:"3px 10px",borderRadius:6,border:"1px solid",cursor:"pointer",fontSize:11,fontWeight:600,fontFamily:"inherit",
+                      borderColor:emailViewMode===o.k?"#0f172a":"#e2e8f0",background:emailViewMode===o.k?"#0f172a":"#fff",color:emailViewMode===o.k?"#fff":"#475569"}}>
+                    {o.l}
+                  </button>
+                ))}
+                <div style={{width:1,height:16,background:"#e2e8f0",flexShrink:0}}/>
                 <span style={{fontSize:11,fontWeight:700,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.05em"}}>Send as</span>
                 {[{k:"grouped",l:"Grouped per booker",t:"One email per booker containing all their selected invoices"},
                   {k:"individual",l:"One email per invoice",t:"A separate email for every selected invoice"}].map(o=>(
@@ -5064,35 +5078,62 @@ function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onCreat
                   {/* The one scrolling region — flex:1 with a vh cap so it scrolls even if
                       the flex chain can't resolve a height. */}
                   <div style={{flex:1,minHeight:120,maxHeight:"46vh",overflowY:"auto",display:"flex",flexDirection:"column",gap:8,paddingRight:2}}>
-                    {emailBatches.map(b=>{
-                      const all = b.recs.every(r=>emailSelIds.has(r.id));
-                      const some = !all && b.recs.some(r=>emailSelIds.has(r.id));
-                      return (
-                        <div key={b.batchId} style={{border:"2px solid #e0e7ff",borderRadius:12,overflow:"hidden"}}>
-                          <label style={{display:"flex",alignItems:"center",gap:9,padding:"8px 12px",background:"#f5f3ff",cursor:"pointer"}}>
-                            <input type="checkbox" checked={all} ref={el=>{ if(el) el.indeterminate = some; }}
-                              onChange={()=>toggleMany(b.recs)} style={{accentColor:accent,width:15,height:15}}/>
-                            <span style={{fontWeight:800,fontSize:12,color:"#312e81"}}>{b.orderName||"Batch"}</span>
-                            <span style={{fontSize:11,color:"#6366f1",fontWeight:600}}>{b.recs.length} invoice{b.recs.length!==1?"s":""}</span>
-                            <span style={{fontSize:11,color:"#94a3b8"}}>{b.dateFrom?fmtDate(b.dateFrom):""}{b.dateTo&&b.dateTo!==b.dateFrom?` – ${fmtDate(b.dateTo)}`:""}</span>
-                            <span style={{marginLeft:"auto",fontSize:12,fontWeight:700,color:"#312e81"}}>{fmtMoney(b.recs.reduce((s,r)=>s+(r.total||0),0))}</span>
+                    {groupedView ? (<>
+                      {emailBatches.map(b=>{
+                        const all = b.recs.every(r=>emailSelIds.has(r.id));
+                        const some = !all && b.recs.some(r=>emailSelIds.has(r.id));
+                        return (
+                          <div key={b.batchId} style={{border:"2px solid #e0e7ff",borderRadius:12,overflow:"hidden"}}>
+                            <label style={{display:"flex",alignItems:"center",gap:9,padding:"8px 12px",background:"#f5f3ff",cursor:"pointer"}}>
+                              <input type="checkbox" checked={all} ref={el=>{ if(el) el.indeterminate = some; }}
+                                onChange={()=>toggleMany(b.recs)} style={{accentColor:accent,width:15,height:15}}/>
+                              <span style={{fontWeight:800,fontSize:12,color:"#312e81"}}>{b.orderName||"Batch"}</span>
+                              <span style={{fontSize:11,color:"#6366f1",fontWeight:600}}>{b.recs.length} invoice{b.recs.length!==1?"s":""}</span>
+                              <span style={{fontSize:11,color:"#94a3b8"}}>{b.dateFrom?fmtDate(b.dateFrom):""}{b.dateTo&&b.dateTo!==b.dateFrom?` – ${fmtDate(b.dateTo)}`:""}</span>
+                              <span style={{marginLeft:"auto",fontSize:12,fontWeight:700,color:"#312e81"}}>{fmtMoney(b.recs.reduce((s,r)=>s+(r.total||0),0))}</span>
+                            </label>
+                            {b.recs.map(r=>invoiceRow(r,34))}
+                          </div>
+                        );
+                      })}
+                      {emailSingles.length>0&&(
+                        <div style={{border:"1.5px solid #e2e8f0",borderRadius:12,overflow:"hidden"}}>
+                          <label style={{display:"flex",alignItems:"center",gap:9,padding:"8px 12px",background:"#f8fafc",cursor:"pointer"}}>
+                            <input type="checkbox"
+                              checked={emailSingles.every(r=>emailSelIds.has(r.id))}
+                              ref={el=>{ if(el) el.indeterminate = !emailSingles.every(r=>emailSelIds.has(r.id)) && emailSingles.some(r=>emailSelIds.has(r.id)); }}
+                              onChange={()=>toggleMany(emailSingles)} style={{accentColor:accent,width:15,height:15}}/>
+                            <span style={{fontWeight:800,fontSize:12,color:"#0f172a"}}>Standalone</span>
+                            <span style={{fontSize:11,color:"#64748b"}}>{emailSingles.length} invoice{emailSingles.length!==1?"s":""}</span>
+                            <span style={{marginLeft:"auto",fontSize:12,fontWeight:700,color:"#0f172a"}}>{fmtMoney(emailSingles.reduce((s,r)=>s+(r.total||0),0))}</span>
                           </label>
-                          {b.recs.map(r=>invoiceRow(r,34))}
+                          {emailSingles.map(r=>invoiceRow(r,34))}
                         </div>
-                      );
-                    })}
-                    {emailSingles.length>0&&(
+                      )}
+                    </>) : (
+                      /* Individual: every record its own row, no batch cards — the flat
+                         Billing list, with the batch shown per row instead. */
                       <div style={{border:"1.5px solid #e2e8f0",borderRadius:12,overflow:"hidden"}}>
                         <label style={{display:"flex",alignItems:"center",gap:9,padding:"8px 12px",background:"#f8fafc",cursor:"pointer"}}>
                           <input type="checkbox"
-                            checked={emailSingles.every(r=>emailSelIds.has(r.id))}
-                            ref={el=>{ if(el) el.indeterminate = !emailSingles.every(r=>emailSelIds.has(r.id)) && emailSingles.some(r=>emailSelIds.has(r.id)); }}
-                            onChange={()=>toggleMany(emailSingles)} style={{accentColor:accent,width:15,height:15}}/>
-                          <span style={{fontWeight:800,fontSize:12,color:"#0f172a"}}>Standalone</span>
-                          <span style={{fontSize:11,color:"#64748b"}}>{emailSingles.length} invoice{emailSingles.length!==1?"s":""}</span>
-                          <span style={{marginLeft:"auto",fontSize:12,fontWeight:700,color:"#0f172a"}}>{fmtMoney(emailSingles.reduce((s,r)=>s+(r.total||0),0))}</span>
+                            checked={allSendable.every(r=>emailSelIds.has(r.id))}
+                            ref={el=>{ if(el) el.indeterminate = !allSendable.every(r=>emailSelIds.has(r.id)) && allSendable.some(r=>emailSelIds.has(r.id)); }}
+                            onChange={()=>toggleMany(allSendable)} style={{accentColor:accent,width:15,height:15}}/>
+                          <span style={{fontWeight:800,fontSize:12,color:"#0f172a"}}>All invoices</span>
+                          <span style={{fontSize:11,color:"#64748b"}}>{allSendable.length}</span>
+                          <span style={{marginLeft:"auto",fontSize:12,fontWeight:700,color:"#0f172a"}}>{fmtMoney(allSendable.reduce((s,r)=>s+(r.total||0),0))}</span>
                         </label>
-                        {emailSingles.map(r=>invoiceRow(r,34))}
+                        {allSendable.map(r=>(
+                          <label key={r.id} style={{display:"flex",alignItems:"center",gap:8,padding:"5px 12px",borderTop:"1px solid #f1f5f9",cursor:"pointer",fontSize:12}}>
+                            <input type="checkbox" checked={emailSelIds.has(r.id)} onChange={()=>toggle(r.id)} style={{accentColor:accent}}/>
+                            <span style={{fontFamily:"monospace",color:"#0f172a"}}>{r.id}</span>
+                            <span style={{color:"#475569",fontWeight:600}}>{displayName(r.bookerEmail)}</span>
+                            {r.orderName&&<span style={{color:"#6366f1",fontSize:11}}>{r.orderName}</span>}
+                            <span style={{color:"#94a3b8"}}>{r.dateFrom?fmtDate(r.dateFrom):""}{r.dateTo&&r.dateTo!==r.dateFrom?` – ${fmtDate(r.dateTo)}`:""}</span>
+                            <StatusPill status={r.status}/>
+                            <span style={{marginLeft:"auto",fontWeight:700,color:"#0f172a"}}>{fmtMoney(r.total)}</span>
+                          </label>
+                        ))}
                       </div>
                     )}
                   </div>
