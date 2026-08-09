@@ -1881,7 +1881,8 @@ function CartModal({ cart, setCart, onClose, onSubmit, openNew, silentMode=false
   const totalNew    = cart.filter(i=>!i.isEdit&&!i.isMultiEdit&&!i.notifyOnly&&!i.statusChange).reduce((s,i)=>s+i.drafts.length,0);
   const totalEdits  = cart.filter(i=>i.isEdit||i.isMultiEdit).reduce((s,i)=>s+i.drafts.length,0);
   const totalStatus = cart.filter(i=>i.statusChange).reduce((s,i)=>s+(i.ids?.length||i.drafts?.length||0),0);
-  const totalNotify = cart.filter(i=>i.notifyOnly&&!i.informCpsa&&!i.clashNotify).reduce((s,i)=>s+(i.drafts?.length||0),0);
+  const totalNotify = cart.filter(i=>i.notifyOnly&&!i.informCpsa&&!i.clashNotify&&!i.invoiceEmail).reduce((s,i)=>s+(i.drafts?.length||0),0);
+  const totalInvoice = cart.filter(i=>i.invoiceEmail).reduce((s,i)=>s+(i.count||1),0);
   const totalClash  = cart.filter(i=>i.clashNotify).length;
   const totalInform = cart.filter(i=>i.informCpsa).reduce((s,i)=>s+(i.drafts?.length||0),0);
   // Group CPSA status notify-only items by booker email so the cart doesn't explode
@@ -1889,7 +1890,7 @@ function CartModal({ cart, setCart, onClose, onSubmit, openNew, silentMode=false
   // separately below (clash/inform have no drafts to group).
   const notifyByEmail = {};
   cart.forEach((item, gi) => {
-    if (!item.notifyOnly || item.informCpsa || item.clashNotify) return;
+    if (!item.notifyOnly || item.informCpsa || item.clashNotify || item.invoiceEmail) return;
     const key = item.email;
     if (!notifyByEmail[key]) notifyByEmail[key] = { name: item.name, email: item.email, newStatus: item.newStatus, entries: [] };
     item.drafts.forEach((d, di) => notifyByEmail[key].entries.push({ d, gi, di }));
@@ -1958,7 +1959,7 @@ function CartModal({ cart, setCart, onClose, onSubmit, openNew, silentMode=false
         : (
           <>
             <div style={{fontSize:13,color:'#64748b',marginBottom:12}}>
-              {[totalNew>0&&`${totalNew} new booking${totalNew>1?'s':''}`, totalEdits>0&&`${totalEdits} edit${totalEdits>1?'s':''}`, totalStatus>0&&`${totalStatus} status change${totalStatus>1?'s':''}`, totalClash>0&&`${totalClash} clash alert${totalClash>1?'s':''}`, totalNotify>0&&`${totalNotify} GTEC notification${totalNotify>1?'s':''}`, totalInform>0&&`${totalInform} Inform-GTEC email${totalInform>1?'s':''}`].filter(Boolean).join(' · ')} ready to submit.
+              {[totalNew>0&&`${totalNew} new booking${totalNew>1?'s':''}`, totalEdits>0&&`${totalEdits} edit${totalEdits>1?'s':''}`, totalStatus>0&&`${totalStatus} status change${totalStatus>1?'s':''}`, totalClash>0&&`${totalClash} clash alert${totalClash>1?'s':''}`, totalNotify>0&&`${totalNotify} GTEC notification${totalNotify>1?'s':''}`, totalInform>0&&`${totalInform} Inform-GTEC email${totalInform>1?'s':''}`, totalInvoice>0&&`${totalInvoice} invoice email${totalInvoice>1?'s':''}`].filter(Boolean).join(' · ')} ready to submit.
             </div>
             <div style={{flex:1,minHeight:0,overflowY:'auto',display:'flex',flexDirection:'column',gap:10,paddingRight:2}}>
               {/* Regular (non-notify) cart items */}
@@ -2082,6 +2083,28 @@ function CartModal({ cart, setCart, onClose, onSubmit, openNew, silentMode=false
                 );
               })}
 
+              {/* Queued invoice emails — the document is already rendered; this is the
+                  outbox row for it. */}
+              {cart.map((item,gi)=>{
+                if(!item.invoiceEmail) return null;
+                return (
+                  <div key={'inv-'+gi} style={{border:`1.5px solid ${item.preview?'#fde68a':'#7dd3fc'}`,borderRadius:12,overflow:'hidden'}}>
+                    <div style={{background:item.preview?'#fffbeb':'#f0f9ff',padding:'10px 14px',display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
+                      <EmailChip email={item.email}/>
+                      <span style={{fontSize:13,fontWeight:600,color:'#0f172a',flex:1}}>{item.name}</span>
+                      <span style={{fontSize:11,fontWeight:700,color:item.preview?'#92400e':'#0369a1',background:item.preview?'#fef3c7':'#e0f2fe',border:`1px solid ${item.preview?'#fcd34d':'#7dd3fc'}`,borderRadius:4,padding:'1px 7px'}}>
+                        {item.preview?'📄 Invoice preview':'🧾 Official invoice'}
+                      </span>
+                      <button onClick={()=>removeItem(gi)} title="Remove" style={{background:'none',border:'none',cursor:'pointer',color:'#f43f5e',fontSize:15,padding:'2px 4px',lineHeight:1}}>✕</button>
+                    </div>
+                    <div style={{padding:'8px 14px',fontSize:12,color:'#64748b',background:'#fff',display:'flex',gap:10,flexWrap:'wrap'}}>
+                      <span>{item.count||1} document{(item.count||1)!==1?'s':''}</span>
+                      <span style={{fontFamily:'monospace',color:'#475569'}}>{(item.refs||[]).join(', ')}</span>
+                      <span style={{marginLeft:'auto',fontWeight:700,color:'#0f172a'}}>{fmtCost(item.total||0)}</span>
+                    </div>
+                  </div>
+                );
+              })}
               {/* Inform-CPSA vendor alerts — one card per selected vendor */}
               {cart.map((item,gi)=>{
                 if(!item.informCpsa) return null;
@@ -4371,7 +4394,7 @@ function driveBatchFolderName(records) {
 }
 const DRIVE_SUBFOLDERS = { po:"PO (to GTEC)", fromGtec:"Invoice (from GTEC)", toClubs:"Invoice (to Clubs)" };
 
-function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onCreateReceipt, onLoadToSummary, isAdmin=false, loggedInEmail="", emailAliases={}, aliasNames={}, driveEnabled=false, onDriveSync, onDriveAttach, onEmailOfficial }) {
+function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onCreateReceipt, onLoadToSummary, isAdmin=false, loggedInEmail="", emailAliases={}, aliasNames={}, driveEnabled=false, onDriveSync, onDriveAttach, onEmailOfficial, onQueueInvoiceEmails, silentMode=false, onToggleSilent }) {
   const [filterStatus, setFilterStatus] = useState("all");
   const [expandedId, setExpandedId] = useState(null);
   const [expandedBatchId, setExpandedBatchId] = useState(null);
@@ -4992,10 +5015,8 @@ function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onCreat
           </label>
         );
 
-        async function send() {
-          setEmailBusy(true);
-          try {
-            const items = outgoing.map(recs => {
+        function buildItems() {
+          return outgoing.map(recs => {
               const n = recs.length;
               const name = displayName(recs[0].bookerEmail);
               return {
@@ -5012,10 +5033,18 @@ function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onCreat
                     lines: emailExportMode==="individual" ? (r.individualLines||r.lines||[]) : (r.lines||[]) })),
                 }),
               };
-            });
-            const ok = await onEmailOfficial(items, { preview });
+          });
+        }
+        async function send() {
+          setEmailBusy(true);
+          try {
+            const ok = await onEmailOfficial(buildItems(), { preview });
             if (ok !== false) { setShowEmailModal(false); setEmailSelIds(new Set()); }
           } finally { setEmailBusy(false); }
+        }
+        function queue() {
+          const ok = onQueueInvoiceEmails(buildItems(), { preview });
+          if (ok !== false) { setShowEmailModal(false); setEmailSelIds(new Set()); }
         }
 
         return (
@@ -5117,6 +5146,22 @@ function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onCreat
                   placeholder={preview?"e.g. Please check these before we issue them.":"e.g. Payment due by the 20th. Please use the bank reference on each invoice."}
                   style={{...S.inp,resize:"vertical",fontFamily:"inherit"}}/>
               </div>
+              {/* Silent mode blocks every send, so surface it here rather than letting the
+                  send fail with a toast telling you to go and find another menu. */}
+              {onToggleSilent&&(
+                <div style={{display:"flex",alignItems:"center",gap:10,padding:"9px 12px",borderRadius:10,flexShrink:0,
+                  background:silentMode?"#fffbeb":"#ecfdf5",border:`1.5px solid ${silentMode?"#fde68a":"#6ee7b7"}`}}>
+                  <span style={{fontSize:18}}>{silentMode?"🔇":"🔔"}</span>
+                  <div style={{flex:1,fontSize:12,color:silentMode?"#92400e":"#047857"}}>
+                    <div style={{fontWeight:700}}>{silentMode?"Silent mode ON — nothing will send":"Emails will be sent"}</div>
+                    <div>{silentMode?"All outgoing email is suppressed. Disable it to send from here.":`${preview?"Previews":"Invoices"} go out to the bookers listed below.`}</div>
+                  </div>
+                  <button onClick={()=>onToggleSilent(!silentMode)}
+                    style={S.btn({background:silentMode?"#f59e0b":"#10b981",color:"#fff",fontSize:12,fontWeight:700,whiteSpace:"nowrap"})}>
+                    {silentMode?"Disable silent mode":"Mute emails"}
+                  </button>
+                </div>
+              )}
               <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",borderTop:"1px solid #f1f5f9",paddingTop:10,flexShrink:0}}>
                 <span style={{fontSize:12,color:selectedRecs.length?"#0f172a":"#94a3b8",fontWeight:selectedRecs.length?700:400}}>
                   {selectedRecs.length
@@ -5125,10 +5170,28 @@ function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onCreat
                 </span>
                 <div style={{marginLeft:"auto",display:"flex",gap:8}}>
                   <button onClick={()=>setShowEmailModal(false)} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#475569",fontSize:12})}>Cancel</button>
-                  <button disabled={!selectedRecs.length||emailBusy} onClick={send}
-                    style={S.btn({background:selectedRecs.length&&!emailBusy?accent:"#cbd5e1",color:"#fff",fontWeight:700,fontSize:12,cursor:selectedRecs.length&&!emailBusy?"pointer":"not-allowed"})}>
-                    {emailBusy?"Sending…":`✉ Send ${outgoing.length||""} ${preview?"preview":"invoice"} email${outgoing.length!==1?"s":""}`}
-                  </button>
+                  {/* Queueing stages the email for the cart, so it can sit alongside the
+                      rest of a submission and go out with everything else. Silent mode
+                      doesn't block it — nothing sends until the cart is submitted. */}
+                  {onQueueInvoiceEmails&&(
+                    <button disabled={!selectedRecs.length||emailBusy} onClick={queue}
+                      title="Stage these emails in the cart to review and send with everything else"
+                      style={S.btn({border:`1.5px solid ${selectedRecs.length?accent:"#e2e8f0"}`,background:"#fff",
+                        color:selectedRecs.length?accent:"#cbd5e1",fontWeight:700,fontSize:12,
+                        cursor:selectedRecs.length&&!emailBusy?"pointer":"not-allowed"})}>
+                      🛒 Add {outgoing.length||""} to cart
+                    </button>
+                  )}
+                  {(()=>{
+                    const blocked = silentMode || !selectedRecs.length || emailBusy;
+                    return (
+                      <button disabled={blocked} onClick={send}
+                        title={silentMode?"Silent mode is on — disable it above, or add to cart instead":undefined}
+                        style={S.btn({background:blocked?"#cbd5e1":accent,color:"#fff",fontWeight:700,fontSize:12,cursor:blocked?"not-allowed":"pointer"})}>
+                        {emailBusy?"Sending…":silentMode?"🔇 Silent mode on":`✉ Send ${outgoing.length||""} now`}
+                      </button>
+                    );
+                  })()}
                 </div>
               </div>
             </div>
@@ -10084,6 +10147,20 @@ export default function App() {
     return true;
   }
 
+  // Queue invoice emails into the cart instead of sending now — same philosophy as
+  // bookings, removals and notifications: stage it, review it in the cart, submit once.
+  function handleQueueInvoiceEmails(items, { preview = false } = {}) {
+    if (!items?.length) return false;
+    setCart(c => [...c, ...items.map(it => ({
+      notifyOnly: true, invoiceEmail: true, preview,
+      email: it.to, name: it.name, subject: it.subject, html: it.html,
+      count: it.count, refs: it.refs, total: it.total,
+    }))]);
+    const docs = items.reduce((s, i) => s + (i.count || 1), 0);
+    showToast(`🛒 ${docs} ${preview?"preview":"invoice"}${docs!==1?"s":""} added to cart in ${items.length} email${items.length!==1?"s":""}.`);
+    return true;
+  }
+
   function updateFacilityRate(facilityId, type, value) {
     const existing = typeof facilityRates[facilityId] === "object" ? facilityRates[facilityId] : { day: 0, evening: 0 };
     const newRates = { ...facilityRates, [facilityId]: { ...existing, [type]: parseFloat(value) || 0 } };
@@ -10672,6 +10749,17 @@ export default function App() {
       }
       // Notify-only emails: clash alerts, CPSA status notices, mismatch, inform-CPSA.
       for (const item of notifyItems) {
+        // Invoice emails arrive with their document already rendered, so there is no
+        // template to pick — just send what was queued.
+        if (item.invoiceEmail) {
+          await sendEmail({ to: item.email, subject: item.subject, html: item.html,
+            kind: item.preview ? "invoice_preview" : "invoice" });
+          logActivity(item.preview ? "invoice_preview_emailed" : "official_invoice_emailed", {
+            emails: 1, documents: item.count || 1, count: item.count || 1,
+            recipients: [item.email], refs: item.refs || [], total: item.total || 0,
+          });
+          continue;
+        }
         if (item.clashNotify) {
           sendApprovalEmail({to:item.email, subject:"⚠️ Scheduling Clash – Action Required",
             html:buildClashEmailHtml({name:item.name, email:item.email, clashes:item.clashes||[]})});
@@ -11144,7 +11232,7 @@ export default function App() {
         )}
 
         {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<SummaryTab bookings={bookings} loggedInEmail={loggedInEmail} facilityRates={facilityRates} pricingConditions={pricingConditions} onAddPricingCondition={addPricingCondition} onUpdatePricingCondition={updatePricingCondition} onRemovePricingCondition={removePricingCondition} isAdmin={isAdmin} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onUpdateFacilityRate={updateFacilityRate} pricingMode={pricingMode} onSetPricingMode={setPricingMode} onProposeMerge={handleProposeMerge} onBulkApply={handleBulkApply} onMarkInvoiced={handleMarkInvoiced} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} bookerFilter={listBookerFilter} profiles={profiles} emailAliases={emailAliases} aliasNames={aliasNames} onCreateOfficialInvoice={handleCreateOfficialInvoice} onEmailInvoice={handleEmailInvoicePreview} onFilterChange={s=>setListBookerFilter(s)} loadRequest={summaryLoadRequest}/>}</div>}
-        {tab==="billing"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<BillingTab billingRecords={billingRecords} onUpdateRecord={handleUpdateBillingRecord} onDeleteRecord={id=>setBillingRecords(prev=>prev.filter(r=>r.id!==id))} onCreateReceipt={handleCreateReceipt} onLoadToSummary={handleLoadBillingToSummary} isAdmin={isAdmin} loggedInEmail={loggedInEmail} emailAliases={emailAliases} aliasNames={aliasNames} profiles={profiles} driveEnabled={driveConfigured()} onDriveSync={handleDriveSync} onDriveAttach={handleDriveAttachGtec} onEmailOfficial={handleEmailOfficialInvoices}/>}</div>}
+        {tab==="billing"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<BillingTab billingRecords={billingRecords} onUpdateRecord={handleUpdateBillingRecord} onDeleteRecord={id=>setBillingRecords(prev=>prev.filter(r=>r.id!==id))} onCreateReceipt={handleCreateReceipt} onLoadToSummary={handleLoadBillingToSummary} isAdmin={isAdmin} loggedInEmail={loggedInEmail} emailAliases={emailAliases} aliasNames={aliasNames} profiles={profiles} driveEnabled={driveConfigured()} onDriveSync={handleDriveSync} onDriveAttach={handleDriveAttachGtec} onEmailOfficial={handleEmailOfficialInvoices} onQueueInvoiceEmails={handleQueueInvoiceEmails} silentMode={silentMode} onToggleSilent={isAdmin?setSilentMode:undefined}/>}</div>}
         {tab==="about"&&<div style={{padding:"8px 0"}}><AboutTab/></div>}
         {tab==="admin"&&isAdmin&&<div style={S.card}>
           {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onView={setViewing} onQueueDelete={queueForRemovalSilent} clashes={allClashes} deleteIds={new Set(deleteQueue.map(b=>b.id))} facilityRates={facilityRates} onUpdateFacilityRate={updateFacilityRate} onClearOldUnapproved={handleClearOldUnapproved} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onSyncDB={handleSyncDB} onBulkApply={handleBulkApply} onSaveMismatch={handleSaveMismatch} onInformCpsa={setInformCpsaFor} onQueueNotifications={queueNotifications} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} onLinkClash={handleLinkClashToGtec} loggedInEmail={loggedInEmail} syncResults={syncResults} onClearSyncResults={()=>setSyncResults([])} showSyncResults={showSyncPanel} onToggleSyncResults={()=>setShowSyncPanel(v=>!v)} bookerFilter={listBookerFilter} onToggleBooker={toggleBooker} onSetBookerFilter={setListBookerFilter} aliasNames={aliasNames} emailAliases={emailAliases} pricingConditions={pricingConditions} onAddPricingCondition={addPricingCondition} onUpdatePricingCondition={updatePricingCondition} onRemovePricingCondition={removePricingCondition} cpsaDeleteLog={cpsaDeleteLog} onClearDeleteLogEntry={id=>setCpsaDeleteLog(prev=>prev.filter(e=>e.id!==id))} onClearDeleteLog={()=>setCpsaDeleteLog([])}/>}
