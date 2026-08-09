@@ -4383,6 +4383,7 @@ function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onCreat
   const [showEmailModal, setShowEmailModal] = useState(false);
   const [emailMode, setEmailMode] = useState("official"); // "preview" | "official"
   const [emailSendMode, setEmailSendMode] = useState("grouped"); // "grouped" = one email per booker | "individual" = one per invoice
+  const [emailExportMode, setEmailExportMode] = useState("grouped"); // "grouped" = summary lines | "individual" = itemised — mirrors the Billing list's Export
   const [emailSelIds, setEmailSelIds] = useState(new Set()); // record ids staged to send
   const [emailNote, setEmailNote] = useState("");
   const [emailBusy, setEmailBusy] = useState(false);
@@ -4922,12 +4923,12 @@ function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onCreat
         {isAdmin&&onEmailOfficial&&(<>
           <div style={{width:1,height:18,background:"#e2e8f0",flexShrink:0}}/>
           <span style={{color:"#64748b",fontWeight:600,whiteSpace:"nowrap"}}>Email:</span>
-          <button onClick={()=>{ setEmailMode("preview"); setEmailSelIds(new Set()); setEmailNote(""); setShowEmailModal(true); }}
+          <button onClick={()=>{ setEmailMode("preview"); setEmailExportMode(exportMode); setEmailSelIds(new Set()); setEmailNote(""); setShowEmailModal(true); }}
             title="Email unofficial previews. Drafts and issued invoices can both be queued; several for one booker bundle into a single email."
             style={{padding:"3px 10px",borderRadius:6,border:"1px solid #b45309",background:"#b45309",color:"#fff",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"}}>
             ✉ Draft / preview
           </button>
-          <button onClick={()=>{ setEmailMode("official"); setEmailSelIds(new Set()); setEmailNote(""); setShowEmailModal(true); }}
+          <button onClick={()=>{ setEmailMode("official"); setEmailExportMode(exportMode); setEmailSelIds(new Set()); setEmailNote(""); setShowEmailModal(true); }}
             title="Email official payable invoices. Several invoices for one booker bundle into a single email."
             style={{padding:"3px 10px",borderRadius:6,border:"1px solid #0369a1",background:"#0369a1",color:"#fff",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"}}>
             ✉ Official invoices
@@ -4954,7 +4955,9 @@ function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onCreat
           .map(b => ({ ...b, recs: b.invRecs.filter(eligible) }))
           .filter(b => b.recs.length);
         const emailSingles = ungrouped.filter(eligible);
-        const allSendable = [...emailBatches.flatMap(b=>b.recs), ...emailSingles];
+        // One pool either way — View only changes how it is presented, never what can be
+        // picked — so a selection survives flipping between Grouped and Individual.
+        const allSendable = sorted.filter(eligible);
         const selectedRecs = allSendable.filter(r => emailSelIds.has(r.id));
 
         // Bundling unit: one email per booker, or one per invoice.
@@ -5006,7 +5009,7 @@ function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onCreat
                   recipientName: name, recipientEmail: recs[0].bookerEmail,
                   note: emailNote.trim(), preview,
                   docs: recs.map(r => ({ rec:r, docType:"invoice",
-                    lines: exportMode==="individual" ? (r.individualLines||r.lines||[]) : (r.lines||[]) })),
+                    lines: emailExportMode==="individual" ? (r.individualLines||r.lines||[]) : (r.lines||[]) })),
                 }),
               };
             });
@@ -5034,10 +5037,20 @@ function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onCreat
                 {preview
                   ? <>Copies marked <strong>unofficial — not a tax invoice</strong>, nothing payable. Drafts <em>and</em> issued invoices can be queued.</>
                   : <>Real <strong>payable invoices</strong>. Drafts are hidden here — switch to Preview to send one for review.</>}
-                {" "}Same grouping and status filter as the list behind. Documents sent as <strong>{exportMode==="individual"?"itemised":"summary"}</strong> (Export toggle).
+                {" "}Same grouping and status filter as the list behind.
               </div>
 
               <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",flexShrink:0}}>
+                <span style={{fontSize:11,fontWeight:700,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.05em"}}>Export</span>
+                {[{k:"grouped",l:"Summary",t:"One line per booking pattern — as in the Billing list"},
+                  {k:"individual",l:"Itemised",t:"One line per individual booking — as in the Billing list"}].map(o=>(
+                  <button key={o.k} onClick={()=>setEmailExportMode(o.k)} title={o.t}
+                    style={{padding:"3px 10px",borderRadius:6,border:"1px solid",cursor:"pointer",fontSize:11,fontWeight:600,fontFamily:"inherit",
+                      borderColor:emailExportMode===o.k?"#4338ca":"#e2e8f0",background:emailExportMode===o.k?"#4338ca":"#fff",color:emailExportMode===o.k?"#fff":"#475569"}}>
+                    {o.l}
+                  </button>
+                ))}
+                <div style={{width:1,height:16,background:"#e2e8f0",flexShrink:0}}/>
                 <span style={{fontSize:11,fontWeight:700,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.05em"}}>Send as</span>
                 {[{k:"grouped",l:"Grouped per booker",t:"One email per booker containing all their selected invoices"},
                   {k:"individual",l:"One email per invoice",t:"A separate email for every selected invoice"}].map(o=>(
