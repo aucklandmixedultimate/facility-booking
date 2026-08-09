@@ -4382,6 +4382,7 @@ function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onCreat
   const [driveBusy, setDriveBusy] = useState(false);
   const [showEmailModal, setShowEmailModal] = useState(false);
   const [emailMode, setEmailMode] = useState("official"); // "preview" | "official"
+  const [emailSendMode, setEmailSendMode] = useState("grouped"); // "grouped" = one email per booker | "individual" = one per invoice
   const [emailSelIds, setEmailSelIds] = useState(new Set()); // record ids staged to send
   const [emailNote, setEmailNote] = useState("");
   const [emailBusy, setEmailBusy] = useState(false);
@@ -4936,34 +4937,30 @@ function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onCreat
 
       {showEmailModal&&isAdmin&&onEmailOfficial&&(()=>{
         const preview = emailMode === "preview";
+        const perInvoice = emailSendMode === "individual";
         // Previews may cover anything, including drafts — the point is "does this look
-        // right before I issue it". Official sends are restricted to issued invoices:
-        // a draft has no reference a booker could pay against. Purchase orders are
-        // excluded either way, since they go to GTEC rather than to a booker.
-        const sendable = visibleRecords.filter(r =>
-          r.type !== "purchase_order" && r.bookerEmail &&
+        // right before I issue it". Official sends are restricted to issued invoices: a
+        // draft has no reference a booker could pay against. Purchase orders are excluded
+        // either way, since they go to GTEC rather than to a booker.
+        const eligible = r => r.type !== "purchase_order" && r.bookerEmail &&
           r.bookerEmail !== "combined" && r.bookerEmail !== "gtec" &&
-          (preview || (r.status||"draft") !== "draft"));
+          (preview || (r.status||"draft") !== "draft");
         const isDraft = r => (r.status||"draft") === "draft";
 
-        // Booker → set → invoice. The booker is the email unit (one bundle each); the set
-        // is the batch the invoices were issued in, so a whole run can be picked at once.
-        const groups = {};
-        for (const r of sendable) {
-          const k = canonEmail(r.bookerEmail);
-          const g = (groups[k] ||= { email:k, name:displayName(r.bookerEmail), recs:[], sets:{} });
-          g.recs.push(r);
-          const sk = r.batchId || `single:${r.id}`;
-          (g.sets[sk] ||= { key:sk, label:r.orderName || (r.batchId?"Batch":"Standalone"), recs:[] }).recs.push(r);
-        }
-        const groupList = Object.values(groups)
-          .map(g => ({ ...g, setList: Object.values(g.sets) }))
-          .sort((a,b)=>a.name.localeCompare(b.name));
+        // Organised exactly like the Billing list behind it: batch cards first, then
+        // standalone records, honouring the same status filter — so what you see here
+        // lines up with what you were just looking at.
+        const emailBatches = batches
+          .map(b => ({ ...b, recs: b.invRecs.filter(eligible) }))
+          .filter(b => b.recs.length);
+        const emailSingles = ungrouped.filter(eligible);
+        const allSendable = [...emailBatches.flatMap(b=>b.recs), ...emailSingles];
+        const selectedRecs = allSendable.filter(r => emailSelIds.has(r.id));
 
-        const chosen = groupList
-          .map(g => ({ ...g, recs: g.recs.filter(r => emailSelIds.has(r.id)) }))
-          .filter(g => g.recs.length);
-        const totalChosen = chosen.reduce((s,g)=>s+g.recs.length,0);
+        // Bundling unit: one email per booker, or one per invoice.
+        const byBooker = {};
+        for (const r of selectedRecs) (byBooker[canonEmail(r.bookerEmail)] ||= []).push(r);
+        const outgoing = perInvoice ? selectedRecs.map(r=>[r]) : Object.values(byBooker);
 
         const setIds = ids => setEmailSelIds(new Set(ids));
         const toggle = id => setEmailSelIds(prev => { const n=new Set(prev); n.has(id)?n.delete(id):n.add(id); return n; });
@@ -4979,23 +4976,36 @@ function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onCreat
             {label} ({recs.length})
           </button>
         );
+        const accent = preview ? "#b45309" : "#0369a1";
+
+        const invoiceRow = (r, indent) => (
+          <label key={r.id} style={{display:"flex",alignItems:"center",gap:8,padding:`5px 12px 5px ${indent}px`,borderTop:"1px solid #f1f5f9",cursor:"pointer",fontSize:12}}>
+            <input type="checkbox" checked={emailSelIds.has(r.id)} onChange={()=>toggle(r.id)} style={{accentColor:accent}}/>
+            <span style={{fontFamily:"monospace",color:"#0f172a"}}>{r.id}</span>
+            <span style={{color:"#475569",fontWeight:600}}>{displayName(r.bookerEmail)}</span>
+            <span style={{color:"#94a3b8"}}>{r.dateFrom?fmtDate(r.dateFrom):""}{r.dateTo&&r.dateTo!==r.dateFrom?` – ${fmtDate(r.dateTo)}`:""}</span>
+            <StatusPill status={r.status}/>
+            <span style={{marginLeft:"auto",fontWeight:700,color:"#0f172a"}}>{fmtMoney(r.total)}</span>
+          </label>
+        );
 
         async function send() {
           setEmailBusy(true);
           try {
-            const items = chosen.map(g => {
-              const n = g.recs.length;
+            const items = outgoing.map(recs => {
+              const n = recs.length;
+              const name = displayName(recs[0].bookerEmail);
               return {
-                to: g.recs[0].bookerEmail, name: g.name, count: n,
-                total: g.recs.reduce((s,r)=>s+(r.total||0),0),
-                refs: g.recs.map(r=>r.id),
+                to: recs[0].bookerEmail, name, count: n,
+                total: recs.reduce((s,r)=>s+(r.total||0),0),
+                refs: recs.map(r=>r.id),
                 subject: preview
-                  ? `Draft invoice${n!==1?"s":""} for review — ${AMUA_INFO.name}`
-                  : (n===1 ? `Invoice ${g.recs[0].id} from ${AMUA_INFO.name}` : `${n} invoices from ${AMUA_INFO.name}`),
+                  ? (n===1 ? `Draft invoice ${recs[0].id} for review — ${AMUA_INFO.name}` : `Draft invoices for review — ${AMUA_INFO.name}`)
+                  : (n===1 ? `Invoice ${recs[0].id} from ${AMUA_INFO.name}` : `${n} invoices from ${AMUA_INFO.name}`),
                 html: buildInvoiceBundleHtml({
-                  recipientName: g.name, recipientEmail: g.recs[0].bookerEmail,
+                  recipientName: name, recipientEmail: recs[0].bookerEmail,
                   note: emailNote.trim(), preview,
-                  docs: g.recs.map(r => ({ rec:r, docType:"invoice",
+                  docs: recs.map(r => ({ rec:r, docType:"invoice",
                     lines: exportMode==="individual" ? (r.individualLines||r.lines||[]) : (r.lines||[]) })),
                 }),
               };
@@ -5005,12 +5015,12 @@ function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onCreat
           } finally { setEmailBusy(false); }
         }
 
-        const accent = preview ? "#b45309" : "#0369a1";
         return (
-          <Modal title={preview ? "✉ Email draft / preview invoices" : "✉ Email official invoices"} onClose={()=>setShowEmailModal(false)} width={760}>
-            <div style={{display:"flex",flexDirection:"column",gap:12}}>
-              {/* Mode switch — the same picker serves both, so you can flip without reopening */}
-              <div style={{display:"flex",borderRadius:10,overflow:"hidden",border:"1.5px solid #e2e8f0"}}>
+          <Modal title={preview ? "✉ Email draft / preview invoices" : "✉ Email official invoices"} onClose={()=>setShowEmailModal(false)} width={780}>
+            {/* minHeight:0 + flex:1 lets the record list below be the scrolling region while
+                the mode switches and the send bar stay put. */}
+            <div style={{display:"flex",flexDirection:"column",gap:10,minHeight:0,flex:1}}>
+              <div style={{display:"flex",borderRadius:10,overflow:"hidden",border:"1.5px solid #e2e8f0",flexShrink:0}}>
                 {[{k:"preview",l:"Preview (unofficial)"},{k:"official",l:"Official (payable)"}].map(o=>(
                   <button key={o.k} onClick={()=>{ setEmailMode(o.k); setEmailSelIds(new Set()); }}
                     style={{flex:1,padding:"9px 14px",border:"none",cursor:"pointer",fontFamily:"inherit",fontWeight:700,fontSize:12,
@@ -5020,91 +5030,91 @@ function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onCreat
                   </button>
                 ))}
               </div>
-              <div style={{fontSize:12,color:"#475569",background:preview?"#fffbeb":"#f0f9ff",border:`1px solid ${preview?"#fde68a":"#bae6fd"}`,borderRadius:8,padding:"9px 12px"}}>
+              <div style={{fontSize:11.5,color:"#475569",background:preview?"#fffbeb":"#f0f9ff",border:`1px solid ${preview?"#fde68a":"#bae6fd"}`,borderRadius:8,padding:"8px 11px",flexShrink:0}}>
                 {preview
-                  ? <>Sends copies marked <strong>unofficial — not a tax invoice</strong>, with nothing payable. Drafts <em>and</em> already-issued invoices can be queued, so you can send a booker a whole set to check before issuing.</>
-                  : <>Sends <strong>real payable invoices</strong>. Drafts are hidden here — a draft has no reference a booker could pay against; switch to Preview to send one for review.</>}
-                {" "}Invoices for the same booker are bundled into <strong>one email</strong>. Documents are sent as <strong>{exportMode==="individual"?"itemised":"summary"}</strong> (set by Export above).
+                  ? <>Copies marked <strong>unofficial — not a tax invoice</strong>, nothing payable. Drafts <em>and</em> issued invoices can be queued.</>
+                  : <>Real <strong>payable invoices</strong>. Drafts are hidden here — switch to Preview to send one for review.</>}
+                {" "}Same grouping and status filter as the list behind. Documents sent as <strong>{exportMode==="individual"?"itemised":"summary"}</strong> (Export toggle).
               </div>
 
-              {groupList.length===0
+              <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",flexShrink:0}}>
+                <span style={{fontSize:11,fontWeight:700,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.05em"}}>Send as</span>
+                {[{k:"grouped",l:"Grouped per booker",t:"One email per booker containing all their selected invoices"},
+                  {k:"individual",l:"One email per invoice",t:"A separate email for every selected invoice"}].map(o=>(
+                  <button key={o.k} onClick={()=>setEmailSendMode(o.k)} title={o.t}
+                    style={{padding:"3px 10px",borderRadius:6,border:"1px solid",cursor:"pointer",fontSize:11,fontWeight:600,fontFamily:"inherit",
+                      borderColor:emailSendMode===o.k?accent:"#e2e8f0",background:emailSendMode===o.k?accent:"#fff",color:emailSendMode===o.k?"#fff":"#475569"}}>
+                    {o.l}
+                  </button>
+                ))}
+              </div>
+
+              {allSendable.length===0
                 ? <div style={{textAlign:"center",padding:28,color:"#94a3b8",fontSize:13}}>
-                    {preview ? "No invoices to preview yet." : "No issued invoices to send. Create an official invoice first, or use Preview for drafts."}
+                    {preview ? "No invoices to preview under the current status filter." : "No issued invoices to send. Create an official invoice, or use Preview for drafts."}
                   </div>
                 : (<>
-                  <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+                  <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center",flexShrink:0}}>
                     <span style={{fontSize:11,fontWeight:700,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.05em"}}>Quick select</span>
-                    {quick("All", sendable, "Select every listed invoice")}
-                    {preview && quick("Drafts", sendable.filter(isDraft), "Select only draft invoices")}
-                    {preview && quick("Issued", sendable.filter(r=>!isDraft(r)), "Select only already-issued invoices")}
+                    {quick("All", allSendable, "Select every listed invoice")}
+                    {preview && quick("Drafts", allSendable.filter(isDraft), "Select only draft invoices")}
+                    {preview && quick("Issued", allSendable.filter(r=>!isDraft(r)), "Select only already-issued invoices")}
                     <button onClick={()=>setIds([])} style={{padding:"3px 9px",borderRadius:6,border:"1px solid #e2e8f0",background:"#fff",color:"#94a3b8",cursor:"pointer",fontSize:11,fontWeight:600,fontFamily:"inherit"}}>Clear</button>
                   </div>
-                  <div style={{maxHeight:"42vh",overflowY:"auto",display:"flex",flexDirection:"column",gap:8}}>
-                    {groupList.map(g=>{
-                      const all = g.recs.every(r=>emailSelIds.has(r.id));
-                      const some = !all && g.recs.some(r=>emailSelIds.has(r.id));
+                  {/* The one scrolling region — flex:1 with a vh cap so it scrolls even if
+                      the flex chain can't resolve a height. */}
+                  <div style={{flex:1,minHeight:120,maxHeight:"46vh",overflowY:"auto",display:"flex",flexDirection:"column",gap:8,paddingRight:2}}>
+                    {emailBatches.map(b=>{
+                      const all = b.recs.every(r=>emailSelIds.has(r.id));
+                      const some = !all && b.recs.some(r=>emailSelIds.has(r.id));
                       return (
-                        <div key={g.email} style={{border:"1.5px solid #e2e8f0",borderRadius:10,overflow:"hidden"}}>
-                          <label style={{display:"flex",alignItems:"center",gap:9,padding:"8px 12px",background:"#f8fafc",cursor:"pointer"}}>
+                        <div key={b.batchId} style={{border:"2px solid #e0e7ff",borderRadius:12,overflow:"hidden"}}>
+                          <label style={{display:"flex",alignItems:"center",gap:9,padding:"8px 12px",background:"#f5f3ff",cursor:"pointer"}}>
                             <input type="checkbox" checked={all} ref={el=>{ if(el) el.indeterminate = some; }}
-                              onChange={()=>toggleMany(g.recs)} style={{accentColor:accent,width:15,height:15}}/>
-                            <span style={{fontWeight:700,fontSize:13,color:"#0f172a"}}>{g.name}</span>
-                            <span style={{fontSize:11,color:"#64748b"}}>{g.email}</span>
-                            <span style={{marginLeft:"auto",fontSize:11,color:"#64748b"}}>
-                              {g.recs.length} invoice{g.recs.length!==1?"s":""} · {fmtMoney(g.recs.reduce((s,r)=>s+(r.total||0),0))}
-                            </span>
+                              onChange={()=>toggleMany(b.recs)} style={{accentColor:accent,width:15,height:15}}/>
+                            <span style={{fontWeight:800,fontSize:12,color:"#312e81"}}>{b.orderName||"Batch"}</span>
+                            <span style={{fontSize:11,color:"#6366f1",fontWeight:600}}>{b.recs.length} invoice{b.recs.length!==1?"s":""}</span>
+                            <span style={{fontSize:11,color:"#94a3b8"}}>{b.dateFrom?fmtDate(b.dateFrom):""}{b.dateTo&&b.dateTo!==b.dateFrom?` – ${fmtDate(b.dateTo)}`:""}</span>
+                            <span style={{marginLeft:"auto",fontSize:12,fontWeight:700,color:"#312e81"}}>{fmtMoney(b.recs.reduce((s,r)=>s+(r.total||0),0))}</span>
                           </label>
-                          {g.setList.map(set=>{
-                            const setAll = set.recs.every(r=>emailSelIds.has(r.id));
-                            const setSome = !setAll && set.recs.some(r=>emailSelIds.has(r.id));
-                            const multiInSet = set.recs.length > 1;
-                            return (
-                              <div key={set.key}>
-                                {multiInSet&&(
-                                  <label style={{display:"flex",alignItems:"center",gap:8,padding:"5px 12px 5px 26px",borderTop:"1px solid #f1f5f9",background:"#fcfdfe",cursor:"pointer",fontSize:11}}>
-                                    <input type="checkbox" checked={setAll} ref={el=>{ if(el) el.indeterminate = setSome; }}
-                                      onChange={()=>toggleMany(set.recs)} style={{accentColor:accent}}/>
-                                    <span style={{fontWeight:700,color:"#475569"}}>Set: {set.label}</span>
-                                    <span style={{color:"#94a3b8"}}>{set.recs.length} invoices</span>
-                                  </label>
-                                )}
-                                {set.recs.map(r=>(
-                                  <label key={r.id} style={{display:"flex",alignItems:"center",gap:9,padding:`6px 12px 6px ${multiInSet?46:34}px`,borderTop:"1px solid #f1f5f9",cursor:"pointer",fontSize:12}}>
-                                    <input type="checkbox" checked={emailSelIds.has(r.id)} onChange={()=>toggle(r.id)} style={{accentColor:accent}}/>
-                                    <span style={{fontFamily:"monospace",color:"#0f172a"}}>{r.id}</span>
-                                    {r.orderName&&!multiInSet&&<span style={{color:"#64748b"}}>{r.orderName}</span>}
-                                    <span style={{color:"#94a3b8"}}>{r.dateFrom?fmtDate(r.dateFrom):""}{r.dateTo&&r.dateTo!==r.dateFrom?` – ${fmtDate(r.dateTo)}`:""}</span>
-                                    <StatusPill status={r.status}/>
-                                    <span style={{marginLeft:"auto",fontWeight:700,color:"#0f172a"}}>{fmtMoney(r.total)}</span>
-                                  </label>
-                                ))}
-                              </div>
-                            );
-                          })}
+                          {b.recs.map(r=>invoiceRow(r,34))}
                         </div>
                       );
                     })}
+                    {emailSingles.length>0&&(
+                      <div style={{border:"1.5px solid #e2e8f0",borderRadius:12,overflow:"hidden"}}>
+                        <label style={{display:"flex",alignItems:"center",gap:9,padding:"8px 12px",background:"#f8fafc",cursor:"pointer"}}>
+                          <input type="checkbox"
+                            checked={emailSingles.every(r=>emailSelIds.has(r.id))}
+                            ref={el=>{ if(el) el.indeterminate = !emailSingles.every(r=>emailSelIds.has(r.id)) && emailSingles.some(r=>emailSelIds.has(r.id)); }}
+                            onChange={()=>toggleMany(emailSingles)} style={{accentColor:accent,width:15,height:15}}/>
+                          <span style={{fontWeight:800,fontSize:12,color:"#0f172a"}}>Standalone</span>
+                          <span style={{fontSize:11,color:"#64748b"}}>{emailSingles.length} invoice{emailSingles.length!==1?"s":""}</span>
+                          <span style={{marginLeft:"auto",fontSize:12,fontWeight:700,color:"#0f172a"}}>{fmtMoney(emailSingles.reduce((s,r)=>s+(r.total||0),0))}</span>
+                        </label>
+                        {emailSingles.map(r=>invoiceRow(r,34))}
+                      </div>
+                    )}
                   </div>
                 </>)}
 
-              <div>
+              <div style={{flexShrink:0}}>
                 <label style={{...S.lbl}}>Note to include (optional)</label>
                 <textarea value={emailNote} onChange={e=>setEmailNote(e.target.value)} rows={2}
                   placeholder={preview?"e.g. Please check these before we issue them.":"e.g. Payment due by the 20th. Please use the bank reference on each invoice."}
                   style={{...S.inp,resize:"vertical",fontFamily:"inherit"}}/>
               </div>
-              {/* Queue summary — what is about to go out, and to whom */}
-              <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",borderTop:"1px solid #f1f5f9",paddingTop:12}}>
-                <span style={{fontSize:12,color:totalChosen?"#0f172a":"#94a3b8",fontWeight:totalChosen?700:400}}>
-                  {totalChosen
-                    ? `Queue: ${totalChosen} invoice${totalChosen!==1?"s":""} → ${chosen.length} email${chosen.length!==1?"s":""} (${chosen.map(g=>g.name).join(", ")})`
+              <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",borderTop:"1px solid #f1f5f9",paddingTop:10,flexShrink:0}}>
+                <span style={{fontSize:12,color:selectedRecs.length?"#0f172a":"#94a3b8",fontWeight:selectedRecs.length?700:400}}>
+                  {selectedRecs.length
+                    ? `Queue: ${selectedRecs.length} invoice${selectedRecs.length!==1?"s":""} → ${outgoing.length} email${outgoing.length!==1?"s":""}${perInvoice?"":` (${[...new Set(selectedRecs.map(r=>displayName(r.bookerEmail)))].join(", ")})`}`
                     : "Nothing selected"}
                 </span>
                 <div style={{marginLeft:"auto",display:"flex",gap:8}}>
                   <button onClick={()=>setShowEmailModal(false)} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#475569",fontSize:12})}>Cancel</button>
-                  <button disabled={!totalChosen||emailBusy} onClick={send}
-                    style={S.btn({background:totalChosen&&!emailBusy?accent:"#cbd5e1",color:"#fff",fontWeight:700,fontSize:12,cursor:totalChosen&&!emailBusy?"pointer":"not-allowed"})}>
-                    {emailBusy?"Sending…":`✉ Send ${chosen.length||""} ${preview?"preview":"invoice"} email${chosen.length!==1?"s":""}`}
+                  <button disabled={!selectedRecs.length||emailBusy} onClick={send}
+                    style={S.btn({background:selectedRecs.length&&!emailBusy?accent:"#cbd5e1",color:"#fff",fontWeight:700,fontSize:12,cursor:selectedRecs.length&&!emailBusy?"pointer":"not-allowed"})}>
+                    {emailBusy?"Sending…":`✉ Send ${outgoing.length||""} ${preview?"preview":"invoice"} email${outgoing.length!==1?"s":""}`}
                   </button>
                 </div>
               </div>
