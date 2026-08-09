@@ -16,22 +16,30 @@ export async function htmlToPdfBlob(html) {
     await new Promise((resolve) => { iframe.onload = resolve; iframe.srcdoc = html; });
     await new Promise((r) => setTimeout(r, 200)); // let fonts/layout settle
     const doc = iframe.contentDocument;
-    const el = doc.querySelector(".page") || doc.body;
-    const canvas = await html2canvas(el, { scale: 2, backgroundColor: "#ffffff", useCORS: true, logging: false, windowWidth: 780 });
-    const img = canvas.toDataURL("image/jpeg", 0.92);
+    // Documents lay their line items out in `.sheet` blocks, each already sized to one
+    // A4 page and carrying a subtotal for its own rows. Rasterise each sheet onto its own
+    // PDF page so those boundaries are honoured — slicing one tall image by height would
+    // cut wherever the image happened to reach 297mm, stranding a sheet's subtotal on the
+    // following page. Falls back to the whole document for anything without sheets.
+    const sheets = [...doc.querySelectorAll(".sheet")];
+    const targets = sheets.length ? sheets : [doc.querySelector(".page") || doc.body];
 
     const pdf = new jsPDF({ unit: "mm", format: "a4" });
     const pageW = 210, pageH = 297;
-    const imgH = (canvas.height * pageW) / canvas.width;
-    // Repeat the full-height image with a negative offset per page — the
-    // standard html2canvas pagination pattern.
-    let heightLeft = imgH;
-    pdf.addImage(img, "JPEG", 0, 0, pageW, imgH);
-    heightLeft -= pageH;
-    while (heightLeft > 0) {
-      pdf.addPage();
-      pdf.addImage(img, "JPEG", 0, heightLeft - imgH, pageW, imgH);
-      heightLeft -= pageH;
+    for (let i = 0; i < targets.length; i++) {
+      const canvas = await html2canvas(targets[i], { scale: 2, backgroundColor: "#ffffff", useCORS: true, logging: false, windowWidth: 780 });
+      const img = canvas.toDataURL("image/jpeg", 0.92);
+      const imgH = (canvas.height * pageW) / canvas.width;
+      if (i > 0) pdf.addPage();
+      pdf.addImage(img, "JPEG", 0, 0, pageW, imgH);
+      // A sheet taller than a page still gets sliced rather than clipped — belt and
+      // braces, since the row budget is meant to keep every sheet inside one page.
+      let heightLeft = imgH - pageH;
+      while (heightLeft > 0) {
+        pdf.addPage();
+        pdf.addImage(img, "JPEG", 0, heightLeft - imgH, pageW, imgH);
+        heightLeft -= pageH;
+      }
     }
     return pdf.output("blob");
   } finally {
