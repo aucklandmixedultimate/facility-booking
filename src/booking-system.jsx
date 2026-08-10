@@ -9216,7 +9216,16 @@ function findMatchingUserBooking(allBookings, ev, facilityIds, gtecLinks={}, ema
   // Name is only an inconsistency for loosely-identified events — not when the email
   // (or a strong org link) already confirms identity, even if the booking is under an
   // individual member's name.
-  if (!teamIsOurs && !emailLinked && best.identityScore < 4) reasons.push(`Name: ${b.name} → ${team}`);
+  //
+  // The threshold is the same >= 3 that identityOk uses below. It previously demanded 4,
+  // which contradicted both this comment and identityOk: score 3 IS the strong-org-link
+  // tier (the org token matches the booking's email prefix, name or purpose, exactly or
+  // within an edit distance). So a club booking made under a member's own name —
+  // "Euphoria Training (Field 2)" against a booking by Shou Wei — was linked confidently
+  // enough to sync, then flagged purely because the names differed, with every other
+  // dimension identical. Below 3 the link is loose (name similarity or a purpose
+  // substring) and the name really is worth an admin's eye.
+  if (!teamIsOurs && !emailLinked && best.identityScore < 3) reasons.push(`Name: ${b.name} → ${team}`);
 
   const identityOk = teamIsOurs || emailLinked || best.identityScore >= 3;
   const exact = reasons.length === 0 && identityOk;
