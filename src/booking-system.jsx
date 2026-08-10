@@ -3807,7 +3807,10 @@ function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkApply, o
   const [splitPatterns, setSplitPatterns] = useState(new Set());
   const [patternModal, setPatternModal] = useState(null);
   const [oneOffModalData, setOneOffModalData] = useState(null);
-  const [schedDateFrom, setSchedDateFrom] = useState("");
+  // Date-range table filters default to "today onwards" — the common case is upcoming
+  // bookings, and past ones are a deliberate lookup. Clear the From field (or pick "Any
+  // date" in the picker) to see history again.
+  const [schedDateFrom, setSchedDateFrom] = useState(()=>todayKey());
   const [schedDateTo,   setSchedDateTo]   = useState("");
   const [schedStatusFilter, setSchedStatusFilter] = useState(new Set());
   // Selected {email, status} groups for bulk action. Key = `${email}::${status}`.
@@ -7465,7 +7468,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
   // Clashes/mismatches narrowed to the active booker filter (drives panels + counts).
   const visibleClashes = clashes.filter(c=>inBookerFilter(c.user?.email));
   const [showBookerFilter,setShowBookerFilter]=useState(false);
-  const [adminDateFrom,setAdminDateFrom]=useState(""), [adminDateTo,setAdminDateTo]=useState("");
+  const [adminDateFrom,setAdminDateFrom]=useState(()=>todayKey()), [adminDateTo,setAdminDateTo]=useState("");
   const [adminColPurpose,setAdminColPurpose]=useState("");
   const [sortCol,setSortCol]=useState("date"), [sortDir,setSortDir]=useState("asc");
   const [selected,setSelected]=useState(new Set());
@@ -9508,7 +9511,7 @@ export default function App() {
     try{return JSON.parse(localStorage.getItem("fb_approx_durations")||"{}");}catch{return {};}
   });
   const [pricingMode, setPricingModeState] = useState(()=>localStorage.getItem("fb_pricing_mode")||"hourly");
-  const [listDateFrom,    setListDateFrom]      = useState("");
+  const [listDateFrom,    setListDateFrom]      = useState(()=>todayKey());
   const [listDateTo,      setListDateTo]        = useState("");
   const [listStatusFilter,setListStatusFilter]  = useState("all");
   const [listColPurpose,  setListColPurpose]    = useState("");
