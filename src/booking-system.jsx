@@ -1110,22 +1110,41 @@ function describeActivity(r) {
   }
 }
 
-function ActivityLogModal({onClose, inline=false}) {
+function ActivityLogModal({onClose, inline=false, bookers=[]}) {
   const [rows, setRows] = useState(null);
   const [error, setError] = useState("");
   const [filter, setFilter] = useState("all"); // all | sync | admin | booker
+  const [logFrom, setLogFrom] = useState("");  // created_at lower bound (yyyy-mm-dd)
+  const [logTo, setLogTo]     = useState("");  // created_at upper bound
+  const [who, setWho]         = useState("");  // free text — refs, dates, anything
+  const [bookerSel, setBookerSel] = useState(""); // canonical booker email, "" = all
+  const [actionFilter, setActionFilter] = useState("all");
+  const [limit, setLimit]     = useState(1000);
+  const [truncated, setTruncated] = useState(false);
   const SYNC_ACTIONS = useMemo(()=>new Set([
     "cpsa_sync_start","cpsa_sync_complete","cpsa_confirm","cpsa_review_flag",
     "cpsa_admin_booking_add","cpsa_admin_booking_remove","cpsa_admin_convert","mismatch_resolution","mismatch_billing_settled"
   ]),[]);
+  // The date range is applied server-side, not to an already-truncated page. The old
+  // fetch took the most recent 200 rows full stop — one sync writes dozens, so anything
+  // more than a few days old fell off the end and looked like it had never happened.
   useEffect(()=>{
+    let cancelled = false;
     (async ()=>{
+      setRows(null);
+      const q = ["select=*", `limit=${limit}`];
+      if (logFrom) q.push(`created_at=gte.${logFrom}T00:00:00`);
+      if (logTo)   q.push(`created_at=lte.${logTo}T23:59:59`);
       try {
-        const data = await sb.select("activity_log", "select=*&limit=200");
+        const data = await sb.select("activity_log", q.join("&"));
+        if (cancelled) return;
         setRows(data||[]);
-      } catch(e) { setError(e.message); setRows([]); }
+        setTruncated((data||[]).length >= limit);
+        setError("");
+      } catch(e) { if (!cancelled) { setError(e.message); setRows([]); } }
     })();
-  },[]);
+    return ()=>{ cancelled = true; };
+  },[logFrom, logTo, limit]);
   // Collapse sign_in/sign_out into one row per user (most recent) — admins want
   // "last login per user", not a history of every session.
   const collapsed = useMemo(() => {
@@ -1142,7 +1161,26 @@ function ActivityLogModal({onClose, inline=false}) {
     }
     return out;
   }, [rows]);
+  // Every action present in the fetched window, so the dropdown only offers real options.
+  const actionsPresent = useMemo(
+    () => [...new Set((rows||[]).map(r=>r.action))].sort((a,b)=>(ACTIVITY_LABELS[a]||a).localeCompare(ACTIVITY_LABELS[b]||b)),
+    [rows]);
+  // Booker match scans the whole entry, not just user_email: a deletion records the
+  // affected booker inside detail, and the actor is usually the admin who did it.
+  const whoQ = who.trim().toLowerCase();
+  const blob = r => `${r.user_email||""} ${JSON.stringify(r.detail||{})}`.toLowerCase();
+  const matchesWho = r => !whoQ || blob(r).includes(whoQ);
+  // Picking a booker matches on every address they own plus their display name. Typing
+  // "AUUC" would miss them entirely — their address is auultimateclub@gmail.com, which
+  // doesn't contain that string — so the roster does the resolving instead of the user.
+  const selBooker = bookers.find(b => b.email === bookerSel);
+  const bookerNeedles = selBooker
+    ? [...(selBooker.addresses||[selBooker.email]), selBooker.name].filter(Boolean).map(x=>String(x).toLowerCase())
+    : [];
+  const matchesBooker = r => !selBooker || bookerNeedles.some(nd => blob(r).includes(nd));
   const filtered = collapsed.filter(r => {
+    if (!matchesWho(r) || !matchesBooker(r)) return false;
+    if (actionFilter!=="all" && r.action!==actionFilter) return false;
     if (filter==="all")   return true;
     if (filter==="sync")  return SYNC_ACTIONS.has(r.action);
     if (filter==="admin") return activityActor(r)==="admin";
@@ -1178,6 +1216,43 @@ function ActivityLogModal({onClose, inline=false}) {
           ))}
           <span style={{marginLeft:"auto",fontSize:11,color:"#94a3b8"}}>{rows===null?"Loading…":`${filtered.length} of ${collapsed.length} entries (logins collapsed to most-recent per user)`}</span>
         </div>
+        {/* Booker / date-range / action filters. The dates query the server, so they reach
+            history the fetch window would otherwise cut off. */}
+        <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap",flexShrink:0,background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 9px"}}>
+          {bookers.length>0&&(
+            <select value={bookerSel} onChange={e=>setBookerSel(e.target.value)}
+              title="Match every address this booker owns, plus their display name"
+              style={{...S.inp,fontSize:12,padding:"4px 8px",flex:"0 1 170px"}}>
+              <option value="">All bookers</option>
+              {bookers.map(b=><option key={b.email} value={b.email}>{b.name}</option>)}
+            </select>
+          )}
+          <input value={who} onChange={e=>setWho(e.target.value)} placeholder="Date (2026-09), ref, any text…"
+            title="Matches the actor's email and anything recorded in the entry — booker addresses, references, booking dates"
+            style={{...S.inp,fontSize:12,padding:"4px 8px",flex:"1 1 190px",minWidth:150}}/>
+          <select value={actionFilter} onChange={e=>setActionFilter(e.target.value)}
+            style={{...S.inp,fontSize:12,padding:"4px 8px",flex:"0 1 165px"}}>
+            <option value="all">All actions</option>
+            {actionsPresent.map(a=><option key={a} value={a}>{ACTIVITY_LABELS[a]||a}</option>)}
+          </select>
+          <span style={{fontSize:11,color:"#64748b",fontWeight:600}}>Logged</span>
+          <input type="date" value={logFrom} onChange={e=>setLogFrom(e.target.value)} title="Only entries logged on or after this date"
+            style={{...S.inp,fontSize:12,padding:"4px 8px",flex:"0 1 140px"}}/>
+          <span style={{fontSize:11,color:"#94a3b8"}}>→</span>
+          <input type="date" value={logTo} onChange={e=>setLogTo(e.target.value)} title="Only entries logged on or before this date"
+            style={{...S.inp,fontSize:12,padding:"4px 8px",flex:"0 1 140px"}}/>
+          {(who||logFrom||logTo||actionFilter!=="all"||bookerSel)&&(
+            <button onClick={()=>{setWho("");setLogFrom("");setLogTo("");setActionFilter("all");setBookerSel("");}}
+              style={{padding:"4px 9px",borderRadius:6,border:"1px solid #e2e8f0",background:"#fff",color:"#64748b",cursor:"pointer",fontSize:11,fontWeight:600,fontFamily:"inherit"}}>Clear</button>
+          )}
+        </div>
+        {truncated&&(
+          <div style={{background:"#fffbeb",border:"1px solid #fde68a",borderRadius:8,padding:"6px 10px",fontSize:11,color:"#92400e",flexShrink:0,display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+            <span>⚠ Hit the {limit}-entry fetch limit — older history is not loaded. Narrow the <strong>Logged</strong> dates, or load more.</span>
+            <button onClick={()=>setLimit(l=>l+2000)}
+              style={{marginLeft:"auto",padding:"3px 9px",borderRadius:6,border:"1px solid #fcd34d",background:"#fff",color:"#92400e",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"}}>Load {limit+2000} entries</button>
+          </div>
+        )}
         {error&&<div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:6,padding:"6px 10px",fontSize:12,color:"#b91c1c"}}>⚠ {error} — has <code>supabase-migration-activity-log.sql</code> been run?</div>}
         <div style={{overflowY:"auto",flex:1,minHeight:0,border:"1px solid #f1f5f9",borderRadius:8}}>
           <CopyableTable>
@@ -7586,6 +7661,11 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
   const adminBookerPrimaries = Object.keys(adminBookerGroups).sort();
   // Every address across all groups — used for select-all / all-selected checks.
   const adminBookerEmails = [...new Set(adminBookerPrimaries.flatMap(p=>[...adminBookerGroups[p]]))];
+  // Roster for the inline activity log's booker picker — each primary with every address
+  // that resolves to it, so a search catches entries logged against a secondary too.
+  const adminBookerRoster = adminBookerPrimaries.map(pri=>({
+    email: pri, name: aliasNames[pri] || pri.split("@")[0], addresses: [...adminBookerGroups[pri]],
+  })).sort((a,b)=>a.name.localeCompare(b.name));
 
   function matchesQ(b) {
     const t=q.toLowerCase();
@@ -7845,7 +7925,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
 
       {/* Activity Log — inline */}
       {showActivityPanel && (
-        <ActivityLogModal inline onClose={()=>setShowActivityPanel(false)}/>
+        <ActivityLogModal inline onClose={()=>setShowActivityPanel(false)} bookers={adminBookerRoster}/>
       )}
 
       {/* Track-changes panel: invoiced bookings whose billed dimensions drifted */}
@@ -10000,7 +10080,12 @@ export default function App() {
       const primary = emailAliases[b.email.toLowerCase()] || b.email.toLowerCase();
       return [primary, { email: primary, name: aliasNames[primary] || b.name || primary.split("@")[0] }];
     })
-  ).values()].sort((a,b)=>a.name.localeCompare(b.name));
+  ).values()].map(bk => ({
+    ...bk,
+    // Every address that resolves to this booker, so an activity-log search finds
+    // entries recorded against a linked secondary address too.
+    addresses: [bk.email, ...Object.entries(emailAliases).filter(([,pri])=>pri===bk.email).map(([sec])=>sec)],
+  })).sort((a,b)=>a.name.localeCompare(b.name));
 
   // Login gate — after all hooks
   if(session === undefined) return null; // auth session still loading
@@ -10037,7 +10122,9 @@ export default function App() {
       // Flag edits/creates that touch GTEC-submitted bookings so track-changes shows
       // post-queue changes distinctly (GTEC may need notifying of the change).
       gtecQueued: draftsArr.filter(reachedGtecQueue).length,
-      items: draftsArr.slice(0,8).map(d=>({ date:d.date, facility_id:d.facility_id, start_hour:d.start_hour, duration:d.duration, status:d.status })),
+      // Record every slot, not the first 8: the summary line shows 3, but the rest is
+      // what makes a bulk change traceable afterwards (and searchable by date).
+      items: draftsArr.slice(0,60).map(d=>({ date:d.date, facility_id:d.facility_id, start_hour:d.start_hour, duration:d.duration, status:d.status })),
     });
     showToast(isNew?`${draftsArr.length} booking${draftsArr.length>1?"s":""} submitted!`:"Booking updated!");
 
@@ -10648,7 +10735,7 @@ export default function App() {
       ids,
       booker: deleteQueue[0]?.email,
       gtecPurge: purgeEntries.length,
-      items: deleteQueue.slice(0,8).map(b=>({ date:b.date, facility_id:b.facility_id, start_hour:b.start_hour, duration:b.duration, status:b.status })),
+      items: deleteQueue.slice(0,60).map(b=>({ date:b.date, facility_id:b.facility_id, start_hour:b.start_hour, duration:b.duration, status:b.status, name:b.name, email:b.email })),
     });
     showToast(`${ids.length} booking${ids.length>1?"s":""} removed.`);
     setDeleteQueue([]);
@@ -11288,7 +11375,7 @@ export default function App() {
       )}
 
       {showActivityLog&&isAdmin&&(
-        <ActivityLogModal onClose={()=>setShowActivityLog(false)}/>
+        <ActivityLogModal onClose={()=>setShowActivityLog(false)} bookers={knownBookers}/>
       )}
 
       {showRetentionModal&&isAdmin&&(
