@@ -10007,14 +10007,30 @@ export default function App() {
       // miss future months due to a stale `bookings` closure.
       const srcBookings = configured ? (await sb.select("bookings")) : bookings;
       const future = srcBookings.filter(b => b.date >= today);
-      const months = new Set();
+      // Sync a CONTIGUOUS run of months, not just the months we happen to hold bookings
+      // in. The old set was {this month} ∪ {months of our future bookings}, which left
+      // two holes: a month where we hold nothing was never fetched at all, and a gap
+      // between two booking months (bookings in Aug and Dec, nothing between) skipped
+      // the months in between. On top of that the feed's month view returns a few days
+      // either side of the month, so the first sync would import a boundary event into
+      // the next month, and only the sync AFTER that would notice that month existed —
+      // which is why a second run sometimes turned up bookings the first one missed.
+      //
+      // Run from this month through the furthest month we hold a future booking in, and
+      // at least LOOKAHEAD months out regardless, capped so a booking years ahead can't
+      // turn one sync into hundreds of fetches.
+      const LOOKAHEAD = 3, MAX_MONTHS = 18;
       const now = new Date();
-      months.add(`${now.getFullYear()}-${now.getMonth()}`);
+      const mIdx = (y,m) => y*12 + m;                       // months since year 0
+      const firstIdx = mIdx(now.getFullYear(), now.getMonth());
+      let lastIdx = firstIdx + LOOKAHEAD;
       for (const b of future) {
-        const [y,m] = b.date.split("-");
-        months.add(`${parseInt(y)}-${parseInt(m)-1}`);
+        const [y,m] = b.date.split("-").map(Number);
+        if (Number.isFinite(y) && Number.isFinite(m)) lastIdx = Math.max(lastIdx, mIdx(y, m-1));
       }
-      const sorted = [...months].map(k=>k.split("-").map(Number)).sort((a,b)=>a[0]-b[0]||a[1]-b[1]);
+      lastIdx = Math.min(lastIdx, firstIdx + MAX_MONTHS - 1);
+      const sorted = [];
+      for (let i = firstIdx; i <= lastIdx; i++) sorted.push([Math.floor(i/12), i%12]);
       // Drop months that have aged out of the retention window before re-syncing.
       purgeOldLogs();
       logActivity("cpsa_sync_start", { months: sorted.length });
