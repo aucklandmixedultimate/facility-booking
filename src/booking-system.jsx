@@ -9393,16 +9393,23 @@ function parseCJRTime(t) {
   return h + min/60;
 }
 
+// A GTEC entry with no time on it blocks the field for the day rather than a slot.
+// Treated as 8am–8pm: it previously ended at 4pm, which left the evening looking free
+// even though the field was taken, so evening bookings were neither clashed nor matched
+// against it. 8pm sits inside the calendar grid (which runs to CAL_END, 10pm).
+const CJR_ALLDAY_START = 8, CJR_ALLDAY_END = 20;
+const cjrAllDay = () => ({ start_hour: CJR_ALLDAY_START, duration: CJR_ALLDAY_END - CJR_ALLDAY_START });
+
 // Parse EventDateTime string for start_hour and duration
 // e.g. "08/06/2026, 6:30 pm to 8:30 pm"  or  "08/06/2026" (no time = all day)
 function parseCJRDateTime(dt) {
-  if (!dt) return { start_hour: 8, duration: 8 };
+  if (!dt) return cjrAllDay();
   const timeRange = dt.replace(/^\d+\/\d+\/\d+,?\s*/,"").trim();
   const parts = timeRange.split(/\s+to\s+/i);
-  if (parts.length < 2) return { start_hour: 8, duration: 8 };
+  if (parts.length < 2) return cjrAllDay();
   const start = parseCJRTime(parts[0]);
   const end   = parseCJRTime(parts[1]);
-  if (start === null || end === null) return { start_hour: 8, duration: 8 };
+  if (start === null || end === null) return cjrAllDay();
   const dur = end - start;
   return { start_hour: start, duration: dur > 0 ? dur : 1 };
 }
