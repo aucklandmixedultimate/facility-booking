@@ -2718,24 +2718,56 @@ function BookingForm({ booking, allBookings, onAddToCart, onClose, isAdmin, logg
           {/* An admin books on behalf of clubs, so the field is a roster they can pick
               from (and still type into for someone new). Everyone else stays locked to
               their own login. */}
-          {isAdmin ? (<>
-            <input list="booker-roster" style={S.inp} type="email" value={email}
-              onChange={e=>{
-                const v = e.target.value;
-                setEmail(v);
-                const hit = bookers.find(bk => bk.email === v.trim().toLowerCase());
-                if (hit) setName(hit.name);
-              }}
-              placeholder="Pick a booker, or type a new email"/>
-            <datalist id="booker-roster">
-              {bookers.map(bk=><option key={bk.email} value={bk.email}>{bk.name}</option>)}
-            </datalist>
-            <div style={{fontSize:11,color:"#0369a1",marginTop:3}}>
-              {email && email.toLowerCase() !== (loggedInEmail||"").toLowerCase()
-                ? `👤 Booking on behalf of ${bookers.find(bk=>bk.email===email.trim().toLowerCase())?.name || email}`
-                : "Admin — pick any booker to book on their behalf"}
-            </div>
-          </>) : (<>
+          {isAdmin ? (()=>{
+            // Chips rather than a dropdown: the admin books for the same handful of clubs
+            // constantly, so they should be one tap in the booker's own colour. The admin's
+            // own address leads and is the default; the field stays editable for someone new.
+            const adminEmail = (loggedInEmail||"").toLowerCase();
+            const rosterFor = e => bookers.find(bk => bk.email === e);
+            const chips = [
+              ...(adminEmail ? [{ email: adminEmail, name: rosterFor(adminEmail)?.name || "AMUA", self: true }] : []),
+              ...bookers.filter(bk => bk.email !== adminEmail),
+            ];
+            const current = email.trim().toLowerCase();
+            const pick = bk => {
+              setEmail(bk.email);
+              // A booker already in the roster fills their name too; for an address with
+              // no bookings yet the name field is left for the admin to type.
+              const r = rosterFor(bk.email);
+              if (r) setName(r.name);
+            };
+            return (<>
+              <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:6}}>
+                {chips.map(bk=>{
+                  const active = current === bk.email;
+                  const c = emailColor(bk.email);
+                  return (
+                    <button key={bk.email} type="button" onClick={()=>pick(bk)} title={bk.email}
+                      style={{display:"inline-flex",alignItems:"center",gap:5,padding:"3px 10px",borderRadius:999,
+                        border:`1.5px solid ${active?c:c+"44"}`,background:active?c:c+"18",color:active?"#fff":c,
+                        fontSize:11,fontWeight:700,fontFamily:"inherit",cursor:"pointer",whiteSpace:"nowrap",
+                        boxShadow:active?`0 0 0 2px ${c}33`:"none"}}>
+                      <span style={{width:6,height:6,borderRadius:"50%",background:active?"#fff":c,display:"inline-block",flexShrink:0}}/>
+                      {bk.name}{bk.self?" (you)":""}
+                    </button>
+                  );
+                })}
+              </div>
+              <input style={S.inp} type="email" value={email}
+                onChange={e=>{
+                  const v = e.target.value;
+                  setEmail(v);
+                  const hit = rosterFor(v.trim().toLowerCase());
+                  if (hit) setName(hit.name);
+                }}
+                placeholder="…or type a new booker's email"/>
+              <div style={{fontSize:11,color:"#0369a1",marginTop:3}}>
+                {current && current !== adminEmail
+                  ? `👤 Booking on behalf of ${rosterFor(current)?.name || email}`
+                  : "Pick a booker to book on their behalf — defaults to you"}
+              </div>
+            </>);
+          })() : (<>
             <input style={{...S.inp,background:loggedInEmail?"#f0fdf4":S.inp.background}} type="email" value={email} readOnly={!!loggedInEmail} onChange={e=>setEmail(e.target.value)} placeholder="you@example.com"/>
             {loggedInEmail&&<div style={{fontSize:11,color:"#16a34a",marginTop:3}}>✓ Pre-filled from your login</div>}
           </>)}
