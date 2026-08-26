@@ -9392,6 +9392,18 @@ function nameSimilarity(a, b) {
 // Stripped before identity comparison so "Euphoria Training" reads as "Euphoria".
 const GTEC_ACTIVITY_WORDS = new Set(["training","train","trainings","trials","trial","game","games","practice","practise","session","sessions","scrim","scrimmage","scrimmages","match","matches","fixture","fixtures","league","tournament","tourney","hat","social","dev","development","clinic","camp","mixed","womens","mens","open"]);
 function stripActivityTokens(name) { return tokenize(name).filter(t => !GTEC_ACTIVITY_WORDS.has(t)); }
+// Place and filler words that appear in half the organisation names in Auckland and
+// identify nobody on their own. "Auckland Lacrosse Summer League" and a booking under
+// aucklandmixedultimate@gmail.com share only "auckland" — enough for the fuzzy tier to
+// link two unrelated tenants, which then surfaced as a mismatch where it should have
+// been a clash. Skipped as the SOLE basis for a fuzzy match; a whole-name match on the
+// stripped org string is a much stronger signal and is left alone.
+const GTEC_GENERIC_TOKENS = new Set([
+  "auckland","newzealand","zealand","city","central","north","south","east","west",
+  "club","clubs","association","assoc","incorporated","team","teams",
+  "senior","seniors","junior","juniors","youth","summer","winter","spring","autumn",
+  "park","sports","sport",
+]);
 
 // Bounded Levenshtein (early-exit beyond max) for typo tolerance on org tokens.
 function editDistance(a, b, max=2) {
@@ -9445,6 +9457,7 @@ function gtecIdentityScore(team, b, { detailEmail, gtecLinks, canon }) {
   const candTokens = [...tokenize((b.email||"").split("@")[0]), ...tokenize(b.name), ...tokenize(b.purpose)];
   for (const ct of coreTokens) {
     if (ct.length < 4) continue;
+    if (GTEC_GENERIC_TOKENS.has(ct)) continue; // a shared place name is not an identity
     const thr = ct.length>=7 ? 2 : 1;
     for (const dt of candTokens) {
       if (dt.length < 4) continue;
