@@ -649,6 +649,63 @@ function setFunctionCost(sysNotes, amount) {
   return base ? `${base}\n${marker}` : marker;
 }
 
+// ── Shared slots (retroactive split / merge) ────────────────────────────────
+// One physical slot used by more than one team is held as one booking per team, linked
+// by a shared id so the group can be costed and named as a unit. [SLOT] id|role|share.
+//   parent  the booking a slot was split from — GTEC booked that name, so it keeps it
+//   child   a team added to that slot afterwards
+//   peer    two bookings made independently and merged later; neither owns the name, so
+//           the GTEC-facing name carries both
+// share is this member's fraction of the slot's cost. Shares sum to 1 across the group,
+// so the slot is billed once between the teams rather than once per team.
+const SLOT_RE = /\[SLOT\][^\n]*/g;
+function parseSlotLink(sysNotes) {
+  const m = (sysNotes||"").match(/\[SLOT\]\s*([^\n]*)/);
+  if (!m) return null;
+  const [id, role, share] = m[1].split("|").map(x=>(x||"").trim());
+  if (!id) return null;
+  const f = parseFloat(share);
+  return { id, role: role || "peer", share: Number.isFinite(f) && f > 0 ? f : 1 };
+}
+function setSlotLink(sysNotes, id, role, share) {
+  const base = (sysNotes||"").replace(SLOT_RE,"").trim();
+  if (!id) return base;
+  const marker = `[SLOT] ${id}|${role||"peer"}|${+(Number(share)||1).toFixed(4)}`;
+  return base ? `${base}\n${marker}` : marker;
+}
+function clearSlotLink(sysNotes) { return (sysNotes||"").replace(SLOT_RE,"").trim(); }
+function newSlotRef() { return "S"+Date.now().toString(36)+Math.random().toString(36).slice(2,5); }
+// Everyone sharing a slot, parent first then oldest-first, so the group reads in the
+// order it was built.
+function slotGroupMembers(bookings, id) {
+  if (!id) return [];
+  return (bookings||[]).filter(b => parseSlotLink(b.system_notes)?.id === id)
+    .sort((a,b) => {
+      const ra = parseSlotLink(a.system_notes)?.role === "parent";
+      const rb = parseSlotLink(b.system_notes)?.role === "parent";
+      if (ra !== rb) return ra ? -1 : 1;
+      return (a.created_at||"").localeCompare(b.created_at||"");
+    });
+}
+// The name GTEC should see for a shared slot. A split keeps the parent's name — GTEC
+// booked that and the field allocation never changed. A merge of two bookings made
+// separately has no parent, so both names are carried.
+function slotGroupName(members) {
+  if (!members || !members.length) return "";
+  const parent = members.find(b => parseSlotLink(b.system_notes)?.role === "parent");
+  if (parent) return parent.purpose || "";
+  return [...new Set(members.map(b => (b.purpose||"").trim()).filter(Boolean))].join(" / ");
+}
+// Even shares across n members, with the rounding remainder given to the first so they
+// still total exactly 1.
+function evenSlotShares(n) {
+  if (n <= 0) return [];
+  const each = +(1/n).toFixed(4);
+  const shares = Array(n).fill(each);
+  shares[0] = +(1 - each*(n-1)).toFixed(4);
+  return shares;
+}
+
 // Bookings created together — a recurrence, a multi-day span, a multi-facility pick or
 // any grouped variant — share a group id so the cart and summary present them as one
 // group (the same treatment weekly recurrences already get). Stored as [GRP] id.
@@ -1053,7 +1110,7 @@ const ACTIVITY_ADMIN_ACTIONS = new Set([
   "cpsa_sync_start","cpsa_sync_complete","cpsa_confirm","cpsa_review_flag",
   "cpsa_admin_booking_add","cpsa_admin_booking_remove","cpsa_admin_convert","mismatch_resolution",
   "mismatch_billing_settled","status_change","invoiced","official_invoice_created",
-  "invoice_preview_emailed","official_invoice_emailed","drive_upload","drive_attach",
+  "invoice_preview_emailed","official_invoice_emailed","slot_shared","slot_merged","slot_unlinked","drive_upload","drive_attach",
 ]);
 const ACTIVITY_LABELS = {
   booking_create:"Booking created", booking_edit:"Booking edited", booking_delete:"Booking deleted",
@@ -1064,6 +1121,7 @@ const ACTIVITY_LABELS = {
   mismatch_resolution:"Mismatch resolved", mismatch_billing_settled:"Billing settled",
   invoiced:"Invoiced", official_invoice_created:"Invoice created",
   invoice_preview_emailed:"Invoice preview emailed", official_invoice_emailed:"Invoice emailed",
+  slot_shared:"Slot shared with a team", slot_merged:"Bookings merged into one slot", slot_unlinked:"Removed from a shared slot",
   drive_upload:"Saved to Drive", drive_attach:"GTEC invoice attached",
   email_sent:"Email sent", email_failed:"Email failed", sign_in:"Signed in", sign_out:"Signed out",
 };
@@ -1106,6 +1164,9 @@ function describeActivity(r) {
     case "invoiced":                return `Marked ${d.count||d.ids?.length||0} booking${(d.count||d.ids?.length)!==1?"s":""} invoiced`;
     case "official_invoice_created":return `Created official invoice · ${d.count||0} item${d.count!==1?"s":""}`;
     case "invoice_preview_emailed": return `Emailed ${d.count||0} unofficial invoice preview${d.count!==1?"s":""}${d.recipients?.length?` · ${d.recipients.join(", ")}`:""}`;
+    case "slot_shared":   return `Shared a slot with ${d.added||"a team"} · ${activitySlot(d)} · now ${d.members||2} teams`;
+    case "slot_merged":   return `Merged ${d.members||2} bookings into one shared slot · ${activitySlot(d)}`;
+    case "slot_unlinked": return `Removed a booking from a shared slot · ${d.remaining||0} team${d.remaining!==1?"s":""} remain`;
     case "official_invoice_emailed": return `Emailed ${d.documents||0} official invoice${d.documents!==1?"s":""} in ${d.emails||0} email${d.emails!==1?"s":""}${d.recipients?.length?` · ${d.recipients.join(", ")}`:""}`;
     case "drive_upload": return `Saved ${d.doc||"document"} to Drive${d.reason==="status_change"?" · status update":d.reason==="manual"?" · manual sync":""}`;
     case "drive_attach": return `Attached ${d.file||"file"} · Invoice (from GTEC)`;
@@ -2481,7 +2542,7 @@ function MultiEditForm({ bookings: srcBookings, onAddToCart, onClose, allBooking
 }
 
 
-function BookingForm({ booking, allBookings, onAddToCart, onClose, isAdmin, loggedInEmail }) {
+function BookingForm({ booking, allBookings, onAddToCart, onClose, isAdmin, loggedInEmail, bookers=[] }) {
   const isMobile = useMobile();
   const isEditing  = !!booking?.id && !booking?._multiEdit;
   const isMultiEdit = !!booking?._multiEdit;
@@ -2631,8 +2692,30 @@ function BookingForm({ booking, allBookings, onAddToCart, onClose, isAdmin, logg
         </div>
         <div>
           <label style={S.lbl}>Email *</label>
-          <input style={{...S.inp,background:loggedInEmail?"#f0fdf4":S.inp.background}} type="email" value={email} readOnly={!!loggedInEmail} onChange={e=>setEmail(e.target.value)} placeholder="you@example.com"/>
-          {loggedInEmail&&<div style={{fontSize:11,color:"#16a34a",marginTop:3}}>✓ Pre-filled from your login</div>}
+          {/* An admin books on behalf of clubs, so the field is a roster they can pick
+              from (and still type into for someone new). Everyone else stays locked to
+              their own login. */}
+          {isAdmin ? (<>
+            <input list="booker-roster" style={S.inp} type="email" value={email}
+              onChange={e=>{
+                const v = e.target.value;
+                setEmail(v);
+                const hit = bookers.find(bk => bk.email === v.trim().toLowerCase());
+                if (hit) setName(hit.name);
+              }}
+              placeholder="Pick a booker, or type a new email"/>
+            <datalist id="booker-roster">
+              {bookers.map(bk=><option key={bk.email} value={bk.email}>{bk.name}</option>)}
+            </datalist>
+            <div style={{fontSize:11,color:"#0369a1",marginTop:3}}>
+              {email && email.toLowerCase() !== (loggedInEmail||"").toLowerCase()
+                ? `👤 Booking on behalf of ${bookers.find(bk=>bk.email===email.trim().toLowerCase())?.name || email}`
+                : "Admin — pick any booker to book on their behalf"}
+            </div>
+          </>) : (<>
+            <input style={{...S.inp,background:loggedInEmail?"#f0fdf4":S.inp.background}} type="email" value={email} readOnly={!!loggedInEmail} onChange={e=>setEmail(e.target.value)} placeholder="you@example.com"/>
+            {loggedInEmail&&<div style={{fontSize:11,color:"#16a34a",marginTop:3}}>✓ Pre-filled from your login</div>}
+          </>)}
         </div>
       </div>
 
@@ -2727,12 +2810,15 @@ function BookingForm({ booking, allBookings, onAddToCart, onClose, isAdmin, logg
 }
 
 // ─── Booking Detail ───────────────────────────────────────────────────────────
-function BookingDetail({booking,onEdit,onClose,onCancel,isAdmin,onStatusChange,onPatch,loggedInEmail,allClashes=[],bookers=[],onConvertAdmin}) {
+function BookingDetail({booking,onEdit,onClose,onCancel,isAdmin,onStatusChange,onPatch,loggedInEmail,allClashes=[],bookers=[],onConvertAdmin,allBookings=[],onShareSlot,onMergeSlot,onUnlinkSlot}) {
   const f=FACILITIES.find(x=>x.id===booking.facility_id);
   const m=STATUS_META[booking.status]||STATUS_META.pending;
   const isPast = booking.date < todayKey();
   const isOwn  = booking.email?.toLowerCase() === loggedInEmail?.toLowerCase();
   const isAdminBk = isAdminBooking(booking);
+  const [shareEmail,setShareEmail] = useState("");
+  const [sharePurpose,setSharePurpose] = useState("");
+  const [mergeId,setMergeId] = useState("");
   const [convertEmail,setConvertEmail] = useState("");
   const [convertName,setConvertName]   = useState("");
   const convertValid = /\S+@\S+\.\S+/.test(convertEmail.trim());
@@ -2957,6 +3043,91 @@ function BookingDetail({booking,onEdit,onClose,onCancel,isAdmin,onStatusChange,o
                   <button onClick={()=>{setEditPricing(false);setSplitParts(parseSplit(booking.system_notes)||[{email:primaryEmailLc,weight:1}]);setFnCost((v=>v==null?"":String(v))(parseFunctionCost(booking.system_notes)));}} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#475569",fontSize:12})}>Cancel</button>
                   <button onClick={savePricing} style={S.btn({background:"#7e22ce",color:"#fff",fontSize:12,fontWeight:700})}>Save pricing</button>
                 </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
+      {/* Shared slot — one field/time used by more than one team, held as one booking
+          each so every team sees their own, linked so the slot is billed once. */}
+      {isAdmin&&!isAdminBk&&(onShareSlot||onMergeSlot)&&(()=>{
+        const link = parseSlotLink(booking.system_notes);
+        const members = link ? slotGroupMembers(allBookings, link.id) : [];
+        const shared = members.length > 1;
+        const gtecName = shared ? slotGroupName(members) : "";
+        // Other bookings already sitting on this exact field and time — merge candidates.
+        const sameSlot = allBookings.filter(b =>
+          b.id !== booking.id && !isAdminBooking(b) && b.date === booking.date &&
+          b.facility_id === booking.facility_id && timeOverlaps(b, booking) &&
+          !["cancelled","rejected"].includes(b.status) &&
+          !members.some(m => m.id === b.id));
+        return (
+          <div style={{background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:10,padding:"12px 16px",display:"flex",flexDirection:"column",gap:9}}>
+            <div style={{fontSize:12,fontWeight:700,color:"#0369a1",textTransform:"uppercase",letterSpacing:"0.05em"}}>
+              👥 Shared slot {shared?`— ${members.length} teams`:""}
+            </div>
+            {shared ? (<>
+              <div style={{fontSize:11,color:"#0369a1"}}>
+                This field and time is shared. The slot is billed <strong>once</strong>, split between the teams below — each is invoiced their share.
+              </div>
+              <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                {members.map(m=>{
+                  const ml = parseSlotLink(m.system_notes);
+                  const isThis = m.id === booking.id;
+                  return (
+                    <div key={m.id} style={{display:"flex",alignItems:"center",gap:8,fontSize:12,background:isThis?"#e0f2fe":"#fff",border:"1px solid #bae6fd",borderRadius:6,padding:"5px 9px"}}>
+                      <span style={{fontSize:10,fontWeight:700,color:ml?.role==="parent"?"#7c3aed":ml?.role==="peer"?"#0369a1":"#64748b",background:"#fff",border:"1px solid #e2e8f0",borderRadius:4,padding:"0 5px"}}>
+                        {ml?.role==="parent"?"parent":ml?.role==="peer"?"peer":"child"}
+                      </span>
+                      <span style={{fontWeight:600,color:"#0f172a"}}>{m.name||m.email}</span>
+                      <span style={{color:"#64748b"}}>{m.purpose||""}</span>
+                      <span style={{marginLeft:"auto",fontWeight:700,color:"#0369a1"}}>{Math.round((ml?.share||1)*100)}%</span>
+                      {onUnlinkSlot&&(
+                        <button onClick={()=>{ if(window.confirm(`Remove ${m.name||m.email} from this shared slot?`)) onUnlinkSlot(m); }}
+                          title="Remove this team from the shared slot" style={{border:"none",background:"transparent",color:"#ef4444",cursor:"pointer",fontSize:13,lineHeight:1}}>✕</button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              {gtecName&&(
+                <div style={{fontSize:11,color:"#475569",background:"#fff",border:"1px solid #e2e8f0",borderRadius:6,padding:"5px 9px"}}>
+                  <strong>Name GTEC sees:</strong> {gtecName}
+                  <span style={{color:"#94a3b8"}}> — {members.some(m=>parseSlotLink(m.system_notes)?.role==="parent")?"the parent booking's name, unchanged by the split":"both names, since these were booked separately and merged"}</span>
+                </div>
+              )}
+            </>) : (
+              <div style={{fontSize:11,color:"#0369a1"}}>Add another team to use this same field and time. A booking is created for them and the slot&apos;s cost is split — GTEC keeps seeing this booking&apos;s name.</div>
+            )}
+            {onShareSlot&&(
+              <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+                <select value={shareEmail} onChange={e=>setShareEmail(e.target.value)} style={{...S.inp,fontSize:12,padding:"5px 8px",flex:"1 1 150px"}}>
+                  <option value="">Add a team…</option>
+                  {bookers.filter(bk=>!members.some(m=>(m.email||"").toLowerCase()===bk.email)&&bk.email!==(booking.email||"").toLowerCase())
+                    .map(bk=><option key={bk.email} value={bk.email}>{bk.name}</option>)}
+                </select>
+                <input value={sharePurpose} onChange={e=>setSharePurpose(e.target.value)} placeholder={`Purpose (default: ${booking.purpose||"same"})`}
+                  style={{...S.inp,fontSize:12,padding:"5px 8px",flex:"1 1 150px"}}/>
+                <button disabled={!shareEmail}
+                  onClick={()=>{ onShareSlot(booking,{email:shareEmail,purpose:sharePurpose}); setShareEmail(""); setSharePurpose(""); }}
+                  style={S.btn({background:shareEmail?"#0369a1":"#cbd5e1",color:"#fff",fontSize:12,fontWeight:700,cursor:shareEmail?"pointer":"not-allowed"})}>
+                  ＋ Add team
+                </button>
+              </div>
+            )}
+            {onMergeSlot&&sameSlot.length>0&&(
+              <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center",borderTop:"1px dashed #bae6fd",paddingTop:8}}>
+                <span style={{fontSize:11,color:"#0369a1",fontWeight:600}}>Booked separately?</span>
+                <select value={mergeId} onChange={e=>setMergeId(e.target.value)} style={{...S.inp,fontSize:12,padding:"5px 8px",flex:"1 1 160px"}}>
+                  <option value="">Merge with an existing booking here…</option>
+                  {sameSlot.map(b=><option key={b.id} value={b.id}>{b.name||b.email} — {b.purpose||"(no purpose)"}</option>)}
+                </select>
+                <button disabled={!mergeId}
+                  onClick={()=>{ const other=sameSlot.find(b=>b.id===mergeId); if(other) onMergeSlot(booking,other); setMergeId(""); }}
+                  title="Both bookings become equal partners on this slot, and GTEC sees both names"
+                  style={S.btn({background:mergeId?"#7c3aed":"#cbd5e1",color:"#fff",fontSize:12,fontWeight:700,cursor:mergeId?"pointer":"not-allowed"})}>
+                  🔗 Merge
+                </button>
               </div>
             )}
           </div>
@@ -5782,21 +5953,26 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
   // A booking is "special" (itemised on its own, never merged into shared day/evening
   // rate buckets) when it has a manual price or a partial cost-split share.
   function isSpecialLine(b) {
-    return parseFunctionCost(b.system_notes) != null || b.__splitShare != null;
+    return parseFunctionCost(b.system_notes) != null || b.__splitShare != null
+      || (parseSlotLink(b.system_notes)?.share ?? 1) < 1;
   }
   // One itemised line for a fixed-price and/or cost-split booking, applying the
   // per-booker share carried on b.__splitShare (set when building per-booker scopes).
   function specialLineFor(b) {
+    // Two independent reductions can apply: a shared slot (this team's fraction of a
+    // field used by several teams) and a cost split (co-bookers on one booking).
+    const slotShare = parseSlotLink(b.system_notes)?.share ?? 1;
     const share = b.__splitShare ?? 1;
     const full = fullLineCost(b);
     const fac = FACILITIES.find(f => f.id === b.facility_id);
     const timeStr = `${fmtTime(b.start_hour)}–${fmtTime(b.start_hour + b.duration)}`;
     const fixed = parseFunctionCost(b.system_notes) != null;
-    const shareNote = share < 1 ? ` · shared ${Math.round(share*100)}% of ${fmtCost(full)}` : "";
+    const slotNote = slotShare < 1 ? ` · shared field, ${Math.round(slotShare*100)}% of ${fmtCost(full)}` : "";
+    const shareNote = share < 1 ? ` · split ${Math.round(share*100)}%` : "";
     return {
       desc:   `${fmtDate(b.date)} · ${fac?.name||b.facility_id} · ${timeStr}`,
-      detail: `${b.purpose||""}${fixed?" · fixed price":""}${shareNote}`,
-      cost:   full * share,
+      detail: `${b.purpose||""}${fixed?" · fixed price":""}${slotNote}${shareNote}`,
+      cost:   full * slotShare * share,
     };
   }
   function buildInvoiceLines(bkgs, detail) {
@@ -8966,10 +9142,20 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                           <button onClick={()=>queueAction(b.id,"rejected")} title="Reject"
                             style={S.btn({padding:"3px 7px",fontSize:10,background:queued?.newStatus==="rejected"?"#be123c":"#f43f5e",color:"#fff",outline:queued?.newStatus==="rejected"?"2px solid #be123c":"none"})}>✗</button>
                         </>}
-                        {b.status==="clash"&&!isDeleteQueued&&(
+                        {b.status==="clash"&&!isDeleteQueued&&(<>
                           <button onClick={()=>queueAction(b.id,"approved")} title="Resolve clash — approve booking"
                             style={S.btn({padding:"3px 7px",fontSize:10,background:queued?.newStatus==="approved"?"#15803d":"#22c55e",color:"#fff",outline:queued?.newStatus==="approved"?"2px solid #15803d":"none"})}>✓ Resolve</button>
-                        )}
+                          {/* A clash hides the stage the booking was at, and REVIEW_STATUSES
+                              doesn't contain "clash" — so a booking that clashed while still
+                              awaiting review lost its reject action and could only be approved
+                              or deleted. Offer reject wherever the pre-clash stage was a review
+                              stage, which is the pending-AMUA case. */}
+                          {REVIEW_STATUSES.has(parseClashPrevStatus(b.system_notes)||"pending_amua")&&(
+                            <button onClick={()=>queueAction(b.id,"rejected")}
+                              title={`Reject — clashed while at ${STATUS_META[parseClashPrevStatus(b.system_notes)||"pending_amua"]?.label||"review"}`}
+                              style={S.btn({padding:"3px 7px",fontSize:10,background:queued?.newStatus==="rejected"?"#be123c":"#f43f5e",color:"#fff",outline:queued?.newStatus==="rejected"?"2px solid #be123c":"none"})}>✗</button>
+                          )}
+                        </>)}
                         <button onClick={()=>onEdit(b)} style={S.btn({padding:"3px 7px",fontSize:10,border:"1.5px solid #e2e8f0",background:"#fff",color:"#475569"})}>Edit</button>
                         <button onClick={()=>!isDeleteQueued&&onQueueDelete(b.id)}
                           style={S.btn({padding:"3px 7px",fontSize:10,border:isDeleteQueued?"1.5px solid #dc2626":"1.5px solid #fca5a5",background:isDeleteQueued?"#fee2e2":"#fff",color:isDeleteQueued?"#dc2626":"#f43f5e"})}>🗑</button>
@@ -10290,6 +10476,107 @@ export default function App() {
     return true;
   }
 
+  // Persist a shared-slot group: rewrite every member's link marker with an even share.
+  // Shares are rewritten on every add/remove so they always total 1 — the slot is billed
+  // once between the teams, not once per team.
+  async function writeSlotGroup(members, id, roles) {
+    const shares = evenSlotShares(members.length);
+    const patches = members.map((b,i) => ({
+      id: b.id,
+      system_notes: setSlotLink(b.system_notes, id, roles[i], shares[i]),
+    }));
+    if (configured) {
+      await Promise.all(patches.map(p2 => sb.update("bookings", p2.id,
+        { system_notes: p2.system_notes, updated_at: new Date().toISOString() })));
+    } else {
+      setBookings(prev => prev.map(b => {
+        const p2 = patches.find(x => x.id === b.id);
+        return p2 ? { ...b, system_notes: p2.system_notes } : b;
+      }));
+    }
+  }
+
+  // Retroactively share a slot with another team: adds a second booking on the same
+  // field, date and time owned by that team, linked to this one. The original stays the
+  // parent, so the name GTEC already has for the slot doesn't change.
+  async function handleShareSlot(booking, { email, name, purpose }) {
+    const em = (email||"").trim().toLowerCase();
+    if (!/\S+@\S+\.\S+/.test(em)) { showToast("Pick a team to share this slot with.", "error"); return; }
+    if (em === (booking.email||"").toLowerCase()) { showToast("That team already owns this booking.", "error"); return; }
+    const existing = parseSlotLink(booking.system_notes);
+    const linkId = existing?.id || newSlotRef();
+    const members = existing ? slotGroupMembers(bookings, existing.id) : [booking];
+    if (members.some(b => (b.email||"").toLowerCase() === em)) { showToast("That team is already on this slot.", "error"); return; }
+    const child = {
+      id: newId(),
+      facility_id: booking.facility_id, date: booking.date,
+      start_hour: booking.start_hour, duration: booking.duration,
+      purpose: (purpose||"").trim() || booking.purpose || "",
+      name: name || displayNameFor(em), email: em,
+      status: booking.status,
+      created_at: new Date().toISOString(),
+      // Linked immediately so it is never briefly billed as a full-price slot of its own.
+      system_notes: setSlotLink("", linkId, "child", 1/(members.length+1)),
+    };
+    if (configured) {
+      try { await sb.insert("bookings", { ...child, user_id: userId }); }
+      catch(e) { showToast("Could not add the team: "+e.message, "error"); return; }
+    } else {
+      setBookings(prev => [...prev, child]);
+    }
+    const all = [...members, child];
+    // Whoever was already the parent stays the parent; a first split makes this one it.
+    const roles = all.map((b,i) => {
+      if (b.id === child.id) return "child";
+      const r = parseSlotLink(b.system_notes)?.role;
+      if (r === "parent" || r === "peer") return r;
+      return i === 0 && !members.some(m=>parseSlotLink(m.system_notes)?.role==="parent") ? "parent" : "child";
+    });
+    await writeSlotGroup(all, linkId, roles);
+    if (configured) await loadBookings();
+    logActivity("slot_shared", { booking_id: booking.id, added: em, members: all.length, date: booking.date, facility_id: booking.facility_id });
+    showToast(`Slot shared with ${child.name} — ${all.length} teams, split ${Math.round(100/all.length)}% each.`);
+  }
+
+  // Merge two bookings that were made independently for the same slot. Neither is the
+  // parent, so the GTEC-facing name carries both.
+  async function handleMergeSlots(a, b) {
+    if (!a || !b || a.id === b.id) return;
+    const existing = parseSlotLink(a.system_notes) || parseSlotLink(b.system_notes);
+    const linkId = existing?.id || newSlotRef();
+    const members = [...new Map([
+      ...slotGroupMembers(bookings, parseSlotLink(a.system_notes)?.id),
+      ...slotGroupMembers(bookings, parseSlotLink(b.system_notes)?.id),
+      a, b,
+    ].map(x => [x.id, x])).values()];
+    await writeSlotGroup(members, linkId, members.map(()=> "peer"));
+    if (configured) await loadBookings();
+    logActivity("slot_merged", { ids: members.map(m=>m.id), members: members.length, date: a.date, facility_id: a.facility_id });
+    showToast(`Merged into one shared slot — ${members.length} teams, split ${Math.round(100/members.length)}% each.`);
+  }
+
+  // Remove one booking from a shared slot. The rest re-balance; a lone survivor is
+  // unlinked entirely so it goes back to being billed in full.
+  async function handleUnlinkSlot(booking) {
+    const link = parseSlotLink(booking.system_notes);
+    if (!link) return;
+    const rest = slotGroupMembers(bookings, link.id).filter(b => b.id !== booking.id);
+    const patch = { system_notes: clearSlotLink(booking.system_notes), updated_at: new Date().toISOString() };
+    if (configured) { try { await sb.update("bookings", booking.id, patch); } catch(e){ showToast("Unlink failed: "+e.message,"error"); return; } }
+    else setBookings(prev => prev.map(b => b.id===booking.id ? {...b, ...patch} : b));
+    if (rest.length === 1) {
+      const only = rest[0];
+      const p2 = { system_notes: clearSlotLink(only.system_notes), updated_at: new Date().toISOString() };
+      if (configured) await sb.update("bookings", only.id, p2);
+      else setBookings(prev => prev.map(b => b.id===only.id ? {...b, ...p2} : b));
+    } else if (rest.length > 1) {
+      await writeSlotGroup(rest, link.id, rest.map(b => parseSlotLink(b.system_notes)?.role || "peer"));
+    }
+    if (configured) await loadBookings();
+    logActivity("slot_unlinked", { booking_id: booking.id, remaining: rest.length });
+    showToast(rest.length <= 1 ? "Slot is no longer shared." : `Removed from the shared slot — ${rest.length} teams remain.`);
+  }
+
   function updateFacilityRate(facilityId, type, value) {
     const existing = typeof facilityRates[facilityId] === "object" ? facilityRates[facilityId] : { day: 0, evening: 0 };
     const newRates = { ...facilityRates, [facilityId]: { ...existing, [type]: parseFloat(value) || 0 } };
@@ -11528,6 +11815,7 @@ export default function App() {
             onClose={()=>{setShowForm(false);setEditing(null);}}
             isAdmin={isAdmin}
             loggedInEmail={loggedInEmail}
+            bookers={knownBookers}
           />
         </Modal>
       )}
@@ -11578,7 +11866,7 @@ export default function App() {
 
       {viewing&&(
         <Modal title="Booking Details" onClose={()=>setViewing(null)}>
-          <BookingDetail booking={viewing} onEdit={()=>openEdit(viewing)} onClose={()=>setViewing(null)} onCancel={()=>queueForRemoval(viewing.id)} isAdmin={isAdmin} onStatusChange={status=>handleStatusChange(viewing,status)} onPatch={handlePatchBooking} loggedInEmail={loggedInEmail} allClashes={allClashes} bookers={knownBookers} onConvertAdmin={handleConvertAdminBooking}/>
+          <BookingDetail booking={viewing} onEdit={()=>openEdit(viewing)} onClose={()=>setViewing(null)} onCancel={()=>queueForRemoval(viewing.id)} isAdmin={isAdmin} onStatusChange={status=>handleStatusChange(viewing,status)} onPatch={handlePatchBooking} loggedInEmail={loggedInEmail} allClashes={allClashes} bookers={knownBookers} onConvertAdmin={handleConvertAdminBooking} allBookings={bookings} onShareSlot={handleShareSlot} onMergeSlot={handleMergeSlots} onUnlinkSlot={handleUnlinkSlot}/>
         </Modal>
       )}
 
