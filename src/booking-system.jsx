@@ -9976,17 +9976,14 @@ export default function App() {
       const matchedUserIds = new Set();
       const cpsaNotifications = []; // notify-only cart items for first-time CPSA status changes
 
-      // Build set of canonical keys for this month's feed + a list of time slots
-      // (date/start/duration) used to decide whether a booking still overlaps CPSA.
+      // Canonical key per feed event, used to spot admin blocks the feed no longer has.
       const feedKeys = new Set();
-      const feedSlots = [];
       for (const ev of events) {
         const date = parseCJRDate(ev.EventStartDate);
         if (!date) continue;
-        const { start_hour, duration } = parseCJRDateTime(ev.EventDateTime);
+        const { start_hour } = parseCJRDateTime(ev.EventDateTime);
         const purpose = ev.EventName || "External Booking";
         const facilityIds = mapCJRFacility(purpose, ev);
-        feedSlots.push({ date, start_hour, duration });
         for (const facility_id of facilityIds) {
           feedKeys.add(`${date}|${facility_id}|${start_hour}|${purpose}`);
         }
@@ -10158,21 +10155,25 @@ export default function App() {
       }
       if (configured) await loadBookings();
 
-      // Reset cpsa_confirmed/cpsa_review_needed bookings in this month only when NO
-      // CPSA feed event overlaps them at all — i.e. they are genuinely gone from CPSA.
-      // A booking that still overlaps a feed event keeps its flag even if it wasn't the
-      // top-scored match this run, so legitimate mismatches are never silently wiped.
+      // Clear the CPSA flag on bookings nothing in the feed links to any more. The test
+      // is whether some event would STILL match this booking — not whether one merely
+      // overlaps it in time. That distinction matters: a booking simply outscored by
+      // another this run still matches, so it keeps its flag and a legitimate mismatch is
+      // never silently wiped; but a flag left by a link the matcher no longer makes can
+      // now clear. Under the old overlap test it could not — the event still sat over the
+      // booking in time, so the stale mismatch stuck forever and the booking showed up in
+      // the mismatch panel AND as a clash at the same time.
       const cpsaLinkedUnmatched = currentBookings.filter(b => {
         if (isAdminBooking(b)) return false;
         if (!b.date.startsWith(monthStr) || b.date < syncToday) return false;
         if (b.status !== "cpsa_confirmed" && b.status !== "cpsa_review_needed") return false;
         if (matchedUserIds.has(b.id)) return false;
-        const stillOverlaps = feedSlots.some(s =>
-          s.date === b.date &&
-          b.start_hour < s.start_hour + s.duration &&
-          s.start_hour < b.start_hour + b.duration
-        );
-        return !stillOverlaps;
+        const stillMatchable = events.some(ev2 => {
+          if (parseCJRDate(ev2.EventStartDate) !== b.date) return false;
+          return !!findMatchingUserBooking([b], ev2, mapCJRFacility(ev2.EventName || "", ev2),
+            gtecLinksRef.current, emailAliasesRef.current);
+        });
+        return !stillMatchable;
       });
       for (const cb of cpsaLinkedUnmatched) {
         const strippedSysNotes = stripMismatchNote(cb.system_notes);
