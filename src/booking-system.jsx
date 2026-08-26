@@ -2026,6 +2026,7 @@ function CartModal({ cart, setCart, onClose, onSubmit, openNew, silentMode=false
   const totalStatus = cart.filter(i=>i.statusChange).reduce((s,i)=>s+(i.ids?.length||i.drafts?.length||0),0);
   const totalNotify = cart.filter(i=>i.notifyOnly&&!i.informCpsa&&!i.clashNotify&&!i.invoiceEmail).reduce((s,i)=>s+(i.drafts?.length||0),0);
   const totalInvoice = cart.filter(i=>i.invoiceEmail).reduce((s,i)=>s+(i.count||1),0);
+  const totalSlot    = cart.filter(i=>i.slotChange).length;
   const totalClash  = cart.filter(i=>i.clashNotify).length;
   const totalInform = cart.filter(i=>i.informCpsa).reduce((s,i)=>s+(i.drafts?.length||0),0);
   // Group CPSA status notify-only items by booker email so the cart doesn't explode
@@ -2033,6 +2034,7 @@ function CartModal({ cart, setCart, onClose, onSubmit, openNew, silentMode=false
   // separately below (clash/inform have no drafts to group).
   const notifyByEmail = {};
   cart.forEach((item, gi) => {
+    if (item.slotChange) return;
     if (!item.notifyOnly || item.informCpsa || item.clashNotify || item.invoiceEmail) return;
     const key = item.email;
     if (!notifyByEmail[key]) notifyByEmail[key] = { name: item.name, email: item.email, newStatus: item.newStatus, entries: [] };
@@ -2102,7 +2104,7 @@ function CartModal({ cart, setCart, onClose, onSubmit, openNew, silentMode=false
         : (
           <>
             <div style={{fontSize:13,color:'#64748b',marginBottom:12}}>
-              {[totalNew>0&&`${totalNew} new booking${totalNew>1?'s':''}`, totalEdits>0&&`${totalEdits} edit${totalEdits>1?'s':''}`, totalStatus>0&&`${totalStatus} status change${totalStatus>1?'s':''}`, totalClash>0&&`${totalClash} clash alert${totalClash>1?'s':''}`, totalNotify>0&&`${totalNotify} GTEC notification${totalNotify>1?'s':''}`, totalInform>0&&`${totalInform} Inform-GTEC email${totalInform>1?'s':''}`, totalInvoice>0&&`${totalInvoice} invoice email${totalInvoice>1?'s':''}`].filter(Boolean).join(' · ')} ready to submit.
+              {[totalNew>0&&`${totalNew} new booking${totalNew>1?'s':''}`, totalEdits>0&&`${totalEdits} edit${totalEdits>1?'s':''}`, totalStatus>0&&`${totalStatus} status change${totalStatus>1?'s':''}`, totalClash>0&&`${totalClash} clash alert${totalClash>1?'s':''}`, totalNotify>0&&`${totalNotify} GTEC notification${totalNotify>1?'s':''}`, totalInform>0&&`${totalInform} Inform-GTEC email${totalInform>1?'s':''}`, totalInvoice>0&&`${totalInvoice} invoice email${totalInvoice>1?'s':''}`, totalSlot>0&&`${totalSlot} shared-slot change${totalSlot>1?'s':''}`].filter(Boolean).join(' · ')} ready to submit.
             </div>
             <div style={{flex:1,minHeight:0,overflowY:'auto',display:'flex',flexDirection:'column',gap:10,paddingRight:2}}>
               {/* Regular (non-notify) cart items */}
@@ -2226,6 +2228,27 @@ function CartModal({ cart, setCart, onClose, onSubmit, openNew, silentMode=false
                 );
               })}
 
+              {/* Shared-slot changes — a split creates a booking, a merge or unlink only
+                  relinks existing ones, so the row spells out which. */}
+              {cart.map((item,gi)=>{
+                if(!item.slotChange) return null;
+                const tone = item.kind==="share" ? {bd:"#7dd3fc",bg:"#f0f9ff",fg:"#0369a1",tag:"👥 Share slot"}
+                          : item.kind==="merge" ? {bd:"#ddd6fe",bg:"#f5f3ff",fg:"#6d28d9",tag:"🔗 Merge slot"}
+                          : {bd:"#fecaca",bg:"#fef2f2",fg:"#b91c1c",tag:"✂ Unshare slot"};
+                return (
+                  <div key={'slot-'+gi} style={{border:`1.5px solid ${tone.bd}`,borderRadius:12,overflow:'hidden'}}>
+                    <div style={{background:tone.bg,padding:'10px 14px',display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
+                      <span style={{fontSize:11,fontWeight:700,color:tone.fg,background:'#fff',border:`1px solid ${tone.bd}`,borderRadius:4,padding:'1px 7px'}}>{tone.tag}</span>
+                      <span style={{fontSize:13,fontWeight:600,color:'#0f172a',flex:1}}>{item.label}</span>
+                      <button onClick={()=>removeItem(gi)} title="Remove" style={{background:'none',border:'none',cursor:'pointer',color:'#f43f5e',fontSize:15,padding:'2px 4px',lineHeight:1}}>✕</button>
+                    </div>
+                    <div style={{padding:'8px 14px',fontSize:12,color:'#64748b',background:'#fff'}}>
+                      {item.detail}
+                      {item.newBooking&&<span style={{marginLeft:8,color:'#0369a1',fontWeight:600}}>· creates 1 booking</span>}
+                    </div>
+                  </div>
+                );
+              })}
               {/* Queued invoice emails — the document is already rendered; this is the
                   outbox row for it. */}
               {cart.map((item,gi)=>{
@@ -3068,7 +3091,7 @@ function BookingDetail({booking,onEdit,onClose,onCancel,isAdmin,onStatusChange,o
             </div>
             {shared ? (<>
               <div style={{fontSize:11,color:"#0369a1"}}>
-                This field and time is shared. The slot is billed <strong>once</strong>, split between the teams below — each is invoiced their share.
+                This field and time is shared. The slot is billed <strong>once</strong>, split between the teams below — each is invoiced their share. Changes go to the <strong>cart</strong> and apply when you submit it.
               </div>
               <div style={{display:"flex",flexDirection:"column",gap:4}}>
                 {members.map(m=>{
@@ -3083,8 +3106,8 @@ function BookingDetail({booking,onEdit,onClose,onCancel,isAdmin,onStatusChange,o
                       <span style={{color:"#64748b"}}>{m.purpose||""}</span>
                       <span style={{marginLeft:"auto",fontWeight:700,color:"#0369a1"}}>{Math.round((ml?.share||1)*100)}%</span>
                       {onUnlinkSlot&&(
-                        <button onClick={()=>{ if(window.confirm(`Remove ${m.name||m.email} from this shared slot?`)) onUnlinkSlot(m); }}
-                          title="Remove this team from the shared slot" style={{border:"none",background:"transparent",color:"#ef4444",cursor:"pointer",fontSize:13,lineHeight:1}}>✕</button>
+                        <button onClick={()=>{ if(window.confirm(`Remove ${m.name||m.email} from this shared slot?\n\nAdded to the cart — nothing changes until you submit.`)) onUnlinkSlot(m); }}
+                          title="Remove this team from the shared slot (staged in the cart)" style={{border:"none",background:"transparent",color:"#ef4444",cursor:"pointer",fontSize:13,lineHeight:1}}>✕</button>
                       )}
                     </div>
                   );
@@ -3097,7 +3120,7 @@ function BookingDetail({booking,onEdit,onClose,onCancel,isAdmin,onStatusChange,o
                 </div>
               )}
             </>) : (
-              <div style={{fontSize:11,color:"#0369a1"}}>Add another team to use this same field and time. A booking is created for them and the slot&apos;s cost is split — GTEC keeps seeing this booking&apos;s name.</div>
+              <div style={{fontSize:11,color:"#0369a1"}}>Add another team to use this same field and time. A booking is created for them and the slot&apos;s cost is split — GTEC keeps seeing this booking&apos;s name. Changes go to the <strong>cart</strong> and apply when you submit it.</div>
             )}
             {onShareSlot&&(
               <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
@@ -3111,7 +3134,7 @@ function BookingDetail({booking,onEdit,onClose,onCancel,isAdmin,onStatusChange,o
                 <button disabled={!shareEmail}
                   onClick={()=>{ onShareSlot(booking,{email:shareEmail,purpose:sharePurpose}); setShareEmail(""); setSharePurpose(""); }}
                   style={S.btn({background:shareEmail?"#0369a1":"#cbd5e1",color:"#fff",fontSize:12,fontWeight:700,cursor:shareEmail?"pointer":"not-allowed"})}>
-                  ＋ Add team
+                  🛒 Add team
                 </button>
               </div>
             )}
@@ -3124,7 +3147,7 @@ function BookingDetail({booking,onEdit,onClose,onCancel,isAdmin,onStatusChange,o
                 </select>
                 <button disabled={!mergeId}
                   onClick={()=>{ const other=sameSlot.find(b=>b.id===mergeId); if(other) onMergeSlot(booking,other); setMergeId(""); }}
-                  title="Both bookings become equal partners on this slot, and GTEC sees both names"
+                  title="Both bookings become equal partners on this slot, and GTEC sees both names. Added to the cart — nothing changes until you submit."
                   style={S.btn({background:mergeId?"#7c3aed":"#cbd5e1",color:"#fff",fontSize:12,fontWeight:700,cursor:mergeId?"pointer":"not-allowed"})}>
                   🔗 Merge
                 </button>
@@ -10476,106 +10499,104 @@ export default function App() {
     return true;
   }
 
-  // Persist a shared-slot group: rewrite every member's link marker with an even share.
-  // Shares are rewritten on every add/remove so they always total 1 — the slot is billed
-  // once between the teams, not once per team.
-  async function writeSlotGroup(members, id, roles) {
-    const shares = evenSlotShares(members.length);
-    const patches = members.map((b,i) => ({
-      id: b.id,
-      system_notes: setSlotLink(b.system_notes, id, roles[i], shares[i]),
-    }));
-    if (configured) {
-      await Promise.all(patches.map(p2 => sb.update("bookings", p2.id,
-        { system_notes: p2.system_notes, updated_at: new Date().toISOString() })));
-    } else {
-      setBookings(prev => prev.map(b => {
-        const p2 = patches.find(x => x.id === b.id);
-        return p2 ? { ...b, system_notes: p2.system_notes } : b;
-      }));
-    }
+  // Shared-slot changes are staged in the cart like every other booking change — they
+  // create and edit bookings, so they belong behind the same review-then-submit step
+  // rather than writing straight to the database. Each builder returns the exact patches
+  // (and, for a split, the booking to insert) so the cart row can describe the change and
+  // the submit can apply it without recomputing anything.
+  function slotMemberPatch(b, id, role, share) {
+    return { id: b.id, name: b.name, email: b.email, system_notes: setSlotLink(b.system_notes, id, role, share) };
   }
 
-  // Retroactively share a slot with another team: adds a second booking on the same
-  // field, date and time owned by that team, linked to this one. The original stays the
-  // parent, so the name GTEC already has for the slot doesn't change.
-  async function handleShareSlot(booking, { email, name, purpose }) {
+  // Retroactively share a slot with another team: a second booking on the same field,
+  // date and time owned by that team, linked to this one. The original stays the parent,
+  // so the name GTEC already has for the slot doesn't change.
+  function buildShareSlotChange(booking, { email, name, purpose }) {
     const em = (email||"").trim().toLowerCase();
-    if (!/\S+@\S+\.\S+/.test(em)) { showToast("Pick a team to share this slot with.", "error"); return; }
-    if (em === (booking.email||"").toLowerCase()) { showToast("That team already owns this booking.", "error"); return; }
+    if (!/\S+@\S+\.\S+/.test(em)) return { error: "Pick a team to share this slot with." };
+    if (em === (booking.email||"").toLowerCase()) return { error: "That team already owns this booking." };
     const existing = parseSlotLink(booking.system_notes);
-    const linkId = existing?.id || newSlotRef();
+    const id = existing?.id || newSlotRef();
     const members = existing ? slotGroupMembers(bookings, existing.id) : [booking];
-    if (members.some(b => (b.email||"").toLowerCase() === em)) { showToast("That team is already on this slot.", "error"); return; }
-    const child = {
-      id: newId(),
-      facility_id: booking.facility_id, date: booking.date,
-      start_hour: booking.start_hour, duration: booking.duration,
-      purpose: (purpose||"").trim() || booking.purpose || "",
-      name: name || displayNameFor(em), email: em,
-      status: booking.status,
-      created_at: new Date().toISOString(),
-      // Linked immediately so it is never briefly billed as a full-price slot of its own.
-      system_notes: setSlotLink("", linkId, "child", 1/(members.length+1)),
-    };
-    if (configured) {
-      try { await sb.insert("bookings", { ...child, user_id: userId }); }
-      catch(e) { showToast("Could not add the team: "+e.message, "error"); return; }
-    } else {
-      setBookings(prev => [...prev, child]);
-    }
-    const all = [...members, child];
-    // Whoever was already the parent stays the parent; a first split makes this one it.
-    const roles = all.map((b,i) => {
-      if (b.id === child.id) return "child";
-      const r = parseSlotLink(b.system_notes)?.role;
-      if (r === "parent" || r === "peer") return r;
-      return i === 0 && !members.some(m=>parseSlotLink(m.system_notes)?.role==="parent") ? "parent" : "child";
+    if (members.some(b => (b.email||"").toLowerCase() === em)) return { error: "That team is already on this slot." };
+    const shares = evenSlotShares(members.length + 1);
+    const hasParent = members.some(m => parseSlotLink(m.system_notes)?.role === "parent");
+    const patches = members.map((m, i) => {
+      const role = parseSlotLink(m.system_notes)?.role
+        || (!hasParent && m.id === booking.id ? "parent" : "child");
+      return slotMemberPatch(m, id, role, shares[i]);
     });
-    await writeSlotGroup(all, linkId, roles);
-    if (configured) await loadBookings();
-    logActivity("slot_shared", { booking_id: booking.id, added: em, members: all.length, date: booking.date, facility_id: booking.facility_id });
-    showToast(`Slot shared with ${child.name} — ${all.length} teams, split ${Math.round(100/all.length)}% each.`);
+    const bkName = name || displayNameFor(em);
+    return {
+      kind: "share", id, patches,
+      newBooking: {
+        id: newId(),
+        facility_id: booking.facility_id, date: booking.date,
+        start_hour: booking.start_hour, duration: booking.duration,
+        purpose: (purpose||"").trim() || booking.purpose || "",
+        name: bkName, email: em, status: booking.status,
+        created_at: new Date().toISOString(),
+        system_notes: setSlotLink("", id, "child", shares[shares.length-1]),
+      },
+      label: `Share ${fmtDateShortDow(booking.date)} ${facShort(booking.facility_id)} ${fmtTimeShort(booking.start_hour)} with ${bkName}`,
+      detail: `${members.length + 1} teams · ${Math.round(100/(members.length+1))}% each`,
+      meta: { booking_id: booking.id, added: em, members: members.length + 1, date: booking.date, facility_id: booking.facility_id },
+    };
   }
 
-  // Merge two bookings that were made independently for the same slot. Neither is the
-  // parent, so the GTEC-facing name carries both.
-  async function handleMergeSlots(a, b) {
-    if (!a || !b || a.id === b.id) return;
-    const existing = parseSlotLink(a.system_notes) || parseSlotLink(b.system_notes);
-    const linkId = existing?.id || newSlotRef();
+  // Merge two bookings made independently for the same slot. Neither is the parent, so
+  // the GTEC-facing name carries both.
+  function buildMergeSlotChange(a, b) {
+    if (!a || !b || a.id === b.id) return { error: "Pick a different booking to merge with." };
+    const id = parseSlotLink(a.system_notes)?.id || parseSlotLink(b.system_notes)?.id || newSlotRef();
     const members = [...new Map([
       ...slotGroupMembers(bookings, parseSlotLink(a.system_notes)?.id),
       ...slotGroupMembers(bookings, parseSlotLink(b.system_notes)?.id),
       a, b,
     ].map(x => [x.id, x])).values()];
-    await writeSlotGroup(members, linkId, members.map(()=> "peer"));
-    if (configured) await loadBookings();
-    logActivity("slot_merged", { ids: members.map(m=>m.id), members: members.length, date: a.date, facility_id: a.facility_id });
-    showToast(`Merged into one shared slot — ${members.length} teams, split ${Math.round(100/members.length)}% each.`);
+    const shares = evenSlotShares(members.length);
+    return {
+      kind: "merge", id,
+      patches: members.map((m, i) => slotMemberPatch(m, id, "peer", shares[i])),
+      newBooking: null,
+      label: `Merge ${members.length} bookings into one slot · ${fmtDateShortDow(a.date)} ${facShort(a.facility_id)} ${fmtTimeShort(a.start_hour)}`,
+      detail: `${members.map(m=>m.name||m.email).join(" + ")} · ${Math.round(100/members.length)}% each · GTEC sees both names`,
+      meta: { ids: members.map(m=>m.id), members: members.length, date: a.date, facility_id: a.facility_id },
+    };
   }
 
   // Remove one booking from a shared slot. The rest re-balance; a lone survivor is
   // unlinked entirely so it goes back to being billed in full.
-  async function handleUnlinkSlot(booking) {
+  function buildUnlinkSlotChange(booking) {
     const link = parseSlotLink(booking.system_notes);
-    if (!link) return;
+    if (!link) return { error: "That booking isn't on a shared slot." };
     const rest = slotGroupMembers(bookings, link.id).filter(b => b.id !== booking.id);
-    const patch = { system_notes: clearSlotLink(booking.system_notes), updated_at: new Date().toISOString() };
-    if (configured) { try { await sb.update("bookings", booking.id, patch); } catch(e){ showToast("Unlink failed: "+e.message,"error"); return; } }
-    else setBookings(prev => prev.map(b => b.id===booking.id ? {...b, ...patch} : b));
-    if (rest.length === 1) {
-      const only = rest[0];
-      const p2 = { system_notes: clearSlotLink(only.system_notes), updated_at: new Date().toISOString() };
-      if (configured) await sb.update("bookings", only.id, p2);
-      else setBookings(prev => prev.map(b => b.id===only.id ? {...b, ...p2} : b));
-    } else if (rest.length > 1) {
-      await writeSlotGroup(rest, link.id, rest.map(b => parseSlotLink(b.system_notes)?.role || "peer"));
-    }
-    if (configured) await loadBookings();
-    logActivity("slot_unlinked", { booking_id: booking.id, remaining: rest.length });
-    showToast(rest.length <= 1 ? "Slot is no longer shared." : `Removed from the shared slot — ${rest.length} teams remain.`);
+    const shares = evenSlotShares(rest.length);
+    const patches = [
+      { id: booking.id, name: booking.name, email: booking.email, system_notes: clearSlotLink(booking.system_notes) },
+      ...(rest.length === 1
+        ? [{ id: rest[0].id, name: rest[0].name, email: rest[0].email, system_notes: clearSlotLink(rest[0].system_notes) }]
+        : rest.map((m, i) => slotMemberPatch(m, link.id, parseSlotLink(m.system_notes)?.role || "peer", shares[i]))),
+    ];
+    return {
+      kind: "unlink", id: link.id, patches, newBooking: null,
+      label: `Remove ${booking.name||booking.email} from a shared slot · ${fmtDateShortDow(booking.date)} ${facShort(booking.facility_id)}`,
+      detail: rest.length <= 1 ? "Slot stops being shared — the remaining booking is billed in full"
+                               : `${rest.length} teams remain · ${Math.round(100/rest.length)}% each`,
+      meta: { booking_id: booking.id, remaining: rest.length },
+    };
   }
+
+  // Stage any of the three in the cart.
+  function stageSlotChange(built) {
+    if (!built) return;
+    if (built.error) { showToast(built.error, "error"); return; }
+    setCart(c => [...c, { slotChange: true, ...built, email: built.newBooking?.email, name: built.newBooking?.name }]);
+    showToast(`🛒 ${built.label} — added to cart.`);
+  }
+  const handleShareSlot = (booking, opts) => stageSlotChange(buildShareSlotChange(booking, opts));
+  const handleMergeSlots = (a, b) => stageSlotChange(buildMergeSlotChange(a, b));
+  const handleUnlinkSlot = (booking) => stageSlotChange(buildUnlinkSlotChange(booking));
 
   function updateFacilityRate(facilityId, type, value) {
     const existing = typeof facilityRates[facilityId] === "object" ? facilityRates[facilityId] : { day: 0, evening: 0 };
@@ -11120,15 +11141,40 @@ export default function App() {
     //    then the booker is emailed (sync-style "mutate on submit, then notify").
     //  • save items   — new bookings + edits (notify-only items are never re-saved).
     //  • notify-only  — clash / CPSA / mismatch / inform-CPSA emails (no mutation).
+    //  • slotChange   — shared-slot split / merge / unlink: relinks members and, for a
+    //    split, inserts the new team's booking.
     const statusItems = cart.filter(item => item.statusChange);
-    const saveItems   = cart.filter(item => !item.notifyOnly && !item.statusChange);
+    const saveItems   = cart.filter(item => !item.notifyOnly && !item.statusChange && !item.slotChange);
     const notifyItems = cart.filter(item => item.notifyOnly);
+    const slotItems   = cart.filter(item => item.slotChange);
 
     // 1. New bookings + edits.
     const allDrafts = saveItems.flatMap(item => item.drafts);
     if (allDrafts.length) {
       const name = (saveItems[0]||{}).name, email = (saveItems[0]||{}).email;
       await handleSave(allDrafts, name, email, { skipEmail: true });
+    }
+
+    // 1b. Shared-slot changes: insert the split's new booking, then rewrite every
+    // member's link so the shares total 1 again.
+    for (const it of slotItems) {
+      try {
+        if (it.newBooking) {
+          if (configured) await sb.insert("bookings", { ...it.newBooking, user_id: userId });
+          else setBookings(prev => [...prev, it.newBooking]);
+        }
+        const now = new Date().toISOString();
+        if (configured) {
+          await Promise.all((it.patches||[]).map(p2 =>
+            sb.update("bookings", p2.id, { system_notes: p2.system_notes, updated_at: now })));
+        } else {
+          setBookings(prev => prev.map(b => {
+            const p2 = (it.patches||[]).find(x => x.id === b.id);
+            return p2 ? { ...b, system_notes: p2.system_notes, updated_at: now } : b;
+          }));
+        }
+        logActivity(it.kind === "share" ? "slot_shared" : it.kind === "merge" ? "slot_merged" : "slot_unlinked", it.meta || {});
+      } catch(e) { showToast("Shared-slot change failed: "+e.message, "error"); return; }
     }
 
     // 2. Apply the queued status changes (the whole action was deferred to submit).
