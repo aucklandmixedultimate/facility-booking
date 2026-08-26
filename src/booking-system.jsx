@@ -257,6 +257,13 @@ function fmt24(h) {
 function fmtDateShort(s) {
   const d=new Date(s+"T00:00:00"); return `${d.getDate()} ${d.toLocaleDateString("en-NZ",{month:"short"})}`;
 }
+// "Thu 3 Sep" — fmtDateShort plus the weekday. Its own helper rather than a change to
+// fmtDateShort, which is used in eleven places where the extra word would just add width.
+function fmtDateShortDow(s) {
+  const d = new Date(s+"T00:00:00");
+  if (Number.isNaN(d.getTime())) return s || "";
+  return `${d.toLocaleDateString("en-NZ",{weekday:"short"})} ${d.getDate()} ${d.toLocaleDateString("en-NZ",{month:"short"})}`;
+}
 function fmtDate(s) { return new Date(s+"T00:00:00").toLocaleDateString("en-NZ",{weekday:"short",day:"numeric",month:"short",year:"numeric"}); }
 // Normalise a free-text date (e.g. an extension-written GTEC submission marker that
 // may be in ambiguous US m/d/yyyy form) to the app's unambiguous "5 Jun 2026" style.
@@ -8924,7 +8931,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                     <td style={{padding:"3px 8px",textAlign:"center"}} onClick={e=>e.stopPropagation()}>
                       {isPending&&<input type="checkbox" checked={selected.has(b.id)} onChange={()=>toggleSelect(b.id)} style={{width:13,height:13,accentColor:"#6366f1"}}/>}
                     </td>
-                    <td style={{padding:"3px 6px",whiteSpace:"nowrap",fontSize:11,color:"#475569"}}>{fmtDateShort(b.date)}</td>
+                    <td style={{padding:"3px 6px",whiteSpace:"nowrap",fontSize:11,color:"#475569"}}>{fmtDateShortDow(b.date)}</td>
                     <td style={{padding:"3px 6px"}}>
                       <span onClick={e=>{e.stopPropagation();toggleAdminBooker(adminCanonEmail(b.email));}}
                         style={{display:"inline-block",padding:"2px 8px",borderRadius:10,background:emailColor(b.email),color:"#fff",fontSize:11,fontWeight:600,cursor:"pointer",outline:adminBookerFilter.has(adminCanonEmail(b.email))?"2px solid #0f172a":"none",outlineOffset:1}}>
