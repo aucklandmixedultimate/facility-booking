@@ -7837,7 +7837,12 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
     const primary = (emailAliases[em.toLowerCase()] || em).toLowerCase();
     return aliasNames[primary] || primary.split("@")[0];
   };
-  const [sf,setSf]=useState("all"), [ff,setFf]=useState("all"), [q]=useState("");
+  const [ff,setFf]=useState("all"), [q]=useState("");
+  // Status filter as an EXCLUSION set: empty shows everything, and unticking a status
+  // hides it. The old single-value select could only ever isolate one status, so
+  // "everything except cancelled and rejected" was impossible to express.
+  const [sfHidden,setSfHidden]=useState(()=>new Set());
+  const [sfOpen,setSfOpen]=useState(false);
   // Booker filter (empty Set = all). Shared with the global header pills so that
   // ALL admin content — queue, table, clashes, mismatches, track-changes — filters
   // to the selected booker(s) at once. Falls back to local state if used unwired.
@@ -7985,7 +7990,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
 
   const list=bookings.filter(b=>{
     if(isAdminBooking(b)) return false;
-    if(sf!=="all"&&b.status!==sf) return false;
+    if(sfHidden.has(b.status)) return false;
     if(ff!=="all"&&b.facility_id!==ff) return false;
     if(adminBookerFilter.size>0&&!adminBookerFilter.has(b.email?.toLowerCase())) return false;
     if(adminDateFrom&&b.date<adminDateFrom) return false;
@@ -9197,20 +9202,75 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                     {visibleFacilities().map(f=><option key={f.id} value={f.id}>{facCellLabel(f)}</option>)}
                   </select>
                 </th>
-                <th style={{padding:"3px 4px",width:100}}>
-                  <select value={sf} onChange={e=>setSf(e.target.value)}
-                    style={{padding:"3px 4px",fontSize:10,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",width:"100%"}}>
-                    <option value="all">All</option>
-                    {Object.entries(STATUS_META).filter(([k])=>!["pending","amua_submit"].includes(k)).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
-                  </select>
+                <th style={{padding:"3px 4px",width:100,position:"relative"}}>
+                  {(()=>{
+                    // "pending" and "amua_submit" are legacy aliases of statuses already
+                    // listed, so they are not offered — but they follow whatever their
+                    // modern equivalent is set to, or nothing would ever hide them.
+                    const ALIAS = { pending:"pending_amua", amua_submit:"queued_cpsa" };
+                    const keys = Object.keys(STATUS_META).filter(k=>!ALIAS[k]);
+                    const shown = keys.filter(k=>!sfHidden.has(k));
+                    const label = sfHidden.size===0 ? "All"
+                      : shown.length===0 ? "None"
+                      : shown.length===1 ? (STATUS_META[shown[0]]?.label||"").replace(/^\(\d\/\d\)\s*/,"")
+                      : `${shown.length}/${keys.length}`;
+                    // Hiding a status hides its legacy alias with it.
+                    const withAliases = set => {
+                      const n2 = new Set(set);
+                      Object.entries(ALIAS).forEach(([legacy,modern]) => n2.has(modern) ? n2.add(legacy) : n2.delete(legacy));
+                      return n2;
+                    };
+                    const toggle = k => setSfHidden(prev => {
+                      const n2 = new Set(prev); n2.has(k) ? n2.delete(k) : n2.add(k);
+                      return withAliases(n2);
+                    });
+                    const only = k => setSfHidden(withAliases(new Set(keys.filter(x=>x!==k))));
+                    return (<>
+                      <button onClick={()=>setSfOpen(o2=>!o2)} title="Show or hide statuses"
+                        style={{padding:"3px 4px",fontSize:10,border:`1px solid ${sfHidden.size?"#0f172a":"#cbd5e1"}`,borderRadius:4,
+                          background:sfHidden.size?"#0f172a":"#fff",color:sfHidden.size?"#fff":"#475569",width:"100%",
+                          cursor:"pointer",fontFamily:"inherit",fontWeight:sfHidden.size?700:400,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+                        {label} ▾
+                      </button>
+                      {sfOpen&&(<>
+                        <div onClick={()=>setSfOpen(false)} style={{position:"fixed",inset:0,zIndex:29}}/>
+                        <div style={{position:"absolute",top:"100%",left:0,zIndex:30,background:"#fff",border:"1.5px solid #cbd5e1",
+                          borderRadius:8,boxShadow:"0 8px 24px rgba(0,0,0,0.14)",padding:6,minWidth:210,textAlign:"left"}}>
+                          <div style={{display:"flex",gap:5,marginBottom:5}}>
+                            <button onClick={()=>setSfHidden(new Set())}
+                              style={{flex:1,padding:"3px 6px",fontSize:10,border:"1px solid #e2e8f0",borderRadius:4,background:"#fff",color:"#475569",cursor:"pointer",fontFamily:"inherit"}}>Show all</button>
+                            <button onClick={()=>setSfOpen(false)}
+                              style={{flex:1,padding:"3px 6px",fontSize:10,border:"1px solid #0f172a",borderRadius:4,background:"#0f172a",color:"#fff",cursor:"pointer",fontFamily:"inherit",fontWeight:700}}>Done</button>
+                          </div>
+                          {keys.map(k=>{
+                            const m = STATUS_META[k];
+                            return (
+                              <div key={k} style={{display:"flex",alignItems:"center",gap:6,padding:"2px 3px",fontSize:11}}>
+                                <input type="checkbox" checked={!sfHidden.has(k)} onChange={()=>toggle(k)}
+                                  style={{accentColor:"#0f172a",cursor:"pointer",flexShrink:0}}/>
+                                <span style={{width:8,height:8,borderRadius:"50%",background:m?.dot||"#94a3b8",flexShrink:0}}/>
+                                <span onClick={()=>toggle(k)} style={{cursor:"pointer",color:sfHidden.has(k)?"#94a3b8":"#0f172a",
+                                  textDecoration:sfHidden.has(k)?"line-through":"none",whiteSpace:"nowrap"}}>
+                                  {(m?.label||k).replace(/^\(\d\/\d\)\s*/,"")}
+                                </span>
+                                <button onClick={()=>only(k)} title={`Show only ${(m?.label||k).replace(/^\(\d\/\d\)\s*/,"")}`}
+                                  style={{marginLeft:"auto",padding:"0 5px",fontSize:9,border:"1px solid #e2e8f0",borderRadius:3,
+                                    background:"#f8fafc",color:"#64748b",cursor:"pointer",fontFamily:"inherit"}}>only</button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </>)}
+                    </>);
+                  })()}
                 </th>
                 <th style={{padding:"3px 4px"}}>
                   <input placeholder="Search purpose…" value={adminColPurpose} onChange={e=>setAdminColPurpose(e.target.value)}
                     style={{padding:"3px 6px",fontSize:11,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",width:"100%"}}/>
                 </th>
                 <th style={{padding:"3px 4px"}}>
-                  {(adminBookerFilter.size>0||sf!=="all"||ff!=="all"||adminDateFrom||adminDateTo||adminColPurpose)&&(
-                    <button onClick={()=>{setAdminBookerFilter(new Set());setSf("all");setFf("all");setAdminDateFrom("");setAdminDateTo("");setAdminColPurpose("");}}
+                  {(adminBookerFilter.size>0||sfHidden.size>0||ff!=="all"||adminDateFrom||adminDateTo||adminColPurpose)&&(
+                    <button onClick={()=>{setAdminBookerFilter(new Set());setSfHidden(new Set());setFf("all");setAdminDateFrom("");setAdminDateTo("");setAdminColPurpose("");}}
                       style={{padding:"2px 7px",fontSize:10,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",color:"#64748b",cursor:"pointer",whiteSpace:"nowrap"}}>
                       ✕ Clear
                     </button>
