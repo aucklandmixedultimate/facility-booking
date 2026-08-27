@@ -96,15 +96,31 @@ const sb = {
 };
 
 // ─── Facilities ───────────────────────────────────────────────────────────────
+// site       which ground this belongs to; Cornwall Park is the default and stays implicit
+// adminOnly  hidden from every picker, filter and calendar column for non-admins, so it
+//            can be neither seen nor booked by them. Use for a ground we manage but do
+//            not own — it is not part of the GTEC/CPSA feed, so the sync never touches it
+//            (mapCJRFacility only ever returns f3/f4/f5, and CPSA_FIELD_IDS excludes it).
+// defaultRate  $/hr used for both day and evening until an admin sets a rate explicitly.
 const FACILITIES = [
   { id:"f1", name:"Meeting Room – Ground Floor", capacity:20,  color:"#a78bfa", kind:"social" }, // light purple
   { id:"f2", name:"Function Room – Upstairs",    capacity:100, color:"#7c3aed", kind:"social" }, // deep purple
   { id:"f3", name:"Field #1",                    capacity:50,  color:"#166534", kind:"field"  }, // darkest green
   { id:"f4", name:"Field #2",                    capacity:50,  color:"#22c55e", kind:"field"  }, // mid green
   { id:"f5", name:"Field #3",                    capacity:50,  color:"#86efac", kind:"field"  }, // light green
+  // Grammar TEC (Reihana St) — managed by GTEC but not a CPSA ground, so it is outside
+  // the sync entirely and hidden from bookers until AMUA decides to open it up.
+  { id:"g1", name:"Grammar TEC – Field 1",       capacity:50,  color:"#0891b2", kind:"field",
+    site:"Grammar TEC", adminOnly:true, defaultRate:45 },
 ];
+// Facilities the current viewer may see. Lookups by id are deliberately NOT filtered — a
+// booking on an admin-only facility must still render its name wherever it appears.
+// Mirrored at module level in the same way as the alias/colour maps, so the 13 pickers
+// and calendar columns don't each need the admin flag threaded through them.
+let _isAdminView = false;
+function visibleFacilities() { return FACILITIES.filter(f => !f.adminOnly || _isAdminView); }
 // Light tint of each facility colour for day-view column backgrounds.
-const FACILITY_TINT = { f1:"#f5f3ff", f2:"#ede9fe", f3:"#dcfce7", f4:"#ecfdf5", f5:"#f0fdf4" };
+const FACILITY_TINT = { f1:"#f5f3ff", f2:"#ede9fe", f3:"#dcfce7", f4:"#ecfdf5", f5:"#f0fdf4", g1:"#ecfeff" };
 function isSocialFac(id) { return FACILITIES.find(f=>f.id===id)?.kind==="social"; }
 const EMAIL_COLORS = ["#6366f1","#ec4899","#f59e0b","#10b981","#ef4444","#8b5cf6","#06b6d4","#84cc16","#f97316","#14b8a6","#e879f9","#fb7185","#34d399","#60a5fa","#fbbf24"];
 const _ecc = {}; let _eci = 0;
@@ -1786,7 +1802,7 @@ function InlineDayPicker({ date, bookings, onPick, onConfirm, multi=false }) {
   function geom(e) {
     const r = colsRef.current?.getBoundingClientRect();
     if (!r) return null;
-    const col  = Math.max(0, Math.min(FACILITIES.length-1, Math.floor((e.clientX - r.left) / (r.width / FACILITIES.length))));
+    const col  = Math.max(0, Math.min(visibleFacilities().length-1, Math.floor((e.clientX - r.left) / (r.width / visibleFacilities().length))));
     const slot = Math.max(0, Math.min(Math.floor((e.clientY - r.top - HEAD_H) / SH), CAL_SLOTS-1));
     return { col, slot };
   }
@@ -1842,14 +1858,14 @@ function InlineDayPicker({ date, bookings, onPick, onConfirm, multi=false }) {
           onMouseDown={gridDown} onMouseMove={gridMove} onMouseUp={gridUp} onMouseLeave={()=>setDrag(null)}>
         {span&&(
           <div style={{position:"absolute",zIndex:5,pointerEvents:"none",
-            left:`${span.loC/FACILITIES.length*100}%`, width:`${(span.hiC-span.loC+1)/FACILITIES.length*100}%`,
+            left:`${span.loC/visibleFacilities().length*100}%`, width:`${(span.hiC-span.loC+1)/visibleFacilities().length*100}%`,
             top:HEAD_H+span.loS*SH, height:(span.hiS-span.loS+1)*SH,
             background:"rgba(99,102,241,0.20)",border:"1.5px solid #6366f1",borderRadius:4,
             display:"flex",alignItems:"flex-start",justifyContent:"center",fontSize:8,fontWeight:700,color:"#4338ca",paddingTop:1}}>
             {fmtTime(slotToHour(span.loS))}–{fmtTime(slotToHour(span.hiS+1))}{span.hiC>span.loC?` · ${span.hiC-span.loC+1} fields`:""}
           </div>
         )}
-        {FACILITIES.map(fac=>{
+        {visibleFacilities().map(fac=>{
           const facBkgs = dayBkgs.filter(b=>b.facility_id===fac.id);
           const colTint = FACILITY_TINT[fac.id] || "#fff";
           const isFloodlit = fac.id===FLOODLIT_FIELD_ID;
@@ -1982,7 +1998,7 @@ function SlotRow({ slot, idx, onChange, onRemove, canRemove, allBookings }) {
         <div>
           <label style={S.lbl}>Facility *</label>
           <select style={S.inp} value={slot.facility_id} onChange={e=>upd("facility_id",e.target.value)}>
-            {FACILITIES.map(f=><option key={f.id} value={f.id}>{f.name}</option>)}
+            {visibleFacilities().map(f=><option key={f.id} value={f.id}>{f.name}</option>)}
           </select>
         </div>
         <div>
@@ -2384,7 +2400,7 @@ function InlineDraftEditor({ draft, onSave, onCancel }) {
         <div>
           <label style={S.lbl}>Facility</label>
           <select style={{...S.inp,fontSize:12}} value={facility} onChange={e=>setFacility(e.target.value)}>
-            {FACILITIES.map(f=><option key={f.id} value={f.id}>{f.name}</option>)}
+            {visibleFacilities().map(f=><option key={f.id} value={f.id}>{f.name}</option>)}
           </select>
         </div>
         <div>
@@ -3749,7 +3765,7 @@ function DayTimelinePopup({ date, bookings, onClose, onBookingClick, onNewBookin
             ))}
           </div>
           {/* Facility columns */}
-          {FACILITIES.map(fac=>{
+          {visibleFacilities().map(fac=>{
             const isDragging = dragState?.facility===fac.id;
             const colSel = (isDragging && nd) ? nd : (pendingSel?.facility===fac.id ? pendingSel : null);
             const colTint = FACILITY_TINT[fac.id] || "#fff";
@@ -3906,7 +3922,7 @@ function AboutTab() {
         <h2 style={h2}>Hiring Rates</h2>
         <p style={{margin:"0 0 12px",fontSize:13,color:"#475569"}}>Rates are set per facility and time of day. Contact AMUA for current rates.</p>
         <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
-          {FACILITIES.map(f=>(
+          {visibleFacilities().map(f=>(
             <div key={f.id} style={{display:"flex",alignItems:"center",gap:8,background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:"10px 14px",flex:"1 1 180px"}}>
               <span style={{width:10,height:10,borderRadius:"50%",background:f.color,display:"inline-block",flexShrink:0}}/>
               <span style={{fontWeight:600,fontSize:13,color:"#0f172a"}}>{f.name}</span>
@@ -4041,7 +4057,7 @@ function PatternModal({ email, name, pk, bkgs, isAdmin, canEdit: canEditProp, on
             <div style={{display:"flex",alignItems:"center",gap:5}}>
               <span style={{fontSize:12,color:"#64748b"}}>Facility</span>
               <select value={bulkFac} onChange={e=>setBulkFac(e.target.value)} style={si}>
-                {FACILITIES.map(f=><option key={f.id} value={f.id}>{f.name}</option>)}
+                {visibleFacilities().map(f=><option key={f.id} value={f.id}>{f.name}</option>)}
               </select>
             </div>
           </div>
@@ -5532,10 +5548,14 @@ function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onCreat
 // { id, bookerEmail, facilityId, period:"day"|"evening"|"both",
 //   dayRate, eveningRate, dateFrom, dateTo, locked, source, createdAt }
 function defaultFacRates(facilityRates, facId) {
+  // A facility can carry its own default $/hr (a ground hired at a flat rate); otherwise
+  // the house default applies. Either way an explicit admin-set rate still wins.
+  const own = FACILITIES.find(f => f.id === facId)?.defaultRate;
+  const dflt = own != null ? { day: own, evening: own } : { day: 0, evening: 50 };
   const r = (facilityRates || {})[facId];
-  if (!r) return { day: 0, evening: 50 };
-  if (typeof r === "object") return { day: r.day ?? 0, evening: r.evening ?? 50 };
-  return { day: parseFloat(r) || 0, evening: 50 }; // backward compat (number = day rate)
+  if (!r) return dflt;
+  if (typeof r === "object") return { day: r.day ?? dflt.day, evening: r.evening ?? dflt.evening };
+  return { day: parseFloat(r) || dflt.day, evening: dflt.evening }; // backward compat (number = day rate)
 }
 // A rule targets one or more bookers and facilities. New rules store arrays
 // (bookerEmails/facilityIds); legacy rules and invoice-locked snapshots store the
@@ -5645,7 +5665,7 @@ function PricingConditionsManager({ conditions = [], bookers = [], onAdd, onUpda
           <div>
             <div style={lblBlock}>Facilities <span style={{color:"#94a3b8",fontWeight:500}}>· pick one or more</span></div>
             <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
-              {FACILITIES.map(f=><Fragment key={f.id}>{chip(facSel.includes(f.id),()=>toggle(facSel,setFacSel,f.id),f.name,f.color,"#fff")}</Fragment>)}
+              {visibleFacilities().map(f=><Fragment key={f.id}>{chip(facSel.includes(f.id),()=>toggle(facSel,setFacSel,f.id),f.name,f.color,"#fff")}</Fragment>)}
             </div>
           </div>
           <div style={{display:"flex",flexWrap:"wrap",gap:8,alignItems:"center"}}>
@@ -5974,7 +5994,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
 
   // Per-facility cost (adapts to pricing mode) — always includes ALL facilities
   const byFacility = {};
-  FACILITIES.forEach(fac => { byFacility[fac.id] = { fac, dayHrs: 0, eveningHrs: 0, bkgCount: 0, cost: 0 }; });
+  visibleFacilities().forEach(fac => { byFacility[fac.id] = { fac, dayHrs: 0, eveningHrs: 0, bkgCount: 0, cost: 0 }; });
   active.forEach(b => {
     const fac = FACILITIES.find(x => x.id === b.facility_id);
     if (!fac) return;
@@ -5989,7 +6009,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
     return { fac, dayHrs, eveningHrs, hours: dayHrs + eveningHrs, bkgCount, rates, cost };
   });
   const totalCost = facCosts.reduce((s, c) => s + c.cost, 0);
-  const anyRates  = FACILITIES.some(f => { const r = getFacRates(f.id); return r.day > 0 || r.evening > 0; });
+  const anyRates  = visibleFacilities().some(f => { const r = getFacRates(f.id); return r.day > 0 || r.evening > 0; });
 
   function fmtHrs(h) { return h===0?"0h" : h%1===0?`${h}h`:`${Math.floor(h)}h ${Math.round((h%1)*60)}m`; }
   function getPlayers(email) { return approxPlayers[email.toLowerCase()] || 0; }
@@ -6532,7 +6552,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
             <div style={{ background:"#f8fafc", border:"1.5px solid #e0e7ff", borderRadius:12, padding:14, marginBottom:14 }}>
               <div style={{ fontSize:12, color:"#64748b", marginBottom:10 }}>Day rate = before 5:30 pm · Evening rate = 5:30 pm onwards</div>
               <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))", gap:10 }}>
-                {FACILITIES.map(fac => {
+                {visibleFacilities().map(fac => {
                   const r = typeof facilityRates[fac.id]==="object" ? facilityRates[fac.id] : { day: facilityRates[fac.id]||0, evening: 50 };
                   const day = r.day ?? 0, evening = r.evening ?? 50;
                   const rateRow = (label, color, type, val) => (
@@ -7134,7 +7154,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
                                   {f.field==="day"&&<select value={f.resolvedVal} onChange={e=>setRes(f.field,parseInt(e.target.value))} style={si}>{DAYS.map((d,i)=><option key={i} value={i}>{d}</option>)}</select>}
                                   {f.field==="start_hour"&&<input type="number" min="0" max="23" step="0.5" value={f.resolvedVal} onChange={e=>setRes(f.field,parseFloat(e.target.value)||0)} style={{...si,width:60}}/>}
                                   {f.field==="duration"&&<select value={f.resolvedVal} onChange={e=>setRes(f.field,parseFloat(e.target.value))} style={si}>{DURATIONS.map(d=><option key={d.value} value={d.value}>{d.label}</option>)}</select>}
-                                  {f.field==="facility_id"&&<select value={f.resolvedVal} onChange={e=>setRes(f.field,e.target.value)} style={si}>{FACILITIES.map(f2=><option key={f2.id} value={f2.id}>{f2.name}</option>)}</select>}
+                                  {f.field==="facility_id"&&<select value={f.resolvedVal} onChange={e=>setRes(f.field,e.target.value)} style={si}>{visibleFacilities().map(f2=><option key={f2.id} value={f2.id}>{f2.name}</option>)}</select>}
                                 </span>
                               </div>
                             );
@@ -9121,7 +9141,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                   <select value={ff} onChange={e=>setFf(e.target.value)}
                     style={{padding:"3px 4px",fontSize:10,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",width:"100%"}}>
                     <option value="all">All</option>
-                    {FACILITIES.map(f=><option key={f.id} value={f.id}>{f.name.includes("Field")?f.name.replace("Field ","F"):f.name.split(" ")[0]}</option>)}
+                    {visibleFacilities().map(f=><option key={f.id} value={f.id}>{f.name.includes("Field")?f.name.replace("Field ","F"):f.name.split(" ")[0]}</option>)}
                   </select>
                 </th>
                 <th style={{padding:"3px 4px",width:100}}>
@@ -9706,6 +9726,11 @@ export default function App() {
   const isAdmin = (realIsAdmin && viewAsEmail)
     ? false  // explicit: viewing AS another user means seeing what they see
     : realIsAdmin;
+  // Mirrored so facility pickers and calendar columns can hide admin-only grounds without
+  // the flag being threaded through a dozen components. Assigned in render so it tracks
+  // the latest value — including while an admin is viewing as a booker, where it
+  // correctly hides the ground, matching what that booker would actually see.
+  _isAdminView = isAdmin;
   const userId        = session?.user?.id || null;
   const [bookings, setBookings] =useState([]);
   const [loading,  setLoading]  =useState(true);
@@ -11337,7 +11362,7 @@ export default function App() {
   const FacilityPills=()=>(
     <div style={{display:"flex",gap:6,marginBottom:16,alignItems:"center",overflowX:"auto",WebkitOverflowScrolling:"touch",scrollbarWidth:"none",msOverflowStyle:"none",paddingBottom:2}}>
       <button onClick={()=>setSelFac("all")} style={{padding:"5px 12px",borderRadius:20,border:"1.5px solid",cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",flexShrink:0,borderColor:selFac==="all"?"#0f172a":"#e2e8f0",background:selFac==="all"?"#0f172a":"#fff",color:selFac==="all"?"#fff":"#475569"}}>All</button>
-      {FACILITIES.map(f=>(
+      {visibleFacilities().map(f=>(
         <button key={f.id} onClick={()=>setSelFac(f.id===selFac?"all":f.id)} style={{padding:"5px 12px",borderRadius:20,border:"1.5px solid",cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",display:"inline-flex",alignItems:"center",gap:5,flexShrink:0,borderColor:selFac===f.id?f.color:"#e2e8f0",background:selFac===f.id?f.color:"#fff",color:selFac===f.id?"#fff":"#475569"}}>
           <span style={{width:8,height:8,borderRadius:"50%",background:f.color}}/>{f.name}
         </button>
@@ -11641,7 +11666,7 @@ export default function App() {
                                 <select value={listColFacility} onChange={e=>setListColFacility(e.target.value)}
                                   style={{padding:"3px 4px",fontSize:11,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",width:"100%"}}>
                                   <option value="all">All</option>
-                                  {FACILITIES.map(f=><option key={f.id} value={f.id}>{f.name}</option>)}
+                                  {visibleFacilities().map(f=><option key={f.id} value={f.id}>{f.name}</option>)}
                                 </select>
                               </th>
                               <th style={{padding:"3px 4px"}}>
@@ -11817,7 +11842,7 @@ export default function App() {
         <Modal title="💲 Facility Rates" onClose={()=>setShowRatesModal(false)} width={620}>
           <div style={{fontSize:12,color:"#64748b",marginBottom:12}}>Day rate = before 5:30 pm · Evening rate = 5:30 pm onwards.</div>
           <div style={{display:"flex",flexDirection:"column",gap:8}}>
-            {FACILITIES.map(fac => {
+            {visibleFacilities().map(fac => {
               const r = typeof facilityRates[fac.id]==="object" ? facilityRates[fac.id] : { day: facilityRates[fac.id]||0, evening: 50 };
               return (
                 <div key={fac.id} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,padding:"10px 14px"}}>
