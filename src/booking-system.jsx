@@ -1966,6 +1966,7 @@ function InlineDayPicker({ date, bookings, onPick, onConfirm, multi=false }) {
           ["Purpose", inspect.purpose||"—"],
           ["Booked by", isAdminBooking(inspect) ? "GTEC (external)" : (inspect.name||"—")],
           ...(isAdminBooking(inspect) ? [] : [["Email", inspect.email||"—"]]),
+          ...(inspect.created_at ? [["Created", fmtLoggedAt(inspect.created_at)]] : []),
         ];
         return (
           <div style={{marginTop:8,border:"1.5px solid #e2e8f0",borderRadius:8,background:"#f8fafc",padding:"8px 10px"}}>
@@ -3042,6 +3043,7 @@ function BookingDetail({booking,onEdit,onClose,onCancel,isAdmin,onStatusChange,o
         ["Purpose",booking.purpose],
         ["Booked by",booking.name],
         ["Email",booking.email],
+        booking.created_at&&["Created",fmtLoggedAt(booking.created_at)],
         ].filter(Boolean).map(([label,value])=>(
         <div key={label} style={{display:"flex",gap:12}}>
           <span style={{minWidth:90,fontSize:12,fontWeight:600,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.05em",paddingTop:1}}>{label}</span>
