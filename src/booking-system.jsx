@@ -108,10 +108,14 @@ const FACILITIES = [
   { id:"f3", name:"Field #1",                    capacity:50,  color:"#166534", kind:"field"  }, // darkest green
   { id:"f4", name:"Field #2",                    capacity:50,  color:"#22c55e", kind:"field"  }, // mid green
   { id:"f5", name:"Field #3",                    capacity:50,  color:"#86efac", kind:"field"  }, // light green
-  // Grammar TEC (Reihana St) — managed by GTEC but not a CPSA ground, so it is outside
-  // the sync entirely and hidden from bookers until AMUA decides to open it up.
-  { id:"g1", name:"Grammar TEC – Field 1",       capacity:50,  color:"#0891b2", kind:"field",
-    site:"Grammar TEC", adminOnly:true, defaultRate:45 },
+  // GTEC Orakei (Reihana St) — managed by GTEC but not a CPSA ground, so it sits outside
+  // the sync entirely and is hidden from bookers until AMUA decides to open it up.
+  { id:"g1", name:"GTEC Orakei – Field 1",       capacity:50,  color:"#0e7490", kind:"field",
+    site:"GTEC Orakei", adminOnly:true, defaultRate:45 },   // dark cyan
+  { id:"g2", name:"GTEC Orakei – Field 2",       capacity:50,  color:"#0891b2", kind:"field",
+    site:"GTEC Orakei", adminOnly:true, defaultRate:45 },   // mid cyan
+  { id:"g3", name:"GTEC Orakei – Field 3",       capacity:50,  color:"#22d3ee", kind:"field",
+    site:"GTEC Orakei", adminOnly:true, defaultRate:45 },   // light cyan
 ];
 // Facilities the current viewer may see. Lookups by id are deliberately NOT filtered — a
 // booking on an admin-only facility must still render its name wherever it appears.
@@ -120,7 +124,7 @@ const FACILITIES = [
 let _isAdminView = false;
 function visibleFacilities() { return FACILITIES.filter(f => !f.adminOnly || _isAdminView); }
 // Light tint of each facility colour for day-view column backgrounds.
-const FACILITY_TINT = { f1:"#f5f3ff", f2:"#ede9fe", f3:"#dcfce7", f4:"#ecfdf5", f5:"#f0fdf4", g1:"#ecfeff" };
+const FACILITY_TINT = { f1:"#f5f3ff", f2:"#ede9fe", f3:"#dcfce7", f4:"#ecfdf5", f5:"#f0fdf4", g1:"#cffafe", g2:"#ecfeff", g3:"#f0fdff" };
 function isSocialFac(id) { return FACILITIES.find(f=>f.id===id)?.kind==="social"; }
 const EMAIL_COLORS = ["#6366f1","#ec4899","#f59e0b","#10b981","#ef4444","#8b5cf6","#06b6d4","#84cc16","#f97316","#14b8a6","#e879f9","#fb7185","#34d399","#60a5fa","#fbbf24"];
 const _ecc = {}; let _eci = 0;
@@ -309,8 +313,21 @@ function fmtTimeShort(h) {
   const hh=Math.floor(h), m=Math.round((h%1)*60), dh=hh>12?hh-12:hh===0?12:hh;
   return `${dh}${m?":"+String(m).padStart(2,"0"):""}${hh>=12?"p":"a"}`;
 }
-const FAC_SHORT = { f1:"Mtg", f2:"Fn", f3:"Fld1", f4:"Fld2", f5:"Fld3" };
+const FAC_SHORT = { f1:"Mtg", f2:"Fn", f3:"Fld1", f4:"Fld2", f5:"Fld3", g1:"Ork1", g2:"Ork2", g3:"Ork3" };
 function facShort(id) { return FAC_SHORT[id] || (FACILITIES.find(x=>x.id===id)?.name) || id; }
+// Labels for tight spaces. A facility at a named site uses its short code — spelling out
+// "GTEC Orakei – Field 1" in a 96px calendar column or a table cell doesn't fit — while
+// the unqualified Cornwall Park facilities keep the wording they already had.
+function facColLabel(fac) {
+  if (!fac) return "—";
+  if (fac.site) return facShort(fac.id);
+  return fac.name.includes("Field") ? fac.name.replace("Field ","Fld ") : fac.name.split("–")[0].trim().slice(0,10);
+}
+function facCellLabel(fac) {
+  if (!fac) return "—";
+  if (fac.site) return facShort(fac.id);
+  return fac.name.includes("Field") ? fac.name.replace("Field ","F") : fac.name.split(" ")[0];
+}
 // Global mobile styles
 const MOBILE_STYLE = `
   .modal-backdrop > div { border-radius: 16px 16px 0 0; }
@@ -1875,7 +1892,7 @@ function InlineDayPicker({ date, bookings, onPick, onConfirm, multi=false }) {
             <div key={fac.id} style={{flex:1,minWidth:64}}>
               <div title={isFloodlit?`${fac.name} — only floodlit field; avoid daytime use (book only as a last resort)`:fac.name} style={{height:18,display:"flex",alignItems:"center",justifyContent:"center",gap:3,fontSize:9,fontWeight:700,color:fac.color,background:colTint,borderTopLeftRadius:4,borderTopRightRadius:4,borderBottom:`2px solid ${fac.color}`,overflow:"hidden",whiteSpace:"nowrap"}}>
                 <span style={{width:6,height:6,borderRadius:"50%",background:fac.color,flexShrink:0}}/>
-                {fac.name.includes("Field")?fac.name.replace("Field ","Fld "):fac.name.split("–")[0].trim().slice(0,8)}
+                {facColLabel(fac)}
                 {isFloodlit&&<span title="Only floodlit field — avoid daytime use">💡</span>}
               </div>
               <div style={{position:"relative",cursor:"crosshair",background:colTint,height:CAL_TOTAL*INLINE_HOUR_H,borderLeft:"1px solid #f1f5f9"}}>
@@ -3773,7 +3790,7 @@ function DayTimelinePopup({ date, bookings, onClose, onBookingClick, onNewBookin
               <div key={fac.id} style={{flex:1,minWidth:96}}>
                 <div style={{height:24,boxSizing:"border-box",position:"sticky",top:0,zIndex:5,display:"flex",alignItems:"center",justifyContent:"center",gap:4,fontSize:10,fontWeight:700,color:fac.color,whiteSpace:"nowrap",overflow:"hidden",background:colTint,borderBottom:`2px solid ${fac.color}`}}>
                   <span style={{width:7,height:7,borderRadius:"50%",background:fac.color,flexShrink:0}}/>
-                  {fac.name.includes("Field")?fac.name.replace("Field ","Fld "):fac.name.split("–")[0].trim().slice(0,10)}
+                  {facColLabel(fac)}
                 </div>
                 <div style={{position:"relative",borderLeft:"1px solid #f1f5f9",cursor:isDragging?"ns-resize":"crosshair",background:colTint}}
                   onMouseDown={e=>down(e,fac.id)} onMouseMove={e=>move(e,fac.id)} onMouseUp={e=>up(e,fac.id)}
@@ -6839,7 +6856,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
                                       <td style={{padding:"3px 8px",color:"#475569",whiteSpace:"nowrap"}}>
                                         <span style={{display:"inline-flex",alignItems:"center",gap:4}}>
                                           <span style={{width:6,height:6,borderRadius:"50%",background:fac?.color,display:"inline-block"}}/>
-                                          {fac?(fac.name.includes("Field")?fac.name.replace("Field ","F"):fac.name.split(" ")[0]):"—"}
+                                          {facCellLabel(fac)}
                                         </span>
                                       </td>
                                       <td style={{padding:"3px 8px",color:"#475569",whiteSpace:"nowrap"}}>{fmt24(b.start_hour)}–{fmt24(b.start_hour+b.duration)}</td>
@@ -7343,7 +7360,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
                                   <span key={fid} title={fac?.name||fid}
                                     style={{display:"inline-flex",alignItems:"center",gap:3,padding:"1px 6px",borderRadius:10,background:(fac?.color||"#94a3b8")+"22",color:fac?.color||"#475569",fontSize:10,fontWeight:600,border:`1px solid ${(fac?.color||"#94a3b8")}55`}}>
                                     <span style={{width:5,height:5,borderRadius:"50%",background:fac?.color||"#94a3b8"}}/>
-                                    {fac?(fac.name.includes("Field")?fac.name.replace("Field ","F"):fac.name.split(" ")[0]):fid}
+                                    {facCellLabel(fac)||fid}
                                   </span>
                                 );
                               })}
@@ -9141,7 +9158,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                   <select value={ff} onChange={e=>setFf(e.target.value)}
                     style={{padding:"3px 4px",fontSize:10,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",width:"100%"}}>
                     <option value="all">All</option>
-                    {visibleFacilities().map(f=><option key={f.id} value={f.id}>{f.name.includes("Field")?f.name.replace("Field ","F"):f.name.split(" ")[0]}</option>)}
+                    {visibleFacilities().map(f=><option key={f.id} value={f.id}>{facCellLabel(f)}</option>)}
                   </select>
                 </th>
                 <th style={{padding:"3px 4px",width:100}}>
