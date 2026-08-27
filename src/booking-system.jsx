@@ -3774,22 +3774,32 @@ function DayTimelinePopup({ date, bookings, onClose, onBookingClick, onNewBookin
   const dayFacs   = visibleFacilities();
   const dayColMin = dayFacs.length <= 5 ? 96 : dayFacs.length <= 6 ? 84 : 68;
   const dayModalW = Math.min(1060, 760 + Math.max(0, dayFacs.length - 5) * 70);
-  const dayGridW  = 48 + dayFacs.length * dayColMin;
+  const dayGridW  = 96 + dayFacs.length * dayColMin;   // an hour axis at each edge
+
+  // The hour ruler, repeated on both sides. With eight columns the right-hand ones sit a
+  // long way from a single left-hand ruler, so reading a block's time meant tracking back
+  // across the whole grid. Rendered from one function rather than duplicated markup, so
+  // the two can't drift apart. Both stay stuck to their own edge if the grid does scroll.
+  const hourAxis = side => (
+    <div style={{width:48,flexShrink:0,boxSizing:"border-box",position:"sticky",[side]:0,zIndex:6,background:"#fff",
+      ...(side==="right" ? {borderLeft:"1px solid #f1f5f9"} : {})}}>
+      <div style={{height:24,position:"sticky",top:0,zIndex:7,background:"#fff"}}/>
+      {Array.from({length:CAL_TOTAL+1},(_,i)=>CAL_START+i).map(h=>(
+        <div key={h} style={{height:HOUR_H,boxSizing:"border-box",display:"flex",alignItems:"flex-start",
+          justifyContent:side==="right"?"flex-start":"flex-end",
+          paddingLeft:side==="right"?6:0,paddingRight:side==="right"?0:6,paddingTop:3}}>
+          <span style={{fontSize:10,color:"#94a3b8",whiteSpace:"nowrap"}}>{fmtTime(h)}</span>
+        </div>
+      ))}
+    </div>
+  );
 
   return (
     <Modal title={`📅 ${dObj.toLocaleDateString("en-NZ",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}`} onClose={onClose} width={dayModalW}>
       <div style={{fontSize:12,color:"#94a3b8",marginBottom:8}}>Click a booking — or its <strong>⤢</strong> handle — to view it · click or drag an empty area to select a time, then press Create booking.</div>
       <div ref={scrollRef} style={{overflow:"auto",maxHeight:"60vh"}}>
         <div style={{display:"flex",minWidth:dayGridW}}>
-          {/* Hour labels (sticky on horizontal scroll) */}
-          <div style={{width:48,flexShrink:0,position:"sticky",left:0,zIndex:6,background:"#fff"}}>
-            <div style={{height:24,position:"sticky",top:0,zIndex:7,background:"#fff"}}/>
-            {Array.from({length:CAL_TOTAL+1},(_,i)=>CAL_START+i).map(h=>(
-              <div key={h} style={{height:HOUR_H,boxSizing:"border-box",display:"flex",alignItems:"flex-start",justifyContent:"flex-end",paddingRight:6,paddingTop:3}}>
-                <span style={{fontSize:10,color:"#94a3b8",whiteSpace:"nowrap"}}>{fmtTime(h)}</span>
-              </div>
-            ))}
-          </div>
+          {hourAxis("left")}
           {/* Facility columns */}
           {visibleFacilities().map(fac=>{
             const isDragging = dragState?.facility===fac.id;
@@ -3853,6 +3863,7 @@ function DayTimelinePopup({ date, bookings, onClose, onBookingClick, onNewBookin
               </div>
             );
           })}
+          {hourAxis("right")}
         </div>
       </div>
       {pendingSel && (() => {
