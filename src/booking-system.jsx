@@ -3767,11 +3767,20 @@ function DayTimelinePopup({ date, bookings, onClose, onBookingClick, onNewBookin
 
   const nd = norm(dragState);
 
+  // Every column should fit without sideways scrolling. An admin now sees eight
+  // facilities across two grounds where there were five, which overflowed a 760px modal
+  // at the old 96px minimum. Widen the dialog as columns are added and narrow the columns
+  // themselves once there are more than six, so the whole day stays visible at a glance.
+  const dayFacs   = visibleFacilities();
+  const dayColMin = dayFacs.length <= 5 ? 96 : dayFacs.length <= 6 ? 84 : 68;
+  const dayModalW = Math.min(1060, 760 + Math.max(0, dayFacs.length - 5) * 70);
+  const dayGridW  = 48 + dayFacs.length * dayColMin;
+
   return (
-    <Modal title={`📅 ${dObj.toLocaleDateString("en-NZ",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}`} onClose={onClose} width={760}>
+    <Modal title={`📅 ${dObj.toLocaleDateString("en-NZ",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}`} onClose={onClose} width={dayModalW}>
       <div style={{fontSize:12,color:"#94a3b8",marginBottom:8}}>Click a booking — or its <strong>⤢</strong> handle — to view it · click or drag an empty area to select a time, then press Create booking.</div>
       <div ref={scrollRef} style={{overflow:"auto",maxHeight:"60vh"}}>
-        <div style={{display:"flex",minWidth:560}}>
+        <div style={{display:"flex",minWidth:dayGridW}}>
           {/* Hour labels (sticky on horizontal scroll) */}
           <div style={{width:48,flexShrink:0,position:"sticky",left:0,zIndex:6,background:"#fff"}}>
             <div style={{height:24,position:"sticky",top:0,zIndex:7,background:"#fff"}}/>
@@ -3787,7 +3796,7 @@ function DayTimelinePopup({ date, bookings, onClose, onBookingClick, onNewBookin
             const colSel = (isDragging && nd) ? nd : (pendingSel?.facility===fac.id ? pendingSel : null);
             const colTint = FACILITY_TINT[fac.id] || "#fff";
             return (
-              <div key={fac.id} style={{flex:1,minWidth:96}}>
+              <div key={fac.id} style={{flex:1,minWidth:dayColMin}}>
                 <div style={{height:24,boxSizing:"border-box",position:"sticky",top:0,zIndex:5,display:"flex",alignItems:"center",justifyContent:"center",gap:4,fontSize:10,fontWeight:700,color:fac.color,whiteSpace:"nowrap",overflow:"hidden",background:colTint,borderBottom:`2px solid ${fac.color}`}}>
                   <span style={{width:7,height:7,borderRadius:"50%",background:fac.color,flexShrink:0}}/>
                   {facColLabel(fac)}
