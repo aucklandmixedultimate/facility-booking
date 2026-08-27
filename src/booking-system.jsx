@@ -315,6 +315,10 @@ function fmtTimeShort(h) {
 }
 const FAC_SHORT = { f1:"Mtg", f2:"Fn", f3:"Fld1", f4:"Fld2", f5:"Fld3", g1:"Ork1", g2:"Ork2", g3:"Ork3" };
 function facShort(id) { return FAC_SHORT[id] || (FACILITIES.find(x=>x.id===id)?.name) || id; }
+// Which ground a facility belongs to. Cornwall Park facilities carry no `site`, so they
+// share the empty default and still compare equal to each other.
+function facSite(id) { return FACILITIES.find(f => f.id === id)?.site || ""; }
+function sameSite(a, b) { return facSite(a) === facSite(b); }
 // Labels for tight spaces. A facility at a named site uses its short code — spelling out
 // "GTEC Orakei – Field 1" in a 96px calendar column or a table cell doesn't fit — while
 // the unqualified Cornwall Park facilities keep the wording they already had.
@@ -790,7 +794,12 @@ function getSameFacilityOverlaps(draft, others) {
   return others.filter(o => o.facility_id === draft.facility_id && timeOverlaps(draft, o));
 }
 function getCrossFacilityOverlaps(draft, others) {
-  return others.filter(o => o.facility_id !== draft.facility_id && timeOverlaps(draft, o));
+  // Same ground only. This warning says "other parts of this venue are also in use", so a
+  // booking at GTEC Orakei tells you nothing about Cornwall Park being busy — listing it
+  // was pure noise, and worse on a repeating booking where it multiplied across dates.
+  return others.filter(o => o.facility_id !== draft.facility_id
+    && sameSite(o.facility_id, draft.facility_id)
+    && timeOverlaps(draft, o));
 }
 function getClashes(allBookings) {
   // Returns pairs: admin booking overlapping a non-admin booking on same facility (future dates only)
@@ -1779,12 +1788,19 @@ function OverlapWarning({title,description,bookings:bkgs,onProceed,onCancel}) {
         <div><div style={{fontWeight:700,fontSize:15,color:"#92400e",marginBottom:6}}>{title}</div>
           <div style={{fontSize:13,color:"#78350f",lineHeight:1.6}}>{description}</div></div>
       </div>
+      {/* Chronological, and each row carries its date: a repeating request overlaps on
+          several different days, and without the date the list read as one undated blur. */}
       <div style={{display:"flex",flexDirection:"column",gap:8}}>
-        {bkgs.map(b=>{const f=FACILITIES.find(x=>x.id===b.facility_id);return(
+        {[...bkgs].sort((a,b)=>(a.date||"").localeCompare(b.date||"")||a.start_hour-b.start_hour).map(b=>{
+          const f=FACILITIES.find(x=>x.id===b.facility_id);return(
           <div key={b.id} style={{display:"flex",gap:10,alignItems:"center",padding:"10px 14px",background:"#f8fafc",borderRadius:8,border:"1px solid #e2e8f0"}}>
             <span style={{width:10,height:10,borderRadius:"50%",background:f?.color,flexShrink:0,display:"inline-block"}}/>
-            <div style={{flex:1}}><div style={{fontSize:13,fontWeight:700,color:"#0f172a"}}>{f?.name}</div>
-              <div style={{fontSize:12,color:"#64748b"}}>{b.purpose} · {fmtTime(b.start_hour)}–{fmtTime(b.start_hour+b.duration)} · {b.name}</div></div>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:13,fontWeight:700,color:"#0f172a"}}>
+                {b.date?fmtDateShortDow(b.date):""}{b.date?" · ":""}{f?.name}
+              </div>
+              <div style={{fontSize:12,color:"#64748b"}}>{b.purpose} · {fmtTime(b.start_hour)}–{fmtTime(b.start_hour+b.duration)} · {b.name}</div>
+            </div>
             <Badge status={b.status}/>
           </div>
         );})}
