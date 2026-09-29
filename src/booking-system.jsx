@@ -826,7 +826,26 @@ function getClashes(allBookings) {
 // EmailJS credentials ship in the browser bundle. The function authenticates the
 // caller's Supabase session (JWT) and holds the EmailJS keys as Supabase secrets.
 // If the function isn't reachable/deployed, sending is skipped (never throws).
-async function sendEmail({ to, subject, html, kind = "order", cc }) {
+// The EmailJS template inserts the subject with {{subject}}, which HTML-escapes it, so
+// characters like / & ' arrive as codes ("(2&#x2F;4) Queued for GTEC"). Drop the
+// "(2/4)" pipeline-step prefix from status labels and swap the rest for characters that
+// survive escaping.
+function cleanEmailSubject(subject) {
+  return String(subject || "")
+    .replace(/\(\d+\s*\/\s*\d+\)\s*/g, "")
+    .replace(/\s*\/\s*/g, " - ")
+    .replace(/&/g, "and")
+    .replace(/'/g, "’")
+    .replace(/"/g, "”")
+    .replace(/`/g, "’")
+    .replace(/=/g, "-")
+    .replace(/[<>]/g, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+async function sendEmail({ to, subject: rawSubject, html, kind = "order", cc }) {
+  const subject = cleanEmailSubject(rawSubject);
   if (!supabase || !_accessToken) {
     console.warn("Email skipped: no Supabase session for", to);
     logActivity("email_failed", { to, subject, error: "no_session" });
@@ -10785,7 +10804,8 @@ export default function App() {
   function handleQueueInvoiceEmails(items, { preview = false } = {}) {
     if (!items?.length) return false;
     setCart(c => [...c, ...items.map(it => ({
-      notifyOnly: true, invoiceEmail: true, preview,
+      // drafts is empty (not missing) so cart code that walks every item's drafts is safe.
+      notifyOnly: true, invoiceEmail: true, preview, drafts: [],
       email: it.to, name: it.name, subject: it.subject, html: it.html,
       count: it.count, refs: it.refs, total: it.total,
     }))]);
@@ -11661,7 +11681,7 @@ export default function App() {
               {cart.length>0&&(
                 <button onClick={()=>setShowCart(true)} style={S.btn({background:"#f59e0b",color:"#fff",display:"flex",alignItems:"center",gap:4,padding:"7px 10px"})}>
                   🛒{!isMobile&&" Cart"}
-                  <span style={{background:"#fff",color:"#92400e",borderRadius:999,fontSize:11,fontWeight:800,padding:"1px 6px",minWidth:18,textAlign:"center"}}>{cart.reduce((s,i)=>s+i.drafts.length,0)}</span>
+                  <span style={{background:"#fff",color:"#92400e",borderRadius:999,fontSize:11,fontWeight:800,padding:"1px 6px",minWidth:18,textAlign:"center"}}>{cart.reduce((s,i)=>s+(i.invoiceEmail?(i.count||1):(i.drafts?.length||0)),0)}</span>
                 </button>
               )}
               {deleteQueue.length>0&&(
