@@ -4615,10 +4615,12 @@ function renderInvoiceDocHtml({
           : `<td style="${tdAmt};color:#475569">${invLineRate(l)}</td><td style="${tdAmt};color:#475569">${invLineDuration(l)}</td>`}
         ${money(l.cost || 0)}
       </tr>`).join("");
+    // Footnotes wrap rather than clip: a nowrap line here would set the table's minimum
+    // width and push Rate/Duration/Amount off the sheet.
     const shared = pageLines.filter(l => l.sharedNote);
     const footnotes = shared.length ? `
       <tr><td colspan="5" style="padding:6px 28px 2px;font-size:10px;line-height:14px;color:#64748b">
-        ${shared.map(l => `<div style="${clip};max-width:664px">* ${l.date ? `${fmtDateShortDow(l.date)} — ` : ""}${l.sharedNote} · ${l.desc || l.description || l.label || ""}</div>`).join("")}
+        ${shared.map(l => `<div>* ${l.date ? `${fmtDateShortDow(l.date)} — ` : ""}${l.sharedNote} · ${l.desc || l.description || l.label || ""}</div>`).join("")}
       </td></tr>` : "";
 
     // Per-sheet figures cover only the rows printed above them. The whole-invoice figure
