@@ -4520,6 +4520,8 @@ const PIPELINE_KEYS = PIPELINE_STATES.map(s=>s.key);
 const INV_ROWS_PAGE_1 = 28, INV_ROWS_PAGE_N = 34, INV_ROWS_FOR_TOTALS = 2;
 // A page-1 banner (receipt "PAID", preview notice) costs roughly this many rows of height.
 const INV_ROWS_PER_BANNER = 2;
+// Widest a line description may grow before it is cut off itself (sheet is 720px wide).
+const INV_DESC_MAX_PX = 440;
 
 function paginateInvoiceLines(lines, { bannerRows = 0 } = {}) {
   if (!lines.length) return [[]];
@@ -4547,10 +4549,14 @@ function renderInvoiceDocHtml({
   // block carries only print rules (page size, sheet breaks), which email ignores.
   // Rows are a fixed height and clipped to one line, so the per-sheet row counts hold
   // instead of breaking on one long description.
-  const cellBase = "box-sizing:border-box;padding:3px 28px;border-bottom:1px solid #f1f5f9;font-size:11.5px;line-height:16px;height:22px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
+  // Columns size automatically: Description keeps at least its 42% share and widens for
+  // longer text (up to a cap), while Detail has max-width:0 so it takes only the room
+  // left over and is the column that gets cut off.
+  const clip = "white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
+  const cellBase = `box-sizing:border-box;padding:3px 28px;border-bottom:1px solid #f1f5f9;font-size:11.5px;line-height:16px;height:22px;${clip}`;
   const tdAmt = `${cellBase};text-align:right;color:#0f172a`;
   const tdLbl = `${cellBase};text-align:right;color:#64748b`;
-  const th    = "padding:4px 28px;text-align:left;font-size:9px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;background:#f8fafc;border-bottom:1.5px solid #e2e8f0";
+  const th    = "padding:4px 28px;white-space:nowrap;text-align:left;font-size:9px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;background:#f8fafc;border-bottom:1.5px solid #e2e8f0";
   const cap   = "font-size:9px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em";
   const money = (v, extra = "") => `<td style="${tdAmt}${extra}">${fmtCost(v)}</td>`;
   const amuaLines = [AMUA_INFO.address, AMUA_INFO.gstNumber ? `GST No: ${AMUA_INFO.gstNumber}` : "", AMUA_INFO.bank]
@@ -4578,9 +4584,9 @@ function renderInvoiceDocHtml({
 
     const rows = pageLines.map(l => `
       <tr>
-        <td style="${cellBase};width:42%;color:#0f172a">${l.desc || l.description || l.label || "—"}</td>
-        <td style="${cellBase};width:38%;color:#64748b;font-size:10.5px">${l.detail || ""}</td>
-        ${money(l.cost || 0, ";width:20%")}
+        <td style="${cellBase};color:#0f172a"><div style="${clip};max-width:${INV_DESC_MAX_PX}px">${l.desc || l.description || l.label || "—"}</div></td>
+        <td style="${cellBase};max-width:0;color:#64748b;font-size:10.5px">${l.detail || ""}</td>
+        ${money(l.cost || 0)}
       </tr>`).join("");
 
     // Per-sheet figures cover only the rows printed above them. The whole-invoice figure
@@ -4629,10 +4635,10 @@ function renderInvoiceDocHtml({
 
     return `<section class="sheet" style="background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);margin:0 auto 20px;max-width:720px">
       ${head}
-      <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;table-layout:fixed">
+      <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse">
         <thead><tr>
           <th style="${th};width:42%">Description</th>
-          <th style="${th};width:38%">Detail</th>
+          <th style="${th}">Detail</th>
           <th style="${th};width:20%;text-align:right">Amount</th>
         </tr></thead>
         <tbody>
