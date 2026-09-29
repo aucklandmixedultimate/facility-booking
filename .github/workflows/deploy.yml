@@ -60,3 +60,7 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./dist
+          # Keep earlier deploys' hashed assets. GitHub Pages lets browsers cache
+          # index.html for ~10 minutes, so a cached page can still request the previous
+          # bundle; deleting it leaves a blank page until the cache expires.
+          keep_files: true
