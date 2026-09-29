@@ -4622,10 +4622,18 @@ function renderInvoiceDocHtml({
   // Rate, Duration and Amount are sized to their content and never cut off; Description
   // has max-width:0 so it takes whatever room is left and is the column that truncates.
   const clip = "white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
-  const cellBase = `box-sizing:border-box;padding:3px 8px;border-bottom:1px solid #f1f5f9;font-size:11.5px;line-height:16px;height:22px;${clip}`;
+  // Emailed copies (paginate=false) have no sheets to fit, so rows may wrap and cells carry
+  // only padding and a rule, inheriting type from the table. That keeps each row ~1/3 the
+  // size: the email service rejects messages over 50KB.
+  const compact = !paginate;
+  const cellBase = compact
+    ? "padding:3px 8px;border-bottom:1px solid #f1f5f9"
+    : `box-sizing:border-box;padding:3px 8px;border-bottom:1px solid #f1f5f9;font-size:11.5px;line-height:16px;height:22px;${clip}`;
   const edgeL = ";padding-left:28px", edgeR = ";padding-right:28px";
-  const tdAmt = `${cellBase};text-align:right;color:#0f172a`;
-  const tdLbl = `${cellBase};text-align:right;color:#64748b`;
+  const tdAmt = compact ? `${cellBase};text-align:right;white-space:nowrap` : `${cellBase};text-align:right;color:#0f172a`;
+  const tdLbl = `${tdAmt};color:#64748b`;
+  const tdDate = compact ? `${cellBase}${edgeL};white-space:nowrap` : `${cellBase}${edgeL};color:#0f172a`;
+  const tdDesc = compact ? cellBase : `${cellBase};width:100%;max-width:0;color:#0f172a`;
   const th    = "padding:4px 8px;white-space:nowrap;text-align:left;font-size:9px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;background:#f8fafc;border-bottom:1.5px solid #e2e8f0";
   const cap   = "font-size:9px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em";
   const money = (v, extra = "") => `<td style="${tdAmt}${edgeR}${extra}">${fmtCost(v)}</td>`;
@@ -4656,8 +4664,8 @@ function renderInvoiceDocHtml({
     // Records saved before lines carried rate/hours fall back to their free-text detail.
     const rows = pageLines.map(l => `
       <tr>
-        <td style="${cellBase}${edgeL};color:#0f172a">${l.date ? fmtDateShortDow(l.date) : ""}</td>
-        <td style="${cellBase};width:100%;max-width:0;color:#0f172a">${l.desc || l.description || l.label || "—"}</td>
+        <td style="${tdDate}">${l.date ? fmtDateShortDow(l.date) : ""}</td>
+        <td style="${tdDesc}">${l.desc || l.description || l.label || "—"}</td>
         ${l.hours == null && l.rate == null && !l.fixedPrice && l.detail
           ? `<td colspan="2" style="${cellBase};color:#64748b;font-size:10.5px"><div style="${clip};max-width:200px">${l.detail}</div></td>`
           : `<td style="${tdAmt};color:#475569">${invLineRate(l)}</td><td style="${tdAmt};color:#475569">${invLineDuration(l)}</td>`}
@@ -4717,7 +4725,7 @@ function renderInvoiceDocHtml({
 
     return `<section class="sheet" style="background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);margin:0 auto 20px;max-width:720px">
       ${head}
-      <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse">
+      <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:11.5px;line-height:16px;color:#0f172a">
         <thead><tr>
           <th style="${th}${edgeL}">Date</th>
           <th style="${th}">Description</th>
@@ -4796,6 +4804,11 @@ function buildBillingDocHtml(rec, docType, lines) {
 // has three invoices outstanding gets one email listing all three, not three emails.
 // Each document keeps its own letterhead, reference and totals; a summary card up top
 // reconciles them. Documents are unpaginated here: email has no pages.
+// The email service (EmailJS) rejects a message whose variables exceed 50KB. Bundles are
+// kept under this, leaving room for the subject and addresses.
+const INV_EMAIL_MAX_BYTES = 45 * 1024;
+const htmlBytes = html => new TextEncoder().encode(html).length;
+
 function buildInvoiceBundleHtml({ recipientName, recipientEmail, docs, note = "", preview = false }) {
   const combined = docs.reduce((s, d) => s + (d.rec.total || 0), 0);
   const summaryRows = docs.map(d => {
@@ -4810,6 +4823,7 @@ function buildInvoiceBundleHtml({ recipientName, recipientEmail, docs, note = ""
   const body = docs.map(d => renderInvoiceDocHtml({
     ...billingDocFields(d.rec, d.docType, d.lines), paginate: false, fragment: true, previewNotice: preview,
   })).join("");
+  // Indentation is stripped: emails are size-limited (see INV_EMAIL_MAX_BYTES).
   return `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>${docs.length} document${docs.length!==1?"s":""} for ${recipientName||recipientEmail}</title><style>
     @page { size:A4; margin:12mm }
     body{font-family:'Segoe UI',Arial,sans-serif;background:#f1f5f9;margin:0;padding:24px 12px;color:#0f172a}
@@ -4845,7 +4859,7 @@ function buildInvoiceBundleHtml({ recipientName, recipientEmail, docs, note = ""
       </div>
     </div>
     ${body}
-  </body></html>`;
+  </body></html>`.replace(/\n\s+/g, "\n");
 }
 
 // Drive file/folder naming for billing documents. Names are deterministic so
@@ -5497,24 +5511,36 @@ function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onCreat
           </label>
         );
 
+        function buildItem(recs, detail, extraNote = "") {
+          const n = recs.length;
+          const name = displayName(recs[0].bookerEmail);
+          return {
+            to: recs[0].bookerEmail, name, count: n,
+            total: recs.reduce((s,r)=>s+(r.total||0),0),
+            refs: recs.map(r=>r.id),
+            subject: preview
+              ? (n===1 ? `Draft invoice ${recs[0].id} for review — ${AMUA_INFO.name}` : `Draft invoices for review — ${AMUA_INFO.name}`)
+              : (n===1 ? `Invoice ${recs[0].id} from ${AMUA_INFO.name}` : `${n} invoices from ${AMUA_INFO.name}`),
+            html: buildInvoiceBundleHtml({
+              recipientName: name, recipientEmail: recs[0].bookerEmail,
+              note: [emailNote.trim(), extraNote].filter(Boolean).join("\n\n"), preview,
+              docs: recs.map(r => ({ rec:r, docType:"invoice",
+                lines: detail==="individual" ? (r.individualLines||r.lines||[]) : (r.lines||[]) })),
+            }),
+          };
+        }
+        // One email per booker when it fits the email size limit. Otherwise each invoice
+        // goes separately, and an itemised invoice that still doesn't fit is sent as its
+        // summary version instead.
         function buildItems() {
-          return outgoing.map(recs => {
-              const n = recs.length;
-              const name = displayName(recs[0].bookerEmail);
-              return {
-                to: recs[0].bookerEmail, name, count: n,
-                total: recs.reduce((s,r)=>s+(r.total||0),0),
-                refs: recs.map(r=>r.id),
-                subject: preview
-                  ? (n===1 ? `Draft invoice ${recs[0].id} for review — ${AMUA_INFO.name}` : `Draft invoices for review — ${AMUA_INFO.name}`)
-                  : (n===1 ? `Invoice ${recs[0].id} from ${AMUA_INFO.name}` : `${n} invoices from ${AMUA_INFO.name}`),
-                html: buildInvoiceBundleHtml({
-                  recipientName: name, recipientEmail: recs[0].bookerEmail,
-                  note: emailNote.trim(), preview,
-                  docs: recs.map(r => ({ rec:r, docType:"invoice",
-                    lines: emailExportMode==="individual" ? (r.individualLines||r.lines||[]) : (r.lines||[]) })),
-                }),
-              };
+          return outgoing.flatMap(recs => {
+            const all = buildItem(recs, emailExportMode);
+            if (htmlBytes(all.html) <= INV_EMAIL_MAX_BYTES || recs.length === 1 && emailExportMode !== "individual") return [all];
+            return recs.map(r => {
+              const one = buildItem([r], emailExportMode);
+              if (htmlBytes(one.html) <= INV_EMAIL_MAX_BYTES || emailExportMode !== "individual") return one;
+              return buildItem([r], "grouped", "This invoice has too many lines to itemise by email, so it is shown as a summary. Reply to this email if you would like the itemised copy.");
+            });
           });
         }
         async function send() {
