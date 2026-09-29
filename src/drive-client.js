@@ -147,6 +147,16 @@ export async function uploadFile({ name, parentId, blob, mimeType, fileId = null
   return r.json();
 }
 
+// Rename a file or folder in place (metadata-only PATCH; contents untouched).
+export async function renameFile(fileId, name) {
+  return driveFetch(`files/${fileId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    query: { fields: "id,name,webViewLink" },
+    body: JSON.stringify({ name }),
+  });
+}
+
 // Pin the newest revision so Drive never auto-purges the finalised binary
 // (Drive may drop old non-Docs revisions after 30 days / 100 revisions).
 export async function keepLatestRevisionForever(fileId) {
