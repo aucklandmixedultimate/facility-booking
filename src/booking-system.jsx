@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo, Fragment } from "react";
 import { createClient } from "@supabase/supabase-js";
 import logoUrl from "./assets/logo.jpg";
-import { driveConfigured, getDriveToken, ensureFolderPath, ensureFolder, uploadFile, findChildFile, keepLatestRevisionForever, testDriveConnection, downloadDriveFile, disconnectDrive, DRIVE_ROOT_FOLDER } from "./drive-client.js";
+import { driveConfigured, getDriveToken, ensureFolderPath, ensureFolder, uploadFile, renameFile, findChildFile, keepLatestRevisionForever, testDriveConnection, downloadDriveFile, disconnectDrive, DRIVE_ROOT_FOLDER } from "./drive-client.js";
 import { htmlToPdfBlob } from "./pdf-utils.js";
 
 // ─── LOGO ─────────────────────────────────────────────────────────────────────
@@ -4776,7 +4776,7 @@ function driveBatchFolderName(records) {
 }
 const DRIVE_SUBFOLDERS = { po:"PO (to GTEC)", fromGtec:"Invoice (from GTEC)", toClubs:"Invoice (to Clubs)" };
 
-function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onCreateReceipt, onLoadToSummary, isAdmin=false, loggedInEmail="", emailAliases={}, aliasNames={}, driveEnabled=false, onDriveSync, onDriveAttach, onEmailOfficial, onQueueInvoiceEmails, silentMode=false, onToggleSilent }) {
+function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onCreateReceipt, onLoadToSummary, isAdmin=false, loggedInEmail="", emailAliases={}, aliasNames={}, driveEnabled=false, onDriveSync, onRenameBatch, onDriveAttach, onEmailOfficial, onQueueInvoiceEmails, silentMode=false, onToggleSilent }) {
   const [filterStatus, setFilterStatus] = useState("all");
   const [expandedId, setExpandedId] = useState(null);
   const [expandedBatchId, setExpandedBatchId] = useState(null);
@@ -5215,6 +5215,15 @@ function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onCreat
               style={{padding:"3px 9px",borderRadius:6,border:"1.5px solid #c4b5fd",background:"#ede9fe",color:"#6d28d9",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"}}>
               📥 Download all
             </button>
+            {isAdmin&&onRenameBatch&&(
+              <button onClick={e=>{e.stopPropagation();
+                const next = window.prompt("Rename this batch (leave blank to clear the name):", batch.orderName);
+                if (next!==null && next.trim()!==batch.orderName) onRenameBatch(batch.batchId, next);
+              }} title={batch.records.some(r=>r.drive?.pdfId)?"Rename this batch — its Drive folder and documents are updated to match":"Rename this batch"}
+                style={{padding:"3px 9px",borderRadius:6,border:"1.5px solid #c7d2fe",background:"#fff",color:"#4338ca",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"}}>
+                ✏️ Rename
+              </button>
+            )}
             {driveEnabled&&isAdmin&&onDriveSync&&(
               <button onClick={e=>{e.stopPropagation();onDriveSync(batch.records.map(r=>r.id));}}
                 title="Sync all documents in this batch to Google Drive"
@@ -11030,7 +11039,13 @@ export default function App() {
     let okCount = 0;
     try {
       const year = String(new Date(records[0].createdAt||Date.now()).getFullYear());
-      const batchFolder = await ensureFolderPath([DRIVE_ROOT_FOLDER, year, driveBatchFolderName(records)]);
+      // Reuse the batch's existing folder (renaming it if the batch was renamed) so
+      // re-synced files stay alongside what's already there; fall back to name lookup.
+      const folderName = driveBatchFolderName(records);
+      const knownFolderId = records.find(r=>r.drive?.batchFolderId)?.drive.batchFolderId;
+      let batchFolder = null;
+      if (knownFolderId) { try { batchFolder = await renameFile(knownFolderId, folderName); } catch { /* deleted or inaccessible — look up by name */ } }
+      if (!batchFolder) batchFolder = await ensureFolderPath([DRIVE_ROOT_FOLDER, year, folderName]);
       const subPo    = await ensureFolder(DRIVE_SUBFOLDERS.po, batchFolder.id);
       const subClubs = await ensureFolder(DRIVE_SUBFOLDERS.toClubs, batchFolder.id);
       // Always create the drop-point for the invoice GTEC sends us, even though
@@ -11117,6 +11132,19 @@ export default function App() {
     // File the batch to Google Drive (no-op when not configured; errors are
     // recorded on each record with a retry path in the Billing tab).
     if (driveConfigured()) driveSyncRecords(tagged, { reason:"create" });
+  }
+
+  // Rename a batch: its name is the orderName shared by every record in it. Drive
+  // copies are re-synced so the folder, file names and document text follow.
+  function handleRenameBatch(batchId, name) {
+    const orderName = name.trim();
+    const renamed = billingRecords.filter(r=>r.batchId===batchId).map(r=>({ ...r, orderName }));
+    if (renamed.length===0) return;
+    const byId = new Map(renamed.map(r=>[r.id, r]));
+    setBillingRecords(prev => prev.map(r => byId.get(r.id) || r));
+    logActivity("batch_renamed", { batch_id: batchId, name: orderName, ids: renamed.map(r=>r.id) });
+    showToast(orderName ? `Batch renamed to "${orderName}".` : "Batch name cleared.");
+    if (driveConfigured() && renamed.some(r=>r.drive?.pdfId)) driveSyncRecords(renamed, { reason:"rename" });
   }
 
   // Issue a receipt for a paid invoice — a standalone R-type record acknowledging
@@ -11880,7 +11908,7 @@ export default function App() {
         )}
 
         {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<SummaryTab bookings={bookings} loggedInEmail={loggedInEmail} facilityRates={facilityRates} pricingConditions={pricingConditions} onAddPricingCondition={addPricingCondition} onUpdatePricingCondition={updatePricingCondition} onRemovePricingCondition={removePricingCondition} isAdmin={isAdmin} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onUpdateFacilityRate={updateFacilityRate} pricingMode={pricingMode} onSetPricingMode={setPricingMode} onProposeMerge={handleProposeMerge} onBulkApply={handleBulkApply} onMarkInvoiced={handleMarkInvoiced} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} bookerFilter={listBookerFilter} profiles={profiles} emailAliases={emailAliases} aliasNames={aliasNames} onCreateOfficialInvoice={handleCreateOfficialInvoice} onEmailInvoice={handleEmailInvoicePreview} onFilterChange={s=>setListBookerFilter(s)} loadRequest={summaryLoadRequest}/>}</div>}
-        {tab==="billing"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<BillingTab billingRecords={billingRecords} onUpdateRecord={handleUpdateBillingRecord} onDeleteRecord={id=>setBillingRecords(prev=>prev.filter(r=>r.id!==id))} onCreateReceipt={handleCreateReceipt} onLoadToSummary={handleLoadBillingToSummary} isAdmin={isAdmin} loggedInEmail={loggedInEmail} emailAliases={emailAliases} aliasNames={aliasNames} profiles={profiles} driveEnabled={driveConfigured()} onDriveSync={handleDriveSync} onDriveAttach={handleDriveAttachGtec} onEmailOfficial={handleEmailOfficialInvoices} onQueueInvoiceEmails={handleQueueInvoiceEmails} silentMode={silentMode} onToggleSilent={isAdmin?setSilentMode:undefined}/>}</div>}
+        {tab==="billing"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<BillingTab billingRecords={billingRecords} onUpdateRecord={handleUpdateBillingRecord} onDeleteRecord={id=>setBillingRecords(prev=>prev.filter(r=>r.id!==id))} onCreateReceipt={handleCreateReceipt} onLoadToSummary={handleLoadBillingToSummary} isAdmin={isAdmin} loggedInEmail={loggedInEmail} emailAliases={emailAliases} aliasNames={aliasNames} profiles={profiles} driveEnabled={driveConfigured()} onDriveSync={handleDriveSync} onRenameBatch={handleRenameBatch} onDriveAttach={handleDriveAttachGtec} onEmailOfficial={handleEmailOfficialInvoices} onQueueInvoiceEmails={handleQueueInvoiceEmails} silentMode={silentMode} onToggleSilent={isAdmin?setSilentMode:undefined}/>}</div>}
         {tab==="about"&&<div style={{padding:"8px 0"}}><AboutTab/></div>}
         {tab==="admin"&&isAdmin&&<div style={S.card}>
           {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onView={setViewing} onQueueDelete={queueForRemovalSilent} clashes={allClashes} deleteIds={new Set(deleteQueue.map(b=>b.id))} facilityRates={facilityRates} onUpdateFacilityRate={updateFacilityRate} onClearOldUnapproved={handleClearOldUnapproved} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onSyncDB={handleSyncDB} onBulkApply={handleBulkApply} onSaveMismatch={handleSaveMismatch} onInformCpsa={setInformCpsaFor} onQueueNotifications={queueNotifications} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} onLinkClash={handleLinkClashToGtec} loggedInEmail={loggedInEmail} syncResults={syncResults} onClearSyncResults={()=>setSyncResults([])} showSyncResults={showSyncPanel} onToggleSyncResults={()=>setShowSyncPanel(v=>!v)} bookerFilter={listBookerFilter} onToggleBooker={toggleBooker} onSetBookerFilter={setListBookerFilter} aliasNames={aliasNames} emailAliases={emailAliases} pricingConditions={pricingConditions} onAddPricingCondition={addPricingCondition} onUpdatePricingCondition={updatePricingCondition} onRemovePricingCondition={removePricingCondition} cpsaDeleteLog={cpsaDeleteLog} onClearDeleteLogEntry={id=>setCpsaDeleteLog(prev=>prev.filter(e=>e.id!==id))} onClearDeleteLog={()=>setCpsaDeleteLog([])}/>}
