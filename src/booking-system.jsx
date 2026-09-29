@@ -4561,6 +4561,43 @@ function invLineDuration(l) {
   return (l.hours < 0 ? "−" : "") + [h ? `${h}h` : "", m ? `${m}m` : ""].filter(Boolean).join(" ") || "0h";
 }
 
+// Lines saved before date/hours/rate were stored carry them only as text: the date and
+// time range inside desc ("Mon, 14 Sept 2026 · Field #1 · 6:30 PM–8:30 PM"), and the
+// hours/rate or sharing inside detail ("6h 30m @ $60.00/hr", "· shared field, 50% of …").
+// Recover the structured fields from that text so old records fill the new columns.
+const INV_MONTHS = { jan:1, feb:2, mar:3, apr:4, may:5, jun:6, jul:7, aug:8, sep:9, oct:10, nov:11, dec:12 };
+function normaliseInvLine(l) {
+  if (l.hours != null || l.rate != null || l.fixedPrice) return l;
+  const out = { ...l };
+  let desc = l.desc || l.description || l.label || "";
+  const detail = l.detail || "";
+  const dm = desc.match(/(?:\b[A-Z][a-z]{2},?\s+)?\b(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+(\d{4})/);
+  if (dm && !l.date) {
+    out.date = `${dm[3]}-${String(INV_MONTHS[dm[2].toLowerCase()]).padStart(2,"0")}-${dm[1].padStart(2,"0")}`;
+    desc = desc.replace(dm[0], "").replace(/\s*·\s*·\s*/, " · ").replace(/^\s*·\s*|\s*·\s*$/g, "").replace(/\]\s*·\s*/, "] ").trim();
+    out.desc = desc;
+  }
+  const g = detail.match(/(?:(\d+)h)?\s*(?:(\d+)m)?\s*@\s*\$([\d,]+(?:\.\d+)?)\/hr/);
+  if (g && (g[1] || g[2])) {
+    out.hours = (+g[1] || 0) + (+g[2] || 0) / 60;
+    out.rate = +g[3].replace(/,/g, "");
+    return out;
+  }
+  const tm = desc.match(/(\d{1,2}):(\d{2})\s*([AP]M)\s*[–-]\s*(\d{1,2}):(\d{2})\s*([AP]M)/i);
+  if (tm) {
+    const to24 = (h, m, ap) => (+h % 12) + (ap.toUpperCase() === "PM" ? 12 : 0) + (+m) / 60;
+    let hrs = to24(tm[4], tm[5], tm[6]) - to24(tm[1], tm[2], tm[3]);
+    if (hrs <= 0) hrs += 24;
+    out.hours = hrs;
+    if (/fixed price/i.test(detail)) out.fixedPrice = true;
+    else if (!l.isAdj && !l.isCreditAdj) out.rate = (l.cost || 0) / hrs;
+  }
+  const shareBits = detail.split("·").map(x => x.trim()).filter(x => /shared field|^split \d/i.test(x))
+    .map(x => x.replace(/^split (\d+%)/i, "cost split, $1 share"));
+  if (shareBits.length) out.sharedNote = shareBits.join("; ");
+  return out;
+}
+
 function renderInvoiceDocHtml({
   title, docLabel, docId, bankRef, dateStr, orderName = "",
   billToName, billToEmail, billToExtra = "", periodStr,
@@ -4592,6 +4629,7 @@ function renderInvoiceDocHtml({
        <tr><td colspan="4" style="${tdLbl}${edgeL};background:#f8fafc">GST (15%)</td>${money(gst, ";background:#f8fafc")}</tr>
        <tr><td colspan="4" style="${tdLbl}${edgeL};background:#f0fdf4;font-size:13px;font-weight:700;color:#0f172a">Total</td>${money(total, ";background:#f0fdf4;font-size:15px;font-weight:800;color:#15803d")}</tr>`;
 
+  lines = lines.map(normaliseInvLine);
   const bannerRows = (banner ? INV_ROWS_PER_BANNER : 0) + (previewNotice ? 1 : 0);
   // Emails have no pages, so the emailed copy stays one continuous sheet.
   const pages = paginate ? paginateInvoiceLines(lines, { bannerRows }) : [lines];
