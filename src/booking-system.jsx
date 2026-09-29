@@ -659,15 +659,6 @@ function setSplit(sysNotes, parts) {
   const marker = `[SPLIT] ${parts.map(p=>`${p.email}:${(+p.weight||1)}`).join("|")}`;
   return base ? `${base}\n${marker}` : marker;
 }
-// Fraction (0..1) of a booking's cost allocated to a given booker. null ⇒ booking
-// isn't split (caller bills the primary the full amount).
-function splitShareFor(sysNotes, email) {
-  const parts = parseSplit(sysNotes);
-  if (!parts) return null;
-  const total = parts.reduce((s,p)=>s+p.weight,0) || 1;
-  const mine = parts.find(p=>p.email===(email||"").toLowerCase());
-  return mine ? mine.weight/total : 0;
-}
 // Fixed total cost that overrides the hourly calc, stored as [FNCOST] amount.
 // Used for function-room bookings AMUA prices by hand. Absent ⇒ use hourly rates.
 const FNCOST_RE = /\[FNCOST\][^\n]*/g;
@@ -6030,7 +6021,24 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
   });
   const bookerNameMap = {};
   bookings.filter(b=>!isAdminBooking(b)&&b.email).forEach(b=>{ bookerNameMap[b.email.toLowerCase()]=b.name; });
-  const allInvoiceEmails = [...new Set(activeForInvoice.map(b=>b.email).filter(Boolean))].sort();
+  // Invoices are keyed by a booker's main email, which may never have booked itself.
+  bookings.filter(b=>!isAdminBooking(b)&&b.email).forEach(b=>{
+    const k = ((emailAliases||{})[b.email.toLowerCase()] || "").toLowerCase();
+    if (k && !bookerNameMap[k]) bookerNameMap[k] = (aliasNames||{})[k] || b.name;
+  });
+  // A booker with linked secondary emails is invoiced once, under their main email: every
+  // invoicing comparison goes through invKey so bookings made from any linked address
+  // land on the same invoice. (A hoisted declaration: used before canonEmail is defined.)
+  function invKey(em) { return ((emailAliases||{})[(em||"").toLowerCase()] || em || "").toLowerCase(); }
+  // Fraction (0..1) of a cost-split booking allocated to a booker, counting weights listed
+  // under any of their linked emails. null ⇒ booking isn't split (the primary pays in full).
+  function invSplitShare(b, key) {
+    const parts = parseSplit(b.system_notes);
+    if (!parts) return null;
+    const total = parts.reduce((t,p)=>t+p.weight,0) || 1;
+    return parts.filter(p=>invKey(p.email)===key).reduce((t,p)=>t+p.weight,0) / total;
+  }
+  const allInvoiceEmails = [...new Set(activeForInvoice.map(b=>b.email).filter(Boolean).map(invKey))].sort();
 
   const EVENING_CUTOFF = 17.5; // 5:30pm
 
@@ -6347,7 +6355,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
 
   function exportInvoice(format, bkgsForInvoice, bookerName, bookerEmail) {
     const adjBkgs = invIncludeAdjustments
-      ? mismatchAdjustments.filter(b => b.email?.toLowerCase() === bookerEmail?.toLowerCase())
+      ? mismatchAdjustments.filter(b => invKey(b.email) === invKey(bookerEmail))
       : [];
     const lines = [
       ...buildInvoiceLines(bkgsForInvoice, invDetail),
@@ -6390,7 +6398,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
     if (!onEmailInvoice) return;
     const items = scopes.map(s => {
       const adjBkgs = invIncludeAdjustments
-        ? mismatchAdjustments.filter(b => b.email?.toLowerCase() === s.email?.toLowerCase())
+        ? mismatchAdjustments.filter(b => invKey(b.email) === invKey(s.email))
         : [];
       const lines = [...buildInvoiceLines(s.bkgs, invDetail), ...buildAdjustmentLines(adjBkgs)];
       const dateRange = { from: dateFrom, to: dateTo };
@@ -6452,7 +6460,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
 
     // Pending credits for this booker — negative lines that discount the total
     const creditBkgs = bookings.filter(b => {
-      if (b.email?.toLowerCase() !== scope.email.toLowerCase()) return false;
+      if (invKey(b.email) !== invKey(scope.email)) return false;
       const res = parseCpsaResolution(b.system_notes);
       return res?.billingState === "credit_pending";
     });
@@ -6551,14 +6559,14 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
 
   // Groups active bookings by booker for combined/per-booker export
   function getInvoiceScopes() {
-    const sel = [...invSelectedEmails];
+    const sel = [...new Set([...invSelectedEmails].map(invKey))];
     // A booking is in scope for a selected booker if they're the primary OR a co-booker
     // on a cost-split. This lets co-bookers be invoiced their share even when they aren't
     // the primary on the booking.
     const isSelFor = (b, e) => {
-      const el = e.toLowerCase();
-      if (b.email.toLowerCase() === el) return true;
-      const sh = splitShareFor(b.system_notes, el);
+      const el = invKey(e);
+      if (invKey(b.email) === el) return true;
+      const sh = invSplitShare(b, el);
       return sh != null && sh > 0;
     };
     const pool = sel.length > 0
@@ -6572,13 +6580,13 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
       return [{ name, email, bkgs: pool }];
     }
     return sel.map(e => {
-      const el = e.toLowerCase();
+      const el = invKey(e);
       const bkgs = [];
       pool.forEach(b => {
-        const share = splitShareFor(b.system_notes, el);
+        const share = invSplitShare(b, el);
         if (share != null) {                       // split booking → bill this booker their share
           if (share > 0) bkgs.push({ ...b, __splitShare: share });
-        } else if (b.email.toLowerCase() === el) { // unsplit booking → primary pays in full
+        } else if (invKey(b.email) === el) {       // unsplit booking → primary pays in full
           bkgs.push(b);
         }
       });
@@ -7637,7 +7645,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
                 // Pending credits across all scopes in this popup
                 const pendingCredits = scopes.flatMap(s =>
                   bookings.filter(b => {
-                    if (b.email?.toLowerCase() !== s.email.toLowerCase()) return false;
+                    if (invKey(b.email) !== invKey(s.email)) return false;
                     const res = parseCpsaResolution(b.system_notes);
                     return res?.billingState === "credit_pending";
                   })
@@ -7794,7 +7802,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
                         : allInvoiceEmails.map(e=>({
                             email: e,
                             name: officialBookerName(e),
-                            bkgs: activeForInvoice.filter(b=>b.email?.toLowerCase()===e.toLowerCase()),
+                            bkgs: activeForInvoice.filter(b=>invKey(b.email)===e),
                           })).filter(s=>s.bkgs.length>0);
                       const invoiceRecords = officialScopes.map(s=>{
                         const rec = buildInvoiceRecord(s, allRecs);
@@ -7820,7 +7828,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
               {invMode==="draft" && isAdmin && invIncludeAdjustments && mismatchAdjustments.length>0 && onMarkAdjustmentSettled && (()=>{
                 const visibleAdj = mismatchAdjustments.filter(b=>{
                   const sel=[...invSelectedEmails];
-                  return sel.length===0 || sel.some(e=>b.email?.toLowerCase()===e.toLowerCase());
+                  return sel.length===0 || sel.some(e=>invKey(b.email)===invKey(e));
                 });
                 if (!visibleAdj.length) return null;
                 const BILLING_COLOR = { credit_pending:"#ca8a04", invoice_pending:"#2563eb" };
