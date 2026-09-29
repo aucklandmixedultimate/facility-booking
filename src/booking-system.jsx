@@ -4520,22 +4520,45 @@ const PIPELINE_KEYS = PIPELINE_STATES.map(s=>s.key);
 const INV_ROWS_PAGE_1 = 28, INV_ROWS_PAGE_N = 34, INV_ROWS_FOR_TOTALS = 2;
 // A page-1 banner (receipt "PAID", preview notice) costs roughly this many rows of height.
 const INV_ROWS_PER_BANNER = 2;
-// Widest a line description may grow before it is cut off itself (sheet is 720px wide).
-const INV_DESC_MAX_PX = 440;
+
+// A shared line also prints a footnote on its sheet, so it costs a second row.
+const invLineRows = l => l.sharedNote ? 2 : 1;
 
 function paginateInvoiceLines(lines, { bannerRows = 0 } = {}) {
   if (!lines.length) return [[]];
   const firstCap = Math.max(1, INV_ROWS_PAGE_1 - bannerRows);
-  const pages = [];
-  for (let i = 0; i < lines.length; ) {
-    const cap = pages.length === 0 ? firstCap : INV_ROWS_PAGE_N;
-    pages.push(lines.slice(i, i + cap));
-    i += cap;
+  const pages = [[]];
+  let used = 0;
+  for (const l of lines) {
+    const cap = pages.length === 1 ? firstCap : INV_ROWS_PAGE_N;
+    if (used + invLineRows(l) > cap && pages[pages.length - 1].length) { pages.push([]); used = 0; }
+    pages[pages.length - 1].push(l);
+    used += invLineRows(l);
   }
   // If the last sheet is nearly full the totals block would spill; give it its own sheet.
   const lastCap = pages.length === 1 ? firstCap : INV_ROWS_PAGE_N;
-  if (pages[pages.length - 1].length > lastCap - INV_ROWS_FOR_TOTALS) pages.push([]);
+  if (used > lastCap - INV_ROWS_FOR_TOTALS) pages.push([]);
   return pages;
+}
+
+// A line's date (its own column on documents) plus description, for single-column uses.
+// Lines saved before the date was split out already carry it inside desc.
+function invLineLabel(l) {
+  const desc = l.desc || l.description || l.label || "";
+  return l.date ? `${fmtDate(l.date)} · ${desc}` : desc;
+}
+
+// Rate and Duration cells for a document line. Shared lines show the rate after their
+// share is applied, marked with an asterisk that points at the sheet's footnote.
+function invLineRate(l) {
+  if (l.fixedPrice) return `Fixed${l.sharedNote ? "*" : ""}`;
+  if (l.rate == null) return "—";
+  return `${fmtCost(l.rate)}/hr${l.sharedNote ? "*" : ""}`;
+}
+function invLineDuration(l) {
+  if (l.hours == null) return "—";
+  const mins = Math.round(Math.abs(l.hours) * 60), h = Math.floor(mins / 60), m = mins % 60;
+  return (l.hours < 0 ? "−" : "") + [h ? `${h}h` : "", m ? `${m}m` : ""].filter(Boolean).join(" ") || "0h";
 }
 
 function renderInvoiceDocHtml({
@@ -4549,25 +4572,25 @@ function renderInvoiceDocHtml({
   // block carries only print rules (page size, sheet breaks), which email ignores.
   // Rows are a fixed height and clipped to one line, so the per-sheet row counts hold
   // instead of breaking on one long description.
-  // Columns size automatically: Description keeps at least its 42% share and widens for
-  // longer text (up to a cap), while Detail has max-width:0 so it takes only the room
-  // left over and is the column that gets cut off.
+  // Rate, Duration and Amount are sized to their content and never cut off; Description
+  // has max-width:0 so it takes whatever room is left and is the column that truncates.
   const clip = "white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
-  const cellBase = `box-sizing:border-box;padding:3px 28px;border-bottom:1px solid #f1f5f9;font-size:11.5px;line-height:16px;height:22px;${clip}`;
+  const cellBase = `box-sizing:border-box;padding:3px 8px;border-bottom:1px solid #f1f5f9;font-size:11.5px;line-height:16px;height:22px;${clip}`;
+  const edgeL = ";padding-left:28px", edgeR = ";padding-right:28px";
   const tdAmt = `${cellBase};text-align:right;color:#0f172a`;
   const tdLbl = `${cellBase};text-align:right;color:#64748b`;
-  const th    = "padding:4px 28px;white-space:nowrap;text-align:left;font-size:9px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;background:#f8fafc;border-bottom:1.5px solid #e2e8f0";
+  const th    = "padding:4px 8px;white-space:nowrap;text-align:left;font-size:9px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;background:#f8fafc;border-bottom:1.5px solid #e2e8f0";
   const cap   = "font-size:9px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em";
-  const money = (v, extra = "") => `<td style="${tdAmt}${extra}">${fmtCost(v)}</td>`;
+  const money = (v, extra = "") => `<td style="${tdAmt}${edgeR}${extra}">${fmtCost(v)}</td>`;
   const amuaLines = [AMUA_INFO.address, AMUA_INFO.gstNumber ? `GST No: ${AMUA_INFO.gstNumber}` : "", AMUA_INFO.bank]
     .filter(Boolean).map(l => `<div>${l}</div>`).join("");
   const gstLabel = gstMode === "note" ? "" : gstMode === "exclusive" ? "excl. GST" : "incl. GST";
 
   const totalsRows = gstMode === "note"
-    ? `<tr><td colspan="2" style="${tdLbl};background:#f0fdf4">GST inclusive</td>${money(total, ";background:#f0fdf4;font-size:15px;font-weight:800;color:#15803d")}</tr>`
-    : `<tr><td colspan="2" style="${tdLbl};background:#f8fafc">Subtotal (${gstLabel})</td>${money(pre, ";background:#f8fafc")}</tr>
-       <tr><td colspan="2" style="${tdLbl};background:#f8fafc">GST (15%)</td>${money(gst, ";background:#f8fafc")}</tr>
-       <tr><td colspan="2" style="${tdLbl};background:#f0fdf4;font-size:13px;font-weight:700;color:#0f172a">Total</td>${money(total, ";background:#f0fdf4;font-size:15px;font-weight:800;color:#15803d")}</tr>`;
+    ? `<tr><td colspan="4" style="${tdLbl}${edgeL};background:#f0fdf4">GST inclusive</td>${money(total, ";background:#f0fdf4;font-size:15px;font-weight:800;color:#15803d")}</tr>`
+    : `<tr><td colspan="4" style="${tdLbl}${edgeL};background:#f8fafc">Subtotal (${gstLabel})</td>${money(pre, ";background:#f8fafc")}</tr>
+       <tr><td colspan="4" style="${tdLbl}${edgeL};background:#f8fafc">GST (15%)</td>${money(gst, ";background:#f8fafc")}</tr>
+       <tr><td colspan="4" style="${tdLbl}${edgeL};background:#f0fdf4;font-size:13px;font-weight:700;color:#0f172a">Total</td>${money(total, ";background:#f0fdf4;font-size:15px;font-weight:800;color:#15803d")}</tr>`;
 
   const bannerRows = (banner ? INV_ROWS_PER_BANNER : 0) + (previewNotice ? 1 : 0);
   // Emails have no pages, so the emailed copy stays one continuous sheet.
@@ -4582,19 +4605,28 @@ function renderInvoiceDocHtml({
     const carried = running;
     const isLast = pi === pages.length - 1;
 
+    // Records saved before lines carried rate/hours fall back to their free-text detail.
     const rows = pageLines.map(l => `
       <tr>
-        <td style="${cellBase};color:#0f172a"><div style="${clip};max-width:${INV_DESC_MAX_PX}px">${l.desc || l.description || l.label || "—"}</div></td>
-        <td style="${cellBase};max-width:0;color:#64748b;font-size:10.5px">${l.detail || ""}</td>
+        <td style="${cellBase}${edgeL};color:#0f172a">${l.date ? fmtDateShortDow(l.date) : ""}</td>
+        <td style="${cellBase};width:100%;max-width:0;color:#0f172a">${l.desc || l.description || l.label || "—"}</td>
+        ${l.hours == null && l.rate == null && !l.fixedPrice && l.detail
+          ? `<td colspan="2" style="${cellBase};color:#64748b;font-size:10.5px"><div style="${clip};max-width:200px">${l.detail}</div></td>`
+          : `<td style="${tdAmt};color:#475569">${invLineRate(l)}</td><td style="${tdAmt};color:#475569">${invLineDuration(l)}</td>`}
         ${money(l.cost || 0)}
       </tr>`).join("");
+    const shared = pageLines.filter(l => l.sharedNote);
+    const footnotes = shared.length ? `
+      <tr><td colspan="5" style="padding:6px 28px 2px;font-size:10px;line-height:14px;color:#64748b">
+        ${shared.map(l => `<div style="${clip};max-width:664px">* ${l.date ? `${fmtDateShortDow(l.date)} — ` : ""}${l.sharedNote} · ${l.desc || l.description || l.label || ""}</div>`).join("")}
+      </td></tr>` : "";
 
     // Per-sheet figures cover only the rows printed above them. The whole-invoice figure
     // appears once, in the totals block on the final sheet.
     const carryRows = multi ? [
-      pi > 0 ? `<tr><td colspan="2" style="${tdLbl};background:#f8fafc;font-style:italic;color:#94a3b8">Brought forward from page ${pi}</td>${money(brought, ";background:#f8fafc;font-style:italic;color:#94a3b8")}</tr>` : "",
-      `<tr><td colspan="2" style="${tdLbl};background:#f8fafc">Subtotal — this page (${pageLines.length} item${pageLines.length !== 1 ? "s" : ""})</td>${money(pageSum, ";background:#f8fafc")}</tr>`,
-      !isLast ? `<tr><td colspan="2" style="${tdLbl};background:#f8fafc;font-style:italic;color:#94a3b8">Carried forward to page ${pi + 2}</td>${money(carried, ";background:#f8fafc;font-style:italic;color:#94a3b8")}</tr>` : "",
+      pi > 0 ? `<tr><td colspan="4" style="${tdLbl}${edgeL};background:#f8fafc;font-style:italic;color:#94a3b8">Brought forward from page ${pi}</td>${money(brought, ";background:#f8fafc;font-style:italic;color:#94a3b8")}</tr>` : "",
+      `<tr><td colspan="4" style="${tdLbl}${edgeL};background:#f8fafc">Subtotal — this page (${pageLines.length} item${pageLines.length !== 1 ? "s" : ""})</td>${money(pageSum, ";background:#f8fafc")}</tr>`,
+      !isLast ? `<tr><td colspan="4" style="${tdLbl}${edgeL};background:#f8fafc;font-style:italic;color:#94a3b8">Carried forward to page ${pi + 2}</td>${money(carried, ";background:#f8fafc;font-style:italic;color:#94a3b8")}</tr>` : "",
     ].join("") : "";
 
     const head = pi === 0 ? `
@@ -4637,12 +4669,15 @@ function renderInvoiceDocHtml({
       ${head}
       <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse">
         <thead><tr>
-          <th style="${th};width:42%">Description</th>
-          <th style="${th}">Detail</th>
-          <th style="${th};width:20%;text-align:right">Amount</th>
+          <th style="${th}${edgeL}">Date</th>
+          <th style="${th}">Description</th>
+          <th style="${th};text-align:right">Rate</th>
+          <th style="${th};text-align:right">Duration</th>
+          <th style="${th}${edgeR};text-align:right">Amount</th>
         </tr></thead>
         <tbody>
-          ${rows || `<tr><td colspan="3" style="${cellBase};text-align:center;color:#94a3b8;font-style:italic">No items on this page.</td></tr>`}
+          ${rows || `<tr><td colspan="5" style="${cellBase}${edgeL}${edgeR};text-align:center;color:#94a3b8;font-style:italic">No items on this page.</td></tr>`}
+          ${footnotes}
           ${carryRows}
           ${isLast ? totalsRows : ""}
         </tbody>
@@ -4862,7 +4897,7 @@ function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onCreat
     const baseName = `AMUA ${docTag}${orderTag} - ${(rec.dateFrom||"").replace(/-/g,"")}-${(rec.dateTo||"").replace(/-/g,"")}${detail==="individual"?" - itemised":""}`;
     if (format==="csv") {
       const esc = v => `"${String(v||"").replace(/"/g,'""')}"`;
-      const rowsCsv = lines.map(l=>[(docType==="purchase_order"?rec.poId:rec.id)||"", rec.bookerName||"", rec.bookerEmail||"", l.desc||l.description||l.label||"", l.detail||"", Number(l.cost||0).toFixed(2)].map(esc).join(","));
+      const rowsCsv = lines.map(l=>[(docType==="purchase_order"?rec.poId:rec.id)||"", rec.bookerName||"", rec.bookerEmail||"", invLineLabel(l), l.detail||"", Number(l.cost||0).toFixed(2)].map(esc).join(","));
       rowsCsv.push(["","","","","Subtotal",Number(rec.subtotal||0).toFixed(2)].map(esc).join(","));
       rowsCsv.push(["","","","","GST (15%)",Number(rec.gst||0).toFixed(2)].map(esc).join(","));
       rowsCsv.push(["","","","","Total",Number(rec.total||0).toFixed(2)].map(esc).join(","));
@@ -5099,7 +5134,7 @@ function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onCreat
               <tbody>
                 {(exportMode==="individual"?(rec.individualLines||rec.lines):rec.lines).map((l,i)=>(
                   <tr key={i} style={{borderBottom:"1px solid #f1f5f9"}}>
-                    <td style={{padding:"4px 8px",color:"#0f172a"}}>{l.desc||l.description||l.label||"—"}</td>
+                    <td style={{padding:"4px 8px",color:"#0f172a"}}>{invLineLabel(l)||"—"}</td>
                     <td style={{padding:"4px 8px",color:"#64748b"}}>{l.detail||"—"}</td>
                     <td style={{padding:"4px 8px",textAlign:"right",fontWeight:600,color:"#0f172a"}}>{l.cost!=null?`$${Number(l.cost).toFixed(2)}`:"—"}</td>
                   </tr>
@@ -6114,10 +6149,20 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
     const fixed = parseFunctionCost(b.system_notes) != null;
     const slotNote = slotShare < 1 ? ` · shared field, ${Math.round(slotShare*100)}% of ${fmtCost(full)}` : "";
     const shareNote = share < 1 ? ` · split ${Math.round(share*100)}%` : "";
+    const cost = full * slotShare * share;
+    const sharedNote = [
+      slotShare < 1 ? `shared field, ${Math.round(slotShare*100)}% of ${fmtCost(full)}` : "",
+      share < 1 ? `cost split, ${Math.round(share*100)}% share` : "",
+    ].filter(Boolean).join("; ");
     return {
-      desc:   `${fmtDate(b.date)} · ${fac?.name||b.facility_id} · ${timeStr}`,
+      date:   b.date,
+      desc:   `${fac?.name||b.facility_id} · ${timeStr}`,
       detail: `${b.purpose||""}${fixed?" · fixed price":""}${slotNote}${shareNote}`,
-      cost:   full * slotShare * share,
+      hours:  b.duration,
+      rate:   fixed || !b.duration ? null : cost / b.duration,
+      fixedPrice: fixed || undefined,
+      sharedNote: sharedNote || undefined,
+      cost,
     };
   }
   function buildInvoiceLines(bkgs, detail) {
@@ -6145,6 +6190,8 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
       const groupedLines = Object.values(groups).map(g => ({
         desc:  g.desc,
         detail:`${fmtHrs(g.hours)} @ ${fmtCost(g.rate)}/hr`,
+        hours: g.hours,
+        rate:  g.rate,
         cost:  g.cost,
       }));
       return [...groupedLines, ...specialLines];
@@ -6157,12 +6204,15 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
         const timeStr = `${fmtTime(b.start_hour)}–${fmtTime(b.start_hour + b.duration)}`;
         const splitNote = day>0&&evening>0 ? ` (${fmtHrs(day)} day + ${fmtHrs(evening)} eve)` : "";
         return {
-          desc:   `${fmtDate(b.date)} · ${fac?.name||b.facility_id} · ${timeStr}`,
+          date:   b.date,
+          desc:   `${fac?.name||b.facility_id} · ${timeStr}`,
           detail: `${b.purpose}${splitNote}`,
+          hours:  day + evening,
+          rate:   day + evening ? cost / (day + evening) : null,
           cost,
         };
       });
-      return [...indiv, ...specialLines].sort((a,b)=>a.desc.localeCompare(b.desc));
+      return [...indiv, ...specialLines].sort((a,b)=>(a.date||"").localeCompare(b.date||"") || a.desc.localeCompare(b.desc));
     }
   }
 
@@ -6190,8 +6240,11 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
       const timeStr = `${fmtTime(b.start_hour)}–${fmtTime(b.start_hour+b.duration)}`;
       const origTimeStr = `${fmtTime(snap.start_hour)}–${fmtTime(snap.start_hour+snap.duration)}`;
       return [{
-        desc:    `[${signedCost>0?"Invoice adj.":"Credit adj."}] ${fmtDate(b.date)} · ${fac?.name||b.facility_id}`,
+        date:    b.date,
+        desc:    `[${signedCost>0?"Invoice adj.":"Credit adj."}] ${fac?.name||b.facility_id}`,
         detail:  `GTEC amendment: billed ${origTimeStr} ${snap.duration}h → amended ${timeStr} ${b.duration}h (${bs||"pending"})`,
+        hours:   b.duration - snap.duration,
+        rate:    null,
         cost:    signedCost,
         isAdj:   true,
       }];
@@ -6258,7 +6311,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
       const { pre, gst, total } = gstAmounts(subtotal, invGst);
       const esc = v => `"${String(v||"").replace(/"/g,'""')}"`;
       const docLabel = invDocType === "purchase_order" ? "Purchase Order" : "Invoice";
-      const csvRows = lines.map(l => [invNumber, bookerName, bookerEmail, l.desc, l.detail, l.cost.toFixed(2)].map(esc).join(","));
+      const csvRows = lines.map(l => [invNumber, bookerName, bookerEmail, invLineLabel(l), l.detail, l.cost.toFixed(2)].map(esc).join(","));
       csvRows.push(["","","","","Subtotal",pre.toFixed(2)].map(esc).join(","));
       csvRows.push(["","","","","GST (15%)",gst.toFixed(2)].map(esc).join(","));
       csvRows.push(["","","","","Total",total.toFixed(2)].map(esc).join(","));
@@ -6394,7 +6447,8 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
       const inv = invoiceRecords.find(r=>r.bookerEmail===scope.email);
       const subtotal = (inv?.lines||[]).reduce((s,l)=>s+l.cost,0);
       const { pre } = gstAmounts(subtotal, invGst);
-      return { desc:`${name}`, detail: inv?.id||"", cost: pre };
+      const hours = (inv?.lines||[]).reduce((s,l)=>s+(l.hours||0),0);
+      return { desc:`${name}${inv?.id?` · ${inv.id}`:""}`, detail: inv?.id||"", hours: hours || null, rate: null, cost: pre };
     });
     // Simpler: just sum totals directly
     const sumTotal = invoiceRecords.reduce((s,r)=>s+(r.total||0),0);
