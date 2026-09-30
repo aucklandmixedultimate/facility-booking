@@ -248,8 +248,9 @@ harvest):
 **Admin menu → Council fields** opens `vetting.html` on the booking site. Its source is
 `vetting.html` and `src/vetting/`; the maps and park data are in `public/council-maps/`.
 The page always fits one screen: nothing scrolls except the map, where the wheel zooms.
-- **Auckland view** (C toggles it). Every park is plotted across the city and coloured by
-  its overall suitability: excellent, good, fair, poor, rejected, or not rated. Top picks
+- **Auckland view** (C toggles it). It opens framed from North Harbour Stadium to Opaheke
+  Sports Park. Every park is plotted across the city and coloured by its overall
+  suitability: excellent, good, fair, poor, rejected, or not rated. Top picks
   have a gold ring. Zoom in to see each park's council fields shaded in the same colour.
   Click a park to open and rate it. Deciding returns you to the Auckland map. **Rate next**
   jumps to the next unrated park in the queue.
@@ -269,18 +270,29 @@ The page always fits one screen: nothing scrolls except the map, where the wheel
   stay visible as dashed outlines over the satellite.
 - **Ultimate field to scale.** The field is WFDF standard: 100 × 37 m, 18 m end zones,
   brick marks 20 m in. It's editable under ⚙. It stays centred in the frame and scales
-  with zoom, so you pan the map underneath it to test a spot. The yellow **centre
-  button** (Enter) unlocks the field, and the field then turns to follow the mouse.
-  Locking it again does three things:
-  - fixes the angle;
-  - fills **Fields** with the nearest council field, measured from the field centre to
-    each traced field's centre (with 2+ fields, every field within about 120 m);
-  - asks how much fits: **reduced size**, **1 full field** or **2+ fields**.
+  with zoom, so you pan the map underneath it to test a spot.
+  1. **Unlock** the yellow centre button (Enter). The field turns to follow the mouse.
+  2. **Lock** it to fix the angle. Nothing is recorded yet.
+  3. **Fine-tune** by panning. The bar at the bottom previews the nearest council field.
+  4. **Rate the fit**: reduced size, 1 full field or 2+ fields. Rating confirms the spot.
+     It records the centre and angle, and fills **Fields** with the nearest traced
+     council field (with 2+ fields, every field within about 120 m).
+  If you move or turn the field after rating, the button reads "Moved" until you rate
+  again. Only the confirmed spot is ever saved.
+- **Privately managed grounds (◆).** Some council grounds are run by a club, trust or
+  CCO, e.g. Grammar TEC at Orakei Domain B. They show as purple diamonds, and hollow
+  diamonds mark private grounds that aren't in the council maps. Their card shows the
+  operator, contacts and the request steps:
+  1. get the operator's permission;
+  2. apply to council;
+  3. wait;
+  4. confirm with the operator.
+  The data is in `public/council-maps/private-managed.json`; see multi-provider design §7.1.
 - **Lights.** Click the map to drop a light pole, and click a pole to remove it. Any pole
   marks the park as lit. **None** records that you checked and there aren't any. Lights
   only matter for evening slots.
-- **Saving the position.** Once at least three of quality, fit, lights and fields are set,
-  a decision asks whether to save the field position. The position is the centre
+- **Saving the position.** Once a spot is confirmed and at least three of quality, fit,
+  lights and fields are set, a decision asks whether to save the confirmed spot. The position is the centre
   lat/lon, the angle and the dimensions. Saved positions are restored next time and
   place the park on the Auckland map.
 - **Saving.** Decisions go to Supabase `field_reviews`, admin-only

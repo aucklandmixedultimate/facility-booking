@@ -419,6 +419,46 @@ reliability are covered in [`council-field-vetting.md`](council-field-vetting.md
   applies for that park. Record the park and field in `external_ref.council_park` /
   `external_ref.council_field` so the portal sync (§5.3) can match it.
 
+### 7.1 Privately managed council grounds — a facility class of their own
+
+Some council-owned grounds are run by someone else, who controls or sub-allocates the fields:
+- a club, e.g. Grammar TEC at Orakei Domain;
+- a trust;
+- a council CCO, e.g. Tātaki Auckland Unlimited at North Harbour Stadium.
+
+A council application alone isn't enough there. These grounds get their own facility
+class, `council_private`, and their own request workflow:
+
+| step | stage | who |
+|---|---|---|
+| 1 | Get the private operator's permission, in writing | operator |
+| 2 | Apply to Auckland Council for the same slot, noting the permission | council portal |
+| 3 | Wait for the council decision (parksbookings@ email) | council |
+| 4 | Confirm the slot, lights and access with the private operator | operator |
+
+**Data.** `public/council-maps/private-managed.json` is the seed list: 11 grounds in the
+default Auckland view, North Harbour Stadium to Opaheke Sports Park.
+- **Each entry holds:**
+  - the operator, its type (club / trust / CCO) and what it manages;
+  - its contacts: email, phone, address and web page;
+  - the matching council park id and lat/lon (flagged `approx` when estimated);
+  - a `status`: confirmed / likely / to-verify;
+  - the source URLs.
+- **GTEC is the model entry.** Its row carries `provider_id: "gtec"`, which ties the
+  existing provider's contact details to the council park it runs.
+- **When the provider tables land (§4.1):**
+  - each operator becomes a `providers` row with `kind = 'council_private'`;
+  - each ground becomes a `provider_sites` row linked to its council park;
+  - the contacts seed `provider_contacts`.
+
+**Statuses.** A `council_private` booking walks the stages above. It uses the §4.3
+provider stages for steps 1 and 4 and the council stages for steps 2 and 3. It's only
+confirmed once both the council approval and the operator's confirmation are in.
+
+**Vetting map.** These grounds show as ◆ diamonds on the Auckland map, and their park card
+lists the operator, contacts and the four steps. See
+[`council-field-vetting.md`](council-field-vetting.md).
+
 ## 8. Billing across providers
 
 - **Purchase orders:** one PO per provider per official run (phase 0). PO vendor

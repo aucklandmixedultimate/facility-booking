@@ -28,7 +28,9 @@ const BRICK = 20;
 // How far (in zoom levels) you can zoom from the fitted council map before it drops away
 // to reveal the satellite: two to three wheel clicks either way.
 const REVEAL_OUT = 1, REVEAL_IN = 1.5;
-const AKL = [[-37.3, 174.4], [-36.3, 175.2]];
+// Default Auckland view: North Harbour Stadium in the north to Opaheke Sports Park in the south.
+const DEFAULT_VIEW = [[-36.72666, 174.70198], [-37.08545, 174.95175]];
+const PRIV_COLOR = "#7c3aed";
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -37,6 +39,7 @@ const store = { get(k, d) { try { const v = localStorage.getItem(k); return v ==
 function setStatus(t, warn) { $("status").textContent = t; $("status").classList.toggle("warn", !!warn); }
 
 let PARKS = [], BYID = {};
+let PRIV = { operators: [], workflow: [] }, PRIV_BY_PARK = {};   // privately managed grounds (private-managed.json)
 let reviews = {};              // park_id -> review
 let mode = "local";            // "shared" (Supabase) | "local" (this browser)
 let session = null;
@@ -121,7 +124,9 @@ function current() {
 function tagsFor(p) {
   if (!draft[p.id]) { const r = reviews[p.id] || {};
     draft[p.id] = { lights: r.lights || "unknown", lightPts: (r.placement?.lights || []).map(x => [...x]), fit: r.fit || "unknown",
-      quality: r.quality || 0, fields: r.fields || "", notes: r.notes || "", fieldsManual: !!r.fields }; }
+      quality: r.quality || 0, fields: r.fields || "", notes: r.notes || "", fieldsManual: !!r.fields,
+      // The confirmed field spot: set when a fit is rated, and only this spot is saved.
+      spot: r.placement?.lat != null ? { lat: r.placement.lat, lon: r.placement.lon, angle: r.placement.angle || 0 } : null }; }
   return draft[p.id];
 }
 // "Majority configured": at least three of lights, fit, quality and fields are set.
@@ -142,6 +147,7 @@ function initMap() {
   map.on("zoomanim", e => { $("field").classList.add("zooming"); sizeField(e.zoom); });
   map.on("zoomend", () => { $("field").classList.remove("zooming"); forced = null; updateLayer(); sizeField(); syncCityFields(); });
   map.on("move", () => sizeField());
+  map.on("moveend", () => { if (view === "park" && fieldOn && !rotating) afterMove(); });
   map.on("click", e => {
     if (view === "city") return;
     if (rotating) { lockField(); return; }
@@ -240,33 +246,62 @@ function showField(on) {
   $("field").hidden = !on; $("centreWrap").hidden = !on; $("fieldBtn").setAttribute("aria-pressed", String(on));
   if (!on) { if (rotating) setRotating(false); $("fitPop").hidden = true; }
 }
-// Locking the field fixes its angle, picks the council field(s) it sits on, and asks how much fits.
+// Locking only fixes the angle. You can still pan to fine-tune the spot; the nearest council
+// field is previewed as you go. Rating the fit confirms the spot: that is when the fields are
+// filled in and the position recorded, and only the confirmed spot is saved with a decision.
 function lockField() {
   setRotating(false);
   const p = current(); if (!p) return;
-  autoFields(p);
-  $("fitPop").hidden = false; renderCentre();
+  $("fitPop").hidden = false; previewFields(p); renderCentre();
 }
-function autoFields(p) {
-  const fs = councilFields(p).filter(f => f.n); if (!fs.length) return;
+function nearestFields(p, fit) {
+  const fs = councilFields(p).filter(f => f.n); if (!fs.length) return null;
   const c = map.getCenter(), kx = 111320 * Math.cos(c.lat * Math.PI / 180), ky = 110540;
   const d = f => Math.hypot((f.c[1] - c.lng) * kx, (f.c[0] - c.lat) * ky);
   const byDist = fs.map(f => ({ f, m: d(f) })).sort((a, b) => a.m - b.m);
+  const pick = fit === "multi" ? byDist.filter(x => x.m <= Math.max(dims.len, 60) * 1.2) : [byDist[0]];
+  return { nearest: byDist[0], names: [...new Set((pick.length ? pick : [byDist[0]]).map(x => x.f.n))] };
+}
+function spotMoved(t) {
+  if (!t.spot) return false;
+  const c = map.getCenter(), kx = 111320 * Math.cos(c.lat * Math.PI / 180);
+  const dm = Math.hypot((t.spot.lon - c.lng) * kx, (t.spot.lat - c.lat) * 110540);
+  const da = Math.abs((((angle - t.spot.angle) % 360) + 540) % 360 - 180);
+  return dm > 3 || da > 2;
+}
+function previewFields(p) {
+  const t = tagsFor(p), n = nearestFields(p, t.fit), moved = spotMoved(t);
+  const near = n ? ` · nearest: ${n.nearest.f.n} (${Math.round(n.nearest.m)} m)` : "";
+  $("fitMsg").textContent = moved ? `Field moved — rate the fit again to save this spot${near}` : `Pan to fine-tune, then rate the fit here${near}`;
+  $("fitMsg").classList.toggle("warn", moved);
+}
+function afterMove() {
+  const p = current(); if (!p) return;
   const t = tagsFor(p);
-  let pick = [byDist[0]];
-  if (t.fit === "multi") pick = byDist.filter(x => x.m <= Math.max(dims.len, 60) * 1.2);
-  const names = [...new Set(pick.map(x => x.f.n))];
-  if (!t.fieldsManual || !t.fields.trim()) { t.fields = names.join(", "); t.fieldsManual = false; }
-  $("fieldList").textContent = `Nearest council field: ${byDist[0].f.n} (${Math.round(byDist[0].m)} m from centre)`;
-  drawParkFields(p); renderTags(p);
+  if (t.spot && spotMoved(t)) $("fitPop").hidden = false;
+  if (!$("fitPop").hidden) previewFields(p);
+  renderCentre();
+}
+function confirmSpot(p, fit) {
+  const t = tagsFor(p), c = map.getCenter();
+  t.fit = fit;
+  t.spot = { lat: +c.lat.toFixed(6), lon: +c.lng.toFixed(6), angle: Math.round(angle) };
+  const n = nearestFields(p, fit);
+  if (n) {
+    if (!t.fieldsManual || !t.fields.trim()) { t.fields = n.names.join(", "); t.fieldsManual = false; }
+    $("fieldList").textContent = `Nearest council field: ${n.nearest.f.n} (${Math.round(n.nearest.m)} m from centre)`;
+  }
+  $("fitPop").hidden = true; drawParkFields(p); renderTags(p);
 }
 function renderCentre() {
-  const p = current(), t = p ? tagsFor(p) : null;
+  const p = current(), t = p ? tagsFor(p) : null, moved = !!t && spotMoved(t);
   $("centreWrap").classList.toggle("unlocked", rotating);
-  $("centreWrap").classList.toggle("needfit", !rotating && !!t && t.fit === "unknown");
+  $("centreWrap").classList.toggle("needfit", !rotating && !!t && (!t.spot || moved));
   $("centreIco").textContent = rotating ? "🔓" : "🔒";
-  $("centreLbl").textContent = rotating ? "Click to lock" : t && t.fit !== "unknown" ? `Fits: ${FIT_LABEL[t.fit]} · unlock` : "Unlock · rate fit";
-  $("fitPop").querySelectorAll("[data-fit]").forEach(b => b.setAttribute("aria-pressed", String(!!t && t.fit === b.dataset.fit)));
+  $("centreLbl").textContent = rotating ? "Click to lock the angle"
+    : !t?.spot ? "Unlock to turn · then rate the fit"
+    : moved ? "Moved · rate the fit again" : `Fits: ${FIT_LABEL[t.fit]} · spot saved`;
+  $("fitPop").querySelectorAll("[data-fit]").forEach(b => b.setAttribute("aria-pressed", String(!!t && t.fit === b.dataset.fit && !moved)));
 }
 
 // ── Auckland view: every park coloured by suitability ────────────────────────
@@ -279,12 +314,14 @@ function buildCity() {
     const ll = parkLatLng(p); if (!ll) return;
     const r = reviews[p.id], col = suitColor(r), top = r?.decision === "top", isCur = view === "city" && cur?.id === p.id && !!focusId;
     pts.push(ll);
-    const mk = L.circleMarker(ll, { radius: r ? 8 : 6, color: top ? "#e0a647" : isCur ? "#15211c" : "#ffffff", weight: top || isCur ? 3 : 1.5,
+    const pv = PRIV_BY_PARK[p.id];
+    const mk = pv ? privMarker(ll, col, isCur, top) : L.circleMarker(ll, { radius: r ? 8 : 6, color: top ? "#e0a647" : isCur ? "#15211c" : "#ffffff", weight: top || isCur ? 3 : 1.5,
       fillColor: col, fillOpacity: r ? 0.95 : 0.7, bubblingMouseEvents: false });
     const tags = r ? [r.decision === "top" ? "★ Top pick" : r.decision === "yes" ? "Shortlisted" : "Rejected",
       r.quality ? r.quality + "/5" : "", r.fit && r.fit !== "unknown" ? FIT_LABEL[r.fit] : "",
       r.lights === "full" || r.lights === "training" ? "💡 lights" : r.lights === "none" ? "no lights" : ""].filter(Boolean).join(" · ") : "Not rated yet";
-    mk.bindTooltip(`<b>${esc(p.name)}</b><br>${esc(p.region)} · <b style="color:${col}">${suitWord(r)}</b><br>${esc(tags)}${r?.fields ? "<br>Fields: " + esc(r.fields) : ""}<br><i>Click to rate</i>`,
+    mk.bindTooltip(`<b>${esc(p.name)}</b><br>${esc(p.region)} · <b style="color:${col}">${suitWord(r)}</b><br>${esc(tags)}${r?.fields ? "<br>Fields: " + esc(r.fields) : ""}`
+      + (pv ? `<br><b style="color:${PRIV_COLOR}">◆ Privately managed: ${esc(pv.short)}</b> — ask them first` : "") + `<br><i>Click to rate</i>`,
       { className: "parktip", direction: "top", offset: [0, -6] });
     mk.on("click", () => openPark(p.id));
     mk.addTo(cityLayer);
@@ -295,7 +332,29 @@ function buildCity() {
       .bindTooltip(`${esc(p.name)}${f.n ? " · " + esc(f.n) : ""} — ${suitWord(r)}`, { className: "parktip", sticky: true })
       .on("click", () => openPark(p.id)).addTo(cityFieldsLayer));
   });
+  // Private grounds that aren't in the council maps: hollow diamonds with the operator's contacts.
+  PRIV.operators.filter(o => !o.park_id || !BYID[o.park_id]).forEach(o => {
+    const ll = [o.lat, o.lon]; pts.push(ll);
+    privMarker(ll, "transparent", false, false).bindPopup(privHtml(o, true), { className: "parktip", maxWidth: 320 })
+      .bindTooltip(`<b>${esc(o.park)}</b><br><b style="color:${PRIV_COLOR}">◆ ${esc(o.operator)}</b><br>Not in the council field maps · click for contacts`, { className: "parktip", direction: "top", offset: [0, -8] })
+      .addTo(cityLayer);
+  });
   return pts;
+}
+function privMarker(ll, fill, isCur, top) {
+  return L.marker(ll, { icon: L.divIcon({ className: "", iconSize: [22, 22], iconAnchor: [11, 11],
+    html: `<div class="privpin${isCur ? " cur" : ""}" style="background:${fill};${top ? "border-color:#e0a647;" : ""}margin:3px"></div>` }), keyboard: false, bubblingMouseEvents: false });
+}
+function privHtml(o, full) {
+  const c = o.contact || {}, bits = [];
+  if (c.email) bits.push(`<a href="mailto:${esc(c.email)}">${esc(c.email)}</a>`);
+  if (c.phone) bits.push(`<a href="tel:${esc(c.phone.replace(/[^+\d]/g, ""))}">${esc(c.phone)}</a>`);
+  if (c.url) bits.push(`<a href="${esc(c.url)}" target="_blank" rel="noopener">website ↗</a>`);
+  const steps = `<ol>${PRIV.workflow.map(w => `<li title="${esc(w.detail)}">${esc(w.label)}</li>`).join("")}</ol>`;
+  const status = { confirmed: "confirmed", likely: "likely", "to-verify": "to verify" }[o.status] || o.status;
+  return full
+    ? `<b>${esc(o.park)}</b>${o.approx ? " (approx. location)" : ""}<br><b style="color:${PRIV_COLOR}">◆ ${esc(o.operator)}</b> · ${esc(status)}<br>${esc(o.manages)}<br>${bits.join(" · ")}${c.address ? "<br>" + esc(c.address) : ""}<br><b>Request steps</b>${steps}${o.notes ? `<i>${esc(o.notes)}</i>` : ""}`
+    : `<span><b>◆ Privately managed: ${esc(o.operator)}</b> (${esc(status)}) — ${esc(o.manages)}</span><span>${bits.join(" · ")}</span><span><b>Request steps:</b> ${steps}</span>`;
 }
 function syncCityFields() {
   if (view !== "city") return;
@@ -305,7 +364,7 @@ function syncCityFields() {
 }
 function renderLegend() {
   const row = (c, t) => `<div><i style="background:${c}"></i>${t}</div>`;
-  $("legend").innerHTML = `<b>Suitability</b>${row(`hsl(${suitHue(0.95)} 72% 42%)`, "Excellent")}${row(`hsl(${suitHue(0.7)} 72% 42%)`, "Good")}${row(`hsl(${suitHue(0.5)} 72% 42%)`, "Fair")}${row(`hsl(${suitHue(0.2)} 72% 42%)`, "Poor")}${row("#b3372d", "Rejected")}${row("#8a958f", "Not rated")}<div style="color:var(--muted)">Gold ring = top pick</div>`;
+  $("legend").innerHTML = `<b>Suitability</b>${row(`hsl(${suitHue(0.95)} 72% 42%)`, "Excellent")}${row(`hsl(${suitHue(0.7)} 72% 42%)`, "Good")}${row(`hsl(${suitHue(0.5)} 72% 42%)`, "Fair")}${row(`hsl(${suitHue(0.2)} 72% 42%)`, "Poor")}${row("#b3372d", "Rejected")}${row("#8a958f", "Not rated")}<div><span class="dia"></span>Privately managed</div><div style="color:var(--muted)">Gold ring = top pick</div>`;
 }
 function setView(v, { refit } = {}) {
   const was = view; view = v; store.set("vet-view", v);
@@ -323,7 +382,7 @@ function setView(v, { refit } = {}) {
     cityLayer.addTo(map);
     const pts = buildCity();
     map.invalidateSize();
-    if (refit || !cityHome) { if (pts.length) map.fitBounds(L.latLngBounds(pts).pad(0.05), { animate: false }); else map.fitBounds(AKL, { animate: false }); }
+    if (refit || !cityHome) map.fitBounds($("region").value && pts.length ? L.latLngBounds(pts).pad(0.05) : DEFAULT_VIEW, { animate: false, padding: [24, 24] });
     else map.setView(cityHome.c, cityHome.z, { animate: false });
     syncCityFields();
   } else {
@@ -394,8 +453,10 @@ function render() {
   } else {
     if (next?.maps.length) $("behindImg").src = BASE + "council-maps/" + next.maps[0].file;
     $("parkName").textContent = p.name; $("parkRegion").textContent = p.region;
+    const pv = PRIV_BY_PARK[p.id];
+    $("privBox").hidden = !pv; $("privBox").innerHTML = pv ? privHtml(pv, false) : "";
     const r = reviews[p.id];
-    $("decChip").innerHTML = r ? `<span class="chip ${r.decision === "no" ? "no" : r.decision === "top" ? "top" : ""}">${r.decision === "top" ? "Top pick" : r.decision === "yes" ? "Shortlisted" : "Rejected"}${r.by ? " · " + esc(r.by.split("@")[0]) : ""}</span>` : "";
+    $("decChip").innerHTML = (pv ? `<span class="chip priv" title="Ask ${esc(pv.operator)} before applying to council">◆ ${esc(pv.short)}</span> ` : "") + (r ? `<span class="chip ${r.decision === "no" ? "no" : r.decision === "top" ? "top" : ""}">${r.decision === "top" ? "Top pick" : r.decision === "yes" ? "Shortlisted" : "Rejected"}${r.by ? " · " + esc(r.by.split("@")[0]) : ""}</span>` : "");
     const i = Math.min(mapIdx[p.id] || 0, Math.max(0, p.maps.length - 1));
     $("thumbs").innerHTML = p.maps.length > 1 ? p.maps.map((m, k) => `<button data-map="${k}" aria-pressed="${k === i}" title="${esc(m.title)}">${m.season === "winter" ? "❄ Winter" : "☀ Summer"}${/area/i.test(m.title) ? " area" : ""}</button>`).join("") : "";
     const cf = councilFields(p).map(f => f.n).filter(Boolean);
@@ -415,12 +476,13 @@ function render() {
 
 // ── Decisions ────────────────────────────────────────────────────────────────
 function askPlacement(p, t, decision) {
-  const c = map.getCenter(), dlg = $("saveDlg");
-  $("dlgTitle").textContent = `${decision === "top" ? "Top pick" : decision === "yes" ? "Shortlist" : "Reject"} ${p.name} — save the field position?`;
-  $("dlgBody").textContent = `Field centred at ${c.lat.toFixed(5)}, ${c.lng.toFixed(5)}, turned ${Math.round(((angle % 360) + 360) % 360)}°`
+  const dlg = $("saveDlg"), sp = t.spot, moved = spotMoved(t);
+  $("dlgTitle").textContent = `${decision === "top" ? "Top pick" : decision === "yes" ? "Shortlist" : "Reject"} ${p.name} — save the field spot?`;
+  $("dlgBody").textContent = `Field centred at ${sp.lat.toFixed(5)}, ${sp.lon.toFixed(5)}, turned ${((sp.angle % 360) + 360) % 360}°`
     + ` · fits ${FIT_LABEL[t.fit]}${t.fields.trim() ? ` · on ${t.fields.trim()}` : ""}`
     + ` · ${t.lightPts.length ? t.lightPts.length + " light pole" + (t.lightPts.length > 1 ? "s" : "") : "lights " + t.lights}.`
-    + " Saving it restores this exact spot next time and plots the park there on the Auckland map.";
+    + (moved ? " You've moved the field since rating the fit; this saves the spot you rated, not the current view." : "")
+    + " Saving it restores this spot next time and plots the park there on the Auckland map.";
   return new Promise(res => {
     dlg.returnValue = "";
     dlg.addEventListener("close", () => res(dlg.returnValue || "cancel"), { once: true });
@@ -432,7 +494,7 @@ async function decide(decision) {
   const t = tagsFor(p);
   let withField = false;
   const prevPl = reviews[p.id]?.placement;
-  if (fieldOn && ratedCount(t) >= 3) {
+  if (t.spot && ratedCount(t) >= 3) {
     const a = await askPlacement(p, t, decision);
     if (a === "cancel") return;
     withField = a === "with";
@@ -441,8 +503,7 @@ async function decide(decision) {
   const card = $("card"); card.classList.remove("snap", "deal"); card.classList.add("fly");
   const x = decision === "yes" ? 800 : decision === "no" ? -800 : 0, y = decision === "top" ? -600 : 40;
   card.style.transform = `translate(${x}px, ${y}px) rotate(${x / 25}deg)`; card.style.opacity = "0";
-  const c = map.getCenter();
-  const pos = withField ? { lat: +c.lat.toFixed(6), lon: +c.lng.toFixed(6), angle: Math.round(angle), ...dims }
+  const pos = withField ? { ...t.spot, ...dims }
     : prevPl?.lat != null ? { lat: prevPl.lat, lon: prevPl.lon, angle: prevPl.angle, len: prevPl.len, wid: prevPl.wid, ez: prevPl.ez } : { lat: null, lon: null };
   const placement = (pos.lat != null || t.lightPts.length) ? { ...pos, lights: t.lightPts } : null;
   const rev = { decision, lights: t.lights, fit: t.fit, quality: t.quality || null, fields: t.fields.trim(), notes: t.notes.trim(), placement };
@@ -480,7 +541,7 @@ function bind() {
     if (mp) { mapIdx[p.id] = +mp.dataset.map; render(); return; }
     if (t && t.tagName === "BUTTON") { const d = tagsFor(p), k = t.dataset.tag, v = k === "quality" ? +t.dataset.val : t.dataset.val;
       if (k === "quality") d.quality = d.quality === v ? 0 : v;
-      else if (k === "fit") d.fit = d.fit === v ? "unknown" : v;
+      else if (k === "fit") { if (d.fit === v) d.fit = "unknown"; else if (fieldOn && view === "park") return confirmSpot(p, v); else d.fit = v; }
       else if (k === "lights") { d.lights = v; if (v === "none" && d.lightPts.length) { d.lightPts = []; drawLights(p); } }
       renderTags(p); }
   });
@@ -507,7 +568,7 @@ function bind() {
     angle = Math.atan2(py, px) * 180 / Math.PI; sizeField(); });
   $("centreBtn").onclick = e => { e.stopPropagation(); if (rotating) lockField(); else setRotating(true); };
   $("fitPop").addEventListener("click", e => { const b = e.target.closest("[data-fit]"), p = current(); if (!b || !p) return;
-    const t = tagsFor(p); t.fit = b.dataset.fit; $("fitPop").hidden = true; autoFields(p); renderTags(p); });
+    confirmSpot(p, b.dataset.fit); });
   $("fieldBtn").onclick = () => showField(!fieldOn);
   $("layerBtn").onclick = () => { forced = councilVisible() ? "sat" : "council"; updateLayer(); };
   $("fitBtn").onclick = () => { const p = current(); if (p) showMap(p); };
@@ -546,16 +607,17 @@ function bind() {
     else if (/^[tT]$/.test(e.key)) showField(!fieldOn);
     else if (/^[vV]$/.test(e.key)) $("layerBtn").click();
     else if (e.key === "0") $("fitBtn").click();
-    else if (/^[rR]$/.test(e.key)) { angle = (angle + 15) % 360; sizeField(); }
+    else if (/^[rR]$/.test(e.key)) { angle = (angle + 15) % 360; sizeField(); afterMove(); }
     else if (p && /^[1-5]$/.test(e.key)) { tagsFor(p).quality = +e.key; renderTags(p); }
     else if (p && /^[mM]$/.test(e.key) && p.maps.length > 1) { mapIdx[p.id] = ((mapIdx[p.id] || 0) + 1) % p.maps.length; render(); }
   });
 }
 function exportCsv() {
-  const rows = [["Region", "Park", "Decision", "Suitability", "Lights", "Light poles", "Fit", "Quality", "Fields", "Notes", "Field placement (lat, lon, angle°)", "Reviewer", "Reviewed at"]];
+  const rows = [["Region", "Park", "Decision", "Suitability", "Lights", "Light poles", "Fit", "Quality", "Fields", "Notes", "Field placement (lat, lon, angle°)", "Private operator", "Operator contact", "Reviewer", "Reviewed at"]];
   PARKS.forEach(p => { const r = reviews[p.id]; if (!r) return; const pl = r.placement;
     rows.push([p.region, p.name, r.decision === "top" ? "top pick" : r.decision === "yes" ? "shortlist" : "reject", suitWord(r), r.lights, pl?.lights?.length || 0,
-      FIT_LABEL[r.fit] || r.fit, r.quality || "", r.fields, r.notes, pl?.lat != null ? `${pl.lat}, ${pl.lon}, ${pl.angle}` : "", r.by || "", r.at || ""]); });
+      FIT_LABEL[r.fit] || r.fit, r.quality || "", r.fields, r.notes, pl?.lat != null ? `${pl.lat}, ${pl.lon}, ${pl.angle}` : "",
+      PRIV_BY_PARK[p.id]?.operator || "", [PRIV_BY_PARK[p.id]?.contact?.email, PRIV_BY_PARK[p.id]?.contact?.phone].filter(Boolean).join(" / "), r.by || "", r.at || ""]); });
   const csv = rows.map(r => r.map(v => { const s = String(v ?? ""); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }).join(",")).join("\n");
   const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); a.download = "council-field-vetting.csv"; a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
@@ -565,6 +627,8 @@ function exportCsv() {
 function gate(html) { $("gate").innerHTML = html; $("gate").hidden = false; $("app").hidden = true; }
 async function start() {
   const res = await fetch(BASE + "council-maps/parks.json"); PARKS = (await res.json()).parks; BYID = Object.fromEntries(PARKS.map(p => [p.id, p]));
+  try { const pr = await fetch(BASE + "council-maps/private-managed.json"); if (pr.ok) PRIV = await pr.json(); } catch { /* optional data */ }
+  PRIV_BY_PARK = Object.fromEntries((PRIV.operators || []).filter(o => o.park_id).map(o => [o.park_id, o]));
   const regions = [...new Set(PARKS.map(p => p.region))];
   $("region").insertAdjacentHTML("beforeend", regions.map(r => `<option>${esc(r)}</option>`).join(""));
   $("region").value = store.get("vet-region", ""); $("mode").value = store.get("vet-mode", "todo"); $("mapsOnly").checked = store.get("vet-mapsOnly", true);
