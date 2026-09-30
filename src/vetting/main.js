@@ -17,10 +17,8 @@ const supabase = SB_URL && SB_ANON
   ? createClient(SB_URL, SB_ANON, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, flowType: "pkce" } })
   : null;
 
-// Lights come from the poles you mark on the map; "None" records that you checked and there aren't any.
-const LIGHT_OPTS = [["unknown", "?"], ["none", "None"], ["full", "Yes"]];
+// Lights come from bulbs dropped on the map's poles; "No lights" records that you checked and there aren't any.
 // Fit: how much ultimate the space holds.
-const FIT_OPTS = [["reduced", "Reduced size"], ["full", "1 full field"], ["multi", "2+ fields"]];
 const FIT_LABEL = { unknown: "not rated", reduced: "reduced size", full: "1 full field", multi: "2+ fields", no: "doesn't fit" };
 // WFDF field: 100 × 37 m overall, 18 m end zones, brick marks 20 m in from each goal line.
 const WFDF = { len: 100, wid: 37, ez: 18 };
@@ -133,7 +131,7 @@ function tagsFor(p) {
 function ratedCount(t) { return [t.lights !== "unknown", t.fit !== "unknown", t.quality > 0, !!t.fields.trim()].filter(Boolean).length; }
 
 // ── Map ──────────────────────────────────────────────────────────────────────
-let map, overlay = null, baseZoom = null, forced = null, shownPark = null;
+let map, overlay = null, baseZoom = null, shownPark = null;
 let lightLayer, parkFieldsLayer, cityLayer, cityFieldsLayer, cityHome = null;
 function initMap() {
   map = L.map("map", { zoomSnap: 0.25, zoomDelta: 0.5, wheelPxPerZoomLevel: 150, maxZoom: 21, zoomControl: true });
@@ -145,17 +143,10 @@ function initMap() {
   map.createPane("fieldsPane").style.zIndex = 420;
   lightLayer = L.layerGroup(); parkFieldsLayer = L.layerGroup(); cityLayer = L.layerGroup(); cityFieldsLayer = L.layerGroup();
   map.on("zoomanim", e => { $("field").classList.add("zooming"); sizeField(e.zoom); });
-  map.on("zoomend", () => { $("field").classList.remove("zooming"); forced = null; updateLayer(); sizeField(); syncCityFields(); });
+  map.on("zoomend", () => { $("field").classList.remove("zooming"); updateLayer(); sizeField(); syncCityFields(); });
   map.on("move", () => sizeField());
   map.on("moveend", () => { if (view === "park" && fieldOn && !rotating) afterMove(); });
-  map.on("click", e => {
-    if (view === "city") return;
-    if (rotating) { lockField(); return; }
-    const p = current(); if (!p) return;
-    const t = tagsFor(p); t.lightPts.push([+e.latlng.lat.toFixed(6), +e.latlng.lng.toFixed(6)]);
-    if (t.lights !== "full" && t.lights !== "training") t.lights = "full";
-    drawLights(p); renderTags(p);
-  });
+  map.on("click", () => { if (view === "park" && rotating) lockField(); });
 }
 
 // ── Park view: Esri satellite + council overlay that drops away when you zoom off it ─
@@ -172,11 +163,10 @@ function showMap(p) {
     map.setView(p.lat ? [p.lat, p.lon] : [-36.87, 174.77], p.lat ? 16.5 : 11, { animate: false });
     baseZoom = null;
   }
-  forced = null; shownPark = p.id + "#" + i; updateLayer(); sizeField(); drawParkFields(p); drawLights(p);
+  shownPark = p.id + "#" + i; updateLayer(); sizeField(); drawParkFields(p); drawLights(p);
 }
 function councilVisible() {
   if (!overlay) return false;
-  if (forced) return forced === "council";
   const z = map.getZoom();
   return z >= baseZoom - REVEAL_OUT && z <= baseZoom + REVEAL_IN;
 }
@@ -184,8 +174,6 @@ function updateLayer() {
   const on = councilVisible();
   if (overlay) overlay.setOpacity(on ? 1 : 0);
   $("layerBadge").textContent = on ? "Council map" : "Satellite";
-  $("layerBtn").textContent = on ? "⇄ Satellite" : "⇄ Council map";
-  $("layerBtn").disabled = !overlay;
 }
 // Council fields traced from the map PDFs: [{n: name, c: [lat, lon], p: [[lat, lon], …]}].
 function councilFields(p) {
@@ -201,16 +189,67 @@ function drawParkFields(p) {
       color: on ? "#ffd400" : "#ffffff", weight: on ? 2.5 : 1.2, dashArray: on ? null : "4 4", opacity: 0.9 }).addTo(parkFieldsLayer);
   });
 }
+// Light poles: bulbs dragged from the dispenser onto the map. Placed bulbs can be dragged to
+// adjust them, dragged back onto the dispenser to remove them, or clicked to remove them.
 function drawLights(p) {
   lightLayer.clearLayers();
   const t = tagsFor(p);
   t.lightPts.forEach((ll, k) => {
-    L.marker(ll, { icon: L.divIcon({ className: "", html: `<div class="lightpin">💡</div>`, iconSize: [26, 26], iconAnchor: [13, 13] }),
-      title: "Light pole — click to remove", keyboard: false })
-      .on("click", e => { L.DomEvent.stopPropagation(e); t.lightPts.splice(k, 1);
-        if (!t.lightPts.length && t.lights === "full") t.lights = "unknown"; drawLights(p); renderTags(p); })
-      .addTo(lightLayer);
+    const mk = L.marker(ll, { icon: L.divIcon({ className: "", html: `<div class="lightpin">💡</div>`, iconSize: [26, 26], iconAnchor: [13, 13] }),
+      title: "Light pole — drag to move, drag back to the dispenser (or click) to remove", keyboard: false, draggable: true });
+    mk.on("click", e => { L.DomEvent.stopPropagation(e); removeLight(p, k); });
+    mk.on("drag", e => $("dispenser").classList.toggle("target", overDispenser(e.originalEvent)));
+    mk.on("dragend", e => {
+      $("dispenser").classList.remove("target");
+      const oe = lastPointer;
+      if (oe && overDispenser(oe)) return removeLight(p, k);
+      const l = mk.getLatLng(); t.lightPts[k] = [+l.lat.toFixed(6), +l.lng.toFixed(6)];
+    });
+    mk.addTo(lightLayer);
   });
+  $("bulbCount").textContent = t.lightPts.length;
+  $("noLightsBtn").setAttribute("aria-pressed", String(t.lights === "none"));
+}
+let lastPointer = null;
+function overDispenser(ev) {
+  if (!ev) return false;
+  const pt = ev.touches?.[0] || ev.changedTouches?.[0] || ev, r = $("dispenser").getBoundingClientRect();
+  return pt.clientX >= r.left - 6 && pt.clientX <= r.right + 6 && pt.clientY >= r.top - 6 && pt.clientY <= r.bottom + 6;
+}
+function addLight(p, latlng) {
+  const t = tagsFor(p);
+  t.lightPts.push([+latlng.lat.toFixed(6), +latlng.lng.toFixed(6)]);
+  if (t.lights !== "full" && t.lights !== "training") t.lights = "full";
+  drawLights(p); renderTags(p);
+}
+function removeLight(p, k) {
+  const t = tagsFor(p); t.lightPts.splice(k, 1);
+  if (!t.lightPts.length && (t.lights === "full" || t.lights === "training")) t.lights = "unknown";
+  drawLights(p); renderTags(p);
+}
+// Drag a bulb out of the dispenser: a ghost follows the pointer and drops where released.
+function bindDispenser() {
+  const src = $("bulbSrc"); let ghost = null;
+  document.addEventListener("pointermove", e => { lastPointer = e; }, { passive: true });
+  document.addEventListener("pointerup", e => { lastPointer = e; }, { passive: true, capture: true });
+  src.addEventListener("pointerdown", e => {
+    if (!current() || view !== "park") return;
+    e.preventDefault(); src.setPointerCapture(e.pointerId);
+    ghost = document.createElement("div"); ghost.className = "bulbghost"; ghost.textContent = "💡";
+    ghost.style.left = e.clientX + "px"; ghost.style.top = e.clientY + "px"; document.body.appendChild(ghost);
+  });
+  src.addEventListener("pointermove", e => { if (ghost) { ghost.style.left = e.clientX + "px"; ghost.style.top = e.clientY + "px"; } });
+  const drop = e => {
+    if (!ghost) return; ghost.remove(); ghost = null;
+    const p = current(), r = $("map").getBoundingClientRect();
+    if (!p || overDispenser(e) || e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) return;
+    addLight(p, map.containerPointToLatLng([e.clientX - r.left, e.clientY - r.top]));
+  };
+  src.addEventListener("pointerup", drop);
+  src.addEventListener("pointercancel", () => { if (ghost) { ghost.remove(); ghost = null; } });
+  $("noLightsBtn").onclick = () => { const p = current(); if (!p) return; const t = tagsFor(p);
+    if (t.lights === "none") t.lights = "unknown"; else { t.lights = "none"; t.lightPts = []; }
+    drawLights(p); renderTags(p); };
 }
 
 // ── Frisbee field overlay: frame-centred, true scale, centre button locks/unlocks rotation ─
@@ -353,18 +392,19 @@ function privContacts(o) {
   return bits.join(" · ");
 }
 const privStatus = o => ({ confirmed: "confirmed", likely: "likely", "to-verify": "to verify" }[o.status] || o.status);
-const privSteps = () => `<ol>${PRIV.workflow.map(w => `<li title="${esc(w.detail)}">${esc(w.label)}</li>`).join("")}</ol>`;
+// The four-step request workflow (PRIV.workflow) belongs to booking, not vetting; see multi-provider design §7.1.
 // Popup for a private ground that isn't a council park.
 function privHtml(o) {
   const c = o.contact || {};
-  return `<b>${esc(o.park)}</b>${o.approx ? " (approx. location)" : ""}<br><b style="color:${PRIV_COLOR}">◆ ${esc(o.operator)}</b> · ${esc(privStatus(o))}<br>${esc(o.manages)}<br>${privContacts(o)}${c.address ? "<br>" + esc(c.address) : ""}<br><b>Request steps</b>${privSteps()}${o.notes ? `<i>${esc(o.notes)}</i>` : ""}`;
+  return `<b>${esc(o.park)}</b>${o.approx ? " (approx. location)" : ""}<br><b style="color:${PRIV_COLOR}">◆ ${esc(o.operator)}</b> · ${esc(privStatus(o))}<br>${esc(o.manages)}<br>${privContacts(o)}${c.address ? "<br>" + esc(c.address) : ""}${o.notes ? `<br><i>${esc(o.notes)}</i>` : ""}`;
 }
 // Park card banner: every operator on this ground, then the request steps once.
 function privBanner(ops) {
   const [lead, ...rest] = ops;
-  return `<span><b>◆ Contact: ${esc(lead.operator)}</b> (${esc(privStatus(lead))}) — ${esc(lead.manages)} · ${privContacts(lead)}</span>`
-    + (rest.length ? `<span>Also on site: ${rest.map(o => `${esc(o.operator)} (${esc(o.code || o.type)}${o.contact?.url ? `, <a href="${esc(o.contact.url)}" target="_blank" rel="noopener">website ↗</a>` : ""})`).join(" · ")}</span>` : "")
-    + `<span><b>Request steps:</b> ${privSteps()}</span>`;
+  return `<span class="pb-full"><b>◆ Contact: ${esc(lead.operator)}</b> (${esc(privStatus(lead))}) — ${esc(lead.manages)} · ${privContacts(lead)}</span>`
+    + `<span class="pb-short"><b>◆ ${esc(lead.short)}</b> · ${privContacts(lead)}${rest.length ? ` · +${rest.length} club${rest.length > 1 ? "s" : ""}` : ""}</span>`
+    + (rest.length ? `<span class="pb-full">Also on site: ${rest.map(o => `${esc(o.operator)} (${esc(o.code || o.type)}${o.contact?.url ? `, <a href="${esc(o.contact.url)}" target="_blank" rel="noopener">website ↗</a>` : ""})`).join(" · ")}</span>` : "")
+    ;
 }
 function syncCityFields() {
   if (view !== "city") return;
@@ -409,10 +449,12 @@ function openPark(id) { focusId = id; setView("park"); }
 function renderTags(p) {
   const t = tagsFor(p);
   $("segQuality").innerHTML = [1, 2, 3, 4, 5].map(n => `<button data-tag="quality" data-val="${n}" aria-pressed="${t.quality === n}" title="${n}/5">${n <= t.quality ? "★" : "☆"}</button>`).join("");
-  $("segFit").innerHTML = FIT_OPTS.map(([v, l]) => `<button data-tag="fit" data-val="${v}" aria-pressed="${t.fit === v}">${l}</button>`).join("");
-  const lit = t.lights === "full" || t.lights === "training";
-  $("segLights").innerHTML = LIGHT_OPTS.map(([v, l]) => `<button data-tag="lights" data-val="${v}" aria-pressed="${v === "full" ? lit : t.lights === v}">${v === "full" && t.lights === "training" ? "Yes (training)" : l}</button>`).join("")
-    + `<span class="note">${t.lightPts.length ? `💡 ${t.lightPts.length} pole${t.lightPts.length > 1 ? "s" : ""} marked` : "click the map to mark poles"}</span>`;
+  // Fit and lights are set on the map (fit bar, bulb dispenser); here they're read-outs.
+  $("fitVal").textContent = t.fit === "unknown" ? "lock the field, then rate" : FIT_LABEL[t.fit];
+  $("fitVal").classList.toggle("unset", t.fit === "unknown");
+  $("lightsVal").textContent = t.lightPts.length ? `💡 ${t.lightPts.length} pole${t.lightPts.length > 1 ? "s" : ""}`
+    : t.lights === "none" ? "none" : t.lights === "training" || t.lights === "full" ? "yes" : "drag 💡 onto poles";
+  $("lightsVal").classList.toggle("unset", t.lights === "unknown");
   if (document.activeElement !== $("fieldsIn")) $("fieldsIn").value = t.fields;
   if (document.activeElement !== $("notesIn")) $("notesIn").value = t.notes;
   renderCentre();
@@ -551,8 +593,6 @@ function bind() {
     if (mp) { mapIdx[p.id] = +mp.dataset.map; render(); return; }
     if (t && t.tagName === "BUTTON") { const d = tagsFor(p), k = t.dataset.tag, v = k === "quality" ? +t.dataset.val : t.dataset.val;
       if (k === "quality") d.quality = d.quality === v ? 0 : v;
-      else if (k === "fit") { if (d.fit === v) d.fit = "unknown"; else if (fieldOn && view === "park") return confirmSpot(p, v); else d.fit = v; }
-      else if (k === "lights") { d.lights = v; if (v === "none" && d.lightPts.length) { d.lightPts = []; drawLights(p); } }
       renderTags(p); }
   });
   $("fieldsIn").addEventListener("input", () => { const p = current(); if (p) { const t = tagsFor(p); t.fields = $("fieldsIn").value; t.fieldsManual = !!t.fields.trim(); drawParkFields(p); } });
@@ -580,9 +620,8 @@ function bind() {
   $("fitPop").addEventListener("click", e => { const b = e.target.closest("[data-fit]"), p = current(); if (!b || !p) return;
     confirmSpot(p, b.dataset.fit); });
   $("fieldBtn").onclick = () => showField(!fieldOn);
-  $("layerBtn").onclick = () => { forced = councilVisible() ? "sat" : "council"; updateLayer(); };
+  bindDispenser();
   $("fitBtn").onclick = () => { const p = current(); if (p) showMap(p); };
-  $("backCity").onclick = () => { focusId = null; setView("city"); };
   $("cityTab").onclick = () => { if (view !== "city") { focusId = null; setView("city"); } else setView("city", { refit: true }); };
   $("parkTab").onclick = () => { if (view !== "park") { focusId = null; setView("park"); } };
   $("sizeBtn").onclick = () => { $("sizePanel").hidden = !$("sizePanel").hidden; };
@@ -615,7 +654,6 @@ function bind() {
     else if (/^[sS]$/.test(e.key)) skip();
     else if (/^[zZ]$/.test(e.key)) undo();
     else if (/^[tT]$/.test(e.key)) showField(!fieldOn);
-    else if (/^[vV]$/.test(e.key)) $("layerBtn").click();
     else if (e.key === "0") $("fitBtn").click();
     else if (/^[rR]$/.test(e.key)) { angle = (angle + 15) % 360; sizeField(); afterMove(); }
     else if (p && /^[1-5]$/.test(e.key)) { tagsFor(p).quality = +e.key; renderTags(p); }
