@@ -142,10 +142,10 @@ function initMap() {
   }).addTo(map);
   map.createPane("fieldsPane").style.zIndex = 420;
   lightLayer = L.layerGroup(); parkFieldsLayer = L.layerGroup(); cityLayer = L.layerGroup(); cityFieldsLayer = L.layerGroup();
-  map.on("zoomanim", e => { $("field").classList.add("zooming"); sizeField(e.zoom); });
+  map.on("zoomanim", e => { $("field").classList.add("zooming"); sizeField(e.zoom, e.center); });
   map.on("zoomend", () => { $("field").classList.remove("zooming"); updateLayer(); sizeField(); syncCityFields(); });
   map.on("move", () => sizeField());
-  map.on("moveend", () => { if (view === "park" && fieldOn && !rotating) afterMove(); });
+  map.on("moveend", () => { if (view === "park" && fieldOn && !rotating && !pin) afterMove(); });
   map.on("click", () => { if (view === "park" && rotating) lockField(); });
 }
 
@@ -163,7 +163,7 @@ function showMap(p) {
     map.setView(p.lat ? [p.lat, p.lon] : [-36.87, 174.77], p.lat ? 16.5 : 11, { animate: false });
     baseZoom = null;
   }
-  shownPark = p.id + "#" + i; updateLayer(); sizeField(); drawParkFields(p); drawLights(p);
+  shownPark = p.id + "#" + i; pin = null; updateLayer(); sizeField(); drawParkFields(p); drawLights(p);
 }
 function councilVisible() {
   if (!overlay) return false;
@@ -253,7 +253,10 @@ function bindDispenser() {
 }
 
 // ── Frisbee field overlay: frame-centred, true scale, centre button locks/unlocks rotation ─
-let angle = 0, rotating = false;
+// The field is frame-centred until it's locked; locking pins it to that spot on the map
+// (pin), so panning afterwards moves the map under it. Unlocking recentres on it.
+let angle = 0, rotating = false, pin = null;
+const fieldCentre = () => pin || map.getCenter();
 function drawField() {
   const { len: Lm, wid: Wm, ez } = dims, x0 = -Lm / 2, y0 = -Wm / 2, gl = Lm / 2 - ez, bx = gl - BRICK;
   const cross = x => `<path d="M${x - 0.8} -0.8 L${x + 0.8} 0.8 M${x - 0.8} 0.8 L${x + 0.8} -0.8"/>`;
@@ -266,36 +269,51 @@ function drawField() {
     </g>`;
   $("scaleNote").textContent = `Field ${dims.len} × ${dims.wid} m${dims.ez ? `, ${dims.ez} m end zones` : ""}`;
 }
-function sizeField(zoom) {
+function sizeField(zoom, center) {
   if (!map) return;
-  const z = zoom ?? map.getZoom(), lat = map.getCenter().lat;
+  const z = zoom ?? map.getZoom(), lat = (pin || center || map.getCenter()).lat;
   const mpp = 40075016.686 * Math.cos(lat * Math.PI / 180) / (256 * Math.pow(2, z));
   const w = dims.len / mpp, h = dims.wid / mpp, svg = $("fieldSvg");
   svg.style.width = w + "px"; svg.style.height = h + "px";
   svg.style.left = -w / 2 + "px"; svg.style.top = -h / 2 + "px";
   svg.style.transform = `rotate(${angle}deg)`;
+  // Pinned: place the field (and its lock button) at the pin's screen position, including
+  // mid-zoom, where the target zoom/centre come from the zoomanim event.
+  let left = "50%", top = "50%";
+  if (pin) {
+    const size = map.getSize(), c = center || map.getCenter();
+    const pt = map.project(pin, z).subtract(map.project(c, z)).add(size.divideBy(2));
+    left = pt.x + "px"; top = pt.y + "px";
+  }
+  $("field").style.left = $("centreWrap").style.left = left;
+  $("field").style.top = $("centreWrap").style.top = top;
 }
 function setRotating(on) {
+  if (on && pin) { map.setView(pin, map.getZoom(), { animate: false }); pin = null; }
   rotating = on; $("field").classList.toggle("live", on); $("rotateHint").hidden = !on;
-  if (on) { map.dragging.disable(); $("fitPop").hidden = true; } else map.dragging.enable();
-  renderCentre();
+  $("rotateHint").textContent = matchMedia("(hover: none)").matches
+    ? "Drag out from the centre button to turn · pan the map to move · tap the button to lock it there"
+    : "Move the mouse to turn · drag the map to move · click to lock it there";
+  if (on) $("fitPop").hidden = true;
+  sizeField(); renderCentre();
 }
 function showField(on) {
   fieldOn = on; store.set("vet-field-on", on);
   $("field").hidden = !on; $("centreWrap").hidden = !on; $("fieldBtn").setAttribute("aria-pressed", String(on));
   if (!on) { if (rotating) setRotating(false); $("fitPop").hidden = true; }
 }
-// Locking only fixes the angle. You can still pan to fine-tune the spot; the nearest council
-// field is previewed as you go. Rating the fit confirms the spot: that is when the fields are
-// filled in and the position recorded, and only the confirmed spot is saved with a decision.
+// Locking fixes the angle and pins the field where it is. Rating the fit then confirms the
+// spot: that is when the fields are filled in and the position recorded, and only the
+// confirmed spot is saved with a decision. Unlock to move or turn it again.
 function lockField() {
   setRotating(false);
+  pin = map.getCenter(); sizeField();
   const p = current(); if (!p) return;
   $("fitPop").hidden = false; previewFields(p); renderCentre();
 }
 function nearestFields(p, fit) {
   const fs = councilFields(p).filter(f => f.n); if (!fs.length) return null;
-  const c = map.getCenter(), kx = 111320 * Math.cos(c.lat * Math.PI / 180), ky = 110540;
+  const c = fieldCentre(), kx = 111320 * Math.cos(c.lat * Math.PI / 180), ky = 110540;
   const d = f => Math.hypot((f.c[1] - c.lng) * kx, (f.c[0] - c.lat) * ky);
   const byDist = fs.map(f => ({ f, m: d(f) })).sort((a, b) => a.m - b.m);
   const pick = fit === "multi" ? byDist.filter(x => x.m <= Math.max(dims.len, 60) * 1.2) : [byDist[0]];
@@ -303,7 +321,7 @@ function nearestFields(p, fit) {
 }
 function spotMoved(t) {
   if (!t.spot) return false;
-  const c = map.getCenter(), kx = 111320 * Math.cos(c.lat * Math.PI / 180);
+  const c = fieldCentre(), kx = 111320 * Math.cos(c.lat * Math.PI / 180);
   const dm = Math.hypot((t.spot.lon - c.lng) * kx, (t.spot.lat - c.lat) * 110540);
   const da = Math.abs((((angle - t.spot.angle) % 360) + 540) % 360 - 180);
   return dm > 3 || da > 2;
@@ -311,7 +329,7 @@ function spotMoved(t) {
 function previewFields(p) {
   const t = tagsFor(p), n = nearestFields(p, t.fit), moved = spotMoved(t);
   const near = n ? ` · nearest: ${n.nearest.f.n} (${Math.round(n.nearest.m)} m)` : "";
-  $("fitMsg").textContent = moved ? `Field moved — rate the fit again to save this spot${near}` : `Pan to fine-tune, then rate the fit here${near}`;
+  $("fitMsg").textContent = moved ? `Field moved — rate the fit again to save this spot${near}` : (pin ? `Rate the fit at this spot${near}` : `Pan to fine-tune, then rate the fit here${near}`);
   $("fitMsg").classList.toggle("warn", moved);
 }
 function afterMove() {
@@ -322,7 +340,7 @@ function afterMove() {
   renderCentre();
 }
 function confirmSpot(p, fit) {
-  const t = tagsFor(p), c = map.getCenter();
+  const t = tagsFor(p), c = fieldCentre();
   t.fit = fit;
   t.spot = { lat: +c.lat.toFixed(6), lon: +c.lng.toFixed(6), angle: Math.round(angle) };
   const n = nearestFields(p, fit);
@@ -337,7 +355,7 @@ function renderCentre() {
   $("centreWrap").classList.toggle("unlocked", rotating);
   $("centreWrap").classList.toggle("needfit", !rotating && !!t && (!t.spot || moved));
   $("centreIco").textContent = rotating ? "🔓" : "🔒";
-  $("centreLbl").textContent = rotating ? "Click to lock the angle"
+  $("centreLbl").textContent = rotating ? "Click to lock it here"
     : !t?.spot ? "Unlock to turn · then rate the fit"
     : moved ? "Moved · rate the fit again" : `Fits: ${FIT_LABEL[t.fit]} · spot saved`;
   $("fitPop").querySelectorAll("[data-fit]").forEach(b => b.setAttribute("aria-pressed", String(!!t && t.fit === b.dataset.fit && !moved)));
@@ -414,14 +432,19 @@ function syncCityFields() {
 }
 function renderLegend() {
   const row = (c, t) => `<div><i style="background:${c}"></i>${t}</div>`;
-  $("legend").innerHTML = `<b>Suitability</b>${row(`hsl(${suitHue(0.95)} 72% 42%)`, "Excellent")}${row(`hsl(${suitHue(0.7)} 72% 42%)`, "Good")}${row(`hsl(${suitHue(0.5)} 72% 42%)`, "Fair")}${row(`hsl(${suitHue(0.2)} 72% 42%)`, "Poor")}${row("#b3372d", "Rejected")}${row("#8a958f", "Not rated")}<div><span class="dia"></span>Privately managed</div><div style="color:var(--muted)">Gold ring = top pick</div>`;
+  $("legend").innerHTML = `<button class="lg-h" id="legendToggle" aria-expanded="true">Suitability <span aria-hidden="true">▾</span></button>`
+    + `<div class="lg-b">${row(`hsl(${suitHue(0.95)} 72% 42%)`, "Excellent")}${row(`hsl(${suitHue(0.7)} 72% 42%)`, "Good")}${row(`hsl(${suitHue(0.5)} 72% 42%)`, "Fair")}${row(`hsl(${suitHue(0.2)} 72% 42%)`, "Poor")}${row("#b3372d", "Rejected")}${row("#8a958f", "Not rated")}<div><span class="dia"></span>Privately managed</div><div class="lg-note">Gold ring = top pick</div></div>`;
+  // Collapsed by default on small screens so it doesn't cover the map; the choice is remembered.
+  const setOpen = open => { $("legend").classList.toggle("collapsed", !open); $("legendToggle").setAttribute("aria-expanded", String(open)); };
+  setOpen(store.get("vet-legend-open", !matchMedia("(max-width: 640px)").matches));
+  $("legendToggle").onclick = () => { const open = $("legend").classList.contains("collapsed"); store.set("vet-legend-open", open); setOpen(open); };
 }
 function setView(v, { refit } = {}) {
   const was = view; view = v; store.set("vet-view", v);
   $("cityTab").setAttribute("aria-selected", String(v === "city")); $("parkTab").setAttribute("aria-selected", String(v === "park"));
   $("card").classList.toggle("city", v === "city");
   $("info").hidden = v === "city"; $("cityInfo").hidden = v !== "city"; $("legend").hidden = v !== "city";
-  $("actions").style.visibility = v === "city" ? "hidden" : "";
+  $("actions").hidden = v === "city";
   if (v === "city") {
     if (rotating) setRotating(false);
     $("fitPop").hidden = true;
@@ -519,7 +542,7 @@ function render() {
     if (fresh) showMap(p);
     renderTags(p);
     // Restore a saved field placement for a reviewed park.
-    if (fresh && r?.placement?.lat != null && !tagsFor(p)._placed) { angle = r.placement.angle || 0; map.setView([r.placement.lat, r.placement.lon], map.getZoom(), { animate: false }); tagsFor(p)._placed = true; sizeField(); }
+    if (fresh && r?.placement?.lat != null && !tagsFor(p)._placed) { angle = r.placement.angle || 0; map.setView([r.placement.lat, r.placement.lon], map.getZoom(), { animate: false }); pin = L.latLng(r.placement.lat, r.placement.lon); tagsFor(p)._placed = true; sizeField(); renderCentre(); }
   }
   ["noBtn", "yesBtn", "topBtn", "skipBtn"].forEach(b => $(b).disabled = !p);
   $("undoBtn").disabled = !undoStack.length;
@@ -611,12 +634,21 @@ function bind() {
     if (-dy > 100 && Math.abs(dx) < 90) decide("top"); else if (dx > 110) decide("yes"); else if (dx < -110) decide("no"); };
   h.addEventListener("pointerup", end); h.addEventListener("pointercancel", end);
   // Field rotation follows the pointer while unlocked.
-  $("map").parentElement.addEventListener("pointermove", e => {
-    if (!rotating) return; const r = $("map").getBoundingClientRect();
+  // While unlocked, hovering turns the field and dragging pans the map under it. On touch
+  // screens (no hover), drag outward from the centre button to turn it.
+  const turnTo = e => { const r = $("map").getBoundingClientRect();
     const px = e.clientX - (r.left + r.width / 2), py = e.clientY - (r.top + r.height / 2);
     if (Math.hypot(px, py) < 30) return;   // too close to the centre to read a direction
-    angle = Math.atan2(py, px) * 180 / Math.PI; sizeField(); });
-  $("centreBtn").onclick = e => { e.stopPropagation(); if (rotating) lockField(); else setRotating(true); };
+    angle = Math.atan2(py, px) * 180 / Math.PI; sizeField(); };
+  $("map").parentElement.addEventListener("pointermove", e => { if (rotating && !e.buttons && e.pointerType === "mouse") turnTo(e); });
+  let twist = null;
+  $("centreBtn").addEventListener("pointerdown", e => { if (!rotating || e.pointerType === "mouse") return;
+    twist = { x: e.clientX, y: e.clientY, moved: false }; $("centreBtn").setPointerCapture(e.pointerId); e.preventDefault(); });
+  $("centreBtn").addEventListener("pointermove", e => { if (!twist) return;
+    if (Math.hypot(e.clientX - twist.x, e.clientY - twist.y) > 8) twist.moved = true; if (twist.moved) turnTo(e); });
+  let swallowClick = false;   // a twist ends in a click on the button; don't let it lock
+  $("centreBtn").addEventListener("pointerup", () => { if (twist?.moved) swallowClick = true; twist = null; });
+  $("centreBtn").onclick = e => { e.stopPropagation(); if (swallowClick) { swallowClick = false; return; } if (rotating) lockField(); else setRotating(true); };
   $("fitPop").addEventListener("click", e => { const b = e.target.closest("[data-fit]"), p = current(); if (!b || !p) return;
     confirmSpot(p, b.dataset.fit); });
   $("fieldBtn").onclick = () => showField(!fieldOn);

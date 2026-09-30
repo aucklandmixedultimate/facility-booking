@@ -251,7 +251,7 @@ The page always fits one screen: nothing scrolls except the map, where the wheel
 - **Auckland view** (C toggles it). It opens framed from North Harbour Stadium to Opaheke
   Sports Park. Every park is plotted across the city and coloured by its overall
   suitability: excellent, good, fair, poor, rejected, or not rated. Top picks
-  have a gold ring. Zoom in to see each park's council fields shaded in the same colour.
+  have a gold ring. The legend folds away (collapsed by default on phones). Zoom in to see each park's council fields shaded in the same colour.
   Click a park to open and rate it. Deciding returns you to the Auckland map. **Rate next**
   jumps to the next unrated park in the queue.
   - Suitability starts from quality (x/5).
@@ -271,14 +271,17 @@ The page always fits one screen: nothing scrolls except the map, where the wheel
 - **Ultimate field to scale.** The field is WFDF standard: 100 × 37 m, 18 m end zones,
   brick marks 20 m in. It's editable under ⚙. It stays centred in the frame and scales
   with zoom, so you pan the map underneath it to test a spot.
-  1. **Unlock** the yellow centre button (Enter). The field turns to follow the mouse.
-  2. **Lock** it to fix the angle. Nothing is recorded yet.
-  3. **Fine-tune** by panning. The bar at the bottom previews the nearest council field.
-  4. **Rate the fit**: reduced size, 1 full field or 2+ fields. Rating confirms the spot.
-     It records the centre and angle, and fills **Fields** with the nearest traced
+  1. **Unlock** the centre button (Enter). Move the mouse to turn the field (on a phone, drag
+     out from the button) and drag the map to move it.
+  2. **Lock** it by clicking the map or the button. The field is pinned to that spot, so
+     panning afterwards moves the map under it. The bar at the bottom previews the nearest
+     council field.
+  3. **Rate the fit**: reduced size, 1 full field or 2+ fields. Rating confirms the pinned
+     spot. It records the centre and angle, and fills **Fields** with the nearest traced
      council field (with 2+ fields, every field within about 120 m).
-  If you move or turn the field after rating, the button reads "Moved" until you rate
-  again. Only the confirmed spot is ever saved.
+  Unlocking recentres on the field so you can move or turn it again. Relocking somewhere
+  else shows "Moved" until you rate again. Only the confirmed spot is ever saved, and a
+  saved spot is pinned when you reopen the park.
 - **Privately managed grounds (◆).** Some council grounds are run by a club, trust or
   CCO, e.g. Grammar TEC at Orakei Domain B. They show as purple diamonds, and hollow
   diamonds mark private grounds that aren't in the council maps. Their card shows the
