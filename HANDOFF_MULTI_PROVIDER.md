@@ -37,6 +37,7 @@ This file is the entry point: what exists, what's decided, and where to pick up.
 | Non-GTEC workflow | Bookings list actions | No "Queue for GTEC"; approve directly from *Pending AMUA Review*. |
 | **AMUA details** setting | `amua_org` in `settings`; `AmuaDetailsModal`; `applyAmuaOrg()` → `AMUA_INFO` | Organisation (name, postal address, GST, bank); operations, secondary and key-holder contacts; council answers (RSO, organisation type, address search). Printed on documents; the operations contact goes in the letterhead. |
 | Invoices group linked emails under the main email | `invKey()` / `invSplitShare()` in `SummaryTab` | Prerequisite for multi-club billing. |
+| **Venue selector** (provider → site dropdown next to the facility filter) | `listVenues()`, `venueFacilities()`, `inActiveVenue()`; `PROVIDERS.*.isDefault` / `defaultSite` | Default is Cornwall Park (default provider, default site). Scopes calendars, day grids and new-booking pickers. Summary, rates, pricing and billing still see everything. Shown only when the viewer can see more than one venue; admins also get "All venues". Remembered per device (`fb_venue`). |
 
 ## What's designed, not built
 
@@ -60,7 +61,8 @@ In order (see the plan for detail):
    and forwarding filters from other inboxes, which update applications from
    coordinators' replies.
 4. **Council reference data:** 254-park catalogue, coordinator contacts, season windows,
-   and warnings.
+   warnings, and **field vetting**: lights, fit, quality tiers, reliability and field
+   reports ([`docs/council-field-vetting.md`](docs/council-field-vetting.md)).
 5. **Billing:** free council fields ($0, no council PO), event permits as provider
    invoices, and reconciliation of provider invoices against POs.
 

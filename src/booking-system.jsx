@@ -269,10 +269,66 @@ const RECIPIENT_CODE_GTEC = "GTE";
 // `provider` on each facility. `short` names the provider in Drive folder names.
 // (Interim: see docs/multi-provider-design.md for moving this into Supabase.)
 const PROVIDERS = {
-  gtec:        { ...VENDOR_GTEC, short:"GTEC", recipientCode: RECIPIENT_CODE_GTEC },
+  gtec:        { ...VENDOR_GTEC, short:"GTEC", recipientCode: RECIPIENT_CODE_GTEC,
+                 isDefault:true, defaultSite:"Cornwall Park" },
   stcuthberts: { id:"stcuthberts", name:"St Cuthbert's College", short:"St Cuthberts",
-                 address:"", gstNumber:"", recipientCode:"STC" },
+                 address:"", gstNumber:"", recipientCode:"STC", defaultSite:"St Cuthberts" },
 };
+function defaultProviderId() {
+  return Object.keys(PROVIDERS).find(k => PROVIDERS[k].isDefault) || Object.keys(PROVIDERS)[0];
+}
+
+// ─── Venues: provider → site ─────────────────────────────────────────────────
+// The calendars, day grids and new-booking pickers show one venue at a time: the
+// facilities of one provider at one site. The default provider's default site (Cornwall
+// Park) is shown unless the viewer picks another from the venue dropdown. A facility
+// without a `site` belongs to its provider's defaultSite. Summaries, rates, pricing rules
+// and billing still see every facility.
+// _activeVenue mirrors the App's venue state, like _isAdminView; null = the default.
+let _activeVenue = null;
+const ALL_VENUES = "all";
+function venueKeyOf(f) {
+  const pid = f.provider || defaultProviderId();
+  return `${pid}|${f.site || PROVIDERS[pid]?.defaultSite || ""}`;
+}
+// Venues the current viewer can see, default venue first, then grouped by provider.
+function listVenues() {
+  const byKey = new Map();
+  visibleFacilities().forEach(f => {
+    const key = venueKeyOf(f);
+    if (!byKey.has(key)) {
+      const pid = f.provider || defaultProviderId();
+      byKey.set(key, { key, providerId: pid, providerName: PROVIDERS[pid]?.name || pid,
+                       site: key.split("|")[1] || PROVIDERS[pid]?.short || pid });
+    }
+  });
+  const dflt = defaultVenueKey();
+  return [...byKey.values()].sort((a,b) => (b.key===dflt) - (a.key===dflt)
+    || (b.providerId===defaultProviderId()) - (a.providerId===defaultProviderId())
+    || a.providerName.localeCompare(b.providerName) || a.site.localeCompare(b.site));
+}
+function defaultVenueKey() {
+  const pid = defaultProviderId();
+  return `${pid}|${PROVIDERS[pid]?.defaultSite || ""}`;
+}
+function activeVenueKey() {
+  if (_activeVenue === ALL_VENUES && _isAdminView) return ALL_VENUES;
+  const vs = listVenues();
+  if (vs.some(v => v.key === _activeVenue)) return _activeVenue;
+  return vs.find(v => v.key === defaultVenueKey())?.key || vs[0]?.key || ALL_VENUES;
+}
+function inActiveVenue(facilityId) {
+  const k = activeVenueKey();
+  if (k === ALL_VENUES) return true;
+  const f = FACILITIES.find(x => x.id === facilityId);
+  return !f || venueKeyOf(f) === k;
+}
+// Facilities for venue-scoped views. `keepId` keeps a booking's current facility listed
+// even when it belongs to another venue, so editing never silently drops it.
+function venueFacilities(keepId) {
+  const k = activeVenueKey();
+  return visibleFacilities().filter(f => k === ALL_VENUES || venueKeyOf(f) === k || f.id === keepId);
+}
 function providerOfFacility(facilityId) {
   return FACILITIES.find(f => f.id === facilityId)?.provider || "gtec";
 }
@@ -1957,7 +2013,7 @@ function InlineDayPicker({ date, bookings, onPick, onConfirm, multi=false }) {
   function geom(e) {
     const r = colsRef.current?.getBoundingClientRect();
     if (!r) return null;
-    const col  = Math.max(0, Math.min(visibleFacilities().length-1, Math.floor((e.clientX - r.left) / (r.width / visibleFacilities().length))));
+    const col  = Math.max(0, Math.min(venueFacilities().length-1, Math.floor((e.clientX - r.left) / (r.width / venueFacilities().length))));
     const slot = Math.max(0, Math.min(Math.floor((e.clientY - r.top - HEAD_H) / SH), CAL_SLOTS-1));
     return { col, slot };
   }
@@ -2013,14 +2069,14 @@ function InlineDayPicker({ date, bookings, onPick, onConfirm, multi=false }) {
           onMouseDown={gridDown} onMouseMove={gridMove} onMouseUp={gridUp} onMouseLeave={()=>setDrag(null)}>
         {span&&(
           <div style={{position:"absolute",zIndex:5,pointerEvents:"none",
-            left:`${span.loC/visibleFacilities().length*100}%`, width:`${(span.hiC-span.loC+1)/visibleFacilities().length*100}%`,
+            left:`${span.loC/venueFacilities().length*100}%`, width:`${(span.hiC-span.loC+1)/venueFacilities().length*100}%`,
             top:HEAD_H+span.loS*SH, height:(span.hiS-span.loS+1)*SH,
             background:"rgba(99,102,241,0.20)",border:"1.5px solid #6366f1",borderRadius:4,
             display:"flex",alignItems:"flex-start",justifyContent:"center",fontSize:8,fontWeight:700,color:"#4338ca",paddingTop:1}}>
             {fmtTime(slotToHour(span.loS))}–{fmtTime(slotToHour(span.hiS+1))}{span.hiC>span.loC?` · ${span.hiC-span.loC+1} fields`:""}
           </div>
         )}
-        {visibleFacilities().map(fac=>{
+        {venueFacilities().map(fac=>{
           const facBkgs = dayBkgs.filter(b=>b.facility_id===fac.id);
           const colTint = FACILITY_TINT[fac.id] || "#fff";
           const isFloodlit = fac.id===FLOODLIT_FIELD_ID;
@@ -2154,7 +2210,7 @@ function SlotRow({ slot, idx, onChange, onRemove, canRemove, allBookings }) {
         <div>
           <label style={S.lbl}>Facility *</label>
           <select style={S.inp} value={slot.facility_id} onChange={e=>upd("facility_id",e.target.value)}>
-            {visibleFacilities().map(f=><option key={f.id} value={f.id}>{f.name}</option>)}
+            {venueFacilities(slot.facility_id).map(f=><option key={f.id} value={f.id}>{f.name}</option>)}
           </select>
         </div>
         <div>
@@ -2556,7 +2612,7 @@ function InlineDraftEditor({ draft, onSave, onCancel }) {
         <div>
           <label style={S.lbl}>Facility</label>
           <select style={{...S.inp,fontSize:12}} value={facility} onChange={e=>setFacility(e.target.value)}>
-            {visibleFacilities().map(f=><option key={f.id} value={f.id}>{f.name}</option>)}
+            {venueFacilities(facility).map(f=><option key={f.id} value={f.id}>{f.name}</option>)}
           </select>
         </div>
         <div>
@@ -2745,14 +2801,14 @@ function BookingForm({ booking, allBookings, onAddToCart, onClose, isAdmin, logg
   // A slot is just facility/date/time/duration — shared purpose/notes/repetition live
   // on the form, so creating several grouped bookings means staging several slots.
   function blankSlot(o={}) {
-    return { facility_id:FACILITIES[0].id, date:todayKey(), start_hour:9, duration:1, ...o };
+    return { facility_id:(venueFacilities()[0]||FACILITIES[0]).id, date:todayKey(), start_hour:9, duration:1, ...o };
   }
   const initSlots = isEditing
     ? [{ id:booking.id, facility_id:booking.facility_id, date:booking.date, start_hour:booking.start_hour, duration:booking.duration }]
     : (booking && Array.isArray(booking._dates) && booking._dates.length
-        ? booking._dates.map(dt => blankSlot({ facility_id:booking.facility_id||FACILITIES[0].id, date:dt, start_hour:booking.start_hour||9, duration:booking.duration||1 }))
+        ? booking._dates.map(dt => blankSlot({ facility_id:booking.facility_id||(venueFacilities()[0]||FACILITIES[0]).id, date:dt, start_hour:booking.start_hour||9, duration:booking.duration||1 }))
         : booking && booking.date && !isMultiEdit
-          ? [blankSlot({ facility_id:booking.facility_id||FACILITIES[0].id, date:booking.date, start_hour:booking.start_hour||9, duration:booking.duration||1 })]
+          ? [blankSlot({ facility_id:booking.facility_id||(venueFacilities()[0]||FACILITIES[0]).id, date:booking.date, start_hour:booking.start_hour||9, duration:booking.duration||1 })]
           : []);
 
   const [name,  setName]  = useState(booking?.name  || "");
@@ -2779,7 +2835,7 @@ function BookingForm({ booking, allBookings, onAddToCart, onClose, isAdmin, logg
   // New manual slots inherit the previous slot's field/time/duration (propagate details).
   function addManualSlot() {
     const last = slots[slots.length-1];
-    setSlots(ss=>[...ss, blankSlot({ date:pickDate, facility_id:last?.facility_id||FACILITIES[0].id, start_hour:last?.start_hour??9, duration:last?.duration??1 })]);
+    setSlots(ss=>[...ss, blankSlot({ date:pickDate, facility_id:last?.facility_id||(venueFacilities()[0]||FACILITIES[0]).id, start_hour:last?.start_hour??9, duration:last?.duration??1 })]);
   }
   function addPickedSlots(picks) {
     if (picks?.length) setSlots(ss=>[...ss, ...picks.map(p=>blankSlot({ facility_id:p.facility_id, date:pickDate, start_hour:p.start_hour, duration:p.duration }))]);
@@ -3410,7 +3466,7 @@ function WeekCalendar({ bookings, onNewBooking, onNewBookingRange, onBookingClic
 
   const days    = getWeekDates(weekBase);
   const today   = todayKey();
-  const visible = (selectedFacility === "all" ? bookings : bookings.filter(b => b.facility_id === selectedFacility))
+  const visible = (selectedFacility === "all" ? bookings.filter(b => inActiveVenue(b.facility_id)) : bookings.filter(b => b.facility_id === selectedFacility))
     .filter(b => !["cancelled","rejected"].includes(b.status));
 
   function yToSlot(y)      { return Math.max(0, Math.min(Math.floor(y / SLOT_H), CAL_SLOTS - 1)); }
@@ -3624,7 +3680,7 @@ function MonthCalendar({ bookings, onBookingClick, onNewBooking, onNewBookingRan
   const today = todayKey();
 
   const days    = getDaysInMonth(year, month);
-  const visible = (selectedFacility === "all" ? bookings : bookings.filter(b => b.facility_id === selectedFacility))
+  const visible = (selectedFacility === "all" ? bookings.filter(b => inActiveVenue(b.facility_id)) : bookings.filter(b => b.facility_id === selectedFacility))
     .filter(b => !["cancelled","rejected"].includes(b.status));
 
   const firstDow = days[0].getDay();
@@ -3911,7 +3967,7 @@ function DayTimelinePopup({ date, bookings, onClose, onBookingClick, onNewBookin
   // facilities across two grounds where there were five, which overflowed a 760px modal
   // at the old 96px minimum. Widen the dialog as columns are added and narrow the columns
   // themselves once there are more than six, so the whole day stays visible at a glance.
-  const dayFacs   = visibleFacilities();
+  const dayFacs   = venueFacilities();
   const dayColMin = dayFacs.length <= 5 ? 96 : dayFacs.length <= 6 ? 84 : 68;
   const dayModalW = Math.min(1060, 760 + Math.max(0, dayFacs.length - 5) * 70);
   const dayGridW  = 96 + dayFacs.length * dayColMin;   // an hour axis at each edge
@@ -3941,7 +3997,7 @@ function DayTimelinePopup({ date, bookings, onClose, onBookingClick, onNewBookin
         <div style={{display:"flex",minWidth:dayGridW}}>
           {hourAxis("left")}
           {/* Facility columns */}
-          {visibleFacilities().map(fac=>{
+          {venueFacilities().map(fac=>{
             const isDragging = dragState?.facility===fac.id;
             const colSel = (isDragging && nd) ? nd : (pendingSel?.facility===fac.id ? pendingSel : null);
             const colTint = FACILITY_TINT[fac.id] || "#fff";
@@ -4099,7 +4155,7 @@ function AboutTab() {
         <h2 style={h2}>Hiring Rates</h2>
         <p style={{margin:"0 0 12px",fontSize:13,color:"#475569"}}>Rates are set per facility and time of day. Contact AMUA for current rates.</p>
         <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
-          {visibleFacilities().map(f=>(
+          {venueFacilities().map(f=>(
             <div key={f.id} style={{display:"flex",alignItems:"center",gap:8,background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:"10px 14px",flex:"1 1 180px"}}>
               <span style={{width:10,height:10,borderRadius:"50%",background:f.color,display:"inline-block",flexShrink:0}}/>
               <span style={{fontWeight:600,fontSize:13,color:"#0f172a"}}>{f.name}</span>
@@ -4234,7 +4290,7 @@ function PatternModal({ email, name, pk, bkgs, isAdmin, canEdit: canEditProp, on
             <div style={{display:"flex",alignItems:"center",gap:5}}>
               <span style={{fontSize:12,color:"#64748b"}}>Facility</span>
               <select value={bulkFac} onChange={e=>setBulkFac(e.target.value)} style={si}>
-                {visibleFacilities().map(f=><option key={f.id} value={f.id}>{f.name}</option>)}
+                {venueFacilities(bulkFac).map(f=><option key={f.id} value={f.id}>{f.name}</option>)}
               </select>
             </div>
           </div>
@@ -10149,6 +10205,14 @@ export default function App() {
   const [dbError,  setDbError]  =useState("");
   const [tab,      setTab]      =useState("about");
   const [selFac,   setSelFac]   =useState("all");
+  const [venue, setVenueState] = useState(()=>{ try{ return localStorage.getItem("fb_venue") || null; }catch{ return null; } });
+  _activeVenue = venue;
+  function setVenue(v) {
+    setVenueState(v); _activeVenue = v;
+    try{ v ? localStorage.setItem("fb_venue", v) : localStorage.removeItem("fb_venue"); }catch{ /* ignore */ }
+    // A facility filter from the previous venue would hide everything in the new one.
+    setSelFac(prev => prev === "all" || venueFacilities().some(f => f.id === prev) ? prev : "all");
+  }
   const [showForm, setShowForm] =useState(false);
   const [focusedDate, setFocusedDate] = useState(new Date());
   const [dayPopupDate, setDayPopupDate] = useState(null);
@@ -11813,10 +11877,24 @@ export default function App() {
     </button>
   );}
 
+  const venues = listVenues();
   const FacilityPills=()=>(
     <div style={{display:"flex",gap:6,marginBottom:16,alignItems:"center",overflowX:"auto",WebkitOverflowScrolling:"touch",scrollbarWidth:"none",msOverflowStyle:"none",paddingBottom:2}}>
+      {/* Venue picker: shown only when the viewer can see more than one venue. */}
+      {venues.length>1&&(
+        <select value={activeVenueKey()} onChange={e=>setVenue(e.target.value===defaultVenueKey()?null:e.target.value)}
+          title="Choose which provider's venue to show" aria-label="Venue"
+          style={{padding:"5px 8px",borderRadius:20,border:"1.5px solid #0f172a",fontSize:12,fontWeight:700,fontFamily:"inherit",background:"#fff",color:"#0f172a",flexShrink:0,cursor:"pointer"}}>
+          {[...new Set(venues.map(v=>v.providerId))].map(pid=>(
+            <optgroup key={pid} label={PROVIDERS[pid]?.name||pid}>
+              {venues.filter(v=>v.providerId===pid).map(v=><option key={v.key} value={v.key}>📍 {v.site}</option>)}
+            </optgroup>
+          ))}
+          {isAdmin&&<option value={ALL_VENUES}>All venues</option>}
+        </select>
+      )}
       <button onClick={()=>setSelFac("all")} style={{padding:"5px 12px",borderRadius:20,border:"1.5px solid",cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",flexShrink:0,borderColor:selFac==="all"?"#0f172a":"#e2e8f0",background:selFac==="all"?"#0f172a":"#fff",color:selFac==="all"?"#fff":"#475569"}}>All</button>
-      {visibleFacilities().map(f=>(
+      {venueFacilities().map(f=>(
         <button key={f.id} onClick={()=>setSelFac(f.id===selFac?"all":f.id)} style={{padding:"5px 12px",borderRadius:20,border:"1.5px solid",cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",display:"inline-flex",alignItems:"center",gap:5,flexShrink:0,borderColor:selFac===f.id?f.color:"#e2e8f0",background:selFac===f.id?f.color:"#fff",color:selFac===f.id?"#fff":"#475569"}}>
           <span style={{width:8,height:8,borderRadius:"50%",background:f.color}}/>{f.name}
         </button>

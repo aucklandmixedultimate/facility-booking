@@ -76,6 +76,8 @@ create table providers (
   sync_channel    text not null default 'none'
                   check (sync_channel in ('none','public_calendar','extension_council','email')),
   config          jsonb not null default '{}',  -- channel settings (calendar URL, form URL, portal product codes…)
+  is_default      boolean not null default false, -- the provider shown first (GTEC); exactly one
+  default_site    text,                          -- site for facilities with no site ('Cornwall Park')
   active          boolean not null default true,
   sort            int not null default 0
 );
@@ -404,6 +406,9 @@ for field layouts. Counts from their tables of contents:
 | West | 40 | 39 |
 
 Field numbers and layouts appear only in the map images.
+
+**Vetting.** Most council fields won't suit ultimate. Lights, fit, quality tiers and
+reliability are covered in [`council-field-vetting.md`](council-field-vetting.md).
 
 **Don't create 254 facilities.** Instead:
 - Seed an admin-only reference list `council_parks(name, region)` and
