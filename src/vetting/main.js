@@ -481,14 +481,16 @@ function buildCity() {
     if (inCart) L.circleMarker(ll, { radius: 13, color: "#14b8a6", weight: 4, fill: false, interactive: false }).addTo(cityLayer);
     // An ultimate club's home: a bigger diamond whose centre is the club's colours.
     const clubCol = ult.find(o => o.colors)?.colors;
-    const mk = pv?.length ? privMarker(ll, col, isCur, top, clubCol) : L.circleMarker(ll, { radius: r ? 8 : 6,
+    const isAmua = pv?.some(o => o.amua);
+    const mk = isAmua ? amuaMarker(ll, col, isCur) : pv?.length ? privMarker(ll, col, isCur, top, clubCol) : L.circleMarker(ll, { radius: r ? 8 : 6,
       color: top ? "#e0a647" : isCur ? "#15211c" : fl ? PRIV_COLOR : "#ffffff", weight: top || isCur || fl ? 3 : 1.5, dashArray: fl ? "3 3" : null,
       fillColor: col, fillOpacity: r ? 0.95 : 0.7, bubblingMouseEvents: false });
     const tags = r ? [r.decision === "top" ? "★ Top pick" : r.decision === "yes" ? "Shortlisted" : "Rejected",
       r.quality ? r.quality + "/5" : "", r.fit && r.fit !== "unknown" ? FIT_LABEL[r.fit] : "",
       r.lights === "full" || r.lights === "training" ? "💡 lights" : r.lights === "none" ? "no lights" : ""].filter(Boolean).join(" · ") : "Not rated yet";
     mk.bindTooltip(`<b>${esc(p.name)}</b><br>${esc(p.region)} · <b style="color:${col}">${suitWord(r)}</b><br>${esc(tags)}${r?.fields ? "<br>Fields: " + esc(r.fields) : ""}`
-      + (pv?.length ? `<br><b style="color:${PRIV_COLOR}">◆ Privately managed: contact ${esc(pv[0].short)}</b> first` : "")
+      + (isAmua ? `<br><b style="color:#b7791f">★ AMUA venue (${esc(pv.find(o => o.amua).short)}): MUST BOOK THROUGH AMUA</b>`
+        : pv?.length ? `<br><b style="color:${PRIV_COLOR}">◆ Privately managed: contact ${esc(pv[0].short)}</b> first` : "")
       + (ult.length ? `<br><b style="color:${ULT_COLOR}">🥏 ${ult.some(o => o.booking_only) ? "Book only through" : "Ultimate club"}: ${esc(ult.map(o => o.operator).join(", "))}</b>` : "")
       + (fl ? `<br><b style="color:${PRIV_COLOR}">◇ Flagged: probably club-run${fl.club ? " (" + esc(fl.club) + ")" : ""}</b>` : "")
       + (workMode === "book" ? `<br>🛒 ${inCart ? `${inCart} field${inCart > 1 ? "s" : ""} in the cart · ` : ""}<i>Click to book fields</i>` : `<br><i>Click to rate</i>`),
@@ -505,15 +507,21 @@ function buildCity() {
   // Private grounds that aren't in the council maps: hollow diamonds with the operator's contacts.
   PRIV.operators.filter(o => !o.park_id || !BYID[o.park_id]).forEach(o => {
     const ll = [o.lat, o.lon]; pts.push(ll);
-    privMarker(ll, "transparent", false, false).bindPopup(privHtml(o), { className: "parktip", maxWidth: 320 })
+    (o.amua ? amuaMarker(ll, "#ffffff", false) : privMarker(ll, "transparent", false, false)).bindPopup(privHtml(o), { className: "parktip", maxWidth: 320 })
       .bindTooltip(`<b>${esc(o.park)}</b><br><b style="color:${PRIV_COLOR}">◆ ${esc(o.operator)}</b><br>Not in the council field maps · click for contacts`, { className: "parktip", direction: "top", offset: [0, -8] })
       .addTo(cityLayer);
   });
   return pts;
 }
+// AMUA's existing providers (GTEC, booked through CPSA at Cornwall Park): a gold star whose
+// centre shows the suitability colour.
+function amuaMarker(ll, fill, isCur) {
+  return L.marker(ll, { icon: L.divIcon({ className: "", iconSize: [30, 30], iconAnchor: [15, 15],
+    html: `<div class="amuapin${isCur ? " cur" : ""}"><div><span style="background:${fill}"></span></div></div>` }), keyboard: false, bubblingMouseEvents: false, zIndexOffset: 500 });
+}
 function privMarker(ll, fill, isCur, top, club) {
   const style = club
-    ? `background:${club.fill};border-color:${club.edge || "#fff"};box-shadow:0 0 0 2.5px ${PRIV_COLOR},0 1px 5px rgba(0,0,0,.5);width:18px;height:18px;margin:2px`
+    ? `background:${club.pattern || club.fill};border-color:${club.edge || "#fff"};box-shadow:0 0 0 2.5px ${PRIV_COLOR},0 1px 5px rgba(0,0,0,.5);width:18px;height:18px;margin:2px`
     : `background:${fill};${top ? "border-color:#e0a647;" : ""}margin:3px`;
   return L.marker(ll, { icon: L.divIcon({ className: "", iconSize: [26, 26], iconAnchor: [13, 13],
     html: `<div class="privpin${isCur ? " cur" : ""}" style="${style}"></div>` }), keyboard: false, bubblingMouseEvents: false });
@@ -530,7 +538,7 @@ const privStatus = o => ({ confirmed: "confirmed", likely: "likely", "to-verify"
 // Popup for a private ground that isn't a council park.
 function privHtml(o) {
   const c = o.contact || {};
-  return `<b>${esc(o.park)}</b>${o.approx ? " (approx. location)" : ""}<br><b style="color:${PRIV_COLOR}">◆ ${esc(o.operator)}</b> · ${esc(privStatus(o))}<br>${esc(o.manages)}<br>${privContacts(o)}${c.address ? "<br>" + esc(c.address) : ""}${o.notes ? `<br><i>${esc(o.notes)}</i>` : ""}`;
+  return `<b>${esc(o.park)}</b>${o.approx ? " (approx. location)" : ""}${o.must_book_through === "AMUA" ? `<br><b style="color:#b7791f">★ MUST BOOK THROUGH AMUA</b> (booking site, GTEC / CPSA workflow)` : ""}<br><b style="color:${PRIV_COLOR}">◆ ${esc(o.operator)}</b> · ${esc(privStatus(o))}<br>${esc(o.manages)}<br>${privContacts(o)}${c.address ? "<br>" + esc(c.address) : ""}${o.notes ? `<br><i>${esc(o.notes)}</i>` : ""}`;
 }
 // Park card banner: every operator on this ground, then the request steps once.
 function privBanner(all) {
@@ -539,6 +547,11 @@ function privBanner(all) {
   const ultLine = ult.map(o => `<span class="pb-ult"><b>🥏 ${esc(o.operator)}</b> — ${privContacts(o) || "no contact found"}${o.notes ? ` <i>${esc(o.notes)}</i>` : ""}</span>`).join("");
   if (!ops.length) return ultLine;
   const [lead, ...rest] = ops;
+  // AMUA's own provider grounds (GTEC / CPSA): booked through the AMUA booking site.
+  const amua = all.find(o => o.must_book_through === "AMUA");
+  if (amua) return `<span class="pb-amua"><b>★ MUST BOOK THROUGH AMUA</b> — ${esc(amua.park)} is a ${esc(amua.short)} ground: book it in the AMUA booking site (GTEC / CPSA workflow), not directly with GTEC.</span>`
+    + `<span class="pb-full">Managed by ${esc(amua.operator)} · ${privContacts(amua)}</span>`
+    + (rest.filter(o => o !== amua).length ? `<span class="pb-full">Also on site: ${rest.filter(o => o !== amua).map(o => esc(o.operator)).join(" · ")}</span>` : "") + ultLine;
   if (lead.booking_only) return `<span class="pb-ult pb-only"><b>🥏 BOOKING ONLY AVAILABLE THROUGH ${esc(lead.operator)}</b> — ${privContacts(lead) || "no contact found"}${lead.notes ? ` <i>${esc(lead.notes)}</i>` : ""}</span>`
     + (rest.length ? `<span class="pb-full">Fields managed by: ${rest.map(o => `${esc(o.operator)} (${esc(o.code || o.type)})`).join(" · ")}</span>` : "") + ultLine;
   return `<span class="pb-full"><b>◆ Contact: ${esc(lead.operator)}</b> (${esc(privStatus(lead))}) — ${esc(lead.manages)} · ${privContacts(lead)}</span>`
@@ -556,7 +569,7 @@ function syncCityFields() {
 function renderLegend() {
   const row = (c, t) => `<div><i style="background:${c}"></i>${t}</div>`;
   $("legend").innerHTML = `<button class="lg-h" id="legendToggle" aria-expanded="true">Suitability <span aria-hidden="true">▾</span></button>`
-    + `<div class="lg-b">${row(`hsl(${suitHue(0.95)} 72% 42%)`, "Excellent")}${row(`hsl(${suitHue(0.7)} 72% 42%)`, "Good")}${row(`hsl(${suitHue(0.5)} 72% 42%)`, "Fair")}${row(`hsl(${suitHue(0.2)} 72% 42%)`, "Poor")}${row("#b3372d", "Rejected")}${row("#8a958f", "Not rated")}<div><span class="dia" style="background:#c8102e;border-color:#f2b705;box-shadow:0 0 0 2px ${PRIV_COLOR}"></span><b>Ultimate club home</b> <span class="lg-note">(club colours)</span></div><div><span class="dia"></span>Privately managed</div><div><i style="background:#8a958f;border:2px dashed ${PRIV_COLOR};box-shadow:none"></i>Flagged: probably club-run</div><div class="lg-note">Gold ring = top pick</div></div>`;
+    + `<div class="lg-b">${row(`hsl(${suitHue(0.95)} 72% 42%)`, "Excellent")}${row(`hsl(${suitHue(0.7)} 72% 42%)`, "Good")}${row(`hsl(${suitHue(0.5)} 72% 42%)`, "Fair")}${row(`hsl(${suitHue(0.2)} 72% 42%)`, "Poor")}${row("#b3372d", "Rejected")}${row("#8a958f", "Not rated")}<div><span class="dia" style="background:linear-gradient(45deg,#f2b705 50%,#c8102e 50%);border-color:#f2b705;box-shadow:0 0 0 2px ${PRIV_COLOR}"></span><b>Ultimate club home</b> <span class="lg-note">(club colours)</span></div><div><span class="amualg"><span></span></span><b>AMUA venue</b> <span class="lg-note">(GTEC · CPSA)</span></div><div><span class="dia"></span>Privately managed</div><div><i style="background:#8a958f;border:2px dashed ${PRIV_COLOR};box-shadow:none"></i>Flagged: probably club-run</div><div class="lg-note">Gold ring = top pick</div></div>`;
   // Collapsed by default on small screens so it doesn't cover the map; the choice is remembered.
   const setOpen = open => { $("legend").classList.toggle("collapsed", !open); $("legendToggle").setAttribute("aria-expanded", String(open)); };
   setOpen(store.get("vet-legend-open", !matchMedia("(max-width: 640px)").matches));
@@ -812,7 +825,7 @@ function render() {
     // Chips: the managing club (◆) and any ultimate club (🥏), which may be the booking contact.
     const lead = (pv || []).find(o => o.code !== "ultimate"), ult = ultimateOf(p);
     $("decChip").innerHTML = (lead ? `<span class="chip priv" title="Ask ${esc(lead.operator)} before applying to council">◆ ${esc(lead.short)}</span> ` : "")
-      + ult.map(o => `<span class="chip ult" title="Home of ${esc(o.operator)}"${o.colors ? ` style="background:${o.colors.fill};color:#fff;box-shadow:inset 0 0 0 2px ${o.colors.edge || "#fff"}"` : ""}>🥏 ${esc(o.short)}</span> `).join("") + (r ? `<span class="chip ${r.decision === "no" ? "no" : r.decision === "top" ? "top" : ""}">${r.decision === "top" ? "Top pick" : r.decision === "yes" ? "Shortlisted" : "Rejected"}${r.by ? " · " + esc(r.by.split("@")[0]) : ""}</span>` : "");
+      + ult.map(o => `<span class="chip ult" title="Home of ${esc(o.operator)}"${o.colors ? ` style="background:${o.colors.pattern || o.colors.fill};color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.8);box-shadow:inset 0 0 0 2px ${o.colors.edge || "#fff"}"` : ""}>🥏 ${esc(o.short)}</span> `).join("") + (r ? `<span class="chip ${r.decision === "no" ? "no" : r.decision === "top" ? "top" : ""}">${r.decision === "top" ? "Top pick" : r.decision === "yes" ? "Shortlisted" : "Rejected"}${r.by ? " · " + esc(r.by.split("@")[0]) : ""}</span>` : "");
     const i = Math.min(mapIdx[p.id] || 0, Math.max(0, p.maps.length - 1));
     $("thumbs").innerHTML = p.maps.length > 1 ? p.maps.map((m, k) => `<button data-map="${k}" aria-pressed="${k === i}" title="${esc(m.title)}">${m.season === "winter" ? "❄ Winter" : "☀ Summer"}${/area/i.test(m.title) ? " area" : ""}</button>`).join("") : "";
     const cf = councilFields(p).map(f => f.n).filter(Boolean);
