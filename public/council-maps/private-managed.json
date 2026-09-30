@@ -392,6 +392,571 @@
         "https://www.aucklandcouncil.govt.nz/en/parks-recreation/find-park-beach/park-detail/80.html"
       ],
       "notes": "Resident NRFL Championship club since the 1970s; ask whether it holds the field's seasonal allocation. Email from a search summary; check it on the club site."
+    },
+    {
+      "id": "richmond-grey-lynn",
+      "park_id": "central-grey-lynn-park",
+      "park": "Grey Lynn Park",
+      "lat": -36.8604,
+      "lon": 174.73975,
+      "operator": "Richmond Rovers Rugby League & Sports Club",
+      "short": "Richmond Rovers",
+      "type": "club",
+      "code": "league",
+      "manages": "Home ground and clubrooms at Grey Lynn Park (League 1–3)",
+      "contact": {
+        "phone": "09 376 6755",
+        "address": "55–61 Elgin Street, Grey Lynn",
+        "url": "http://www.richmondroversrugbyleague.com/contact-us.html"
+      },
+      "status": "to-verify",
+      "sources": [
+        "http://www.richmondroversrugbyleague.com/contact-us.html",
+        "https://en.wikipedia.org/wiki/Richmond_Rovers"
+      ],
+      "notes": "Club secretary handles enquiries and clubroom hire."
+    },
+    {
+      "id": "mtalbert-lions-fowlds",
+      "park_id": "central-fowlds-park",
+      "park": "Fowlds Park",
+      "lat": -36.8739,
+      "lon": 174.729,
+      "operator": "Mt Albert Rugby League Football Club (Mt Albert Lions)",
+      "short": "Mt Albert Lions",
+      "type": "club",
+      "code": "league",
+      "manages": "Home ground and clubrooms at Fowlds Park (League 1–3)",
+      "contact": {
+        "email": "office@mtalbertlions.co.nz",
+        "phone": "021 213 2444",
+        "address": "Fowlds Park, Rocky Nook Avenue, Mt Albert",
+        "url": "https://www.sporty.co.nz/MtAlbertLions/Contact-us"
+      },
+      "status": "to-verify",
+      "sources": [
+        "https://www.sporty.co.nz/MtAlbertLions/Contact-us",
+        "https://en.wikipedia.org/wiki/Fowlds_Park"
+      ],
+      "notes": ""
+    },
+    {
+      "id": "ptchev-walker",
+      "park_id": "central-walker-park",
+      "park": "Walker Park",
+      "lat": -36.865,
+      "lon": 174.70325,
+      "operator": "Point Chevalier Pirates Rugby League Club",
+      "short": "Pt Chev Pirates",
+      "type": "club",
+      "code": "league",
+      "manages": "Home ground since 1922, with licensed clubrooms",
+      "contact": {
+        "email": "pcpiratesleague@gmail.com",
+        "phone": "09 846 4778",
+        "address": "417 Point Chevalier Road, Point Chevalier",
+        "url": "https://www.ptchevpirates.co.nz/"
+      },
+      "status": "to-verify",
+      "sources": [
+        "https://www.cab.org.nz/community-directory/KB00027257",
+        "https://en.wikipedia.org/wiki/Point_Chevalier_Pirates"
+      ],
+      "notes": ""
+    },
+    {
+      "id": "eagles-ellerslie",
+      "park_id": "central-ellerslie-domain",
+      "park": "Ellerslie Domain",
+      "lat": -36.89878,
+      "lon": 174.814,
+      "operator": "Ellerslie Eagles Rugby League Football Club",
+      "short": "Ellerslie Eagles",
+      "type": "club",
+      "code": "league",
+      "manages": "Home ground and clubrooms in Ellerslie Domain (League 1–2)",
+      "contact": {
+        "email": "ellerslierugbyleague@xtra.co.nz",
+        "phone": "09 579 7719",
+        "address": "182–186 Main Highway, Ellerslie",
+        "url": "https://www.ellerslieeagles.co.nz/contact"
+      },
+      "status": "to-verify",
+      "sources": [
+        "https://www.ellerslieeagles.co.nz/contact",
+        "https://en.wikipedia.org/wiki/Ellerslie_Eagles"
+      ],
+      "notes": ""
+    },
+    {
+      "id": "eden-gribblehirst",
+      "park_id": "central-gribblehirst-park",
+      "park": "Gribblehirst Park",
+      "lat": -36.88065,
+      "lon": 174.738,
+      "operator": "Eden Rugby Football Club",
+      "short": "Eden RFC",
+      "type": "club",
+      "code": "rugby",
+      "manages": "Home ground; clubrooms overlook Gribblehirst Park",
+      "contact": {
+        "email": "clubmanager@edenrugby.co.nz",
+        "phone": "09 846 2107",
+        "address": "225 Sandringham Road, Sandringham",
+        "url": "https://www.edenrugby.co.nz/ABOUT-1/VENUE-HIRE-1"
+      },
+      "status": "to-verify",
+      "sources": [
+        "https://www.edenrugby.co.nz/ABOUT-1/VENUE-HIRE-1",
+        "https://en.wikipedia.org/wiki/Eden_RFC"
+      ],
+      "notes": "Operations manager (opsmanager@edenrugby.co.nz) handles venue hire."
+    },
+    {
+      "id": "ponsonby-springs",
+      "park_id": "central-western-springs-outer-fields",
+      "park": "Western Springs Outer Fields",
+      "lat": -36.86568,
+      "lon": 174.7285,
+      "operator": "Ponsonby District Rugby Football Club",
+      "short": "Ponsonby RFC",
+      "type": "club",
+      "code": "rugby",
+      "manages": "Clubrooms at the stadium; trains on the Western Springs outer fields (three training fields)",
+      "contact": {
+        "email": "gm@ponsonbyrugby.co.nz",
+        "phone": "09 846 9954",
+        "address": "1 Stadium Road, Western Springs",
+        "url": "https://www.ponsonbyrugby.co.nz/contact-us/contact-us"
+      },
+      "status": "likely",
+      "sources": [
+        "http://www.ponsonbyrugby.co.nz/About-1/Facilities-1",
+        "http://www.ponsonbyrugby.co.nz/About-1/Field-Layout"
+      ],
+      "notes": ""
+    },
+    {
+      "id": "ponsonby-coxs",
+      "park_id": "central-cox-s-bay-reserve",
+      "park": "Cox's Bay Reserve",
+      "lat": -36.85267,
+      "lon": 174.72825,
+      "operator": "Ponsonby District Rugby Football Club",
+      "short": "Ponsonby RFC",
+      "type": "club",
+      "code": "rugby",
+      "manages": "Rugby fields in use (proposed new home with clubrooms)",
+      "contact": {
+        "email": "gm@ponsonbyrugby.co.nz",
+        "phone": "09 846 9954",
+        "url": "https://www.ponsonbyrugby.co.nz/contact-us/contact-us"
+      },
+      "status": "to-verify",
+      "sources": [
+        "https://www.nzherald.co.nz/sport/ex-international-ponsonby-rugby-club-players-desperate-plea-as-western-springs-stadium-consultation-nears-end/AXX4DI4CZBDL3PPKV7FTNF5324/"
+      ],
+      "notes": "Also used by Grafton United CC (cricket) and Western Springs AFC (Field 4 weekday training, May–Sep)."
+    },
+    {
+      "id": "grafton-coxs",
+      "park_id": "central-cox-s-bay-reserve",
+      "park": "Cox's Bay Reserve",
+      "lat": -36.85267,
+      "lon": 174.72825,
+      "operator": "Grafton United Cricket Club",
+      "short": "Grafton United CC",
+      "type": "club",
+      "code": "cricket",
+      "manages": "One of the club's two main cricket grounds",
+      "contact": {
+        "url": "https://graftoncricket.co.nz/"
+      },
+      "status": "to-verify",
+      "sources": [
+        "https://en.wikipedia.org/wiki/Grafton_United_Cricket_Club"
+      ],
+      "notes": ""
+    },
+    {
+      "id": "grafton-victoria",
+      "park_id": "central-victoria-park",
+      "park": "Victoria Park",
+      "lat": -36.84685,
+      "lon": 174.7535,
+      "operator": "Grafton United Cricket Club",
+      "short": "Grafton United CC",
+      "type": "club",
+      "code": "cricket",
+      "manages": "Home ground; the Victoria Park Pavilion (Halsey Street) is its clubrooms",
+      "contact": {
+        "url": "https://graftoncricket.co.nz/"
+      },
+      "status": "likely",
+      "sources": [
+        "https://en.wikipedia.org/wiki/Victoria_Park,_Auckland",
+        "https://en.wikipedia.org/wiki/Grafton_United_Cricket_Club"
+      ],
+      "notes": "Pavilion shared with the Auckland and District Pipe Band and Northern Region football referees."
+    },
+    {
+      "id": "ellerslie-afc-michaels",
+      "park_id": "central-michaels-avenue-reserve",
+      "park": "Michaels Avenue Reserve",
+      "lat": -36.89425,
+      "lon": 174.81775,
+      "operator": "Ellerslie AFC",
+      "short": "Ellerslie AFC",
+      "type": "club",
+      "code": "football",
+      "manages": "Home ground: artificial turf, grass field and the Michaels Ave Community Centre clubrooms; the club runs a field-bookings page",
+      "contact": {
+        "email": "registrations@ellersliefootball.org.nz",
+        "phone": "09 579 8910",
+        "address": "46 Michaels Avenue, Ellerslie",
+        "url": "https://ellersliefootball.org.nz/field-bookings"
+      },
+      "status": "likely",
+      "sources": [
+        "https://ellersliefootball.org.nz/field-bookings",
+        "https://ellersliefootball.org.nz/michaels-ave-community-centre"
+      ],
+      "notes": "General enquiries: info@ellersliefootball.org.nz."
+    },
+    {
+      "id": "marist-halberg",
+      "park_id": "central-murray-halberg-park",
+      "park": "Murray Halberg Park",
+      "lat": -36.89685,
+      "lon": 174.7145,
+      "operator": "Marist Saints Rugby League Club",
+      "short": "Marist Saints",
+      "type": "club",
+      "code": "league",
+      "manages": "Home ground; clubrooms destroyed by fire in November 2023",
+      "contact": {
+        "url": "https://www.facebook.com/maristsaintsrlc"
+      },
+      "status": "to-verify",
+      "sources": [
+        "https://en.wikipedia.org/wiki/Marist_Saints",
+        "https://www.nzherald.co.nz/nz/marist-saints-rugby-league-clubrooms-in-auckland-destroyed-in-fire-police-investigating/C4IHCT6H3ZGFLJOVI4R23TAD2I/"
+      ],
+      "notes": ""
+    },
+    {
+      "id": "mtwgtn-rfc-hamlin",
+      "park_id": "central-hamlin-park",
+      "park": "Hamlin Park",
+      "lat": -36.91005,
+      "lon": 174.8365,
+      "operator": "Mt Wellington Rugby Football Club",
+      "short": "Mt Wellington RFC",
+      "type": "club",
+      "code": "rugby",
+      "manages": "Clubrooms beside Rugby 1",
+      "contact": {
+        "url": "https://en.wikipedia.org/wiki/Mt_Wellington_RFC"
+      },
+      "status": "to-verify",
+      "sources": [
+        "https://en.wikipedia.org/wiki/Mt_Wellington_RFC",
+        "https://www.stuff.co.nz/auckland/local-news/east-bays-courier/69793345/mt-wellington-rugby-football-clubrooms-up-for-sale"
+      ],
+      "notes": "The clubrooms were put up for sale in 2015; check whether the club is still resident."
+    },
+    {
+      "id": "marist-rfc-mtwgtn",
+      "park_id": "central-mt-wellington-war-memorial-reserve",
+      "park": "Mt Wellington War Memorial Reserve",
+      "lat": -36.89824,
+      "lon": 174.86688,
+      "operator": "Marist Brothers Old Boys Rugby Club",
+      "short": "Marist Rugby",
+      "type": "club",
+      "code": "rugby",
+      "manages": "Resident rugby club (with Mt Wellington Rugby Club and Riverside tennis)",
+      "contact": {
+        "url": "https://www.aucklandcouncil.govt.nz/en/parks-recreation/find-park-beach/park-detail/181.html"
+      },
+      "status": "to-verify",
+      "sources": [
+        "https://www.aucklandcouncil.govt.nz/en/parks-recreation/find-park-beach/park-detail/181.html"
+      ],
+      "notes": ""
+    },
+    {
+      "id": "mtwgtn-rfc-memorial",
+      "park_id": "central-mt-wellington-war-memorial-reserve",
+      "park": "Mt Wellington War Memorial Reserve",
+      "lat": -36.89824,
+      "lon": 174.86688,
+      "operator": "Mt Wellington Rugby Football Club",
+      "short": "Mt Wellington RFC",
+      "type": "club",
+      "code": "rugby",
+      "manages": "Resident rugby club",
+      "contact": {
+        "url": "https://en.wikipedia.org/wiki/Mt_Wellington_RFC"
+      },
+      "status": "to-verify",
+      "sources": [
+        "https://www.aucklandcouncil.govt.nz/en/parks-recreation/find-park-beach/park-detail/181.html"
+      ],
+      "notes": ""
+    },
+    {
+      "id": "mtwgtn-warriors-thompson",
+      "park_id": "central-thompson-park",
+      "park": "Thompson Park",
+      "lat": -36.8995,
+      "lon": 174.833,
+      "operator": "Mt Wellington Warriors Rugby League Football Club",
+      "short": "Mt Wellington Warriors",
+      "type": "club",
+      "code": "league",
+      "manages": "Club headquarters and clubrooms (formerly Banks Road Reserve)",
+      "contact": {
+        "address": "50 Banks Road, Mt Wellington",
+        "url": "https://www.sporty.co.nz/mtwellingtonrl/history-1"
+      },
+      "status": "to-verify",
+      "sources": [
+        "https://www.sporty.co.nz/mtwellingtonrl/history-1"
+      ],
+      "notes": ""
+    },
+    {
+      "id": "onehunga-waikaraka",
+      "park_id": "central-waikaraka-park",
+      "park": "Waikaraka Park",
+      "lat": -36.9279,
+      "lon": 174.79825,
+      "operator": "Onehunga Sports AFC",
+      "short": "Onehunga Sports",
+      "type": "club",
+      "code": "football",
+      "manages": "Home ground",
+      "contact": {
+        "email": "enquiry@onehungasports.net",
+        "address": "64 Captain Springs Road, Onehunga",
+        "url": "https://www.onehungasports.net/"
+      },
+      "status": "to-verify",
+      "sources": [
+        "https://en.wikipedia.org/wiki/Onehunga_Sports",
+        "https://www.footballgroundmap.com/ground/waikaraka-park/onehunga-sports"
+      ],
+      "notes": ""
+    },
+    {
+      "id": "gtec-shore-road",
+      "park_id": "central-shore-road-reserve",
+      "park": "Shore Road Reserve",
+      "lat": -36.86445,
+      "lon": 174.79275,
+      "operator": "Grammar TEC Rugby Football Club",
+      "short": "GTEC",
+      "type": "club",
+      "code": "rugby",
+      "manages": "Two rugby fields at Shore Road Reserve (a GTEC site)",
+      "contact": {
+        "email": "admin@grammartec.co.nz",
+        "phone": "09 521 0538",
+        "url": "http://www.grammartec.co.nz/Our-Sites/Shore-Road-Reserve"
+      },
+      "status": "likely",
+      "sources": [
+        "http://www.grammartec.co.nz/Our-Sites/Shore-Road-Reserve"
+      ],
+      "notes": "Parnell Cricket Club is based here in summer.",
+      "provider_id": "gtec"
+    },
+    {
+      "id": "parnell-shore-road",
+      "park_id": "central-shore-road-reserve",
+      "park": "Shore Road Reserve",
+      "lat": -36.86445,
+      "lon": 174.79275,
+      "operator": "Parnell Cricket Club",
+      "short": "Parnell CC",
+      "type": "club",
+      "code": "cricket",
+      "manages": "Home ground since 1996 (summer), with neighbouring Bloodworth Park",
+      "contact": {
+        "url": "https://parnellcricket.co.nz/history-1"
+      },
+      "status": "to-verify",
+      "sources": [
+        "https://parnellcricket.co.nz/history-1"
+      ],
+      "notes": ""
+    },
+    {
+      "id": "parnell-bloodworth",
+      "park_id": "central-thomas-bloodworth-park",
+      "park": "Thomas Bloodworth Park",
+      "lat": -36.86465,
+      "lon": 174.7895,
+      "operator": "Parnell Cricket Club",
+      "short": "Parnell CC",
+      "type": "club",
+      "code": "cricket",
+      "manages": "Second home ground beside Shore Road Reserve",
+      "contact": {
+        "url": "https://parnellcricket.co.nz/history-1"
+      },
+      "status": "to-verify",
+      "sources": [
+        "https://parnellcricket.co.nz/history-1"
+      ],
+      "notes": ""
+    },
+    {
+      "id": "ofc-ngahue",
+      "park_id": "central-ngahue-reserve",
+      "park": "Ngahue Reserve",
+      "lat": -36.8832,
+      "lon": 174.844,
+      "operator": "Oceania Football Confederation (OFC Home of Football)",
+      "short": "OFC",
+      "type": "association",
+      "code": "football",
+      "manages": "Football stadium at Ngahue Reserve, home of the OFC",
+      "contact": {
+        "url": "https://en.wikipedia.org/wiki/Ngahue_Reserve"
+      },
+      "status": "likely",
+      "sources": [
+        "https://en.wikipedia.org/wiki/Ngahue_Reserve"
+      ],
+      "notes": ""
+    },
+    {
+      "id": "roskill-rfc-fearon",
+      "park_id": "central-fearon-park",
+      "park": "Fearon Park",
+      "lat": -36.9028,
+      "lon": 174.7465,
+      "operator": "Mount Roskill Rugby Football Club",
+      "short": "Mt Roskill RFC",
+      "type": "club",
+      "code": "rugby",
+      "manages": "Two full fields and clubrooms (junior club home)",
+      "contact": {
+        "address": "33 Akarana Avenue, Mt Roskill",
+        "url": "https://www.sporty.co.nz/roskillrfc/About-us-1/Playing-Fields"
+      },
+      "status": "likely",
+      "sources": [
+        "https://www.sporty.co.nz/roskillrfc/About-us-1/Playing-Fields"
+      ],
+      "notes": ""
+    },
+    {
+      "id": "roskill-rfc-mayroad",
+      "park_id": "central-may-road-war-memorial-park",
+      "park": "May Road War Memorial Park",
+      "lat": -36.90345,
+      "lon": 174.7345,
+      "operator": "Mount Roskill Rugby Football Club",
+      "short": "Mt Roskill RFC",
+      "type": "club",
+      "code": "rugby",
+      "manages": "Three full fields and a training field (access 13 May Road)",
+      "contact": {
+        "url": "https://www.sporty.co.nz/roskillrfc/About-us-1/Playing-Fields"
+      },
+      "status": "likely",
+      "sources": [
+        "https://www.sporty.co.nz/roskillrfc/About-us-1/Playing-Fields"
+      ],
+      "notes": ""
+    },
+    {
+      "id": "bayroskill-blockhouse",
+      "park_id": "west-blockhouse-bay-recreation-reserve",
+      "park": "Blockhouse Bay Recreation Reserve",
+      "lat": -36.91925,
+      "lon": 174.706,
+      "operator": "Bay Roskill Vikings Rugby League Club",
+      "short": "Bay Roskill Vikings",
+      "type": "club",
+      "code": "league",
+      "manages": "Home ground",
+      "contact": {
+        "url": "https://www.sporty.co.nz/bayroskillrlfc/Our-History/Club-History"
+      },
+      "status": "to-verify",
+      "sources": [
+        "https://en.wikipedia.org/wiki/Bay_Roskill_Vikings"
+      ],
+      "notes": ""
+    },
+    {
+      "id": "otahuhu-rfc-sturges",
+      "park_id": "south-sturges-park",
+      "park": "Sturges Park",
+      "lat": -36.9484,
+      "lon": 174.8415,
+      "operator": "Otahuhu Rugby Football Club",
+      "short": "Otahuhu RFC",
+      "type": "club",
+      "code": "rugby",
+      "manages": "Home ground",
+      "contact": {
+        "address": "8 Awa Street, Otahuhu",
+        "url": "https://www.facebook.com/OtahuhuRugbyClub/"
+      },
+      "status": "to-verify",
+      "sources": [
+        "https://en.wikipedia.org/wiki/Otahuhu_RFC"
+      ],
+      "notes": ""
+    },
+    {
+      "id": "esafc-glover",
+      "park_id": "central-glover-park",
+      "park": "Glover Park",
+      "lat": -36.84703,
+      "lon": 174.86775,
+      "operator": "Eastern Suburbs AFC",
+      "short": "Eastern Suburbs AFC",
+      "type": "club",
+      "code": "football",
+      "manages": "Uses the park for games and training (winter)",
+      "contact": {
+        "email": "tracey@esafc.org.nz",
+        "phone": "09 578 1375",
+        "url": "https://easternsuburbs.org.nz/about-us/our-grounds/"
+      },
+      "status": "to-verify",
+      "sources": [
+        "https://easternsuburbs.org.nz/about-us/our-grounds/"
+      ],
+      "notes": ""
+    },
+    {
+      "id": "esafc-crossfield",
+      "park_id": "central-crossfield-reserve",
+      "park": "Crossfield Reserve",
+      "lat": -36.8662,
+      "lon": 174.8655,
+      "operator": "Eastern Suburbs AFC",
+      "short": "Eastern Suburbs AFC",
+      "type": "club",
+      "code": "football",
+      "manages": "Uses the park's six football fields for games and training",
+      "contact": {
+        "email": "tracey@esafc.org.nz",
+        "phone": "09 578 1375",
+        "url": "https://easternsuburbs.org.nz/about-us/our-grounds/"
+      },
+      "status": "to-verify",
+      "sources": [
+        "https://easternsuburbs.org.nz/about-us/our-grounds/"
+      ],
+      "notes": ""
     }
   ],
   "_contact_rule": "Where several clubs operate at one ground, contact the operator marked primary; if none is marked, the rugby or football club comes first."

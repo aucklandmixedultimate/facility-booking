@@ -437,7 +437,8 @@ class, `council_private`, and their own request workflow:
 | 4 | Confirm the slot, lights and access with the private operator | operator |
 
 **Data.** `public/council-maps/private-managed.json` is the seed list: 11 grounds in the
-default Auckland view, North Harbour Stadium to Opaheke Sports Park (13 operators).
+default Auckland view, North Harbour Stadium to Opaheke Sports Park: 42 operators at 33 parks,
+with a deeper sweep of the central isthmus (league, rugby, football and cricket clubs).
 - **Each entry holds:**
   - the operator, its type (club / trust / CCO) and what it manages;
   - its contacts: email, phone, address and web page;

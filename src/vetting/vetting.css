@@ -93,7 +93,7 @@ main{display:flex;flex-direction:column;min-height:0;min-width:0}
 .field svg{position:absolute;left:0;top:0;overflow:visible;pointer-events:none}
 .field.zooming svg{transition:width .25s ease-out,height .25s ease-out,left .25s ease-out,top .25s ease-out}
 .field.live svg .outline{stroke-dasharray:3 2}
-.rotatehint{position:absolute;left:50%;bottom:10px;transform:translateX(-50%);z-index:600;background:rgba(0,0,0,.75);color:#fff;font-size:12px;padding:4px 10px;border-radius:6px;pointer-events:none;white-space:nowrap}
+.rotatehint{position:absolute;left:50%;top:48px;transform:translateX(-50%);z-index:1001;background:rgba(0,0,0,.75);color:#fff;font-size:12px;padding:4px 10px;border-radius:6px;pointer-events:none;white-space:nowrap}
 
 /* Centre handle: lock/unlock the field's rotation, and the way into the fit rating. */
 .centre{position:absolute;left:50%;top:50%;z-index:620;width:0;height:0}
@@ -103,7 +103,7 @@ main{display:flex;flex-direction:column;min-height:0;min-width:0}
 .centre.needfit .centrebtn{animation:pulse 1.6s ease-out infinite}
 @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(255,212,0,.6)}100%{box-shadow:0 0 0 14px rgba(255,212,0,0)}}
 .centrelbl{position:absolute;left:28px;top:-11px;white-space:nowrap;background:rgba(21,33,28,.55);color:#fff;font-size:12px;font-weight:600;padding:3px 8px;border-radius:6px;pointer-events:none}
-.fitbar{position:absolute;left:50%;bottom:30px;transform:translateX(-50%);z-index:630;display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:6px 10px;max-width:calc(100% - 20px);background:rgba(21,33,28,.92);padding:7px 10px;border-radius:10px;box-shadow:0 6px 20px rgba(0,0,0,.4)}
+.fitbar{position:absolute;left:50%;bottom:30px;transform:translateX(-50%);z-index:1001;display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:6px 10px;max-width:calc(100% - 20px);background:rgba(21,33,28,.92);padding:7px 10px;border-radius:10px;box-shadow:0 6px 20px rgba(0,0,0,.4)}
 .fitbar .fb-msg{color:#fff;font-size:12px}
 .fitbar .fb-msg.warn{color:#ffd400;font-weight:600}
 .fitbar .fb-btns{display:flex;gap:6px}
@@ -152,10 +152,11 @@ main{display:flex;flex-direction:column;min-height:0;min-width:0}
   .toolbar button{padding:3px 6px}.thumbs button{font-size:11px}
   .toolbar{top:6px;left:6px;right:6px;gap:4px}.toolbar button{padding:3px 7px;font-size:12px}
   .dispenser{top:40px;right:6px;padding:4px}.bulbsrc{width:32px;height:32px;font-size:18px}
-  .fitbar{bottom:24px;padding:5px 7px}.fitbar button{padding:3px 6px;font-size:12px}
+  .fitbar{bottom:34px;padding:5px 7px}.fitbar button{padding:3px 6px;font-size:12px}
   .actions{margin-top:4px;gap:10px}.act{font-size:0}.act kbd{display:none}.act .b{width:40px;height:40px;font-size:18px}.act.top .b{width:36px;height:36px}.act.small .b{width:30px;height:30px;font-size:13px}
   .legend{font-size:10px;padding:4px 7px;top:6px;bottom:auto;left:6px}.legend .lg-b{grid-template-columns:1fr 1fr;column-gap:8px}.legend .lg-note{display:none}
-  .rotatehint{font-size:11px;white-space:normal;width:max-content;max-width:90%}
+  .rotatehint{top:72px;font-size:11px;white-space:normal;width:max-content;max-width:62%;text-align:center}
+  .layerbadge{display:none}.leaflet-control-attribution{font-size:9px;line-height:1.3}
 }
 .k{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);font-weight:600}
 .seg{display:flex;flex-wrap:wrap;gap:4px;margin-right:8px}
