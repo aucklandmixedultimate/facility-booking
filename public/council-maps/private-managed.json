@@ -979,7 +979,12 @@
       ],
       "notes": "BOOKING ONLY AVAILABLE THROUGH Ellerslie Ultimate Club (confirmed by AMUA). Ellerslie AFC manages the fields; Ellerslie Ultimate Club is the booking contact. No direct contact found online yet; reach them via Auckland Ultimate's clubs list.",
       "booking_only": true,
-      "primary": false
+      "primary": false,
+      "colors": {
+        "fill": "#c8102e",
+        "edge": "#f2b705",
+        "source": "Ellerslie theme: Ellerslie AFC's red home / gold away kit (no ultimate-club colours found online)"
+      }
     },
     {
       "id": "tepapapa-rfc-fergusson",
@@ -1029,7 +1034,12 @@
       ],
       "notes": "BOOKING ONLY AVAILABLE THROUGH TPU (confirmed by AMUA). The contact is the host Te Papapa sports club's; the ultimate team also posts on Instagram.",
       "booking_only": true,
-      "primary": false
+      "primary": false,
+      "colors": {
+        "fill": "#1e3a8a",
+        "edge": "#ffffff",
+        "source": "Placeholder: no Te Papapa Ultimate or Te Papapa RFC colours found online; confirm and update"
+      }
     }
   ],
   "_contact_rule": "Where several clubs operate at one ground, contact the operator marked booking_only (the only booking channel), then primary, then the rugby or football club."
