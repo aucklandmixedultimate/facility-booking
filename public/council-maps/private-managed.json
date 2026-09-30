@@ -752,7 +752,8 @@
       "sources": [
         "https://www.sporty.co.nz/mtwellingtonrl/history-1"
       ],
-      "notes": ""
+      "notes": "Club is based here, but bookings go straight to Auckland Council; no club permission needed.",
+      "council_only": true
     },
     {
       "id": "onehunga-waikaraka",

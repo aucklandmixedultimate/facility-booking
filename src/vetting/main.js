@@ -41,6 +41,16 @@ function setStatus(t, warn) { $("status").textContent = t; $("status").classList
 
 let PARKS = [], BYID = {};
 let PRIV = { operators: [], workflow: [] }, PRIV_BY_PARK = {};   // park_id -> [operators] from private-managed.json (a ground can have several)
+// Council-only parks: a club is on site but bookings go straight to the council, so no private
+// workflow. The data file's "council_only" is the default; admins can override it per park
+// (settings key "council_only_parks": { park_id: { council_only, by, at } }).
+const CO_KEY = "council_only_parks";
+let councilOnlyOv = {};
+const councilOnly = p => { const ops = PRIV_BY_PARK[p.id] || [], ov = councilOnlyOv[p.id];
+  if (!ops.length || ops.some(o => o.must_book_through)) return false;
+  return ov ? !!ov.council_only : ops.some(o => o.council_only); };
+// The operators that shape the booking workflow and the map marker (none if council-only).
+const privOps = p => councilOnly(p) ? [] : (PRIV_BY_PARK[p.id] || []);
 let reviews = {};              // park_id -> review
 let flags = {};                // park_id -> {club, by, at}: flagged as probably club-run, not yet in private-managed.json
 let flagsShared = false;
@@ -474,8 +484,8 @@ function buildCity() {
     const ll = parkLatLng(p); if (!ll) return;
     const r = reviews[p.id], col = suitColor(r), top = r?.decision === "top", isCur = view === "city" && cur?.id === p.id && !!focusId;
     pts.push(ll);
-    const pv = PRIV_BY_PARK[p.id];
-    const fl = !pv?.length && flags[p.id];
+    const pv = privOps(p);
+    const fl = !PRIV_BY_PARK[p.id]?.length && flags[p.id];
     const ult = ultimateOf(p);
     const inCart = workMode === "book" ? (bookLocs[whoBooks()] || []).filter(x => x.park_id === p.id).length : 0;
     if (inCart) L.circleMarker(ll, { radius: 13, color: "#14b8a6", weight: 4, fill: false, interactive: false }).addTo(cityLayer);
@@ -560,6 +570,10 @@ function privBanner(all) {
     + (rest.length ? `<span class="pb-full">Also on site: ${rest.map(o => `${esc(o.operator)} (${esc(o.code || o.type)}${o.contact?.url ? `, <a href="${esc(o.contact.url)}" target="_blank" rel="noopener">website ↗</a>` : ""})`).join(" · ")}</span>` : "")
     ;
 }
+function councilOnlyBanner(p) {
+  const ops = PRIV_BY_PARK[p.id] || [];
+  return `<span class="pb-co"><b>🏛 Council booking only</b> — ${ops.map(o => esc(o.operator)).join(" · ")} ${ops.length > 1 ? "are" : "is"} based here, but bookings go straight to Auckland Council; no club permission needed.</span>`;
+}
 function syncCityFields() {
   if (view !== "city") return;
   const want = map.getZoom() >= 14.5;
@@ -638,7 +652,7 @@ async function saveBookLocs() {
 // requests go to its booking contact: a booking-only club (e.g. Ellerslie Ultimate Club at
 // Michaels Ave, managed by Ellerslie AFC), else the manager itself.
 function parkWorkflow(p) {
-  const ops = PRIV_BY_PARK[p.id] || [];
+  const ops = privOps(p);
   const manager = ops.find(o => o.code !== "ultimate") || ops.find(o => o.booking_only);
   const contact = ops.find(o => o.booking_only) || manager;
   return manager ? { kind: "council_private", provider: "op_" + manager.id, operator: { id: manager.id, name: manager.operator, short: manager.short,
@@ -753,6 +767,61 @@ function renderTags(p) {
   if (document.activeElement !== $("notesIn")) $("notesIn").value = t.notes;
   renderCentre();
 }
+// Parks in the private-operator list can be switched to council-only (and back).
+function renderCouncilOnly(p) {
+  const ops = PRIV_BY_PARK[p.id] || [], b = $("councilOnlyBtn");
+  b.hidden = !ops.length || ops.some(o => o.must_book_through);
+  if (b.hidden) return;
+  const co = councilOnly(p), ov = councilOnlyOv[p.id];
+  b.setAttribute("aria-pressed", String(co));
+  b.textContent = co ? "🏛 Council only ✓" : "🏛 Council only?";
+  b.title = (co ? "Bookings go straight to the council. Click to use the private-operator workflow again."
+    : "Only the council needs to be contacted here: drop the private-operator workflow for this park.")
+    + (ov?.by ? ` (set by ${ov.by.split("@")[0]})` : "");
+}
+async function loadCouncilOnly() {
+  if (supabase && session) {
+    const { data, error } = await supabase.from("settings").select("value").eq("key", CO_KEY).maybeSingle();
+    if (!error) { councilOnlyOv = data?.value || {}; return; }
+  }
+  councilOnlyOv = store.get("vet-council-only", {});
+}
+// Saves the override, then re-files the park's fields already in anyone's cart under the new
+// workflow, so the booking site picks it up.
+async function setCouncilOnly(p, on) {
+  const entry = { council_only: on, by: session?.user?.email || "", at: new Date().toISOString() };
+  if (supabase && session) {
+    const { data } = await supabase.from("settings").select("value").eq("key", CO_KEY).maybeSingle();
+    const fresh = { ...(data?.value || {}), [p.id]: entry };
+    const { error } = await supabase.from("settings").upsert({ key: CO_KEY, value: fresh, updated_at: entry.at });
+    if (error) { setStatus("Couldn't save council-only (" + error.message + ").", true); return false; }
+    councilOnlyOv = fresh;
+  } else { councilOnlyOv[p.id] = entry; store.set("vet-council-only", councilOnlyOv); }
+  const wf = parkWorkflow(p);
+  if (supabase && session) {
+    const { data } = await supabase.from("settings").select("value").eq("key", BOOK_KEY).maybeSingle();
+    const all = data?.value || {}; let n = 0;
+    Object.values(all).forEach(list => list.forEach(x => { if (x.park_id === p.id) { x.kind = wf.kind; x.operator = wf.operator; n++; } }));
+    if (n) {
+      const { error } = await supabase.from("settings").upsert({ key: BOOK_KEY, value: all, updated_at: new Date().toISOString() });
+      if (error) { setStatus("Saved, but couldn't update carts (" + error.message + ").", true); return true; }
+      bookLocs = all;
+    }
+  } else Object.values(bookLocs).forEach(list => list.forEach(x => { if (x.park_id === p.id) { x.kind = wf.kind; x.operator = wf.operator; } }));
+  setStatus(on ? `${p.name}: council booking only — no private-operator step.` : `${p.name}: private-operator workflow restored.`);
+  return true;
+}
+// Cart entries filed before a park's workflow changed (e.g. a data-file council_only default)
+// are re-filed on load, so the booking site uses the current workflow.
+async function syncCartWorkflows() {
+  let n = 0;
+  Object.values(bookLocs).forEach(list => list.forEach(x => { const p = BYID[x.park_id]; if (!p) return;
+    const wf = parkWorkflow(p);
+    if (x.kind !== wf.kind || (x.operator?.id || null) !== (wf.operator?.id || null)) { x.kind = wf.kind; x.operator = wf.operator; n++; } }));
+  if (!n) return;
+  if (supabase && session) await supabase.from("settings").upsert({ key: BOOK_KEY, value: bookLocs, updated_at: new Date().toISOString() });
+  else store.set("vet-booklocs", bookLocs);
+}
 // The club-run flag only applies to parks not already in the private-operator list.
 function renderFlag(p) {
   const known = !!PRIV_BY_PARK[p.id]?.length, fl = flags[p.id];
@@ -818,9 +887,10 @@ function render() {
   } else {
     if (next?.maps.length) $("behindImg").src = BASE + "council-maps/" + next.maps[0].file;
     $("parkName").textContent = p.name; $("parkRegion").textContent = p.region;
-    const pv = PRIV_BY_PARK[p.id];
-    $("privBox").hidden = !pv?.length; $("privBox").innerHTML = pv?.length ? privBanner(pv) : "";
-    renderFlag(p);
+    const pv = privOps(p), co = councilOnly(p);
+    $("privBox").hidden = !pv.length && !co; $("privBox").classList.toggle("co", co);
+    $("privBox").innerHTML = co ? councilOnlyBanner(p) : pv.length ? privBanner(pv) : "";
+    renderFlag(p); renderCouncilOnly(p);
     const r = reviews[p.id];
     // Chips: the managing club (◆) and any ultimate club (🥏), which may be the booking contact.
     const lead = (pv || []).find(o => o.code !== "ultimate"), ult = ultimateOf(p);
@@ -961,6 +1031,8 @@ function bind() {
   bindDispenser();
   $("clubFlagBtn").onclick = async () => { const p = current(); if (!p) return;
     if (await saveFlag(p.id, flags[p.id] ? null : { club: "" })) { renderFlag(p); if (flags[p.id]) $("clubIn").focus(); } };
+  $("councilOnlyBtn").onclick = async () => { const p = current(); if (!p) return;
+    if (await setCouncilOnly(p, !councilOnly(p))) render(); };
   $("clubIn").addEventListener("change", async () => { const p = current(); if (!p || !flags[p.id]) return;
     await saveFlag(p.id, { club: $("clubIn").value.trim() }); renderFlag(p); });
   $("fitBtn").onclick = () => { const p = current(); if (p) showMap(p); };
@@ -1010,8 +1082,8 @@ function exportCsv() {
   PARKS.forEach(p => { const r = reviews[p.id] || {}, fl = flags[p.id]; if (!reviews[p.id] && !fl && !ultimateOf(p).length) return; const pl = r.placement;
     rows.push([p.region, p.name, r.decision ? (r.decision === "top" ? "top pick" : r.decision === "yes" ? "shortlist" : "reject") : "", r.decision ? suitWord(r) : "", r.lights || "", pl?.lights?.length || 0,
       r.fit ? FIT_LABEL[r.fit] || r.fit : "", r.quality || "", r.fields || "", r.notes || "", pl?.lat != null ? `${pl.lat}, ${pl.lon}, ${pl.angle}` : "",
-      PRIV_BY_PARK[p.id]?.[0]?.operator || "",
-      [PRIV_BY_PARK[p.id]?.[0]?.contact?.email, PRIV_BY_PARK[p.id]?.[0]?.contact?.phone].filter(Boolean).join(" / "),
+      privOps(p)[0]?.operator || "",
+      [privOps(p)[0]?.contact?.email, privOps(p)[0]?.contact?.phone].filter(Boolean).join(" / "),
       ultimateOf(p).map(o => o.operator + ([o.contact?.email, o.contact?.phone].filter(Boolean).length ? ` (${[o.contact?.email, o.contact?.phone].filter(Boolean).join(" / ")})` : "")).join("; "),
       fl ? "yes" + (fl.club ? ": " + fl.club : "") : "", r.by || "", r.at || ""]); });
   const csv = rows.map(r => r.map(v => { const s = String(v ?? ""); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }).join(",")).join("\n");
@@ -1051,7 +1123,7 @@ async function start() {
     setStatus("Demo mode (no Supabase configured): decisions are kept in this browser.", true);
   }
   $("app").hidden = false;
-  await loadBookLocs();
+  await loadBookLocs(); await loadCouncilOnly(); await syncCartWorkflows();
   initMap(); drawField(); showField(fieldOn); renderLegend(); bind();
   setView(view === "park" || view === "book" ? view : "city", { refit: true });
   if (mode === "shared") setInterval(async () => { if (!busy && !rotating && document.visibilityState === "visible" && !$("saveDlg").open) { await loadShared(); if (view === "city") render(); else renderRail(); } }, 30000);
