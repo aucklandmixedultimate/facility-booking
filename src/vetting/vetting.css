@@ -351,3 +351,6 @@ body.viewer .handle .hint,body.viewer .rail .help,body.viewer #fieldBtn,body.vie
 .infopanel .ip-row input,.infopanel .ip-row select,.infopanel select{font-size:12px;padding:2px 5px;border:1px solid var(--line);border-radius:6px;background:var(--surface);min-width:0}
 .infopanel .ip-row input{flex:1 1 110px}
 .infopanel .ip-row button{font-size:12px;padding:2px 8px;border:1px solid var(--line);border-radius:6px;background:var(--surface)}
+/* Community facilities: half-size badges */
+.logopin.sm .lp{width:18px;height:18px;border-width:2px}
+.logopin.sm .lp b{font-size:5px;letter-spacing:0}
