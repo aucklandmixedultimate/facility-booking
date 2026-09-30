@@ -187,6 +187,13 @@ main{display:flex;flex-direction:column;min-height:0;min-width:0}
   .legend{font-size:10px;padding:4px 7px;top:6px;bottom:auto;left:6px}.legend .lg-b{grid-template-columns:1fr 1fr;column-gap:8px}.legend .lg-note{display:none}
   .rotatehint{top:72px;font-size:11px;white-space:normal;width:max-content;max-width:62%;text-align:center}
   .layerbadge{display:none}.leaflet-control-attribution{font-size:9px;line-height:1.3}
+  /* Header: views on one full-width row; mode + filters on the next, nothing squeezed. */
+  .top{display:block}
+  .filters{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr) minmax(0,1fr);gap:5px;width:100%}
+  .filters>.viewtabs{grid-column:1/-1}
+  .filters>div:last-child{display:none}
+  .viewtabs button,.modetabs button{flex:1 1 0;min-width:0;padding:7px 4px;font-size:13px;white-space:nowrap;text-align:center}
+  .filters select{max-width:none;width:100%;min-width:0;padding:6px 4px;font-size:13px}
 }
 .k{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);font-weight:600}
 .seg{display:flex;flex-wrap:wrap;gap:4px;margin-right:8px}
