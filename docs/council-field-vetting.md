@@ -288,6 +288,12 @@ The page always fits one screen: nothing scrolls except the map, where the wheel
   operator to contact.
   The data is in `public/council-maps/private-managed.json`; see multi-provider design §7.1.
   The card shows only who to contact. The request steps belong to booking, not vetting.
+- **Flag as club-run (◇).** For a park that isn't in the private list but looks club-run
+  (clubrooms, a resident club), press **◇ Club-run?** on the card and optionally name the
+  club. The flag saves straight away, with no decision needed, to `field_flags` (in
+  `supabase-migration-field-reviews.sql`; until it's run, flags stay in the browser). On
+  the Auckland map the park gets a dashed purple ring, and the CSV has a "Flagged club-run"
+  column. Promote confirmed flags into `private-managed.json`.
 - **Lights.** Drag a 💡 bulb from the dispenser at the top right of the map onto each light
   pole. Drag a placed bulb to move it, or drag it back onto the dispenser (or click it) to
   remove it. Any bulb marks the park as lit. **No lights** records that you checked and

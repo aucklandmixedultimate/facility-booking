@@ -145,7 +145,7 @@ main{display:flex;flex-direction:column;min-height:0;min-width:0}
   .handle{padding:4px 10px}.title h2{font-size:19px}.chip{font-size:10px;padding:1px 6px}
   .info{padding:5px 8px;gap:4px}.tags{gap:2px 6px}.tags .val{font-size:12px}.stars button{font-size:15px;padding:1px 4px}
   .tags2{grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:4px}.tags2 .k{display:none}.tags2 input{padding:4px 7px;font-size:13px}
-  .privbox{padding:3px 7px;font-size:11px}.privbox .pb-full{display:none}.privbox .pb-short{display:inline}
+  .privbox{padding:3px 7px;font-size:11px}.flagbtn{padding:2px 6px;font-size:11px}.clubin{width:120px;font-size:11px}.privbox .pb-full{display:none}.privbox .pb-short{display:inline}
   .brand{display:none}.top{justify-content:flex-start}.viewtabs button{padding:4px 9px}
   .centrelbl{display:none}.centre.unlocked .centrelbl{display:block;left:-50px;top:26px}
   .toolbar button{padding:3px 6px}.thumbs button{font-size:11px}
@@ -163,6 +163,10 @@ main{display:flex;flex-direction:column;min-height:0;min-width:0}
 .seg .note{font-size:12px;color:var(--muted);align-self:center}
 .tags .val{font-size:13px;margin-right:10px}
 .tags .val.unset{color:var(--muted)}
+.flagbtn{border:1px dashed #7c3aed;background:transparent;color:#5b21b6;border-radius:8px;padding:3px 9px;font-size:12px;font-weight:600}
+.flagbtn[aria-pressed="true"]{background:#efe8fd;border-style:solid}
+.clubin{padding:3px 8px;border:1px solid #c9b5f5;border-radius:8px;background:var(--surface);font-size:12px;min-width:0;width:170px}
+@media (prefers-color-scheme: dark){.flagbtn{color:#c4b0ff}.flagbtn[aria-pressed="true"]{background:#241a3a}}
 .stars button{font-size:17px;line-height:1;padding:2px 6px}
 .tags2 input{width:100%;padding:5px 9px;border:1px solid var(--line);border-radius:8px;background:var(--surface);min-width:0}
 .cityinfo{flex-direction:row;flex-wrap:wrap;align-items:center;gap:6px 16px;font-size:13px;color:var(--muted)}

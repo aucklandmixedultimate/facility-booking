@@ -39,6 +39,8 @@ function setStatus(t, warn) { $("status").textContent = t; $("status").classList
 let PARKS = [], BYID = {};
 let PRIV = { operators: [], workflow: [] }, PRIV_BY_PARK = {};   // park_id -> [operators] from private-managed.json (a ground can have several)
 let reviews = {};              // park_id -> review
+let flags = {};                // park_id -> {club, by, at}: flagged as probably club-run, not yet in private-managed.json
+let flagsShared = false;
 let mode = "local";            // "shared" (Supabase) | "local" (this browser)
 let session = null;
 const undoStack = [];
@@ -57,7 +59,7 @@ function fromRow(r) { return { decision: r.decision, lights: r.lights, fit: r.fi
 async function loadShared() {
   const { data, error } = await supabase.from("field_reviews").select("*");
   if (error) {
-    mode = "local"; reviews = store.get("vet-reviews", {});
+    mode = "local"; reviews = store.get("vet-reviews", {}); flags = store.get("vet-flags", {});
     const missing = /field_reviews|does not exist|schema cache/i.test(error.message || "");
     setStatus(missing ? "The field_reviews table isn't set up yet (run supabase-migration-field-reviews.sql). Decisions are kept in this browser for now."
                       : "Couldn't load shared decisions (" + error.message + "). Decisions are kept in this browser for now.", true);
@@ -65,6 +67,28 @@ async function loadShared() {
   }
   mode = "shared"; reviews = Object.fromEntries(data.map(r => [r.park_id, fromRow(r)]));
   setStatus(`Shared with all admins · ${data.length} decisions so far`);
+  await loadFlags();
+}
+// Club-run flags live in their own table (field_flags) so a park can be flagged without a
+// decision. Until that table exists they're kept in this browser.
+async function loadFlags() {
+  if (mode === "shared") {
+    const { data, error } = await supabase.from("field_flags").select("*");
+    if (!error) { flagsShared = true; flags = Object.fromEntries(data.map(r => [r.park_id, { club: r.club || "", by: r.flagged_by_email || "", at: r.updated_at }])); return; }
+  }
+  flagsShared = false; flags = store.get("vet-flags", {});
+}
+async function saveFlag(id, flag) {
+  if (flagsShared) {
+    const q = flag ? supabase.from("field_flags").upsert({ park_id: id, club: flag.club || "", flagged_by: session?.user?.id || null,
+        flagged_by_email: session?.user?.email || null, updated_at: new Date().toISOString() })
+      : supabase.from("field_flags").delete().eq("park_id", id);
+    const { error } = await q;
+    if (error) { setStatus("Couldn't save the club flag (" + error.message + ").", true); return false; }
+  }
+  if (flag) flags[id] = { ...flag, by: session?.user?.email || "", at: new Date().toISOString() }; else delete flags[id];
+  if (!flagsShared) store.set("vet-flags", flags);
+  return true;
 }
 async function save(id, rev) {
   if (mode === "shared") {
@@ -372,13 +396,16 @@ function buildCity() {
     const r = reviews[p.id], col = suitColor(r), top = r?.decision === "top", isCur = view === "city" && cur?.id === p.id && !!focusId;
     pts.push(ll);
     const pv = PRIV_BY_PARK[p.id];
-    const mk = pv?.length ? privMarker(ll, col, isCur, top) : L.circleMarker(ll, { radius: r ? 8 : 6, color: top ? "#e0a647" : isCur ? "#15211c" : "#ffffff", weight: top || isCur ? 3 : 1.5,
+    const fl = !pv?.length && flags[p.id];
+    const mk = pv?.length ? privMarker(ll, col, isCur, top) : L.circleMarker(ll, { radius: r ? 8 : 6,
+      color: top ? "#e0a647" : isCur ? "#15211c" : fl ? PRIV_COLOR : "#ffffff", weight: top || isCur || fl ? 3 : 1.5, dashArray: fl ? "3 3" : null,
       fillColor: col, fillOpacity: r ? 0.95 : 0.7, bubblingMouseEvents: false });
     const tags = r ? [r.decision === "top" ? "★ Top pick" : r.decision === "yes" ? "Shortlisted" : "Rejected",
       r.quality ? r.quality + "/5" : "", r.fit && r.fit !== "unknown" ? FIT_LABEL[r.fit] : "",
       r.lights === "full" || r.lights === "training" ? "💡 lights" : r.lights === "none" ? "no lights" : ""].filter(Boolean).join(" · ") : "Not rated yet";
     mk.bindTooltip(`<b>${esc(p.name)}</b><br>${esc(p.region)} · <b style="color:${col}">${suitWord(r)}</b><br>${esc(tags)}${r?.fields ? "<br>Fields: " + esc(r.fields) : ""}`
-      + (pv?.length ? `<br><b style="color:${PRIV_COLOR}">◆ Privately managed: contact ${esc(pv[0].short)}</b> first` : "") + `<br><i>Click to rate</i>`,
+      + (pv?.length ? `<br><b style="color:${PRIV_COLOR}">◆ Privately managed: contact ${esc(pv[0].short)}</b> first` : "")
+      + (fl ? `<br><b style="color:${PRIV_COLOR}">◇ Flagged: probably club-run${fl.club ? " (" + esc(fl.club) + ")" : ""}</b>` : "") + `<br><i>Click to rate</i>`,
       { className: "parktip", direction: "top", offset: [0, -6] });
     mk.on("click", () => openPark(p.id));
     mk.addTo(cityLayer);
@@ -433,7 +460,7 @@ function syncCityFields() {
 function renderLegend() {
   const row = (c, t) => `<div><i style="background:${c}"></i>${t}</div>`;
   $("legend").innerHTML = `<button class="lg-h" id="legendToggle" aria-expanded="true">Suitability <span aria-hidden="true">▾</span></button>`
-    + `<div class="lg-b">${row(`hsl(${suitHue(0.95)} 72% 42%)`, "Excellent")}${row(`hsl(${suitHue(0.7)} 72% 42%)`, "Good")}${row(`hsl(${suitHue(0.5)} 72% 42%)`, "Fair")}${row(`hsl(${suitHue(0.2)} 72% 42%)`, "Poor")}${row("#b3372d", "Rejected")}${row("#8a958f", "Not rated")}<div><span class="dia"></span>Privately managed</div><div class="lg-note">Gold ring = top pick</div></div>`;
+    + `<div class="lg-b">${row(`hsl(${suitHue(0.95)} 72% 42%)`, "Excellent")}${row(`hsl(${suitHue(0.7)} 72% 42%)`, "Good")}${row(`hsl(${suitHue(0.5)} 72% 42%)`, "Fair")}${row(`hsl(${suitHue(0.2)} 72% 42%)`, "Poor")}${row("#b3372d", "Rejected")}${row("#8a958f", "Not rated")}<div><span class="dia"></span>Privately managed</div><div><i style="background:#8a958f;border:2px dashed ${PRIV_COLOR};box-shadow:none"></i>Flagged: probably club-run</div><div class="lg-note">Gold ring = top pick</div></div>`;
   // Collapsed by default on small screens so it doesn't cover the map; the choice is remembered.
   const setOpen = open => { $("legend").classList.toggle("collapsed", !open); $("legendToggle").setAttribute("aria-expanded", String(open)); };
   setOpen(store.get("vet-legend-open", !matchMedia("(max-width: 640px)").matches));
@@ -481,6 +508,16 @@ function renderTags(p) {
   if (document.activeElement !== $("fieldsIn")) $("fieldsIn").value = t.fields;
   if (document.activeElement !== $("notesIn")) $("notesIn").value = t.notes;
   renderCentre();
+}
+// The club-run flag only applies to parks not already in the private-operator list.
+function renderFlag(p) {
+  const known = !!PRIV_BY_PARK[p.id]?.length, fl = flags[p.id];
+  $("clubFlagBtn").hidden = known; $("clubIn").hidden = known || !fl;
+  $("clubFlagBtn").setAttribute("aria-pressed", String(!!fl));
+  $("clubFlagBtn").textContent = fl ? "◆ Flagged: club-run" : "◇ Club-run?";
+  $("clubFlagBtn").title = fl ? `Flagged${fl.by ? " by " + fl.by.split("@")[0] : ""} as probably club-run. Click to clear.`
+    : "Flag this park as probably run by a club, even though it isn't in the private-operator list yet";
+  if (document.activeElement !== $("clubIn")) $("clubIn").value = fl?.club || "";
 }
 function renderRail() {
   const reg = $("region").value, mapsOnly = $("mapsOnly").checked;
@@ -530,6 +567,7 @@ function render() {
     $("parkName").textContent = p.name; $("parkRegion").textContent = p.region;
     const pv = PRIV_BY_PARK[p.id];
     $("privBox").hidden = !pv?.length; $("privBox").innerHTML = pv?.length ? privBanner(pv) : "";
+    renderFlag(p);
     const r = reviews[p.id];
     $("decChip").innerHTML = (pv?.length ? `<span class="chip priv" title="Ask ${esc(pv[0].operator)} before applying to council">◆ ${esc(pv[0].short)}</span> ` : "") + (r ? `<span class="chip ${r.decision === "no" ? "no" : r.decision === "top" ? "top" : ""}">${r.decision === "top" ? "Top pick" : r.decision === "yes" ? "Shortlisted" : "Rejected"}${r.by ? " · " + esc(r.by.split("@")[0]) : ""}</span>` : "");
     const i = Math.min(mapIdx[p.id] || 0, Math.max(0, p.maps.length - 1));
@@ -662,6 +700,10 @@ function bind() {
     confirmSpot(p, b.dataset.fit); });
   $("fieldBtn").onclick = () => showField(!fieldOn);
   bindDispenser();
+  $("clubFlagBtn").onclick = async () => { const p = current(); if (!p) return;
+    if (await saveFlag(p.id, flags[p.id] ? null : { club: "" })) { renderFlag(p); if (flags[p.id]) $("clubIn").focus(); } };
+  $("clubIn").addEventListener("change", async () => { const p = current(); if (!p || !flags[p.id]) return;
+    await saveFlag(p.id, { club: $("clubIn").value.trim() }); renderFlag(p); });
   $("fitBtn").onclick = () => { const p = current(); if (p) showMap(p); };
   $("cityTab").onclick = () => { if (view !== "city") { focusId = null; setView("city"); } else setView("city", { refit: true }); };
   $("parkTab").onclick = () => { if (view !== "park") { focusId = null; setView("park"); } };
@@ -702,12 +744,13 @@ function bind() {
   });
 }
 function exportCsv() {
-  const rows = [["Region", "Park", "Decision", "Suitability", "Lights", "Light poles", "Fit", "Quality", "Fields", "Notes", "Field placement (lat, lon, angle°)", "Private operator", "Operator contact", "Reviewer", "Reviewed at"]];
-  PARKS.forEach(p => { const r = reviews[p.id]; if (!r) return; const pl = r.placement;
-    rows.push([p.region, p.name, r.decision === "top" ? "top pick" : r.decision === "yes" ? "shortlist" : "reject", suitWord(r), r.lights, pl?.lights?.length || 0,
-      FIT_LABEL[r.fit] || r.fit, r.quality || "", r.fields, r.notes, pl?.lat != null ? `${pl.lat}, ${pl.lon}, ${pl.angle}` : "",
+  const rows = [["Region", "Park", "Decision", "Suitability", "Lights", "Light poles", "Fit", "Quality", "Fields", "Notes", "Field placement (lat, lon, angle°)", "Private operator", "Operator contact", "Flagged club-run", "Reviewer", "Reviewed at"]];
+  PARKS.forEach(p => { const r = reviews[p.id] || {}, fl = flags[p.id]; if (!reviews[p.id] && !fl) return; const pl = r.placement;
+    rows.push([p.region, p.name, r.decision ? (r.decision === "top" ? "top pick" : r.decision === "yes" ? "shortlist" : "reject") : "", r.decision ? suitWord(r) : "", r.lights || "", pl?.lights?.length || 0,
+      r.fit ? FIT_LABEL[r.fit] || r.fit : "", r.quality || "", r.fields || "", r.notes || "", pl?.lat != null ? `${pl.lat}, ${pl.lon}, ${pl.angle}` : "",
       PRIV_BY_PARK[p.id]?.[0]?.operator || "",
-      [PRIV_BY_PARK[p.id]?.[0]?.contact?.email, PRIV_BY_PARK[p.id]?.[0]?.contact?.phone].filter(Boolean).join(" / "), r.by || "", r.at || ""]); });
+      [PRIV_BY_PARK[p.id]?.[0]?.contact?.email, PRIV_BY_PARK[p.id]?.[0]?.contact?.phone].filter(Boolean).join(" / "),
+      fl ? "yes" + (fl.club ? ": " + fl.club : "") : "", r.by || "", r.at || ""]); });
   const csv = rows.map(r => r.map(v => { const s = String(v ?? ""); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }).join(",")).join("\n");
   const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); a.download = "council-field-vetting.csv"; a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
@@ -737,7 +780,7 @@ async function start() {
     if (session.user?.app_metadata?.role !== "admin") { gate(`<h2>Admins only</h2>Council field vetting is limited to AMUA admins. <a href="./">Back to bookings</a>`); setStatus(""); return; }
     await loadShared();
   } else {
-    reviews = store.get("vet-reviews", {});
+    reviews = store.get("vet-reviews", {}); flags = store.get("vet-flags", {});
     setStatus("Demo mode (no Supabase configured): decisions are kept in this browser.", true);
   }
   $("app").hidden = false;
