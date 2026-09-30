@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Council Field Vetting</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap">
+  </head>
+  <body>
+    <div class="wrap">
+      <header class="top">
+        <div class="brand">
+          <h1>Council Field Vetting</h1>
+          <p>AMUA admins · decide which Auckland Council parks are worth applying for · <a href="./">Back to bookings</a></p>
+        </div>
+        <div class="filters">
+          <select id="region" aria-label="Region"><option value="">All regions</option></select>
+          <select id="mode" aria-label="Queue">
+            <option value="todo">To review</option>
+            <option value="top">Top picks</option>
+            <option value="yes">Shortlisted</option>
+            <option value="no">Rejected</option>
+            <option value="all">All parks</option>
+          </select>
+          <label class="chk"><input type="checkbox" id="mapsOnly" checked> With map only</label>
+          <div>
+            <div class="progress" id="progress">0 / 0 reviewed</div>
+            <div class="bar"><i id="barFill"></i></div>
+          </div>
+        </div>
+      </header>
+      <div class="status" id="status">Loading…</div>
+
+      <div id="gate" class="empty" hidden></div>
+
+      <div class="grid" id="app" hidden>
+        <main>
+          <div class="stack" id="stack">
+            <div class="card behind" id="behind" aria-hidden="true"><img id="behindImg" alt=""></div>
+            <article class="card" id="card">
+              <div class="handle" id="handle" title="Drag this bar left, right or up to decide">
+                <div class="title"><h2 id="parkName">—</h2><span class="chip plain" id="parkRegion"></span><span id="decChip"></span></div>
+                <div class="hint">Drag here to decide · ← reject · → shortlist · ↑ top pick</div>
+                <div class="stamp yes" id="stYes">SHORTLIST</div><div class="stamp no" id="stNo">REJECT</div><div class="stamp top" id="stTop">TOP PICK</div>
+              </div>
+              <div class="mapbox">
+                <div id="map" aria-label="Satellite map with the council field map overlaid"></div>
+                <div class="layerbadge" id="layerBadge">Council map</div>
+                <div class="field" id="field" hidden>
+                  <svg id="fieldSvg" role="img" aria-label="Ultimate frisbee field to scale"></svg>
+                </div>
+                <div class="toolbar" role="toolbar" aria-label="Map tools">
+                  <button id="fieldBtn" aria-pressed="true" title="Show or hide the frisbee field (T)">⬚ Field</button>
+                  <button id="lightsBtn" title="Lights at this park (L)">💡 Lights: unknown</button>
+                  <button id="layerBtn" title="Switch between council map and satellite (V)">⇄ Satellite</button>
+                  <button id="fitBtn" title="Zoom back to the council map (0)">⤢ Fit</button>
+                  <button id="sizeBtn" title="Field dimensions">⚙</button>
+                </div>
+                <div class="sizepanel" id="sizePanel" hidden>
+                  <label>Length (m) <input type="number" id="fLen" min="40" max="130" step="1"></label>
+                  <label>Width (m) <input type="number" id="fWid" min="20" max="60" step="1"></label>
+                  <label>End zone (m) <input type="number" id="fEz" min="0" max="30" step="1"></label>
+                  <button id="fReset">WFDF standard</button>
+                </div>
+                <div class="rotatehint" id="rotateHint" hidden>Move the mouse to turn the field · click to fix it</div>
+              </div>
+              <div class="thumbs" id="thumbs"></div>
+              <div class="info">
+                <div class="links"><a id="gmaps" target="_blank" rel="noopener">Open in Google Maps ↗</a><span id="scaleNote"></span></div>
+                <div id="fieldList" class="fieldlist"></div>
+                <div class="tags">
+                  <label class="k">Lights</label><div class="seg" id="segLights"></div>
+                  <label class="k">Fit</label><div class="seg" id="segFit"></div>
+                  <label class="k">Quality</label><div class="seg stars" id="segQuality"></div>
+                  <label class="k" for="fieldsIn">Fields</label><input id="fieldsIn" placeholder="Which fields suit, e.g. Rugby 1, Rugby 2">
+                  <label class="k" for="notesIn">Notes</label><input id="notesIn" placeholder="Anything worth knowing">
+                </div>
+              </div>
+            </article>
+            <div class="empty" id="emptyState" hidden></div>
+          </div>
+          <div class="actions">
+            <button class="act small" id="undoBtn" title="Undo last decision (Z)"><span class="b">↺</span>Undo</button>
+            <button class="act no" id="noBtn" title="Not suitable (←)"><span class="b">✕</span>Reject <kbd>←</kbd></button>
+            <button class="act top" id="topBtn" title="Top pick (↑)"><span class="b">★</span>Top pick <kbd>↑</kbd></button>
+            <button class="act yes" id="yesBtn" title="Shortlist (→)"><span class="b">✓</span>Shortlist <kbd>→</kbd></button>
+            <button class="act small" id="skipBtn" title="Decide later (S)"><span class="b">⤳</span>Later <kbd>S</kbd></button>
+          </div>
+        </main>
+        <aside class="rail">
+          <h3>Decisions</h3>
+          <div class="counts">
+            <div class="c-top"><b id="nTop">0</b><span>Top</span></div>
+            <div class="c-yes"><b id="nYes">0</b><span>Shortlist</span></div>
+            <div class="c-no"><b id="nNo">0</b><span>Rejected</span></div>
+          </div>
+          <div class="list" id="list"></div>
+          <div class="railtools"><button id="exportBtn">Download CSV</button></div>
+          <p class="help">Scroll to zoom: a couple of clicks in or out swaps the council map for live satellite. Click the field, move the mouse to turn it, click again to fix it. Keys: <kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd>, <kbd>S</kbd> later, <kbd>Z</kbd> undo, <kbd>1</kbd>–<kbd>5</kbd> quality, <kbd>L</kbd> lights, <kbd>F</kbd> fit, <kbd>T</kbd> field, <kbd>V</kbd> satellite, <kbd>M</kbd> next map. Lights only matter for evening slots.</p>
+        </aside>
+      </div>
+    </div>
+    <script type="module" src="/src/vetting/main.js"></script>
+  </body>
+</html>
