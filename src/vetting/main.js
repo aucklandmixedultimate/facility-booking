@@ -1102,6 +1102,26 @@ function exportCsv() {
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
+// ── Profile (same look as the booking site's user button) ────────────────────
+const EMAIL_COLORS = ["#6366f1","#ec4899","#f59e0b","#10b981","#ef4444","#8b5cf6","#06b6d4","#84cc16","#f97316","#14b8a6","#e879f9","#fb7185","#34d399","#60a5fa","#fbbf24"];
+const COUNCIL_APPLICATION_URL = "https://onlineservices.aucklandcouncil.govt.nz/councilonline/application/sportapplication?bookingApplicationType=SEASONAL_ALL_SPORTS_PARKS&productCode=SSPPERMITBK";
+function renderProfile() {
+  const email = session?.user?.email || "";
+  if (!email) { $("profileBtn").hidden = true; return; }
+  let h = 0; for (const ch of email.toLowerCase()) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  $("profileAv").textContent = email[0].toUpperCase(); $("profileAv").style.background = EMAIL_COLORS[h % EMAIL_COLORS.length];
+  $("profileName").textContent = email.split("@")[0]; $("profileBtn").title = email; $("profileBtn").hidden = false;
+  $("profileMenu").innerHTML = `<div class="pm-head"><div class="pm-k">Signed in</div><div class="pm-e">${esc(email)}</div>
+      <span class="pm-role${IS_ADMIN ? " admin" : ""}">${IS_ADMIN ? "👑 Admin" : "👤 User"}</span></div>
+    <a class="pm-item" href="./">📅 Facility Booking</a>
+    ${IS_ADMIN ? `<a class="pm-item" href="${COUNCIL_APPLICATION_URL}" target="_blank" rel="noopener">🏛 Council application</a>` : ""}
+    <button class="pm-item danger" id="pmSignOut">↪ Sign out</button>`;
+  const close = () => { $("profileMenu").hidden = true; $("profileBtn").setAttribute("aria-expanded", "false"); };
+  $("profileBtn").onclick = e => { e.stopPropagation(); const open = $("profileMenu").hidden; $("profileMenu").hidden = !open; $("profileBtn").setAttribute("aria-expanded", String(open)); };
+  document.addEventListener("click", e => { if (!e.target.closest(".profile")) close(); });
+  $("pmSignOut").onclick = async () => { await supabase?.auth.signOut(); location.reload(); };
+}
+
 // ── Start ────────────────────────────────────────────────────────────────────
 function gate(html) { $("gate").innerHTML = html; $("gate").hidden = false; $("app").hidden = true; }
 async function start() {
@@ -1131,6 +1151,7 @@ async function start() {
       setStatus(""); return;
     }
     IS_ADMIN = session.user?.app_metadata?.role === "admin";
+    renderProfile();
     await loadShared();
     if (!IS_ADMIN) {
       workMode = "book"; document.body.classList.add("viewer");

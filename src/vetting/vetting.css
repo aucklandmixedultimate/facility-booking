@@ -279,3 +279,29 @@ kbd{font-family:var(--font-mono);font-size:10px;border:1px solid var(--line);bor
 body.viewer #modeRate,body.viewer .modetabs{display:none}
 body.viewer .filters #mode{display:none}
 body.viewer .handle .hint,body.viewer .rail .help,body.viewer #fieldBtn,body.viewer #sizeBtn{display:none}
+
+/* Back link and profile (matches the booking site's header) */
+.acct{display:flex;align-items:center;gap:8px;order:2}
+@media (min-width:641px){.top .brand{flex:1 1 auto;order:1}.top .filters{order:3;flex:1 1 100%}}
+.backbtn{display:inline-flex;align-items:center;gap:4px;padding:6px 11px;border-radius:9px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font-weight:600;font-size:13px;text-decoration:none;white-space:nowrap}
+.backbtn:hover{background:var(--line)}
+.profile{position:relative}
+#profileBtn{display:flex;align-items:center;gap:6px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:20px;padding:4px 8px 4px 4px;cursor:pointer;font:inherit;font-size:11px;font-weight:600;color:#475569}
+#profileBtn[aria-expanded="true"]{background:#eef2ff;border-color:#c7d2fe}
+#profileBtn .av{width:26px;height:26px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:11px;font-weight:800}
+#profileBtn .pn{max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#profileBtn .caret{font-size:9px;color:#94a3b8}
+.pmenu{position:absolute;right:0;top:calc(100% + 6px);z-index:1200;background:#fff;border:1.5px solid #e2e8f0;border-radius:12px;box-shadow:0 8px 24px rgba(15,23,42,.12);min-width:240px;overflow:hidden;font-size:13px;color:#0f172a}
+.pm-head{padding:10px 14px;border-bottom:1px solid #f1f5f9;background:#f8fafc}
+.pm-k{font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:.05em;font-weight:700}
+.pm-e{font-size:12px;font-weight:600;margin:2px 0 6px;word-break:break-all}
+.pm-role{font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;background:#f1f5f9;color:#475569;border:1px solid #e2e8f0}
+.pm-role.admin{background:#f3e8ff;color:#7c3aed;border-color:#ddd6fe}
+.pm-item{display:flex;align-items:center;gap:10px;width:100%;padding:9px 14px;background:transparent;border:0;font:inherit;font-size:13px;color:#0f172a;text-align:left;cursor:pointer;text-decoration:none;font-weight:500}
+.pm-item:hover{background:#f8fafc}.pm-item.danger{color:#b91c1c}.pm-item.danger:hover{background:#fef2f2}
+@media (prefers-color-scheme: dark){.backbtn{color:var(--ink)}}
+@media (max-width:640px){
+  .acct{justify-content:space-between;margin-bottom:6px}
+  .backbtn{padding:5px 9px;font-size:12px}
+  #profileBtn .pn{display:none}
+}
