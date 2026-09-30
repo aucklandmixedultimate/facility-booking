@@ -9805,7 +9805,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                 const queueLabel = queued ? {queued_cpsa:"→ Queue for GTEC",approved:"✓ GTEC Approved",rejected:"✗ Reject"}[queued.newStatus]||("→ "+(STATUS_META[queued.newStatus]?.label||queued.newStatus)) : null;
                 const wf=workflowOf(b.facility_id), isCouncilWf=wf==="council"||wf==="council_private", nxt=nextWorkflowStatus(b);
                 const opContact=PROVIDERS[providerOfFacility(b.facility_id)]?.contact;
-                const opHint=(opContact&&(nxt==="op_permission"||nxt==="op_confirm")?` — ${[opContact.name,opContact.email,opContact.phone].filter(Boolean).join(" · ")}`:"")
+                const opHint=(opContact&&(nxt==="op_permission"||nxt==="op_confirm")?` — ${[opContact.contact_name||opContact.name,opContact.email,opContact.phone].filter(Boolean).join(" · ")}`:"")
                   +(nxt==="council_apply"?` — council application fee $${COUNCIL_APPLICATION_FEE} per field (pay later)`:"");
                 return (
                   <tr key={b.id} onClick={()=>onView&&onView(b)} style={{background:rowBg,borderTop:ri>0?"1px solid #f1f5f9":"none",transition:"background 0.1s",cursor:"pointer"}}
