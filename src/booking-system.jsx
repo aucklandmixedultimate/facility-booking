@@ -11133,10 +11133,20 @@ export default function App() {
     const pruned = [...listBookerFilter].filter(em=>present.has(em));
     if(pruned.length!==listBookerFilter.size) setListBookerFilter(new Set(pruned));
   },[bookings,loading,listBookerFilter]);
+  // Settings are readable only when signed in, so load them once the session has landed
+  // (a load on first render goes out before the session is restored and gets no rows).
+  // Reload when the tab comes back into view, so fields added on the Council fields page
+  // (another tab) show up without a refresh.
+  const signedInId = session?.user?.id || null;
   useEffect(()=>{
+    if(!signedInId) return;
     (async()=>{ await loadSettings(); purgeOldLogs(); })();
+    let last = Date.now();
+    const onVis = () => { if (document.visibilityState === "visible" && Date.now() - last > 15000) { last = Date.now(); loadSettings(); } };
+    document.addEventListener("visibilitychange", onVis); window.addEventListener("focus", onVis);
+    return () => { document.removeEventListener("visibilitychange", onVis); window.removeEventListener("focus", onVis); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[]);
+  },[signedInId]);
 
   const openNew=useCallback((date,startHour,duration=1,facility=null)=>{setEditing(null);setPrefill({date,startHour,duration,facility});setDayPopupDate(null);setShowForm(true);},[]);
   // Open the booking form pre-seeded with one row per day (grouped multi-day booking).
