@@ -319,6 +319,40 @@ function canSendToCouncil(b) {
   return (wf === "council" && ["pending_amua", "pending", "council_apply"].includes(b.status))
       || (wf === "council_private" && b.status === "council_apply");
 }
+// The batch as the council form wants it, for the AMUA Council Application extension
+// ("📋 Copy for council form"): one Park details block per park with its fields, date
+// range and per-weekday times, plus AMUA's organisation and contacts (AMUA details).
+function buildCouncilPayload(bkgs, approxPlayers = {}) {
+  const hh = h => `${String(Math.floor(h)).padStart(2,"0")}:${String(Math.round((h % 1) * 60)).padStart(2,"0")}`;
+  const DAYS = ["sun","mon","tue","wed","thu","fri","sat"];
+  const parks = {};
+  bkgs.forEach(b => {
+    const c = FACILITIES.find(f => f.id === b.facility_id)?.council; if (!c) return;
+    const p = parks[c.park_id] ||= { region: c.region || "", park: c.park, fields: [], dates: [], days: {}, bookingIds: [], bookers: new Set() };
+    if (!p.fields.includes(c.field)) p.fields.push(c.field);
+    if (!p.dates.includes(b.date)) p.dates.push(b.date);
+    p.bookingIds.push(b.id); p.bookers.add((b.email || "").toLowerCase());
+    const d = DAYS[new Date(b.date + "T12:00").getDay()], t = p.days[d] ||= { start: b.start_hour, end: b.start_hour + b.duration };
+    t.start = Math.min(t.start, b.start_hour); t.end = Math.max(t.end, b.start_hour + b.duration);
+  });
+  const list = Object.values(parks).map(p => {
+    p.dates.sort();
+    const players = [...p.bookers].reduce((n, e) => n + (parseInt(approxPlayers[e], 10) || 0), 0);
+    return { region: p.region, park: p.park, fields: p.fields, firstDate: p.dates[0], lastDate: p.dates[p.dates.length - 1], dates: p.dates,
+      days: Object.fromEntries(Object.entries(p.days).map(([d, t]) => [d, { start: hh(t.start), end: hh(t.end) }])),
+      teams: p.bookers.size, players: players || null, bookingIds: p.bookingIds };
+  });
+  const ct = AMUA_INFO.contacts || {};
+  return { v: 1, source: "amua-facility-booking", createdAt: new Date().toISOString(),
+    feeEstimate: councilFeeSplit(bkgs).total,
+    bookingType: list.every(p => p.dates.length === 1) ? "casual" : "seasonal",
+    purpose: "training", sport: "Other",
+    activityName: `Training - ${AMUA_INFO.name}`,
+    org: { name: AMUA_INFO.name, orgType: AMUA_INFO.council?.orgType || "Club/Team", rso: AMUA_INFO.council?.rso || "",
+      postalAddressSearch: AMUA_INFO.council?.postalAddressSearch || AMUA_INFO.address || "",
+      primary: ct.operations || {}, secondary: ct.secondary || {}, keyHolder: ct.keyHolder || {} },
+    parks: list };
+}
 // Split a batch's fee: each field applied for costs COUNCIL_APPLICATION_FEE, shared equally
 // by the bookers applying for it; a booker's share is spread over their bookings on it.
 function councilFeeSplit(bkgs) {
@@ -8291,7 +8325,7 @@ function SyncedItemRow({ ab, bookings }) {
 }
 
 // ─── Admin Panel with action queue, bulk approve, facility rates ──────────────
-function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,clashes=[],deleteIds=new Set(),facilityRates={},onClearOldUnapproved,onBulkApply,onSaveMismatch,onInformCpsa,onQueueNotifications,onMarkAdjustmentSettled,onLinkClash,loggedInEmail,syncResults=[],onClearSyncResults,showSyncResults=false,onToggleSyncResults,bookerFilter=new Set(),onToggleBooker,onSetBookerFilter,aliasNames={},emailAliases={},pricingConditions=[],onAddPricingCondition,onUpdatePricingCondition,onRemovePricingCondition,cpsaDeleteLog=[],onClearDeleteLogEntry,onClearDeleteLog,onSendToCouncil}) {
+function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,clashes=[],deleteIds=new Set(),facilityRates={},onClearOldUnapproved,onBulkApply,onSaveMismatch,onInformCpsa,onQueueNotifications,onMarkAdjustmentSettled,onLinkClash,loggedInEmail,syncResults=[],onClearSyncResults,showSyncResults=false,onToggleSyncResults,bookerFilter=new Set(),onToggleBooker,onSetBookerFilter,aliasNames={},emailAliases={},pricingConditions=[],onAddPricingCondition,onUpdatePricingCondition,onRemovePricingCondition,cpsaDeleteLog=[],onClearDeleteLogEntry,onClearDeleteLog,onSendToCouncil,approxPlayers={}}) {
   const [showSchedulePanel, setShowSchedulePanel] = useState(false);
   const [showActivityPanel, setShowActivityPanel] = useState(false);
   // Which sync-result months are expanded in the grouped dropdown (monthKey set).
@@ -8900,6 +8934,8 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
               {onSendToCouncil&&(()=>{ const ready=bookings.filter(b=>selected.has(b.id)&&canSendToCouncil(b)); if(!ready.length) return null;
                 const sp=councilFeeSplit(ready);
                 return <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",background:"#f0fdfa",border:"1px solid #99f6e4",borderRadius:10,padding:"8px 10px"}}>
+                  <button onClick={async()=>{ const txt=JSON.stringify(buildCouncilPayload(ready, approxPlayers)); try{ await navigator.clipboard.writeText(txt); alert("Copied. On the council's application form, open the AMUA Council panel and paste it in."); }catch{ window.prompt("Copy this, then paste it into the AMUA Council panel on the council form:", txt); } }}
+                    title="Copy this batch for the AMUA Council Application extension, which fills the council's form" style={S.btn({background:"#fff",color:"#0f766e",border:"1.5px solid #0d9488"})}>📋 Copy for council form</button>
                   <button onClick={()=>onSendToCouncil(ready.map(b=>b.id))} style={S.btn({background:"#0d9488",color:"#fff"})}>🏛 Send {ready.length} to council</button>
                   <span style={{fontSize:12,color:"#115e59"}}>{sp.fields} field{sp.fields!==1?"s":""} · fee ${sp.total.toFixed(2)} ({Object.entries(sp.byBooker).map(([e,v])=>`${adminAlias(e)} $${v.toFixed(2)}`).join(", ")})</span>
                 </div>; })()}
@@ -10561,7 +10597,10 @@ export default function App() {
     const bkgs = bookings.filter(b => ids.includes(b.id) && canSendToCouncil(b));
     if (!bkgs.length) return;
     const sp = councilFeeSplit(bkgs);
-    const appId = `CA-${todayKey().replace(/-/g,"")}-${Math.random().toString(36).slice(2,6).toUpperCase()}`;
+    const raw = window.prompt("Council application number from the portal (e.g. fef887de). Leave blank if you haven't submitted it yet — a local reference is used.", "");
+    if (raw === null) return;   // cancelled
+    const ref = raw.trim().replace(/\s+/g,"");
+    const appId = ref || `CA-${todayKey().replace(/-/g,"")}-${Math.random().toString(36).slice(2,6).toUpperCase()}`;
     const split = Object.entries(sp.byBooker).map(([e,v])=>`${aliasNames[e]||e}: $${v.toFixed(2)}`).join("\n");
     if (!window.confirm(`Send ${bkgs.length} booking${bkgs.length!==1?"s":""} to the council as application ${appId}?\n\n${sp.fields} field${sp.fields!==1?"s":""} × $${COUNCIL_APPLICATION_FEE} = $${sp.total.toFixed(2)}, split:\n${split}`)) return;
     const at = new Date().toISOString();
@@ -12177,7 +12216,7 @@ export default function App() {
                               <span style={{position:"absolute",top:2,left:silentMode?14:2,width:14,height:14,borderRadius:"50%",background:"#fff",boxShadow:"0 1px 2px rgba(0,0,0,0.2)",transition:"left 0.2s"}}/>
                             </span>
                           </button>
-                          <UserMenuItem icon="🧩" label="Install Extension" onClick={()=>{setShowUserMenu(false);setShowExtensionModal(true);}}/>
+                          <UserMenuItem icon="🧩" label="Install Extensions" onClick={()=>{setShowUserMenu(false);setShowExtensionModal(true);}}/>
                           <UserMenuItem icon="💲" label="Facility Rates" onClick={()=>{setShowUserMenu(false);setShowRatesModal(true);}}/>
                           <UserMenuItem icon="👥" label="Player Counts" onClick={()=>{setShowUserMenu(false);setShowPlayersModal(true);}}/>
                           <UserMenuItem icon="🗺" label="Council fields" onClick={()=>{setShowUserMenu(false);window.open(import.meta.env.BASE_URL+"vetting.html","_blank","noopener");}}/>
@@ -12481,7 +12520,7 @@ export default function App() {
       {/* Modals */}
       {showAdminScheduleModal && <ScheduleSummaryModal bookings={bookings} isAdmin={true} loggedInEmail={loggedInEmail} onBulkApply={handleBulkApply} onBulkStatusChange={handleBulkStatusChange} aliasNames={aliasNames} emailAliases={emailAliases} onClose={()=>setShowAdminScheduleModal(false)}/>}
       {showExtensionModal&&(
-        <Modal title="🧩 Install AMUA Booking Extension" onClose={()=>setShowExtensionModal(false)} width={560}>
+        <Modal title="🧩 Install AMUA Extensions" onClose={()=>setShowExtensionModal(false)} width={560}>
           <div style={{display:"flex",flexDirection:"column",gap:16,fontSize:14,color:"#0f172a"}}>
             <div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:8,padding:"10px 14px",fontSize:13,color:"#166534"}}>
               The browser extension lets you submit bookings to GTEC (Sporty) directly from this app and syncs confirmation links back automatically.
@@ -12506,6 +12545,18 @@ export default function App() {
                   </div>
                 </div>
               ))}
+            </div>
+            {/* Second extension: fills Auckland Council's sports-field application form. */}
+            <div style={{borderTop:"1px solid #e2e8f0",paddingTop:14,display:"flex",flexDirection:"column",gap:10}}>
+              <div style={{fontWeight:700,fontSize:15}}>🏛 AMUA Council Application</div>
+              <div style={{background:"#f0fdfa",border:"1px solid #99f6e4",borderRadius:8,padding:"10px 14px",fontSize:13,color:"#115e59"}}>
+                Fills Auckland Council&apos;s sports-field booking application from a batch of council bookings. In Admin, tick the council bookings and press <strong>📋 Copy for council form</strong>. Then, on the council&apos;s form, open the <strong>🏛 AMUA Council</strong> panel, paste the batch, and press <strong>Fill this page</strong> on each page. You review each page, tick the declarations and submit. Afterwards, enter the application number when you press <strong>🏛 Send to council</strong>.
+              </div>
+              <a href="https://github.com/aucklandmixedultimate/amua-booking-extension/releases/download/council-latest/amua-council-extension.zip"
+                style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,background:"#0d9488",color:"#fff",borderRadius:10,padding:"12px 16px",textDecoration:"none",fontWeight:700,fontSize:14}}>
+                ⬇ Download the council extension (.zip)
+              </a>
+              <div style={{fontSize:13,color:"#475569"}}>Install it the same way as above: unzip, then <strong>Load unpacked</strong> in <code style={{background:"#f1f5f9",padding:"1px 5px",borderRadius:4,fontSize:12}}>chrome://extensions</code>. It only runs on <code style={{background:"#f1f5f9",padding:"1px 5px",borderRadius:4,fontSize:12}}>onlineservices.aucklandcouncil.govt.nz</code>. <a href="https://github.com/aucklandmixedultimate/amua-booking-extension/releases/tag/council-latest" target="_blank" rel="noopener noreferrer" style={{color:"#0d9488",fontWeight:600}}>Release notes</a></div>
             </div>
             <div style={{borderTop:"1px solid #f1f5f9",paddingTop:12,display:"flex",gap:8,justifyContent:"flex-end"}}>
               <button onClick={()=>setShowExtensionModal(false)} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#475569"})}>Close</button>

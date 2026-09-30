@@ -294,24 +294,44 @@ read `region`, `parkName`, `control-1` fields, dates, weekdays and times into
 the URL the portal uses to view a lodged document, which is probably the "Export to PDF"
 link's `/view/` sibling.
 
-### 5.4 Submitting to the council: a pre-fill assistant, not a bot
+### 5.4 Submitting to the council: a pre-fill assistant, not a bot (built)
 
 Replaying the Orbeon event protocol from a server is fragile: session-scoped UUIDs,
-sequence numbers, address-lookup ids, and a payment step. Instead, the extension offers
-**"Fill council application"** on the form page, driven by a booking series from the
-app. It sets values through the page's own inputs and fires change events, so Orbeon
-sends its usual Ajax, and walks pages 1–5:
-- sport *Other*;
-- organisation and contacts from the **AMUA details** setting (`amua_org`, User menu →
-  AMUA details);
-- one Park details block per park, with its fields, dates, weekdays and times.
+sequence numbers, address-lookup ids, and a payment step. Instead, the **AMUA Council
+Application** extension (`amua-booking-extension/council-extension/`, released as
+`council-latest/amua-council-extension.zip`, and offered in the booking site's User menu
+→ Install Extensions) fills the form from the page:
 
-The admin then reviews pages 6–8, ticks the agreements and submits. Nothing is paid:
-the bookings are free (§8). The extension reads back the new application number and code into
-`external_requests` and links the booking series to it.
+1. **Copy the batch.** In Admin, tick council bookings and press **📋 Copy for council
+   form** (`buildCouncilPayload`). The batch holds one Park details block per park with:
+   - region, park and fields;
+   - the first and last date;
+   - per-weekday start and end times;
+   - a senior team per booker, with players from each booker's approximate player count.
 
-**Catalogue refresh.** Park and field lists change. The extension can also harvest them
-by iterating region → park in the form and upserting into `council_parks` /
+   It also carries AMUA's organisation, contacts and council answers from the **AMUA
+   details** setting.
+2. **Paste it on the council form.** The 🏛 AMUA Council panel stores the batch in
+   `chrome.storage`.
+3. **Fill each page.** **Fill this page** sets every control it recognises on the current
+   page (by control name, matching dropdowns by label). It fires input/change/blur and
+   waits for Orbeon's loading indicator between fields, because region → park → fields
+   are chained.
+   - Page 5 fills one Park details block per click: add another park, then Fill again.
+   - The postal address is only typed in; you pick the match.
+   - The declarations (pages 6–8) are never ticked.
+   - Anything unset is outlined amber and listed in the log.
+4. **Submit and record.** The admin submits. The panel reads the 8-hex application number
+   off the confirmation page. The admin enters it in **🏛 Send to council**, which records
+   the $10 per field fee (split per field between bookers) and moves the bookings to
+   "awaiting council decision".
+
+It was tested against a mock of the form's control structure only, because the council
+portal can't be reached from the build environment. Expect a round of fixes on the
+first real run.
+
+**Catalogue refresh (not built).** Park and field lists change. The extension could also
+harvest them by iterating region → park in the form and upserting into `council_parks` /
 `council_fields` (§7). Each park selection loads its field list, so that is about 254
 cheap Ajax calls, run only on demand.
 
