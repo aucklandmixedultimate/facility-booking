@@ -135,7 +135,7 @@ const FACILITIES = [
 // Mirrored at module level in the same way as the alias/colour maps, so the 13 pickers
 // and calendar columns don't each need the admin flag threaded through them.
 let _isAdminView = false;
-function visibleFacilities() { return FACILITIES.filter(f => (!f.adminOnly || _isAdminView) && (!f.council || _isAdminView || ownsCouncilFacility(f))); }
+function visibleFacilities() { return FACILITIES.filter(f => !f.inactive && (!f.adminOnly || _isAdminView) && (!f.council || _isAdminView || ownsCouncilFacility(f))); }
 // Council fields are added per booker (Council fields page → Book), so a booker sees only
 // the ones added for them (any of their linked emails); admins see all.
 function ownsCouncilFacility(f) {
@@ -386,10 +386,12 @@ function applyCouncilFacilities(map) {
   for (let i = FACILITIES.length - 1; i >= 0; i--) if (FACILITIES[i].council) FACILITIES.splice(i, 1);
   Object.keys(PROVIDERS).forEach(k => { if (PROVIDERS[k].dynamic) delete PROVIDERS[k]; });
   const byId = new Map();
+  // Only fields saved as active bookings are offered; cart ("still choosing") ones are kept
+  // as inactive facilities so bookings already on them still show their name.
   Object.entries(map || {}).forEach(([email, list]) => (Array.isArray(list) ? list : []).forEach(e => {
     if (!e?.id || !e.park) return;
-    const owner = email.toLowerCase(), have = byId.get(e.id);
-    if (have) { if (!have.owners.includes(owner)) have.owners.push(owner); return; }
+    const owner = email.toLowerCase(), have = byId.get(e.id), active = e.status === "active";
+    if (have) { if (active) { have.inactive = false; if (!have.owners.includes(owner)) have.owners.push(owner); } return; }
     let pid = "akl_council";
     if (e.kind === "council_private" && e.operator?.id) {
       pid = "op_" + e.operator.id;
@@ -401,7 +403,7 @@ function applyCouncilFacilities(map) {
         address: "", gstNumber: "", recipientCode: "AKC" };
     }
     byId.set(e.id, { id: e.id, name: `${e.park} – ${e.field}`, capacity: 50, color: COUNCIL_COLORS[byId.size % COUNCIL_COLORS.length],
-      kind: "field", site: e.park, provider: pid, defaultRate: 0, council: e, owners: [owner] });
+      kind: "field", site: e.park, provider: pid, defaultRate: 0, council: e, owners: active ? [owner] : [], inactive: !active });
   }));
   FACILITIES.push(...byId.values());
 }

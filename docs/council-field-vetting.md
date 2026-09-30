@@ -326,11 +326,23 @@ The page always fits one screen: nothing scrolls except the map, where the wheel
     - the booking workflow and its contact, and the $10 per field council fee.
   - **Unrated fields:** adding a field that hasn't been rated yet switches to Rate mode on
     it, so its orientation and fit get set.
-  - **Auckland map:** in Book mode, parks with cart fields have a teal ring.
-- **🛒 Cart tab.** Lists everything in the booker's cart, by park, with the workflow tag,
-  "open" (back to that park in Book mode), "book ↗" (the booking site at that venue) and
-  remove. Cart fields appear in the booking site's location dropdown for that booker. See
-  multi-provider design §7.1.
+  - **Auckland map:** in Book mode, parks with active booking fields have a solid dark-teal
+    ring, and parks with only cart fields have a dashed teal ring. On the park map, active
+    fields are solid dark teal (📌) and cart fields are dashed teal (🛒). Clicking an active
+    field doesn't remove it; that's done in the Cart tab.
+- **🛒 Cart tab: cart, then active bookings.** A field starts in the cart, which is
+  "still choosing" and not bookable yet.
+  - **✅ Save N fields as active bookings** (also offered in the bar under the park map)
+    moves the cart fields to **📌 Active bookings**.
+  - Only active fields appear in the booking site, under **Provider → 📍 Location →
+    Facility**, for that booker (admins see all).
+  - Each active field has "book dates ↗", which opens the booking site at that location,
+    and ✕, which removes it after a confirmation. Bookings already made on a removed field
+    keep their name.
+  - Entries saved before this change have no status, so they count as cart fields; save
+    them once to make them active.
+
+  See multi-provider design §7.1.
 - **Managing club vs booking contact.** At a privately managed park, the booking is filed
   under the club that manages the fields, but requests go to its booking contact. For
   example, Michaels Ave is managed by Ellerslie AFC and booked only through Ellerslie
