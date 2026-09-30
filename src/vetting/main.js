@@ -673,7 +673,7 @@ const whoBooks = () => (bookFor = (bookFor || session?.user?.email || "demo@loca
 const cartIds = () => new Set((bookLocs[whoBooks()] || []).map(x => x.id));
 // Add or remove one field (or "Whole park") of a park in the booker's cart; saves at once.
 async function toggleCart(p, key) {
-  const who = whoBooks(), list = bookLocs[who] || [], id = cartId(p, key), i = list.findIndex(x => x.id === id);
+  const who = whoBooks(), before = [...(bookLocs[who] || [])], list = [...before], id = cartId(p, key), i = list.findIndex(x => x.id === id);
   if (i >= 0) list.splice(i, 1);
   else {
     const wf = parkWorkflow(p), f = fieldKeys(p).find(x => x.key === key)?.f, c = f?.c || [p.lat, p.lon];
@@ -682,6 +682,7 @@ async function toggleCart(p, key) {
   }
   bookLocs[who] = list;
   const saved = await saveBookLocs();
+  if (!saved) { bookLocs[who] = before; drawParkFields(p); renderBookBar(p); renderTabs(); return; }   // not saved: don't show it as in the cart
   // A field added before it's been rated: switch to Rate mode on it, so its orientation
   // and fit get set (the ultimate field jumps onto it).
   const rt = tagsFor(p).fr[key];
@@ -752,8 +753,9 @@ function bindBook() {
     if (e.target.id === "bbCart") setView("book"); });
   $("bookPanel").addEventListener("click", async e => {
     const del = e.target.closest("[data-bkdel]");
-    if (del) { const w = whoBooks(); bookLocs[w] = (bookLocs[w] || []).filter(x => x.id !== del.dataset.bkdel);
-      if (await saveBookLocs()) setStatus("Removed from " + w + "'s cart."); renderBook(); renderTabs(); return; }
+    if (del) { const w = whoBooks(), before = bookLocs[w] || []; bookLocs[w] = before.filter(x => x.id !== del.dataset.bkdel);
+      if (await saveBookLocs()) setStatus("Removed from " + w + "'s cart."); else bookLocs[w] = before;
+      renderBook(); renderTabs(); return; }
     const op = e.target.closest("[data-bkopen]"); if (op) { if (workMode !== "book") setMode("book"); openPark(op.dataset.bkopen); }
   });
   $("modeRate").onclick = () => setMode("rate");
