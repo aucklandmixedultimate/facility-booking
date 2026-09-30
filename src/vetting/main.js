@@ -629,7 +629,7 @@ function renderBook() {
     html += wf.kind === "council_private"
       ? `<div class="bk-wf priv"><b>◆ Council + private operator: ${esc(wf.operator.name)}</b>${wf.operator.email || wf.operator.phone ? ` · ${esc([wf.operator.email, wf.operator.phone].filter(Boolean).join(" · "))}` : ""}<ol>${PRIV.workflow.map(w => `<li>${esc(w.label)}</li>`).join("")}</ol></div>`
       : `<div class="bk-wf"><b>🏛 Council booking</b><ol><li>AMUA review</li><li>Apply to Auckland Council</li><li>Wait for the council decision</li><li>Approved</li></ol></div>`;
-    html += `<p class="muted">Council application fee: <b>$10 per field</b> per application (pay later). ${bookSel.size ? `This selection: $${bookSel.size * 10}.` : ""}</p>`;
+    html += `<p class="muted">Council application fee: <b>$10 per field</b> per application, pending until AMUA sends the application to the council. AMUA sends applications in batches; each field's $10 is split between the bookers applying for it in that batch.</p>`;
     html += `<div class="bk-go"><button class="primary" id="bookAdd" ${bookSel.size ? "" : "disabled"}>Add ${bookSel.size || ""} field${bookSel.size === 1 ? "" : "s"} to ${esc(who)}</button>
       <a href="${venueLink(wf.provider, p.name)}" target="_blank" rel="noopener">Open ${esc(p.name)} in bookings ↗</a></div>`;
   } else html += `<p class="muted">Open a park from the Auckland map (or the Park view) to add its fields.</p>`;
