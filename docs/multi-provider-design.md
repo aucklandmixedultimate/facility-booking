@@ -299,8 +299,8 @@ sequence numbers, address-lookup ids, and a payment step. Instead, the extension
 app. It sets values through the page's own inputs and fires change events, so Orbeon
 sends its usual Ajax, and walks pages 1–5:
 - sport *Other*;
-- organisation and contacts from a council profile stored with the provider (§4.1
-  `providers.config`);
+- organisation and contacts from the **AMUA details** setting (`amua_org`, User menu →
+  AMUA details);
 - one Park details block per park, with its fields, dates, weekdays and times.
 
 The admin then reviews pages 6–8, ticks the agreements and submits. Nothing is paid:
@@ -467,9 +467,8 @@ The work items, files, acceptance criteria and dependencies are in
 2. **Opening St Cuthberts to bookers:** should it stay admin-only for now?
 3. **Council portal access:** who holds the portal login, and can the extension run in
    that person's browser?
-4. **Council profile:** which organisation details and contacts should the pre-fill
-   use? Primary and secondary contact, key holder, and the postal address as the
-   council's address search knows it.
+4. **Council profile:** fill in User menu → AMUA details (operations, secondary and
+   key-holder contacts, postal address, address-search text).
 5. **Mailboxes for the intake:** which ones besides AMUA's Gmail? Each owner needs to
    set up a forwarding filter (option C).
 6. **Event permit costs:** council fields are free, so this is the only council charge.
