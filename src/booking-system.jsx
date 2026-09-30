@@ -468,6 +468,24 @@ function venueFacilities(keepId) {
   const k = activeVenueKey();
   return visibleFacilities().filter(f => k === ALL_VENUES || venueKeyOf(f) === k || f.id === keepId);
 }
+// <option>s for the booking form's facility pickers: every facility the viewer can book,
+// grouped by venue (the calendar's current venue first), so council fields added on the
+// Council fields page can be picked without switching the calendar's venue first.
+function FacilityOptions({ keepId }) {
+  const cur = activeVenueKey(), vis = visibleFacilities();
+  const keep = keepId && !vis.some(f => f.id === keepId) ? FACILITIES.find(f => f.id === keepId) : null;
+  const facs = keep ? [...vis, keep] : vis;
+  const venues = listVenues().sort((a, b) => (b.key === cur) - (a.key === cur));
+  const keys = [...venues.map(v => v.key), ...new Set(facs.map(venueKeyOf).filter(k => !venues.some(v => v.key === k)))];
+  if (keys.length <= 1) return facs.map(f => <option key={f.id} value={f.id}>{f.name}</option>);
+  return keys.map(k => {
+    const list = facs.filter(f => venueKeyOf(f) === k); if (!list.length) return null;
+    const v = venues.find(x => x.key === k), [pid, site] = k.split("|");
+    return <optgroup key={k} label={`${v?.providerName || PROVIDERS[pid]?.name || pid} · ${v?.site || site}`}>
+      {list.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+    </optgroup>;
+  });
+}
 function providerOfFacility(facilityId) {
   return FACILITIES.find(f => f.id === facilityId)?.provider || "gtec";
 }
@@ -2349,7 +2367,7 @@ function SlotRow({ slot, idx, onChange, onRemove, canRemove, allBookings }) {
         <div>
           <label style={S.lbl}>Facility *</label>
           <select style={S.inp} value={slot.facility_id} onChange={e=>upd("facility_id",e.target.value)}>
-            {venueFacilities(slot.facility_id).map(f=><option key={f.id} value={f.id}>{f.name}</option>)}
+            <FacilityOptions keepId={slot.facility_id}/>
           </select>
         </div>
         <div>
@@ -2751,7 +2769,7 @@ function InlineDraftEditor({ draft, onSave, onCancel }) {
         <div>
           <label style={S.lbl}>Facility</label>
           <select style={{...S.inp,fontSize:12}} value={facility} onChange={e=>setFacility(e.target.value)}>
-            {venueFacilities(facility).map(f=><option key={f.id} value={f.id}>{f.name}</option>)}
+            <FacilityOptions keepId={facility}/>
           </select>
         </div>
         <div>
