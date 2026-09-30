@@ -53,7 +53,8 @@ const mapIdx = {};
 let cursor = 0, busy = false;
 let dims = store.get("vet-field-dims", WFDF);
 let fieldOn = store.get("vet-field-on", true);
-let view = store.get("vet-view", "city");   // "city" | "park"
+let view = store.get("vet-view", "city");   // "city" | "park" | "book" (the cart)
+let workMode = store.get("vet-work-mode", "rate");   // "rate" | "book": what clicking a park's field areas does
 let focusId = null;                          // park opened from the Auckland map (overrides the queue)
 
 // ── Data ─────────────────────────────────────────────────────────────────────
@@ -247,6 +248,18 @@ const FIT_COLOR = { multi: "#1f7a4d", full: "#46b37b", reduced: "#e0a647" };
 function drawParkFields(p) {
   parkFieldsLayer.clearLayers();
   const t = tagsFor(p);
+  if (workMode === "book") {   // Book mode: field areas go in and out of the booker's cart
+    const cart = cartIds();
+    fieldKeys(p).forEach(({ f, key }) => {
+      const on = cart.has(cartId(p, key));
+      L.polygon(f.p, { pane: "fieldsPane", fill: true, fillColor: "#14b8a6", fillOpacity: on ? 0.4 : 0.04,
+        color: on ? "#14b8a6" : "#ffffff", weight: on ? 3 : 1.4, dashArray: on ? null : "4 4", opacity: 0.95, bubblingMouseEvents: false })
+        .bindTooltip(`${esc(key)} — ${on ? "in the cart · click to remove" : "click to add to the cart"}`, { className: "parktip", sticky: true })
+        .on("click", () => toggleCart(p, key))
+        .addTo(parkFieldsLayer);
+    });
+    return;
+  }
   fieldKeys(p).forEach(({ f, key }) => {
     const rt = t.fr[key], sel = t.sel === key, fc = rt?.fit && FIT_COLOR[rt.fit];
     L.polygon(f.p, { pane: "fieldsPane", fill: true, fillColor: fc || "#ffd400", fillOpacity: fc ? 0.3 : sel ? 0.12 : 0.02,
@@ -464,6 +477,8 @@ function buildCity() {
     const pv = PRIV_BY_PARK[p.id];
     const fl = !pv?.length && flags[p.id];
     const ult = ultimateOf(p);
+    const inCart = workMode === "book" ? (bookLocs[whoBooks()] || []).filter(x => x.park_id === p.id).length : 0;
+    if (inCart) L.circleMarker(ll, { radius: 13, color: "#14b8a6", weight: 4, fill: false, interactive: false }).addTo(cityLayer);
     if (ult.length) L.circleMarker(ll, { radius: 15, color: ULT_COLOR, weight: 3, fill: true, fillColor: ULT_COLOR, fillOpacity: 0.18, interactive: false }).addTo(cityLayer);
     const mk = pv?.length ? privMarker(ll, col, isCur, top) : L.circleMarker(ll, { radius: r ? 8 : 6,
       color: top ? "#e0a647" : isCur ? "#15211c" : fl ? PRIV_COLOR : "#ffffff", weight: top || isCur || fl ? 3 : 1.5, dashArray: fl ? "3 3" : null,
@@ -474,7 +489,8 @@ function buildCity() {
     mk.bindTooltip(`<b>${esc(p.name)}</b><br>${esc(p.region)} · <b style="color:${col}">${suitWord(r)}</b><br>${esc(tags)}${r?.fields ? "<br>Fields: " + esc(r.fields) : ""}`
       + (pv?.length ? `<br><b style="color:${PRIV_COLOR}">◆ Privately managed: contact ${esc(pv[0].short)}</b> first` : "")
       + (ult.length ? `<br><b style="color:${ULT_COLOR}">🥏 ${ult.some(o => o.booking_only) ? "Book only through" : "Ultimate club"}: ${esc(ult.map(o => o.operator).join(", "))}</b>` : "")
-      + (fl ? `<br><b style="color:${PRIV_COLOR}">◇ Flagged: probably club-run${fl.club ? " (" + esc(fl.club) + ")" : ""}</b>` : "") + `<br><i>Click to rate</i>`,
+      + (fl ? `<br><b style="color:${PRIV_COLOR}">◇ Flagged: probably club-run${fl.club ? " (" + esc(fl.club) + ")" : ""}</b>` : "")
+      + (workMode === "book" ? `<br>🛒 ${inCart ? `${inCart} field${inCart > 1 ? "s" : ""} in the cart · ` : ""}<i>Click to book fields</i>` : `<br><i>Click to rate</i>`),
       { className: "parktip", direction: "top", offset: [0, -6] });
     mk.on("click", () => openPark(p.id));
     mk.addTo(cityLayer);
@@ -547,9 +563,9 @@ function setView(v, { refit } = {}) {
   $("cityTab").setAttribute("aria-selected", String(v === "city")); $("parkTab").setAttribute("aria-selected", String(v === "park"));
   $("bookTab").setAttribute("aria-selected", String(v === "book"));
   $("card").classList.toggle("city", v === "city"); $("card").classList.toggle("book", v === "book");
-  $("info").hidden = v !== "park"; $("cityInfo").hidden = v !== "city"; $("legend").hidden = v !== "city";
+  $("cityInfo").hidden = v !== "city"; $("legend").hidden = v !== "city";
   $("bookPanel").hidden = v !== "book";
-  $("actions").hidden = v !== "park";
+  applyModeUi();
   if (v === "book" && rotating) setRotating(false);
   if (v === "city") {
     if (rotating) setRotating(false);
@@ -601,70 +617,107 @@ async function saveBookLocs() {
   }
   store.set("vet-booklocs", bookLocs); return true;
 }
+// A privately managed park's booking is filed under the club that manages the fields, but
+// requests go to its booking contact: a booking-only club (e.g. Ellerslie Ultimate Club at
+// Michaels Ave, managed by Ellerslie AFC), else the manager itself.
 function parkWorkflow(p) {
-  const lead = (PRIV_BY_PARK[p.id] || []).find(o => o.booking_only || o.code !== "ultimate");
-  return lead ? { kind: "council_private", provider: "op_" + lead.id, operator: { id: lead.id, name: lead.operator, short: lead.short,
-      email: lead.contact?.email || "", phone: lead.contact?.phone || "", url: lead.contact?.url || "" } }
+  const ops = PRIV_BY_PARK[p.id] || [];
+  const manager = ops.find(o => o.code !== "ultimate") || ops.find(o => o.booking_only);
+  const contact = ops.find(o => o.booking_only) || manager;
+  return manager ? { kind: "council_private", provider: "op_" + manager.id, operator: { id: manager.id, name: manager.operator, short: manager.short,
+      contact_name: contact.operator, email: contact.contact?.email || "", phone: contact.contact?.phone || "", url: contact.contact?.url || "" } }
     : { kind: "council", provider: "akl_council", operator: null };
 }
 const venueLink = (provider, park) => `${BASE}?venue=${encodeURIComponent(provider + "|" + park)}`;
+const cartId = (p, key) => `cf-${p.id}--${slug(key)}`;
+const whoBooks = () => (bookFor = (bookFor || session?.user?.email || "demo@local").toLowerCase());
+const cartIds = () => new Set((bookLocs[whoBooks()] || []).map(x => x.id));
+// Add or remove one field (or "Whole park") of a park in the booker's cart; saves at once.
+async function toggleCart(p, key) {
+  const who = whoBooks(), list = bookLocs[who] || [], id = cartId(p, key), i = list.findIndex(x => x.id === id);
+  if (i >= 0) list.splice(i, 1);
+  else {
+    const wf = parkWorkflow(p), f = fieldKeys(p).find(x => x.key === key)?.f, c = f?.c || [p.lat, p.lon];
+    list.push({ id, park_id: p.id, park: p.name, region: p.region, field: key, lat: c[0], lon: c[1], kind: wf.kind, operator: wf.operator,
+      added_at: new Date().toISOString(), added_by: session?.user?.email || "" });
+  }
+  bookLocs[who] = list;
+  const saved = await saveBookLocs();
+  // A field added before it's been rated: switch to Rate mode on it, so its orientation
+  // and fit get set (the ultimate field jumps onto it).
+  const rt = tagsFor(p).fr[key];
+  if (saved && i < 0 && key !== "Whole park" && !(rt?.fit && rt.fit !== "unknown")) {
+    setStatus(`Added ${p.name} – ${key} to ${who}'s cart. It isn't rated yet: set its orientation and fit, then switch back to Book.`);
+    setMode("rate"); selectField(p, key); renderTabs(); return;
+  }
+  if (saved) setStatus(`${i >= 0 ? "Removed" : "Added"} ${p.name} – ${key} ${i >= 0 ? "from" : "to"} ${who}'s cart.`);
+  drawParkFields(p); renderBookBar(p); renderTabs();
+}
+function workflowHtml(wf) {
+  return wf.kind === "council_private"
+    ? `<span class="wf"><b>◆ Council + ${esc(wf.operator.name)}</b> · contact ${esc(wf.operator.contact_name || wf.operator.name)}${wf.operator.email || wf.operator.phone ? ` (${esc([wf.operator.email, wf.operator.phone].filter(Boolean).join(" · "))})` : ""}: ask the contact → apply to council → wait → confirm with the contact</span>`
+    : `<span class="wf"><b>🏛 Council booking</b>: AMUA review → apply to council → wait for the decision</span>`;
+}
+// Book mode's bar under the park map: booker, this park's fields in the cart, workflow, fee.
+function renderBookBar(p) {
+  const who = whoBooks(), wf = parkWorkflow(p), inPark = (bookLocs[who] || []).filter(x => x.park_id === p.id);
+  const whole = inPark.some(x => x.field === "Whole park"), known = Object.keys(bookLocs).filter(e => e !== who);
+  $("bookBar").innerHTML = `<div class="bb-row"><label>Booking for <input id="bookWho2" list="bookWhoList2" value="${esc(who)}" title="The booker whose cart this is"></label>
+      <datalist id="bookWhoList2">${known.map(e => `<option value="${esc(e)}">`).join("")}</datalist>
+      <button class="b" id="bbWhole" aria-pressed="${whole}" title="Book the park without choosing fields">Whole park</button>
+      <button class="b" id="bbCart">🛒 Cart (${(bookLocs[who] || []).length})</button>
+      <a href="${venueLink(wf.provider, p.name)}" target="_blank" rel="noopener">Open in bookings ↗</a></div>
+    <div class="bb-row">${inPark.length ? inPark.map(x => `<span class="chipf">${esc(x.field)} <button data-uncart="${esc(x.field)}" title="Remove">✕</button></span>`).join("") : `<span class="muted">Click a field area on the map to add it to the cart.</span>`}</div>
+    <div class="bb-row">${workflowHtml(wf)}</div>
+    <div class="bb-row muted">Council fee: $10 per field per application, pending until AMUA sends it, then split between the bookers sharing each field.</div>`;
+}
+// The Cart tab: everything in the booker's cart, by park.
 function renderBook() {
-  const p = current(), who = (bookFor || session?.user?.email || "demo@local").toLowerCase(); bookFor = who;
-  const mine = bookLocs[who] || [], el = $("bookPanel");
-  const known = Object.keys(bookLocs).filter(e => e !== who);
-  let html = `<div class="bk-who"><h3>Booking locations</h3><label>for <input id="bookWho" list="bookWhoList" value="${esc(who)}" title="The booker these fields are added for"></label>
-    <datalist id="bookWhoList">${known.map(e => `<option value="${esc(e)}">`).join("")}</datalist></div>`;
-  if (p) {
-    const wf = parkWorkflow(p), t = tagsFor(p), have = new Set(mine.map(x => x.id));
-    if (bookSelPark !== p.id) { // preselect the selected or rated fields
-      bookSelPark = p.id; bookSel = new Set();
-      if (t.sel) bookSel.add(t.sel); else Object.values(t.fr).filter(x => x.fit && x.fit !== "unknown").forEach(x => bookSel.add(x.name));
-    }
-    const opts = fieldKeys(p).map(x => ({ key: x.key, fit: t.fr[x.key]?.fit })).concat([{ key: "Whole park" }]);
-    html += `<div><b>${esc(p.name)}</b> <span class="muted">· pick the fields to add</span></div><div class="bk-fields">`
-      + opts.map(o => { const id = `cf-${p.id}--${slug(o.key)}`, on = bookSel.has(o.key), saved = have.has(id);
-          return `<label class="bk-f${on || saved ? " on" : ""}"><input type="checkbox" data-bk="${esc(o.key)}" ${on || saved ? "checked" : ""} ${saved ? "disabled" : ""}>
-            <span>${esc(o.key)}<small>${saved ? "✓ already added" : o.fit && o.fit !== "unknown" ? "rated: " + FIT_LABEL[o.fit] : ""}</small></span></label>`; }).join("")
-      + `</div>`;
-    html += wf.kind === "council_private"
-      ? `<div class="bk-wf priv"><b>◆ Council + private operator: ${esc(wf.operator.name)}</b>${wf.operator.email || wf.operator.phone ? ` · ${esc([wf.operator.email, wf.operator.phone].filter(Boolean).join(" · "))}` : ""}<ol>${PRIV.workflow.map(w => `<li>${esc(w.label)}</li>`).join("")}</ol></div>`
-      : `<div class="bk-wf"><b>🏛 Council booking</b><ol><li>AMUA review</li><li>Apply to Auckland Council</li><li>Wait for the council decision</li><li>Approved</li></ol></div>`;
-    html += `<p class="muted">Council application fee: <b>$10 per field</b> per application, pending until AMUA sends the application to the council. AMUA sends applications in batches; each field's $10 is split between the bookers applying for it in that batch.</p>`;
-    html += `<div class="bk-go"><button class="primary" id="bookAdd" ${bookSel.size ? "" : "disabled"}>Add ${bookSel.size || ""} field${bookSel.size === 1 ? "" : "s"} to ${esc(who)}</button>
-      <a href="${venueLink(wf.provider, p.name)}" target="_blank" rel="noopener">Open ${esc(p.name)} in bookings ↗</a></div>`;
-  } else html += `<p class="muted">Open a park from the Auckland map (or the Park view) to add its fields.</p>`;
+  const who = whoBooks(), mine = bookLocs[who] || [], known = Object.keys(bookLocs).filter(e => e !== who);
   const byPark = {};
   mine.forEach(x => (byPark[x.park] ||= []).push(x));
-  html += `<div><b>Saved for ${esc(who)}</b> <span class="muted">· ${mine.length} field${mine.length === 1 ? "" : "s"}; they appear in the booking site's location dropdown</span></div><div class="bk-list">`
+  $("bookPanel").innerHTML = `<div class="bk-who"><h3>🛒 Cart</h3><label>for <input id="bookWho" list="bookWhoList" value="${esc(who)}" title="The booker whose cart this is"></label>
+      <datalist id="bookWhoList">${known.map(e => `<option value="${esc(e)}">`).join("")}</datalist></div>
+    <p class="muted">Switch to <b>📅 Book</b> mode, open a park from the Auckland map and click its field areas to add them. Cart fields appear in the booking site's location dropdown for this booker.</p>
+    <div><b>${mine.length} field${mine.length === 1 ? "" : "s"}</b> <span class="muted">at ${Object.keys(byPark).length} park${Object.keys(byPark).length === 1 ? "" : "s"}</span></div><div class="bk-list">`
     + (mine.length ? Object.entries(byPark).map(([park, xs]) => xs.map(x => `<div class="bk-row"><span class="n">${esc(park)} – ${esc(x.field)}</span>
         <span class="tag${x.kind === "council_private" ? " priv" : ""}">${x.kind === "council_private" ? "◆ " + esc(x.operator?.short || "operator") + " + council" : "🏛 council"}</span>
+        <button data-bkopen="${esc(x.park_id)}" title="Open this park in Book mode">open</button>
         <a href="${venueLink(x.kind === "council_private" ? "op_" + x.operator.id : "akl_council", park)}" target="_blank" rel="noopener">book ↗</a>
-        <button data-bkdel="${esc(x.id)}" title="Remove from this booker's locations">✕</button></div>`).join("")).join("")
-      : `<p class="muted">Nothing yet.</p>`) + `</div>`;
-  el.innerHTML = html;
+        <button data-bkdel="${esc(x.id)}" title="Remove from the cart">✕</button></div>`).join("")).join("")
+      : `<p class="muted">The cart is empty.</p>`) + `</div>`;
+}
+function renderTabs() { $("bookTab").textContent = `🛒 Cart${(bookLocs[whoBooks()] || []).length ? ` (${(bookLocs[whoBooks()] || []).length})` : ""}`; }
+function applyModeUi() {
+  const book = workMode === "book";
+  $("modeRate").setAttribute("aria-checked", String(!book)); $("modeBook").setAttribute("aria-checked", String(book));
+  $("card").classList.toggle("bookmode", book);
+  $("info").hidden = view !== "park" || book; $("bookBar").hidden = view !== "park" || !book;
+  $("actions").hidden = view !== "park" || book;
+  if (book && rotating) setRotating(false);
+  if (book) $("fitPop").hidden = true;
+}
+function setMode(m) {
+  workMode = m; store.set("vet-work-mode", m); applyModeUi();
+  const p = current(); if (p && view === "park") { drawParkFields(p); drawLights(p); }
+  render();
 }
 function bindBook() {
-  $("bookPanel").addEventListener("change", e => {
-    const cb = e.target.closest("[data-bk]"); if (cb) { cb.checked ? bookSel.add(cb.dataset.bk) : bookSel.delete(cb.dataset.bk); renderBook(); return; }
-    if (e.target.id === "bookWho") { bookFor = e.target.value.trim().toLowerCase(); renderBook(); }
-  });
+  const who = e => { bookFor = e.target.value.trim().toLowerCase(); renderTabs(); render(); };
+  $("bookPanel").addEventListener("change", e => { if (e.target.id === "bookWho") who(e); });
+  $("bookBar").addEventListener("change", e => { if (e.target.id === "bookWho2") who(e); });
+  $("bookBar").addEventListener("click", e => { const p = current(); if (!p) return;
+    const un = e.target.closest("[data-uncart]"); if (un) return toggleCart(p, un.dataset.uncart);
+    if (e.target.id === "bbWhole") return toggleCart(p, "Whole park");
+    if (e.target.id === "bbCart") setView("book"); });
   $("bookPanel").addEventListener("click", async e => {
     const del = e.target.closest("[data-bkdel]");
-    if (del) { const who = bookFor; bookLocs[who] = (bookLocs[who] || []).filter(x => x.id !== del.dataset.bkdel);
-      if (await saveBookLocs()) setStatus("Removed from " + who + "'s booking locations."); renderBook(); return; }
-    if (e.target.id === "bookAdd") {
-      const p = current(); if (!p || !bookSel.size) return;
-      const who = bookFor, wf = parkWorkflow(p), list = bookLocs[who] || [], have = new Set(list.map(x => x.id));
-      const fk = Object.fromEntries(fieldKeys(p).map(x => [x.key, x.f]));
-      [...bookSel].forEach(key => { const id = `cf-${p.id}--${slug(key)}`; if (have.has(id)) return;
-        const c = fk[key]?.c || [p.lat, p.lon];
-        list.push({ id, park_id: p.id, park: p.name, region: p.region, field: key, lat: c[0], lon: c[1], kind: wf.kind, operator: wf.operator,
-          added_at: new Date().toISOString(), added_by: session?.user?.email || "" }); });
-      bookLocs[who] = list;
-      if (await saveBookLocs()) setStatus(`Added ${bookSel.size} field${bookSel.size === 1 ? "" : "s"} at ${p.name} to ${who}'s booking locations.`);
-      bookSel = new Set(); renderBook();
-    }
+    if (del) { const w = whoBooks(); bookLocs[w] = (bookLocs[w] || []).filter(x => x.id !== del.dataset.bkdel);
+      if (await saveBookLocs()) setStatus("Removed from " + w + "'s cart."); renderBook(); renderTabs(); return; }
+    const op = e.target.closest("[data-bkopen]"); if (op) { if (workMode !== "book") setMode("book"); openPark(op.dataset.bkopen); }
   });
+  $("modeRate").onclick = () => setMode("rate");
+  $("modeBook").onclick = () => setMode("book");
 }
 
 // ── Render ───────────────────────────────────────────────────────────────────
@@ -729,12 +782,14 @@ function renderCity() {
 }
 function renderParkHeader() {
   const p = current();
+  $("parkName").textContent = "Cart";
   $("emptyState").hidden = true; $("card").hidden = false; $("behind").hidden = true;
-  $("parkName").textContent = p ? p.name : "Booking locations"; $("parkRegion").textContent = p ? p.region : "";
-  $("decChip").innerHTML = ""; $("handleHint").textContent = "Pick council fields to add to a booker's booking locations";
+  $("parkName").textContent = "🛒 Cart"; $("parkRegion").textContent = p ? "last park: " + p.name : "";
+  $("decChip").innerHTML = ""; $("handleHint").textContent = "Council fields in the booker's cart, ready for the booking site";
 }
 function render() {
-  if (view === "book") { renderParkHeader(); renderBook(); renderRail(); return; }
+  if (view === "book") { renderParkHeader(); renderBook(); renderTabs(); renderRail(); return; }
+  renderTabs(); applyModeUi();
   if (view === "city") return renderCity();
   const q = queue(), p = current(), next = focusId ? null : (q[cursor + 1] || (q.length > 1 ? q[0] : null));
   const card = $("card");
@@ -750,7 +805,8 @@ function render() {
     $("privBox").hidden = !pv?.length; $("privBox").innerHTML = pv?.length ? privBanner(pv) : "";
     renderFlag(p);
     const r = reviews[p.id];
-    const lead = (pv || []).find(o => o.booking_only || o.code !== "ultimate"), ult = ultimateOf(p).filter(o => o !== lead);
+    // Chips: the managing club (◆) and any ultimate club (🥏), which may be the booking contact.
+    const lead = (pv || []).find(o => o.code !== "ultimate"), ult = ultimateOf(p);
     $("decChip").innerHTML = (lead ? `<span class="chip priv" title="Ask ${esc(lead.operator)} before applying to council">◆ ${esc(lead.short)}</span> ` : "")
       + ult.map(o => `<span class="chip ult" title="Home of ${esc(o.operator)}">🥏 ${esc(o.short)}</span> `).join("") + (r ? `<span class="chip ${r.decision === "no" ? "no" : r.decision === "top" ? "top" : ""}">${r.decision === "top" ? "Top pick" : r.decision === "yes" ? "Shortlisted" : "Rejected"}${r.by ? " · " + esc(r.by.split("@")[0]) : ""}</span>` : "");
     const i = Math.min(mapIdx[p.id] || 0, Math.max(0, p.maps.length - 1));
@@ -762,6 +818,7 @@ function render() {
     const fresh = shownPark !== p.id + "#" + i;
     if (fresh) showMap(p);
     renderTags(p);
+    if (workMode === "book") renderBookBar(p);
     // Restore a saved field placement for a reviewed park.
     if (fresh && tagsFor(p).spot && !tagsFor(p)._placed) { const sp = tagsFor(p).spot; angle = sp.angle || 0; map.setView([sp.lat, sp.lon], map.getZoom(), { animate: false }); pin = L.latLng(sp.lat, sp.lon); tagsFor(p)._placed = true; sizeField(); renderCentre(); }
   }
@@ -786,7 +843,7 @@ function askPlacement(p, t, decision) {
   });
 }
 async function decide(decision) {
-  const p = current(); if (!p || busy || view !== "park") return;
+  const p = current(); if (!p || busy || view !== "park" || workMode === "book") return;
   const t = tagsFor(p);
   let withField = false;
   const prevPl = reviews[p.id]?.placement;
@@ -845,7 +902,7 @@ function bind() {
   $("notesIn").addEventListener("input", () => { const p = current(); if (p) tagsFor(p).notes = $("notesIn").value; });
   // Swipe on the title bar (the map itself pans and zooms).
   const h = $("handle"), card = $("card"); let sx = 0, sy = 0, dx = 0, dy = 0, drag = false;
-  h.addEventListener("pointerdown", e => { if (view === "city") return; drag = true; sx = e.clientX; sy = e.clientY; dx = dy = 0; card.classList.remove("snap", "deal"); h.setPointerCapture(e.pointerId); });
+  h.addEventListener("pointerdown", e => { if (view !== "park" || workMode === "book") return; drag = true; sx = e.clientX; sy = e.clientY; dx = dy = 0; card.classList.remove("snap", "deal"); h.setPointerCapture(e.pointerId); });
   h.addEventListener("pointermove", e => { if (!drag) return; dx = e.clientX - sx; dy = e.clientY - sy;
     card.style.transform = `translate(${dx}px, ${Math.min(dy, 30)}px) rotate(${dx / 25}deg)`;
     const up = -dy > 70 && Math.abs(dx) < 90;
@@ -893,7 +950,6 @@ function bind() {
   $("cityTab").onclick = () => { if (view !== "city") { focusId = null; setView("city"); } else setView("city", { refit: true }); };
   $("parkTab").onclick = () => { if (view !== "park") { if (view === "city") focusId = null; setView("park"); } };
   $("bookTab").onclick = () => { if (view !== "book") setView("book"); };
-  $("bookBtn").onclick = () => setView("book");
   bindBook();
   $("sizeBtn").onclick = () => { $("sizePanel").hidden = !$("sizePanel").hidden; };
   const syncDims = () => { $("fLen").value = dims.len; $("fWid").value = dims.wid; $("fEz").value = dims.ez; };
@@ -917,7 +973,7 @@ function bind() {
     const p = current();
     if (e.key === "Escape") { if (rotating) setRotating(false); $("sizePanel").hidden = true; $("fitPop").hidden = true; if (p && tagsFor(p).sel) selectField(p, null); return; }
     if (/^[cC]$/.test(e.key)) { focusId = null; setView(view === "city" ? "park" : "city"); return; }
-    if (/^[bB]$/.test(e.key)) { setView(view === "book" ? "park" : "book"); return; }
+    if (/^[bB]$/.test(e.key)) { setMode(workMode === "book" ? "rate" : "book"); return; }
     if (view === "city") return;
     if (e.key === "ArrowRight") { e.preventDefault(); decide("yes"); }
     else if (e.key === "ArrowLeft") { e.preventDefault(); decide("no"); }

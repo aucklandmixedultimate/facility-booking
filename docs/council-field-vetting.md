@@ -307,13 +307,26 @@ The page always fits one screen: nothing scrolls except the map, where the wheel
   - Fergusson Domain: Te Papapa Ultimate (fields managed by Te Papapa Onehunga RFC).
   They're entries with `code: "ultimate"` in `private-managed.json`, and there's an
   "Ultimate club" CSV column.
-- **📅 Book (B).** Adds the current park's council fields (or "Whole park") to a booker's
-  booking locations. The booker defaults to you; admins can type any booker's email. The
-  panel pre-ticks the selected or rated fields and shows the workflow the booking will
-  follow: council, or council + private operator with the operator's contact. It also shows
-  the $10 per field council application fee. Saved fields appear in the booking site's
-  location dropdown for that booker, and "book ↗" links open that venue directly. See
+- **⭐ Rate | 📅 Book modes (B toggles).** Both use the same Auckland → Park navigation.
+  - **Rate mode:** everything above (the ultimate field, orientation, fit, lights and
+    decisions).
+  - **Book mode:** the rating tools hide, including the ultimate field outline, which is
+    only for setting orientation in Rate mode. Clicking a council field area adds it to or
+    removes it from the booker's cart. The bar under the map shows:
+    - the booker, which defaults to you (admins can type any booker's email);
+    - that park's fields in the cart, and a "Whole park" option;
+    - the booking workflow and its contact, and the $10 per field council fee.
+  - **Unrated fields:** adding a field that hasn't been rated yet switches to Rate mode on
+    it, so its orientation and fit get set.
+  - **Auckland map:** in Book mode, parks with cart fields have a teal ring.
+- **🛒 Cart tab.** Lists everything in the booker's cart, by park, with the workflow tag,
+  "open" (back to that park in Book mode), "book ↗" (the booking site at that venue) and
+  remove. Cart fields appear in the booking site's location dropdown for that booker. See
   multi-provider design §7.1.
+- **Managing club vs booking contact.** At a privately managed park, the booking is filed
+  under the club that manages the fields, but requests go to its booking contact. For
+  example, Michaels Ave is managed by Ellerslie AFC and booked only through Ellerslie
+  Ultimate Club; Fergusson Domain is managed by Te Papapa RFC and booked through TPU.
 - **Flag as club-run (◇).** For a park that isn't in the private list but looks club-run
   (clubrooms, a resident club), press **◇ Club-run?** on the card and optionally name the
   club. The flag saves straight away, with no decision needed, to `field_flags` (in

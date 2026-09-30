@@ -85,6 +85,21 @@ main{display:flex;flex-direction:column;min-height:0;min-width:0}
 .toolbar button[aria-pressed="true"]{background:#15211c;color:#fff}
 .toolbar button:disabled{opacity:.55;cursor:default}
 .card.book .mapbox,.card.book #info,.card.book .dispenser{display:none!important}
+/* Book mode: the park map is for picking council field areas; the rating tools hide. */
+.card.bookmode .field,.card.bookmode .centre,.card.bookmode .dispenser,.card.bookmode .fitbar,.card.bookmode .rotatehint,.card.bookmode #sizeBtn{display:none!important}
+.modetabs{display:flex;border:1px solid var(--line);border-radius:9px;overflow:hidden;background:var(--surface)}
+.modetabs button{border:0;background:none;padding:5px 11px;font-weight:600;font-size:13px;color:var(--muted)}
+.modetabs button[aria-checked="true"]{background:#0d9488;color:#fff}
+.modetabs #modeRate[aria-checked="true"]{background:var(--top)}
+.bookbar{flex-direction:column;gap:6px;font-size:13px}
+.bookbar .bb-row{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center}
+.bookbar input{padding:4px 8px;border:1px solid var(--line);border-radius:8px;background:var(--surface);min-width:200px}
+.bookbar .chipf{display:inline-flex;gap:4px;align-items:center;background:#ccfbf1;color:#115e59;border-radius:999px;padding:2px 9px;font-weight:600;font-size:12px}
+.bookbar .chipf button{border:0;background:none;color:inherit;padding:0;font-size:12px;cursor:pointer}
+.bookbar button.b{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:3px 9px;font-size:12px;font-weight:600}
+.bookbar button.b[aria-pressed="true"]{background:#0d9488;border-color:#0d9488;color:#fff}
+.bookbar .wf{color:var(--muted)} .bookbar .wf b{color:var(--ink)}
+@media (prefers-color-scheme: dark){.bookbar .chipf{background:#134e4a;color:#99f6e4}}
 .card.city .toolbar,.card.city .fitbar,.card.city .field,.card.city .centre,.card.city .rotatehint,.card.city .sizepanel{display:none!important}
 .thumbs{display:contents}
 .sizepanel{position:absolute;top:46px;right:10px;z-index:650;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px;display:grid;gap:6px;font-size:13px;box-shadow:0 6px 20px rgba(0,0,0,.25)}
@@ -152,7 +167,7 @@ main{display:flex;flex-direction:column;min-height:0;min-width:0}
   .handle{padding:4px 10px}.title h2{font-size:19px}.chip{font-size:10px;padding:1px 6px}
   .info{padding:5px 8px;gap:4px}.tags{gap:2px 6px}.tags .val{font-size:12px}.stars button{font-size:15px;padding:1px 4px}
   .tags2{grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:4px}.tags2 .k{display:none}.tags2 input{padding:4px 7px;font-size:13px}
-  .privbox{padding:3px 7px;font-size:11px}.flagbtn{padding:2px 6px;font-size:11px}.clubin{width:120px;font-size:11px}.privbox .pb-full{display:none}.privbox .pb-short{display:inline}
+  .privbox{padding:3px 7px;font-size:11px}.modetabs button{padding:4px 7px;font-size:12px}.bookbar input{min-width:0;width:100%}.flagbtn{padding:2px 6px;font-size:11px}.clubin{width:120px;font-size:11px}.privbox .pb-full{display:none}.privbox .pb-short{display:inline}
   .brand{display:none}.top{justify-content:flex-start}.viewtabs button{padding:4px 9px}
   .centrelbl{display:none}.centre.unlocked .centrelbl{display:block;left:-50px;top:26px}
   .toolbar button{padding:3px 6px}.thumbs button{font-size:11px}
