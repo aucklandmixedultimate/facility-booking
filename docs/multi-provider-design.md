@@ -426,6 +426,9 @@ Field numbers and layouts appear only in the map images.
 
 ## 9. Phases
 
+The work items, files, acceptance criteria and dependencies are in
+[`multi-provider-plan.md`](multi-provider-plan.md).
+
 | Phase | Scope | Size |
 |---|---|---|
 | 0 ✅ | St Cuthberts facility; provider on facilities; PO per provider; direct approval for non-GTEC | shipped |
