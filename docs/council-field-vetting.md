@@ -300,6 +300,13 @@ The page always fits one screen: nothing scrolls except the map, where the wheel
   operator to contact.
   The data is in `public/council-maps/private-managed.json`; see multi-provider design §7.1.
   The card shows only who to contact. The request steps belong to booking, not vetting.
+- **Ultimate club homes (🥏, pink ring).** Parks where an ultimate club is based stand out
+  with a pink ring on the Auckland map and a pink 🥏 chip and banner line on the card, with
+  that club's contact. The field contact stays the managing club. Current homes:
+  - Michaels Ave Reserve: Ellerslie Ultimate Club (fields managed by Ellerslie AFC);
+  - Fergusson Domain: Te Papapa Ultimate (fields managed by Te Papapa Onehunga RFC).
+  They're entries with `code: "ultimate"` in `private-managed.json`, and there's an
+  "Ultimate club" CSV column.
 - **Flag as club-run (◇).** For a park that isn't in the private list but looks club-run
   (clubrooms, a resident club), press **◇ Club-run?** on the card and optionally name the
   club. The flag saves straight away, with no decision needed, to `field_flags` (in
