@@ -1022,8 +1022,10 @@ function exportCsv() {
 // ── Start ────────────────────────────────────────────────────────────────────
 function gate(html) { $("gate").innerHTML = html; $("gate").hidden = false; $("app").hidden = true; }
 async function start() {
-  const res = await fetch(BASE + "council-maps/parks.json"); PARKS = (await res.json()).parks; BYID = Object.fromEntries(PARKS.map(p => [p.id, p]));
-  try { const pr = await fetch(BASE + "council-maps/private-managed.json"); if (pr.ok) PRIV = await pr.json(); } catch { /* optional data */ }
+  // "no-cache" revalidates with the server, so a data update shows on the next load instead
+  // of after GitHub Pages' ~10-minute browser cache expires.
+  const res = await fetch(BASE + "council-maps/parks.json", { cache: "no-cache" }); PARKS = (await res.json()).parks; BYID = Object.fromEntries(PARKS.map(p => [p.id, p]));
+  try { const pr = await fetch(BASE + "council-maps/private-managed.json", { cache: "no-cache" }); if (pr.ok) PRIV = await pr.json(); } catch { /* optional data */ }
   PRIV_BY_PARK = {};
   (PRIV.operators || []).filter(o => o.park_id).forEach(o => (PRIV_BY_PARK[o.park_id] ||= []).push(o));
   // Point of contact first: the operator marked primary, else the rugby or football club.
