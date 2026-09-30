@@ -1,6 +1,7 @@
 # Multi-provider facilities, council bookings and email intake — design
 
 Status: **proposal** (phase 0 shipped; later phases need sign-off).
+Start at [`HANDOFF_MULTI_PROVIDER.md`](../HANDOFF_MULTI_PROVIDER.md) for what's live, what's decided and where to resume.
 Scope: move from "one facility authority (GTEC), hard-coded" to "any number of
 providers, defined in Supabase", with automated intake from the Auckland Council
 booking portal and from booking-related email.
