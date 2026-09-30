@@ -243,6 +243,28 @@ harvest):
 | 4.7 | Field reports: post-booking prompt, admin accept/dismiss, rolling up into field attributes | M |
 | 4.8 | Use it: tier/lights badges, sunset-based lights warning, tier-ordered suggestions in the pre-fill | M |
 
+## Vetting tool (live)
+
+**Admin menu → Field vetting** opens `vetting.html` on the booking site. Its source is
+`vetting.html` and `src/vetting/`; the maps and park data are in `public/council-maps/`.
+- **One park per card.** Swipe the title bar, or use ← → ↑: reject, shortlist or top
+  pick. **Later** (S) moves the park to the back of the queue, and **Undo** (Z) takes
+  back the last decision.
+- **Live satellite map.** The map is Esri World Imagery (no key needed; attribution
+  shown). The council's field map is laid over it at its true position: every council
+  map page is a GeoPDF (EPSG:2193), and its corner coordinates give the bounds. Zooming
+  two or three wheel clicks in or out from the fitted map drops the council map to show
+  the satellite, and **Fit** brings it back.
+- **Ultimate field to scale.** The field is WFDF standard: 100 × 37 m, 18 m end zones,
+  brick marks 20 m in. It's editable under ⚙. It stays centred in the frame and scales
+  with zoom, so you pan the map underneath it to test a spot. Click the field, move the
+  mouse to turn it, and click again to fix it (R turns it 15°). The field's position
+  and angle are saved with the decision.
+- **Lights button** on the map cycles unknown → none → training → full.
+- **Saving.** Decisions go to Supabase `field_reviews`, admin-only
+  (`supabase-migration-field-reviews.sql`). Until that migration is run, decisions stay
+  in the browser. **Download CSV** exports them.
+
 ## Manual data entry, until the app screens exist
 
 Use [`docs/data/council-field-vetting.xlsx`](data/council-field-vetting.xlsx). Yellow

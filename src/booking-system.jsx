@@ -12008,6 +12008,7 @@ export default function App() {
                           <UserMenuItem icon="🧩" label="Install Extension" onClick={()=>{setShowUserMenu(false);setShowExtensionModal(true);}}/>
                           <UserMenuItem icon="💲" label="Facility Rates" onClick={()=>{setShowUserMenu(false);setShowRatesModal(true);}}/>
                           <UserMenuItem icon="👥" label="Player Counts" onClick={()=>{setShowUserMenu(false);setShowPlayersModal(true);}}/>
+                          <UserMenuItem icon="🗺" label="Field vetting" onClick={()=>{setShowUserMenu(false);window.open(import.meta.env.BASE_URL+"vetting.html","_blank","noopener");}}/>
                           <UserMenuItem icon="🏢" label="AMUA details" onClick={()=>{setShowUserMenu(false);setShowAmuaModal(true);}}/>
                           <UserMenuItem icon="👤" label="User Management" onClick={()=>{setShowUserMenu(false);setShowUserMgmtModal(true);}}/>
                           <UserMenuItem icon="📜" label="Activity Log" onClick={()=>{setShowUserMenu(false);setShowActivityLog(true);}}/>
