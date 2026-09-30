@@ -206,12 +206,38 @@ const STATUS_CAL_COLOR = {
 const STATUS_CAL_TEXT = { cpsa_review_needed: "#713f12" };
 // Fields that participate in CPSA sync (f1/f2 are meeting/function rooms and stay "approved").
 const CPSA_FIELD_IDS = new Set(["f3","f4","f5"]);
+// AMUA's own details: printed on every billing document, and used to pre-fill provider
+// forms such as the council's sports-park application. These are defaults only; the
+// live values are the admin-editable `amua_org` setting (User menu → AMUA details),
+// applied by applyAmuaOrg so they can change without a deploy.
+const AMUA_DEFAULT_NAME = "Auckland Mixed Ultimate Association (AMUA)";
 const AMUA_INFO = {
-  name:      "Auckland Mixed Ultimate Association (AMUA)",
+  name:      AMUA_DEFAULT_NAME,
   address:   "",
   gstNumber: "",
   bank:      "",
+  contacts:  {},   // { operations|secondary|keyHolder: { name, position, email, phone } }
+  council:   {},   // { rso, orgType, postalAddressSearch } — council application answers
 };
+const AMUA_CONTACT_ROLES = [
+  { key:"operations", label:"Operations contact", hint:"Main contact for facility providers, and printed on invoices." },
+  { key:"secondary",  label:"Secondary contact",  hint:"Backup contact on provider applications." },
+  { key:"keyHolder",  label:"Key / access-code holder", hint:"Holds gate, door or floodlight keys and codes." },
+];
+function applyAmuaOrg(org) {
+  const o = org || {};
+  AMUA_INFO.name      = (o.name || "").trim() || AMUA_DEFAULT_NAME;
+  AMUA_INFO.address   = o.address   || "";
+  AMUA_INFO.gstNumber = o.gstNumber || "";
+  AMUA_INFO.bank      = o.bank      || "";
+  AMUA_INFO.contacts  = o.contacts  || {};
+  AMUA_INFO.council   = o.council   || {};
+}
+// "Jane Smith · ops@amua.nz · 021 123 4567" for the operations contact, or "".
+function amuaContactLine() {
+  const c = AMUA_INFO.contacts?.operations || {};
+  return [c.name, c.email, c.phone].filter(Boolean).join(" · ");
+}
 
 // Pre-configured vendor: Grammar TEC Rugby Club (the facility owner / invoice recipient for POs).
 const VENDOR_GTEC = {
@@ -1183,6 +1209,7 @@ const ACTIVITY_ADMIN_ACTIONS = new Set([
   "cpsa_admin_booking_add","cpsa_admin_booking_remove","cpsa_admin_convert","mismatch_resolution",
   "mismatch_billing_settled","status_change","invoiced","official_invoice_created",
   "invoice_preview_emailed","official_invoice_emailed","slot_shared","slot_merged","slot_unlinked","drive_upload","drive_attach",
+  "settings_change",
 ]);
 const ACTIVITY_LABELS = {
   booking_create:"Booking created", booking_edit:"Booking edited", booking_delete:"Booking deleted",
@@ -1196,6 +1223,7 @@ const ACTIVITY_LABELS = {
   slot_shared:"Slot shared with a team", slot_merged:"Bookings merged into one slot", slot_unlinked:"Removed from a shared slot",
   drive_upload:"Saved to Drive", drive_attach:"GTEC invoice attached",
   email_sent:"Email sent", email_failed:"Email failed", sign_in:"Signed in", sign_out:"Signed out",
+  settings_change:"Settings changed",
 };
 // Who performed the action: explicit stamp from logActivity, else best-effort by action.
 function activityActor(r) {
@@ -1797,6 +1825,70 @@ function DateRangePicker({ from, to, onApply }) {
         </>
       )}
     </div>
+  );
+}
+
+// Admin editor for AMUA's organisation details and operations contacts (the `amua_org`
+// setting). Edits a local draft and saves once, so typing doesn't write every keystroke.
+// Stored in the settings table, readable by every signed-in user: it is the same
+// information printed on invoices, so keep it to what AMUA is happy to share.
+function AmuaDetailsModal({ value, onSave, onClose }) {
+  const [d, setD] = useState(() => ({
+    name: value?.name || AMUA_DEFAULT_NAME,
+    address: value?.address || "", gstNumber: value?.gstNumber || "", bank: value?.bank || "",
+    contacts: { ...(value?.contacts || {}) },
+    council: { rso: "Auckland Ultimate", orgType: "Club/Team", ...(value?.council || {}) },
+  }));
+  const set = (k, v) => setD(p => ({ ...p, [k]: v }));
+  const setContact = (role, k, v) => setD(p => ({ ...p, contacts: { ...p.contacts, [role]: { ...(p.contacts[role] || {}), [k]: v } } }));
+  const setCouncil = (k, v) => setD(p => ({ ...p, council: { ...p.council, [k]: v } }));
+  const si = {padding:"6px 8px",fontSize:12,borderRadius:6,border:"1.5px solid #e2e8f0",fontFamily:"inherit",outline:"none",width:"100%",boxSizing:"border-box"};
+  const row = (label, input) => (
+    <label style={{display:"grid",gridTemplateColumns:"120px 1fr",alignItems:"start",gap:8,marginBottom:6}}>
+      <span style={{fontSize:11,color:"#64748b",fontWeight:600,paddingTop:6}}>{label}</span>{input}
+    </label>
+  );
+  const box = {background:"#f8fafc",border:"1.5px solid #e2e8f0",borderRadius:10,padding:12,marginBottom:12};
+  const head = t => <div style={{fontSize:12,fontWeight:700,color:"#0f172a",marginBottom:8}}>{t}</div>;
+  return (
+    <Modal title="🏢 AMUA details" onClose={onClose} width={620}>
+      <div style={box}>
+        {head("Organisation")}
+        <div style={{fontSize:11,color:"#64748b",marginBottom:8}}>Printed on every invoice, PO and receipt.</div>
+        {row("Name", <input style={si} value={d.name} onChange={e=>set("name", e.target.value)}/>)}
+        {row("Postal address", <textarea style={{...si,minHeight:54,resize:"vertical"}} value={d.address} onChange={e=>set("address", e.target.value)} placeholder={"PO Box …\nAuckland"}/>)}
+        {row("GST number", <input style={si} value={d.gstNumber} onChange={e=>set("gstNumber", e.target.value)} placeholder="e.g. 123-456-789"/>)}
+        {row("Bank account", <input style={si} value={d.bank} onChange={e=>set("bank", e.target.value)} placeholder="e.g. 12-3456-0123456-00 (AMUA)"/>)}
+      </div>
+      {AMUA_CONTACT_ROLES.map(r => {
+        const c = d.contacts[r.key] || {};
+        return (
+          <div key={r.key} style={box}>
+            {head(r.label)}
+            <div style={{fontSize:11,color:"#64748b",marginBottom:8}}>{r.hint}</div>
+            {row("Name", <input style={si} value={c.name||""} onChange={e=>setContact(r.key,"name",e.target.value)}/>)}
+            {r.key!=="keyHolder" && row("Position", <input style={si} value={c.position||""} onChange={e=>setContact(r.key,"position",e.target.value)} placeholder="e.g. Secretary"/>)}
+            {row("Email", <input style={si} type="email" value={c.email||""} onChange={e=>setContact(r.key,"email",e.target.value)}/>)}
+            {row("Phone", <input style={si} type="tel" value={c.phone||""} onChange={e=>setContact(r.key,"phone",e.target.value)}/>)}
+          </div>
+        );
+      })}
+      <div style={box}>
+        {head("Council applications")}
+        <div style={{fontSize:11,color:"#64748b",marginBottom:8}}>Answers used when filling in Auckland Council sports-park applications.</div>
+        {row("Regional sports org.", <input style={si} value={d.council.rso||""} onChange={e=>setCouncil("rso", e.target.value)} placeholder="Leave blank if none"/>)}
+        {row("Organisation type", (
+          <select style={{...si,background:"#fff"}} value={d.council.orgType||""} onChange={e=>setCouncil("orgType", e.target.value)}>
+            {["Club/Team","Regional sports organisation","School","Social","Other"].map(o=><option key={o} value={o}>{o}</option>)}
+          </select>
+        ))}
+        {row("Address search", <input style={si} value={d.council.postalAddressSearch||""} onChange={e=>setCouncil("postalAddressSearch", e.target.value)} placeholder="Text to type into the council's address lookup"/>)}
+      </div>
+      <div style={{display:"flex",justifyContent:"flex-end",gap:8}}>
+        <button onClick={onClose} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#64748b"})}>Cancel</button>
+        <button onClick={()=>onSave(d)} style={S.btn({background:"#0f172a",color:"#fff",fontWeight:700})}>Save</button>
+      </div>
+    </Modal>
   );
 }
 
@@ -4657,7 +4749,8 @@ function renderInvoiceDocHtml({
   const th    = "padding:4px 8px;white-space:nowrap;text-align:left;font-size:9px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;background:#f8fafc;border-bottom:1.5px solid #e2e8f0";
   const cap   = "font-size:9px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em";
   const money = (v, extra = "") => `<td style="${tdAmt}${edgeR}${extra}">${fmtCost(v)}</td>`;
-  const amuaLines = [AMUA_INFO.address, AMUA_INFO.gstNumber ? `GST No: ${AMUA_INFO.gstNumber}` : "", AMUA_INFO.bank]
+  const amuaLines = [AMUA_INFO.address, AMUA_INFO.gstNumber ? `GST No: ${AMUA_INFO.gstNumber}` : "", AMUA_INFO.bank,
+      amuaContactLine() ? `Contact: ${amuaContactLine()}` : ""]
     .filter(Boolean).map(l => `<div>${l}</div>`).join("");
   const gstLabel = gstMode === "note" ? "" : gstMode === "exclusive" ? "excl. GST" : "incl. GST";
 
@@ -4712,7 +4805,7 @@ function renderInvoiceDocHtml({
         <tr>
           <td style="padding:20px 28px;vertical-align:top">
             <div style="font-size:19px;font-weight:800;color:#fff;letter-spacing:-0.02em">${AMUA_INFO.name}</div>
-            <div style="font-size:11px;color:#94a3b8;margin-top:2px;line-height:1.45">${amuaLines || "<span style='color:#64748b'>Update AMUA_INFO in booking-system.jsx</span>"}</div>
+            <div style="font-size:11px;color:#94a3b8;margin-top:2px;line-height:1.45">${amuaLines || "<span style='color:#64748b'>Add AMUA's address and contact under User menu → AMUA details</span>"}</div>
           </td>
           <td style="padding:20px 28px;vertical-align:top;text-align:right;white-space:nowrap">
             <div style="font-size:21px;font-weight:800;color:#fff;line-height:1.1">${docLabel}</div>
@@ -10113,6 +10206,14 @@ export default function App() {
   });
   useEffect(()=>{ try{ localStorage.setItem("fb_alias_names", JSON.stringify(aliasNames)); }catch{ /* ignore */ } }, [aliasNames]);
   // aliasColors: { primaryEmail: "#hex" } — admin-set chip colour overrides.
+  // AMUA organisation details + operations contacts (the `amua_org` setting). Mirrored into
+  // the module-level AMUA_INFO, which the billing-document renderers read.
+  const [amuaOrg, setAmuaOrg] = useState(()=>{
+    let init = {}; try{ init = JSON.parse(localStorage.getItem("fb_amua_org")||"{}"); }catch{ /* ignore */ }
+    applyAmuaOrg(init);
+    return init;
+  });
+  const [showAmuaModal, setShowAmuaModal] = useState(false);
   const [aliasColors, setAliasColors] = useState(()=>{
     let init = {}; try{ init = JSON.parse(localStorage.getItem("fb_alias_colors")||"{}"); }catch{ /* ignore */ }
     _emailColorOverrides = init; // make available to module-level emailColor on first render
@@ -10292,6 +10393,10 @@ export default function App() {
       if (map.alias_colors && typeof map.alias_colors === "object") {
         setAliasColors(map.alias_colors); _emailColorOverrides = map.alias_colors;
         try{localStorage.setItem("fb_alias_colors",JSON.stringify(map.alias_colors));}catch{ /* ignore */ }
+      }
+      if (map.amua_org && typeof map.amua_org === "object") {
+        applyAmuaOrg(map.amua_org); setAmuaOrg(map.amua_org);
+        try{localStorage.setItem("fb_amua_org",JSON.stringify(map.amua_org));}catch{ /* ignore */ }
       }
       // NB: `profiles` is intentionally NOT loaded/stored here — it holds sensitive
       // billing details (addresses, GST, admin bank account) and the settings table
@@ -11053,6 +11158,12 @@ export default function App() {
   function saveEmailAliases(next) { setEmailAliases(next); persistSetting("email_aliases", next); }
   function saveAliasNames(next)   { setAliasNames(next);   persistSetting("alias_names", next); }
   function saveAliasColors(next)  { setAliasColors(next);  persistSetting("alias_colors", next); }
+  function saveAmuaOrg(next) {
+    applyAmuaOrg(next); setAmuaOrg(next);
+    try{localStorage.setItem("fb_amua_org",JSON.stringify(next));}catch{ /* ignore */ }
+    persistSetting("amua_org", next);
+    logActivity("settings_change", { key:"amua_org" });
+  }
 
   async function handleSyncDB() {
     await loadBookings();
@@ -11819,6 +11930,7 @@ export default function App() {
                           <UserMenuItem icon="🧩" label="Install Extension" onClick={()=>{setShowUserMenu(false);setShowExtensionModal(true);}}/>
                           <UserMenuItem icon="💲" label="Facility Rates" onClick={()=>{setShowUserMenu(false);setShowRatesModal(true);}}/>
                           <UserMenuItem icon="👥" label="Player Counts" onClick={()=>{setShowUserMenu(false);setShowPlayersModal(true);}}/>
+                          <UserMenuItem icon="🏢" label="AMUA details" onClick={()=>{setShowUserMenu(false);setShowAmuaModal(true);}}/>
                           <UserMenuItem icon="👤" label="User Management" onClick={()=>{setShowUserMenu(false);setShowUserMgmtModal(true);}}/>
                           <UserMenuItem icon="📜" label="Activity Log" onClick={()=>{setShowUserMenu(false);setShowActivityLog(true);}}/>
                           <UserMenuItem icon="🗑" label="Log Retention" onClick={()=>{setShowUserMenu(false);setShowRetentionModal(true);}}/>
@@ -12246,6 +12358,11 @@ export default function App() {
             <button onClick={()=>setShowPlayersModal(false)} style={S.btn({background:"#0f172a",color:"#fff",fontSize:12})}>Done</button>
           </div>
         </Modal>
+      )}
+
+      {showAmuaModal&&realIsAdmin&&(
+        <AmuaDetailsModal value={amuaOrg} onClose={()=>setShowAmuaModal(false)}
+          onSave={next=>{ saveAmuaOrg(next); setShowAmuaModal(false); showToast("AMUA details saved."); }}/>
       )}
 
       {showUserMgmtModal&&realIsAdmin&&(

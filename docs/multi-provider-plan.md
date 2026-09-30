@@ -194,8 +194,10 @@ Orbeon document exposes the §5.3 control names read-only. It blocks 2.3b only.
 ### 2.4 Extension: "Fill council application" assistant — L
 - **New content script** `src/content/councilFill.ts`, on
   `…/application/sportapplication*`.
-- **Profile:** a council profile (organisation, contacts, key holder, postal-address
-  search text) stored in `providers.config.council_profile` and edited in 1.3.
+- **Profile:** comes from the **AMUA details** setting (`amua_org`, edited under User
+  menu → AMUA details; shipped). It holds the organisation, the operations, secondary and
+  key-holder contacts, the regional sports organisation, the organisation type, and the
+  address-search text. The extension reads it from `settings`.
 - **Filling:** the side panel lists queued council series (`queued_cpsa` on
   `akl_council` facilities, grouped like the Sporty series key). "Fill" walks the
   wizard pages 1–5:
@@ -383,8 +385,9 @@ Depends on 1.5.
    and how bookings are made: by email to a contact, or a form. Needed for 1.3 and 1.4.
 2. **Council account:** whose browser runs the council sync, meaning who is signed in
    to myAUCKLAND as AMUA. Needed for 2.2.
-3. **Council profile** for pre-fill: primary and secondary contacts, key holder, and
-   the postal address as the council's address search shows it. Needed for 2.4.
+3. **Council profile** for pre-fill: enter it under User menu → **AMUA details**
+   (operations, secondary and key-holder contacts, postal address, address-search
+   text). Needed for 2.4.
 4. **Mailboxes** that will forward into AMUA's Gmail. Needed for 3.4.
 5. **Event permit costs:** council fields are free, so the only council charge is an
    event permit for big-event hire. Recharge it to the organiser or clubs, or absorb it?
