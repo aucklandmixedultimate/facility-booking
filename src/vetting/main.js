@@ -529,7 +529,7 @@ function buildCity() {
   // Private grounds that aren't in the council maps: hollow diamonds with the operator's contacts.
   PRIV.operators.filter(o => !o.park_id || !BYID[o.park_id]).forEach(o => {
     const ll = [o.lat, o.lon]; pts.push(ll);
-    (o.icons ? logoMarker(ll, o.icons, o.amua ? "#e0a647" : PRIV_COLOR, false) : o.amua ? amuaMarker(ll, "#ffffff", false) : privMarker(ll, "transparent", false, false)).bindPopup(privHtml(o), { className: "parktip", maxWidth: 320 })
+    (o.icons ? logoMarker(ll, o.icons, o.amua ? "#e0a647" : PRIV_COLOR, false, o.amua ? 700 : 550) : o.amua ? amuaMarker(ll, "#ffffff", false) : privMarker(ll, "transparent", false, false)).bindPopup(privHtml(o), { className: "parktip", maxWidth: 320 })
       .bindTooltip(`<b>${esc(o.park)}</b><br><b style="color:${PRIV_COLOR}">◆ ${esc(o.operator)}</b><br>Not in the council field maps · click for contacts`, { className: "parktip", direction: "top", offset: [0, -8] })
       .addTo(cityLayer);
   });
@@ -539,12 +539,12 @@ function buildCity() {
 // centre shows the suitability colour.
 // A round badge per logo (two overlap, e.g. AMUA + Carlton Juniors at Cornwall Park). The
 // image sits over the club's letters; if the logo file isn't there yet it removes itself.
-function logoMarker(ll, icons, ring, isCur) {
+function logoMarker(ll, icons, ring, isCur, z = 600) {
   const badge = (ic, i) => `<span class="lp" style="background:${ic.bg || "#334155"};z-index:${9 - i}"><b>${esc(ic.mono || "")}</b>`
     + (ic.img ? `<img src="${BASE}council-maps/${esc(ic.img)}" alt="" onerror="this.remove()">` : "") + `</span>`;
   const w = 36 + (icons.length - 1) * 24;
   return L.marker(ll, { icon: L.divIcon({ className: "", iconSize: [w, 36], iconAnchor: [w / 2, 18],
-    html: `<div class="logopin${isCur ? " cur" : ""}" style="--ring:${ring}">${icons.map(badge).join("")}</div>` }), keyboard: false, bubblingMouseEvents: false, zIndexOffset: 600 });
+    html: `<div class="logopin${isCur ? " cur" : ""}" style="--ring:${ring}">${icons.map(badge).join("")}</div>` }), keyboard: false, bubblingMouseEvents: false, zIndexOffset: z });
 }
 function amuaMarker(ll, fill, isCur) {
   return L.marker(ll, { icon: L.divIcon({ className: "", iconSize: [30, 30], iconAnchor: [15, 15],
