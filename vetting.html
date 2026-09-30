@@ -6,10 +6,10 @@
     <title>Council Fields</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap">
-    <script type="module" crossorigin src="/facility-booking/assets/vetting-CHW_1Shi.js"></script>
+    <script type="module" crossorigin src="/facility-booking/assets/vetting-D9UoxMaD.js"></script>
     <link rel="modulepreload" crossorigin href="/facility-booking/assets/index-U3PgYvYW.js">
     <link rel="modulepreload" crossorigin href="/facility-booking/assets/_commonjsHelpers-Cpj98o6Y.js">
-    <link rel="stylesheet" crossorigin href="/facility-booking/assets/vetting-BhDFBKnV.css">
+    <link rel="stylesheet" crossorigin href="/facility-booking/assets/vetting-BLdgWpgw.css">
   </head>
   <body>
     <div class="wrap">
@@ -65,10 +65,8 @@
                   <span class="centrelbl" id="centreLbl">Unlock · rate fit</span>
                 </div>
                 <div class="toolbar" role="toolbar" aria-label="Map tools">
-                  <button id="backCity" title="Back to the Auckland map (C)">◂ Auckland</button>
                   <button id="fieldBtn" aria-pressed="true" title="Show or hide the frisbee field (T)">⬚ Field</button>
-                  <button id="layerBtn" title="Switch between council map and satellite (V)">⇄ Satellite</button>
-                  <button id="fitBtn" title="Zoom back to the council map (0)">⤢ Fit</button>
+                  <button id="fitBtn" title="Zoom back to the council map (0)">⤢</button>
                   <span id="thumbs" class="thumbs"></span>
                   <button id="sizeBtn" title="Field dimensions">⚙</button>
                 </div>
@@ -88,14 +86,18 @@
                 </div>
                 <div class="legend" id="legend" hidden></div>
                 <div class="rotatehint" id="rotateHint" hidden>Move the mouse to turn the field · click to lock it</div>
-                <div class="maphint" id="mapHint">Click the map to mark a light pole</div>
+                <div class="dispenser" id="dispenser" title="Drag a bulb onto each light pole. Drag a bulb back here to remove it.">
+                  <div class="bulbsrc" id="bulbSrc" role="button" aria-label="Drag a light bulb onto a light pole">💡</div>
+                  <span class="dcount" id="bulbCount">0</span>
+                  <button id="noLightsBtn" aria-pressed="false" title="Checked: there are no lights">No lights</button>
+                </div>
               </div>
               <div class="info" id="info">
                 <div class="privbox" id="privBox" hidden></div>
                 <div class="tags">
                   <span class="k">Quality</span><div class="seg stars" id="segQuality"></div>
-                  <span class="k">Fit</span><div class="seg" id="segFit"></div>
-                  <span class="k">Lights</span><div class="seg" id="segLights"></div>
+                  <span class="k">Fit</span><span class="val" id="fitVal"></span>
+                  <span class="k">Lights</span><span class="val" id="lightsVal"></span>
                 </div>
                 <div class="tags2">
                   <label class="k" for="fieldsIn">Fields</label><input id="fieldsIn" placeholder="Lock the field to pick the nearest council field">
@@ -124,7 +126,7 @@
           </div>
           <div class="list" id="list"></div>
           <div class="railtools"><button id="exportBtn">Download CSV</button></div>
-          <p class="help">Scroll zooms the map. Click the map to mark light poles (click one to remove it). Unlock the centre button to turn the field and lock it to fix the angle; pan to fine-tune, then rate the fit to save that spot. ◆ parks are privately managed: ask the operator first. Keys: <kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd>, <kbd>S</kbd> later, <kbd>Z</kbd> undo, <kbd>1</kbd>–<kbd>5</kbd> quality, <kbd>Enter</kbd> lock/unlock, <kbd>C</kbd> Auckland, <kbd>T</kbd> field, <kbd>V</kbd> satellite, <kbd>M</kbd> next map.</p>
+          <p class="help">Scroll zooms the map; a few clicks out swaps the council map for satellite. Drag bulbs from the 💡 dispenser onto light poles (drag one back to remove it). Unlock the centre button to turn the field, lock it, pan to fine-tune, then rate the fit to save that spot. ◆ parks are privately managed. Keys: <kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd>, <kbd>S</kbd> later, <kbd>Z</kbd> undo, <kbd>1</kbd>–<kbd>5</kbd> quality, <kbd>Enter</kbd> lock/unlock, <kbd>C</kbd> Auckland, <kbd>T</kbd> field, <kbd>M</kbd> next map.</p>
         </aside>
       </div>
     </div>
