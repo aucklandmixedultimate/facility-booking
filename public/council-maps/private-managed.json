@@ -29,6 +29,31 @@
   },
   "operators": [
     {
+      "id": "gtec-cornwall",
+      "park_id": null,
+      "park": "Cornwall Park",
+      "lat": -36.8975,
+      "lon": 174.7855,
+      "approx": true,
+      "operator": "Grammar TEC Rugby Football Club (via CPSA)",
+      "short": "GTEC · CPSA",
+      "type": "club",
+      "code": "rugby",
+      "provider_id": "gtec",
+      "amua": true,
+      "manages": "AMUA's home venue: Cornwall Park Fields #1–#3 and the Grammar TEC clubrooms, booked through GTEC's Sporty system (Cornwall Park Sports Association) in the booking site",
+      "contact": {
+        "email": "admin@grammartec.co.nz",
+        "phone": "09 521 0538",
+        "url": "https://www.grammartec.co.nz/venue-hire-fields-1/venue-hire-1"
+      },
+      "status": "confirmed",
+      "sources": [
+        "https://www.grammartec.co.nz/venue-hire-fields-1/venue-hire-1"
+      ],
+      "notes": "Cornwall Park is trust land, not a council park; bookings go through the booking site's GTEC (CPSA) workflow."
+    },
+    {
       "id": "gtec-orakei",
       "park_id": "central-orakei-domain-b",
       "park": "Orakei Domain B",
@@ -51,7 +76,8 @@
         "https://www.grammartec.co.nz/venue-hire-fields-1/grammar-fields/Orakei-Domain",
         "https://www.grammartec.co.nz/venue-hire-fields-1/venue-hire-1"
       ],
-      "notes": "Same operator as AMUA's Cornwall Park fields (provider 'gtec'). Council-owned domain; GTEC holds the fields' use."
+      "notes": "Same operator as AMUA's Cornwall Park fields (provider 'gtec'). Council-owned domain; GTEC holds the fields' use.",
+      "amua": true
     },
     {
       "id": "tau-north-harbour",
@@ -770,7 +796,8 @@
         "http://www.grammartec.co.nz/Our-Sites/Shore-Road-Reserve"
       ],
       "notes": "Parnell Cricket Club is based here in summer.",
-      "provider_id": "gtec"
+      "provider_id": "gtec",
+      "amua": true
     },
     {
       "id": "parnell-shore-road",
@@ -983,7 +1010,8 @@
       "colors": {
         "fill": "#c8102e",
         "edge": "#f2b705",
-        "source": "Ellerslie theme: Ellerslie AFC's red home / gold away kit (no ultimate-club colours found online)"
+        "pattern": "linear-gradient(45deg,#f2b705 50%,#c8102e 50%)",
+        "source": "Confirmed by AMUA: gold/red, bisected"
       }
     },
     {
@@ -1037,8 +1065,9 @@
       "primary": false,
       "colors": {
         "fill": "#1e3a8a",
-        "edge": "#ffffff",
-        "source": "Placeholder: no Te Papapa Ultimate or Te Papapa RFC colours found online; confirm and update"
+        "edge": "#f2b705",
+        "pattern": "repeating-linear-gradient(0deg,#1e3a8a 0 3px,#f2b705 3px 6px,#ffffff 6px 9px)",
+        "source": "Confirmed by AMUA: navy/gold/white stripes"
       }
     }
   ],

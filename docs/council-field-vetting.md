@@ -300,11 +300,15 @@ The page always fits one screen: nothing scrolls except the map, where the wheel
   operator to contact.
   The data is in `public/council-maps/private-managed.json`; see multi-provider design §7.1.
   The card shows only who to contact. The request steps belong to booking, not vetting.
+- **AMUA venues (★).** AMUA's existing provider grounds (GTEC, booked through CPSA) show
+  as a gold star with the suitability colour in the centre: Cornwall Park (not a council
+  park; approximate location), Orakei Domain B and Shore Road Reserve. They're the
+  `amua: true` entries in `private-managed.json`.
 - **Ultimate club homes (🥏).** Parks where an ultimate club is based show as a larger
   diamond on the Auckland map. Its centre and edge are the club's colours (`colors` on the
   operator in `private-managed.json`), and the card has a 🥏 chip in the same colours plus a
-  banner line with that club's contact. Ellerslie Ultimate uses red and gold, taken from the
-  Ellerslie AFC kit. TPU's navy is a placeholder until its colours are confirmed. The field contact stays the managing club. Current homes:
+  banner line with that club's contact. Ellerslie Ultimate is gold/red, split in half, and TPU is
+  navy/gold/white stripes (both confirmed by AMUA). The field contact stays the managing club. Current homes:
   - Michaels Ave Reserve: Ellerslie Ultimate Club (fields managed by Ellerslie AFC);
   - Fergusson Domain: Te Papapa Ultimate (fields managed by Te Papapa Onehunga RFC).
   They're entries with `code: "ultimate"` in `private-managed.json`, and there's an
