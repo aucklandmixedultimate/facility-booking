@@ -119,9 +119,13 @@ Tiers turn many attributes into one decision: **where do we ask first?**
 
 | Tier | Meaning | Rule of thumb |
 |---|---|---|
-| **A — go-to** | Full-size, good surface, lights if needed; applications here usually succeed | `ultimate_fit = full` · `quality ≥ 4` · `reliability ≥ 70%` (or untested with strong reports) · `lights ≠ none` for evening use |
+| **A — go-to** | Full-size, good surface; applications here usually succeed | `ultimate_fit = full` · `quality ≥ 4` · `reliability ≥ 70%` (or untested) |
 | **B — solid backup** | Playable, with some compromise | `full` or good `reduced` · `quality ≥ 3` · reliability unknown or ≥ 40% |
 | **C — last resort** | Usable in a pinch | anything else that isn't `unsuitable` |
+
+**Lights are not part of the tier** (decided 30 Sep 2026). They only matter for evening
+slots, so each field also shows **Evening OK** (lights are `training` or `full`), and
+evening bookings and applications filter on it separately from the tier.
 
 The tier is **computed** from the attributes and shown with the reason ("B: quality 3,
 reliability 45%"). An admin can **override** it with a note, e.g. "A: great in summer,
@@ -131,6 +135,8 @@ C in winter". Tiers can differ by season: store a winter and a summer tier when
 ## 4. Crowd-sourced field reports
 
 Captains and members play on these fields, so they're the cheapest source of truth.
+- **Only admins edit field records** (decided 30 Sep 2026). Everyone else feeds in
+  through reports that an admin accepts.
 - After a council booking has been played, the app asks the booker for a **30-second
   report**: surface 1–5, lights (worked / weren't on / none), fit (full / tight /
   unusable), a free-text note, and an optional photo.
@@ -237,13 +243,32 @@ harvest):
 | 4.7 | Field reports: post-booking prompt, admin accept/dismiss, rolling up into field attributes | M |
 | 4.8 | Use it: tier/lights badges, sunset-based lights warning, tier-ordered suggestions in the pre-fill | M |
 
+## Manual data entry, until the app screens exist
+
+Use [`docs/data/council-field-vetting.xlsx`](data/council-field-vetting.xlsx). Yellow
+cells are inputs and grey cells are calculated.
+- **Parks:** all 254 parks, with priority, status, amenities and notes. Rollups show
+  fields entered and vetted, the count per tier, and the best tier.
+- **Fields:** one row per council field, with an auto fit guess from its name, and
+  dropdowns for fit, surface, lights, season, status and tier override. It calculates
+  reliability, Evening OK, the computed tier and the final tier. Pre-filled with
+  Devonport Domain's 8 fields.
+- **Summary:** counts by region.
+- **Settings:** the tier thresholds, editable.
+
+The columns mirror the `council_parks` / `council_fields` tables above, so the sheet can
+be imported when 4.4 lands.
+
+## Decisions
+
+- **Who vets:** admins only. Others contribute through field reports.
+- **Lights:** needed for evening slots only, and not part of the tier.
+
 ## Open questions
 
 1. **Home base:** which areas count as "where AMUA plays", to prioritise vetting (list
    suburbs or regions)?
-2. **Who vets:** is it admins only, or can trusted captains edit directly without
-   approval?
-3. **Tier thresholds:** are the rule-of-thumb numbers above right? Is lights required
-   for Tier A in all seasons, or only for evening slots?
-4. **Existing knowledge:** is there an existing list, spreadsheet or group chat of known
+2. **Tier thresholds:** are the rule-of-thumb numbers right? They're editable on the
+   spreadsheet's Settings sheet.
+3. **Existing knowledge:** is there an existing list, spreadsheet or group chat of known
    good council fields? Importing it would seed Tier A immediately.
