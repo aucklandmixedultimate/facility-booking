@@ -121,9 +121,14 @@ const FACILITIES = [
     site:"GTEC Orakei", provider:"gtec", adminOnly:true, defaultRate:45 },   // light cyan
   // St Cuthbert's College (Epsom) — hired directly from the school, not through GTEC, so
   // it has its own purchase order and never enters the GTEC queue or sync. Admin-only
-  // until AMUA opens it to bookers; set its rate under Pricing.
+  // until AMUA opens it to bookers; set its rate under Pricing. Listed at the Cornwall
+  // Park location.
   { id:"s1", name:"St Cuthberts – Field #1",     capacity:50,  color:"#c2410c", kind:"field",
-    site:"St Cuthberts", provider:"stcuthberts", adminOnly:true },   // burnt orange
+    site:"Cornwall Park", provider:"stcuthberts", adminOnly:true },   // burnt orange
+  // ARL — a privately run area at the lower CPSA fields. Placeholder until AMUA has the
+  // details (contact, rates); admin-only.
+  { id:"a1", name:"ARL – Lower CPSA field area", capacity:50,  color:"#be123c", kind:"field",
+    site:"Cornwall Park", provider:"arl", adminOnly:true },   // rose
 ];
 // Facilities the current viewer may see. Lookups by id are deliberately NOT filtered — a
 // booking on an admin-only facility must still render its name wherever it appears.
@@ -139,7 +144,7 @@ function ownsCouncilFacility(f) {
   return (f.owners || []).some(o => o === me || o === prim || (_emailAliases[o] || o) === prim);
 }
 // Light tint of each facility colour for day-view column backgrounds.
-const FACILITY_TINT = { f1:"#f5f3ff", f2:"#ede9fe", f3:"#dcfce7", f4:"#ecfdf5", f5:"#f0fdf4", g1:"#cffafe", g2:"#ecfeff", g3:"#f0fdff", s1:"#ffedd5" };
+const FACILITY_TINT = { f1:"#f5f3ff", f2:"#ede9fe", f3:"#dcfce7", f4:"#ecfdf5", f5:"#f0fdf4", g1:"#cffafe", g2:"#ecfeff", g3:"#f0fdff", s1:"#ffedd5", a1:"#fff1f2" };
 function isSocialFac(id) { return FACILITIES.find(f=>f.id===id)?.kind==="social"; }
 const EMAIL_COLORS = ["#6366f1","#ec4899","#f59e0b","#10b981","#ef4444","#8b5cf6","#06b6d4","#84cc16","#f97316","#14b8a6","#e879f9","#fb7185","#34d399","#60a5fa","#fbbf24"];
 const _ecc = {}; let _eci = 0;
@@ -291,10 +296,12 @@ const RECIPIENT_CODE_GTEC = "GTE";
 // `provider` on each facility. `short` names the provider in Drive folder names.
 // (Interim: see docs/multi-provider-design.md for moving this into Supabase.)
 const PROVIDERS = {
-  gtec:        { ...VENDOR_GTEC, short:"GTEC", recipientCode: RECIPIENT_CODE_GTEC,
+  gtec:        { ...VENDOR_GTEC, short:"GTEC", label:"GTEC / CPSA", recipientCode: RECIPIENT_CODE_GTEC,
                  isDefault:true, defaultSite:"Cornwall Park" },
   stcuthberts: { id:"stcuthberts", name:"St Cuthbert's College", short:"St Cuthberts",
-                 address:"", gstNumber:"", recipientCode:"STC", defaultSite:"St Cuthberts" },
+                 address:"", gstNumber:"", recipientCode:"STC", defaultSite:"Cornwall Park" },
+  arl:         { id:"arl", name:"ARL", short:"ARL", address:"", gstNumber:"", recipientCode:"ARL",
+                 defaultSite:"Cornwall Park", placeholder:true },   // details to come
 };
 // Council fields added per booker on the Council fields page (settings "council_facilities"):
 // { "<booker email>": [ {id, park_id, park, region, field, lat, lon, kind, operator, …} ] }.
@@ -486,6 +493,7 @@ function bookableVenues(keepId) {
   const rank = k => k === cur ? -1 : order.indexOf(k) < 0 ? 999 : order.indexOf(k);
   return [...byKey.values()].sort((a, b) => rank(a.key) - rank(b.key));
 }
+const providerLabel = pid => PROVIDERS[pid]?.label || PROVIDERS[pid]?.name || pid;
 function ProviderVenuePicker({ facilityId, onPick, small }) {
   const venues = bookableVenues(facilityId);
   if (venues.length <= 1) return null;
@@ -498,11 +506,11 @@ function ProviderVenuePicker({ facilityId, onPick, small }) {
       <div>
         <label style={S.lbl}>Provider</label>
         <select style={st} value={curPid} onChange={e => pickVenue(venues.find(v => v.pid === e.target.value)?.key)}>
-          {pids.map(pid => <option key={pid} value={pid}>{PROVIDERS[pid]?.name || pid}</option>)}
+          {pids.map(pid => <option key={pid} value={pid}>{providerLabel(pid)}</option>)}
         </select>
       </div>
       <div>
-        <label style={S.lbl}>Venue</label>
+        <label style={S.lbl}>Location</label>
         <select style={st} value={curKey} onChange={e => pickVenue(e.target.value)}>
           {venues.filter(v => v.pid === curPid).map(v => <option key={v.key} value={v.key}>📍 {v.site}</option>)}
         </select>
@@ -12165,19 +12173,27 @@ export default function App() {
   const venues = listVenues();
   const FacilityPills=()=>(
     <div style={{display:"flex",gap:6,marginBottom:16,alignItems:"center",overflowX:"auto",WebkitOverflowScrolling:"touch",scrollbarWidth:"none",msOverflowStyle:"none",paddingBottom:2}}>
-      {/* Venue picker: shown only when the viewer can see more than one venue. */}
-      {venues.length>1&&(
-        <select value={activeVenueKey()} onChange={e=>setVenue(e.target.value===defaultVenueKey()?null:e.target.value)}
-          title="Choose which provider's venue to show" aria-label="Venue"
-          style={{padding:"5px 8px",borderRadius:20,border:"1.5px solid #0f172a",fontSize:12,fontWeight:700,fontFamily:"inherit",background:"#fff",color:"#0f172a",flexShrink:0,cursor:"pointer"}}>
-          {[...new Set(venues.map(v=>v.providerId))].map(pid=>(
-            <optgroup key={pid} label={PROVIDERS[pid]?.name||pid}>
-              {venues.filter(v=>v.providerId===pid).map(v=><option key={v.key} value={v.key}>📍 {v.site}</option>)}
-            </optgroup>
-          ))}
-          {isAdmin&&<option value={ALL_VENUES}>All venues</option>}
-        </select>
-      )}
+      {/* Provider + 📍 location: shown only when the viewer can see more than one location. */}
+      {venues.length>1&&(()=>{
+        const cur=activeVenueKey(), curPid=cur===ALL_VENUES?ALL_VENUES:cur.split("|")[0];
+        const pids=[...new Set(venues.map(v=>v.providerId))];
+        const sel={padding:"5px 8px",borderRadius:20,border:"1.5px solid #0f172a",fontSize:12,fontWeight:700,fontFamily:"inherit",background:"#fff",color:"#0f172a",flexShrink:0,cursor:"pointer"};
+        const go=k=>setVenue(k===defaultVenueKey()?null:k);
+        const pickProvider=pid=>{ if(pid===ALL_VENUES) return setVenue(ALL_VENUES);
+          const site=cur===ALL_VENUES?"":cur.split("|")[1], vs=venues.filter(v=>v.providerId===pid);
+          go((vs.find(v=>v.site===site)||vs.find(v=>v.key===`${pid}|${PROVIDERS[pid]?.defaultSite||""}`)||vs[0]).key); };
+        return <>
+          <select value={curPid} onChange={e=>pickProvider(e.target.value)} title="Provider" aria-label="Provider" style={sel}>
+            {pids.map(pid=><option key={pid} value={pid}>{providerLabel(pid)}</option>)}
+            {isAdmin&&<option value={ALL_VENUES}>All providers &amp; locations</option>}
+          </select>
+          {cur!==ALL_VENUES&&(
+            <select value={cur} onChange={e=>go(e.target.value)} title="Location" aria-label="Location" style={sel}>
+              {venues.filter(v=>v.providerId===curPid).map(v=><option key={v.key} value={v.key}>📍 {v.site}</option>)}
+            </select>
+          )}
+        </>;
+      })()}
       <button onClick={()=>setSelFac("all")} style={{padding:"5px 12px",borderRadius:20,border:"1.5px solid",cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",flexShrink:0,borderColor:selFac==="all"?"#0f172a":"#e2e8f0",background:selFac==="all"?"#0f172a":"#fff",color:selFac==="all"?"#fff":"#475569"}}>All</button>
       {venueFacilities().map(f=>(
         <button key={f.id} onClick={()=>setSelFac(f.id===selFac?"all":f.id)} style={{padding:"5px 12px",borderRadius:20,border:"1.5px solid",cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",display:"inline-flex",alignItems:"center",gap:5,flexShrink:0,borderColor:selFac===f.id?f.color:"#e2e8f0",background:selFac===f.id?f.color:"#fff",color:selFac===f.id?"#fff":"#475569"}}>
