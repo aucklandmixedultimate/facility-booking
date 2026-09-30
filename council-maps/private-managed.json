@@ -163,9 +163,8 @@
       "id": "ani-epsom",
       "park_id": null,
       "park": "Auckland Normal Intermediate (school field)",
-      "lat": -36.885,
-      "lon": 174.763,
-      "approx": true,
+      "lat": -36.884465,
+      "lon": 174.766264,
       "operator": "Auckland Normal Intermediate",
       "short": "ANI",
       "type": "school",
@@ -179,7 +178,7 @@
         "url": "https://ani.school.nz/"
       },
       "status": "confirmed",
-      "notes": "BOOKING ONLY AVAILABLE THROUGH AMUA. No booking form yet: AMUA books by email to the school. $20/hr. Position approximate until pinned.",
+      "notes": "BOOKING ONLY AVAILABLE THROUGH AMUA. No booking form yet: AMUA books by email to the school. $20/hr.",
       "must_book_through": "AMUA",
       "local_board": "albert-eden",
       "tenure": {
@@ -199,12 +198,48 @@
       "category": "community"
     },
     {
+      "id": "ani-lower",
+      "park_id": null,
+      "park": "ANI (lower) field",
+      "lat": -36.885249,
+      "lon": 174.767252,
+      "operator": "Auckland Normal Intermediate",
+      "short": "ANI (lower)",
+      "type": "school",
+      "code": "multi",
+      "category": "community",
+      "provider_id": "ani",
+      "amua": true,
+      "manages": "Lower field maintained and managed by ANI; landowner not confirmed (not part of any council sports park in the catalogue)",
+      "contact": {
+        "email": "ani@ani.school.nz",
+        "phone": "09 630 1109",
+        "url": "https://ani.school.nz/"
+      },
+      "status": "to-verify",
+      "notes": "BOOKING ONLY AVAILABLE THROUGH AMUA (booked by email with ANI, $20/hr). Ownership unverified: ANI maintains and manages it; check the landowner (e.g. Ministry of Education or council) before relying on this.",
+      "must_book_through": "AMUA",
+      "local_board": "albert-eden",
+      "tenure": {
+        "kind": "unknown"
+      },
+      "sources": [
+        "https://ani.school.nz/"
+      ],
+      "icons": [
+        {
+          "img": "logos/ani.png",
+          "mono": "ANI",
+          "bg": "#111827"
+        }
+      ]
+    },
+    {
       "id": "stcuthberts-epsom",
       "park_id": null,
       "park": "St Cuthbert's College (school field)",
-      "lat": -36.8878,
-      "lon": 174.7765,
-      "approx": true,
+      "lat": -36.888158,
+      "lon": 174.781598,
       "operator": "St Cuthbert's College",
       "short": "St Cuthberts",
       "type": "school",
@@ -217,7 +252,7 @@
         "url": "https://www.stcuthberts.school.nz/"
       },
       "status": "confirmed",
-      "notes": "BOOKING ONLY AVAILABLE THROUGH AMUA (St Cuthbert's provider in the AMUA booking site). Position approximate until pinned.",
+      "notes": "BOOKING ONLY AVAILABLE THROUGH AMUA (St Cuthbert's provider in the AMUA booking site).",
       "must_book_through": "AMUA",
       "sources": [
         "https://www.stcuthberts.school.nz/"
@@ -234,9 +269,8 @@
       "id": "sacred-heart-glen-innes",
       "park_id": null,
       "park": "Sacred Heart College (school field)",
-      "lat": -36.8745,
-      "lon": 174.8585,
-      "approx": true,
+      "lat": -36.866126,
+      "lon": 174.87329,
       "operator": "Sacred Heart College",
       "short": "Sacred Heart",
       "type": "school",
@@ -247,7 +281,7 @@
         "url": "https://www.sacredheart.school.nz/"
       },
       "status": "likely",
-      "notes": "Community (school) facility. Position approximate until pinned; booking arrangements to confirm.",
+      "notes": "Community (school) facility.; booking arrangements to confirm.",
       "sources": [
         "https://www.sacredheart.school.nz/"
       ],
