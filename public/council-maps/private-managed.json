@@ -67,6 +67,30 @@
       ]
     },
     {
+      "id": "arl-cornwall-lower",
+      "park_id": null,
+      "park": "Cornwall Park – lower CPSA fields (ARL clubhouse)",
+      "lat": -36.8989,
+      "lon": 174.7863,
+      "approx": true,
+      "operator": "Auckland Rugby League (ARL)",
+      "short": "ARL",
+      "type": "association",
+      "code": "league",
+      "manages": "ARL clubhouse and the lower CPSA field area",
+      "contact": {},
+      "status": "to-verify",
+      "sources": [],
+      "notes": "Placeholder: approximate position until AMUA pins the clubhouse; contact and rates to come. Booked through the booking site's ARL provider (admin-only).",
+      "icons": [
+        {
+          "img": "logos/arl.png",
+          "mono": "ARL",
+          "bg": "#1e3a8a"
+        }
+      ]
+    },
+    {
       "id": "gtec-orakei",
       "park_id": "central-orakei-domain-b",
       "park": "Orakei Domain B",
