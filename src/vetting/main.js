@@ -1214,7 +1214,9 @@ async function start() {
   // "no-cache" revalidates with the server, so a data update shows on the next load instead
   // of after GitHub Pages' ~10-minute browser cache expires.
   const res = await fetch(BASE + "council-maps/parks.json", { cache: "no-cache" }); PARKS = (await res.json()).parks; BYID = Object.fromEntries(PARKS.map(p => [p.id, p]));
-  try { const pr = await fetch(BASE + "council-maps/private-managed.json", { cache: "no-cache" }); if (pr.ok) PRIV = await pr.json(); } catch { /* optional data */ }
+  // A per-minute query string skips GitHub Pages' CDN copy (cached ~10 min after a deploy),
+  // so edits to the operator list show on the next load.
+  try { const pr = await fetch(BASE + "council-maps/private-managed.json?v=" + Math.floor(Date.now() / 60000), { cache: "no-cache" }); if (pr.ok) PRIV = await pr.json(); } catch { /* optional data */ }
   PRIV_BY_PARK = {};
   (PRIV.operators || []).filter(o => o.park_id).forEach(o => (PRIV_BY_PARK[o.park_id] ||= []).push(o));
   // Point of contact first: the operator marked primary, else the rugby or football club.
