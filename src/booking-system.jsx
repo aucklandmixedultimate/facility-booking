@@ -242,7 +242,7 @@ const AMUA_INFO = {
   council:   {},   // { rso, orgType, postalAddressSearch } — council application answers
 };
 const AMUA_CONTACT_ROLES = [
-  { key:"operations", label:"Operations contact", hint:"Main contact for facility providers, and printed on invoices." },
+  { key:"operations", label:"Operations contact", hint:"Main contact for facility providers, printed on invoices, and AMUA's point of contact in the CPSA and council extensions." },
   { key:"secondary",  label:"Secondary contact",  hint:"Backup contact on provider applications." },
   { key:"keyHolder",  label:"Key / access-code holder", hint:"Holds gate, door or floodlight keys and codes." },
 ];
@@ -12550,7 +12550,7 @@ export default function App() {
             <div style={{borderTop:"1px solid #e2e8f0",paddingTop:14,display:"flex",flexDirection:"column",gap:10}}>
               <div style={{fontWeight:700,fontSize:15}}>🏛 AMUA Council Application</div>
               <div style={{background:"#f0fdfa",border:"1px solid #99f6e4",borderRadius:8,padding:"10px 14px",fontSize:13,color:"#115e59"}}>
-                Fills Auckland Council&apos;s sports-field booking application from a batch of council bookings. In Admin, tick the council bookings and press <strong>📋 Copy for council form</strong>. Then, on the council&apos;s form, open the <strong>🏛 AMUA Council</strong> panel, paste the batch, and press <strong>Fill this page</strong> on each page. You review each page, tick the declarations and submit. Afterwards, enter the application number when you press <strong>🏛 Send to council</strong>.
+                A side panel, like the CPSA widget, for batching council bookings into one Auckland Council sports-field application. Click its 🏛 toolbar icon and sign in with the AMUA admin account. It lists the bookings waiting for AMUA by park: the fields, dates and time windows, any overlapping or shared fields, and the $10-per-field fee split between bookers. The applicant and contacts come from <strong>AMUA details</strong>. On the council&apos;s form, press <strong>Fill this page</strong> on each page, check it, tick the declarations and submit. Then press <strong>Record</strong> to save the application number and fee shares.
               </div>
               <a href="https://github.com/aucklandmixedultimate/amua-booking-extension/releases/download/council-latest/amua-council-extension.zip"
                 style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,background:"#0d9488",color:"#fff",borderRadius:10,padding:"12px 16px",textDecoration:"none",fontWeight:700,fontSize:14}}>

@@ -302,18 +302,25 @@ Application** extension (`amua-booking-extension/council-extension/`, released a
 `council-latest/amua-council-extension.zip`, and offered in the booking site's User menu
 → Install Extensions) fills the form from the page:
 
-1. **Copy the batch.** In Admin, tick council bookings and press **📋 Copy for council
-   form** (`buildCouncilPayload`). The batch holds one Park details block per park with:
-   - region, park and fields;
-   - the first and last date;
-   - per-weekday start and end times;
-   - a senior team per booker, with players from each booker's approximate player count.
+It is a Chrome side panel, built like the CPSA widget but in council navy and teal, with its own
+council icon. It signs in to Supabase with the AMUA admin Google account (PKCE via
+`chrome.identity`). The manifest `key` pins its ID to `gplkafpikbhkkfapnikbljpnannhmbap`, so
+`https://gplkafpikbhkkfapnikbljpnannhmbap.chromiumapp.org/` must be a Supabase redirect URL.
 
-   It also carries AMUA's organisation, contacts and council answers from the **AMUA
-   details** setting.
-2. **Paste it on the council form.** The 🏛 AMUA Council panel stores the batch in
-   `chrome.storage`.
-3. **Fill each page.** **Fill this page** sets every control it recognises on the current
+1. **Pick the batch.** The panel loads upcoming `cf-*` bookings ready for AMUA:
+   `pending_amua`, or `council_apply` for private grounds after the operator agreed. It groups
+   them by park, showing for each park:
+   - its fields and dates;
+   - per-weekday time windows;
+   - a senior team per booker, with players from each booker's approximate player count;
+   - **overlap** tags (different bookers, same field, overlapping times) and **shared field**
+     tags;
+   - the $10-per-field fee split between bookers.
+
+   The applicant, contacts and council answers come from the **AMUA details** setting
+   (`amua_org`). The admin ticks the parks to include. The booking site's **📋 Copy for council
+   form** (`buildCouncilPayload`, same shape) plus the panel's Paste box remain as a fallback.
+2. **Fill each page.** **Fill this page** sets every control it recognises on the current
    page (by control name, matching dropdowns by label). It fires input/change/blur and
    waits for Orbeon's loading indicator between fields, because region → park → fields
    are chained.
@@ -321,10 +328,13 @@ Application** extension (`amua-booking-extension/council-extension/`, released a
    - The postal address is only typed in; you pick the match.
    - The declarations (pages 6–8) are never ticked.
    - Anything unset is outlined amber and listed in the log.
-4. **Submit and record.** The admin submits. The panel reads the 8-hex application number
-   off the confirmation page. The admin enters it in **🏛 Send to council**, which records
-   the $10 per field fee (split per field between bookers) and moves the bookings to
-   "awaiting council decision".
+3. **Submit and record.** The admin submits. The panel reads the 8-hex application number
+   off the confirmation page. **Record** moves the bookings to `council_pending` with the
+   `[COUNCIL_APP …]` tag and each booking's fee share, which is the same result as the booking
+   site's **🏛 Send to council**.
+
+The CPSA (GTEC) widget uses the same AMUA details: its submitter, AMUA's point of contact on
+the CPSA form, is the operations contact. This browser's saved values only fill blanks.
 
 It was tested against a mock of the form's control structure only, because the council
 portal can't be reached from the build environment. Expect a round of fixes on the
