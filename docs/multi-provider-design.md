@@ -17,7 +17,7 @@ things have changed:
    no GTEC or CPSA involvement.
 2. **Auckland Council sports parks.** AMUA applies through the council's online portal
    (myAUCKLAND), and council parks booking coordinators reply by email.
-3. **Scale.** The council catalogue alone lists ~260 parks across four regions (see §7).
+3. **Scale.** The council catalogue alone lists 254 parks across four regions (see §7).
    Every new ground that needs a code change is a bottleneck.
 
 ## 2. Where GTEC is hard-coded today
@@ -189,7 +189,7 @@ contains no cookies or tokens.
 | `GET /councilonline/my-account/paginated-booking-applications?pageSize=10&currentPage=N` | JSON `data.formData.results[]` + `pagination` |
 | `GET /councilonline/my-account/paginated-bookings?pageSize=10` | JSON confirmed bookings (empty in this capture) |
 | `GET /councilonline/forms/booking/{code}` | HTML summary: name, type, status, date from/to |
-| `GET /councilonline/orbeon/fr/booking/SportApplicationForm/pdf/{documentId}` | "Export to PDF" of the full form (park, field, dates, times). **Not captured.** |
+| `GET /councilonline/orbeon/fr/booking/SportApplicationForm/pdf/{documentId}` | "Export to PDF" of the full form (park, field, dates, times). Same Orbeon document as the application form in §5.3. |
 
 Fields of each application result:
 - **Identifiers:** `code` (e.g. `0002983560`), and `applicationNumber` /
@@ -236,25 +236,80 @@ same pattern as Sporty. While an admin is signed in to the portal, a content scr
 4. Adds a "Sync council applications" button in the popup. Optionally it runs
    automatically when the admin opens *My applications*.
 
-### 5.3 Capturing park, dates and times
+### 5.3 The application form (second and third HARs)
 
-To be confirmed with one more HAR: open an application, click **Export to PDF**, and
-also open the Orbeon *view* URL, likely
-`/councilonline/orbeon/fr/booking/SportApplicationForm/view/{documentId}`. Orbeon forms
-usually render all fields in the view HTML (`fr-view` controls), which is easier to
-parse than the PDF. Once the field names are known, the extension fills
-`external_requests.detail` = `{park, field, dates[], start, end, activity}`. That lets
-it:
-- match council applications to bookings automatically (park → facility via
-  `facilities.external_ref.council_park`);
-- create *pending* bookings for applications lodged outside the app.
+`GET /councilonline/application/sportapplication?bookingApplicationType=SEASONAL_ALL_SPORTS_PARKS&productCode=SSPPERMITBK`
+opens an **Orbeon Forms** wizard (`SportApplicationForm`). There is no form POST.
+- **Protocol:** every field change is an Ajax event
+  (`POST /councilonline/orbeon/xforms-server?namespace=<uuid>`) carrying `<xxf:event>`
+  XML: `xxforms-value` with the control id and new value, `DOMActivate` for buttons, and
+  `fr-search` for the address lookup.
+- **Server replies:** control values, validation state and **dropdown itemsets** (JSON
+  in `<xxf:itemset>`).
+- **Page navigation:** each "Next" first runs
+  `validateBookingApplicationForm('next', <documentId>)`.
+- **Fee:** `GET /councilonline/yform/rest/getproductpricebycode?productCode=SSPPERMITBK`
+  → **$10.00, pay later**.
 
-### 5.4 Submitting to the council (later)
+The wizard has 8 pages. Control names are the stable part of the ids:
 
-Lodging applications from the app is possible in the same way the extension fills
-Sporty. It is lower value: council applications are few and seasonal. Leave it manual,
-with the app linking to the portal and recording the application number the admin
-pastes back.
+| # | Page | Controls |
+|---|---|---|
+| 1 | Booking | `booking-application-number` (auto), `sportsOrActivity` (35 options — **no "Ultimate"**: use *Other* or *General Sport*), `rso` yes/no + `rsoText`, `sport-booking-type` (casual / seasonal) |
+| 2 | Contact details | `booking-activity-name`, `orgName`, `orgType` (Club/Team, Regional sports organisation, School, Social, Other), `postalAddress` (address search → opaque id), primary `pContactPerson` / `pPreferredContactNumber` / `pAdditionalContactNumber` / email / `pPosition`, secondary `s…` equivalents |
+| 3 | Key and access code holders | `councilResponsibility` yes/no, `contactName`, `contactNumber`, `emailAddress`, `keyOrAccessCode` |
+| 4 | Participant numbers | `junior` + `jNoOfTeam` / `jNoOfPlayer`, `senior` + `sNoOfTeam` / `sNoOfPlayer` |
+| 5 | Booking request | `training` / `competition`, then a **repeating "Park details"** section: `firstTrainingDate1` (first date), `control-7` (last date), `region` → `parkName` → repeating field picker `control-1` ("Select preferred fields or wickets"), per weekday `dayOfTheWeek{Mon…Sun}` + `{mon…sun}StartTime` / `EndTime`, `totalPerWeekHour`, `participantNumberAndGrade`; "add another" / "remove" park |
+| 6 | Health and safety | `healthAndSafety` confirmation |
+| 7 | Standard conditions | `standardConditionsCheck` |
+| 8 | Agreement | `agreementCheckOne` / `Two` / `Three`, `fullName`, `positionInOrganization`, `isPayLater` |
+
+Dates are posted as `{"value":"YYYY-MM-DD","format":"[D01]-[M01]-[Y]","excludedDates":[]}`.
+
+**Park catalogue.** Choosing a region loads that region's park list, and choosing a park
+loads its fields. For example, *Devonport Domain* → Cricket 1–4, Cricket Nets 1,
+General Sport 3, Rugby 1–2. The captured lists are in
+[`docs/data/council-sports-parks.json`](data/council-sports-parks.json):
+
+| Region | Parks |
+|---|---|
+| Central | 62 |
+| North | 62 |
+| South | 93 |
+| West | 37 |
+| **Total** | **254** |
+
+The form's list, not the map PDFs, is authoritative: it includes school grounds such as
+Aorere College that the maps omit. Dropdown `value`s are list positions, not ids, so
+match on labels.
+
+**Reading a lodged application.** A submitted application is the same Orbeon document,
+by `documentId`. Opening it read-only exposes the same control names, so the sync can
+read `region`, `parkName`, `control-1` fields, dates, weekdays and times into
+`external_requests.detail` without any extra reverse-engineering. Still to capture once:
+the URL the portal uses to view a lodged document, which is probably the "Export to PDF"
+link's `/view/` sibling.
+
+### 5.4 Submitting to the council: a pre-fill assistant, not a bot
+
+Replaying the Orbeon event protocol from a server is fragile: session-scoped UUIDs,
+sequence numbers, address-lookup ids, and a payment step. Instead, the extension offers
+**"Fill council application"** on the form page, driven by a booking series from the
+app. It sets values through the page's own inputs and fires change events, so Orbeon
+sends its usual Ajax, and walks pages 1–5:
+- sport *Other*;
+- organisation and contacts from a council profile stored with the provider (§4.1
+  `providers.config`);
+- one Park details block per park, with its fields, dates, weekdays and times.
+
+The admin then reviews pages 6–8, ticks the agreements and submits, and pays the $10
+fee later. The extension reads back the new application number and code into
+`external_requests` and links the booking series to it.
+
+**Catalogue refresh.** Park and field lists change. The extension can also harvest them
+by iterating region → park in the form and upserting into `council_parks` /
+`council_fields` (§7). Each park selection loads its field list, so that is about 254
+cheap Ajax calls, run only on demand.
 
 ## 6. Email intake
 
@@ -334,8 +389,10 @@ region.
 
 ## 7. Council park catalogue
 
-The regional *Sports Fields Maps* PDFs (updated January 2025) list parks by region.
-Counts are from their tables of contents:
+The application form's own dropdowns (§5.3) give the authoritative list: **254 parks**
+(Central 62, North 62, South 93, West 37), saved in `docs/data/council-sports-parks.json`.
+The regional *Sports Fields Maps* PDFs (updated January 2025) are the visual reference
+for field layouts. Counts from their tables of contents:
 
 | Region | Summer | Winter |
 |---|---|---|
@@ -346,10 +403,11 @@ Counts are from their tables of contents:
 
 Field numbers and layouts appear only in the map images.
 
-**Don't create ~260 facilities.** Instead:
-- Seed an admin-only reference list `council_parks(name, region, season)` from these
-  tables of contents, for autocomplete and for routing to the right regional
-  coordinator.
+**Don't create 254 facilities.** Instead:
+- Seed an admin-only reference list `council_parks(name, region)` and
+  `council_fields(park, name)` from `docs/data/council-sports-parks.json`, for
+  autocomplete and for routing to the right regional coordinator. The extension keeps
+  the lists fresh (§5.4).
 - Create a `facilities` row, e.g. "Thompson Park – Field 2", only when AMUA books or
   applies for that park. Record the park and field in `external_ref.council_park` /
   `external_ref.council_field` so the portal sync (§5.3) can match it.
@@ -372,7 +430,8 @@ Field numbers and layouts appear only in the map images.
 |---|---|---|
 | 0 ✅ | St Cuthberts facility; provider on facilities; PO per provider; direct approval for non-GTEC | shipped |
 | 1 | `providers` / `facilities` tables + migration seeding today's constants; load at start-up with code fallback; admin CRUD; provider-labelled statuses | medium |
-| 2 | Extension: council portal sync → `external_requests`; status mapping onto linked bookings | medium (needs the Orbeon HAR for detail) |
+| 2 | Extension: council portal sync → `external_requests` (list JSON + Orbeon document detail); status mapping onto linked bookings | medium |
+| 2b | Extension: "Fill council application" pre-fill assistant + park/field catalogue harvest | medium |
 | 3 | `ingest-email` edge function + Apps Script for AMUA's Gmail + forwarding guide for personal inboxes | small–medium |
 | 4 | Council reference data: contacts, seasons, park catalogue, season/renovation warnings | small |
 | 5 | Provider invoices generalised; council as a billing provider | small |
@@ -386,7 +445,10 @@ Field numbers and layouts appear only in the map images.
 2. **Opening St Cuthberts to bookers:** should it stay admin-only for now?
 3. **Council portal access:** who holds the portal login, and can the extension run in
    that person's browser?
-4. **Mailboxes for the intake:** which ones besides AMUA's Gmail? Each owner needs to
+4. **Council profile:** which organisation details and contacts should the pre-fill
+   use? Primary and secondary contact, key holder, and the postal address as the
+   council's address search knows it.
+5. **Mailboxes for the intake:** which ones besides AMUA's Gmail? Each owner needs to
    set up a forwarding filter (option C).
-5. **Council fees:** when AMUA applies to the council, are the council's fees passed on
+6. **Council fees:** when AMUA applies to the council, are the council's fees passed on
    to clubs through invoices?
