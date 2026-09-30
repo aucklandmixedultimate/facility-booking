@@ -261,12 +261,12 @@ function drawParkFields(p) {
   parkFieldsLayer.clearLayers();
   const t = tagsFor(p);
   if (workMode === "book") {   // Book mode: field areas go in and out of the booker's cart
-    const cart = cartIds();
     fieldKeys(p).forEach(({ f, key }) => {
-      const on = cart.has(cartId(p, key));
-      L.polygon(f.p, { pane: "fieldsPane", fill: true, fillColor: "#14b8a6", fillOpacity: on ? 0.4 : 0.04,
-        color: on ? "#14b8a6" : "#ffffff", weight: on ? 3 : 1.4, dashArray: on ? null : "4 4", opacity: 0.95, bubblingMouseEvents: false })
-        .bindTooltip(`${esc(key)} — ${on ? "in the cart · click to remove" : "click to add to the cart"}`, { className: "parktip", sticky: true })
+      const st = locState(cartId(p, key));   // "active" | "cart" | null
+      L.polygon(f.p, { pane: "fieldsPane", fill: true, fillColor: st === "active" ? "#0f766e" : "#14b8a6",
+        fillOpacity: st === "active" ? 0.55 : st ? 0.3 : 0.04, color: st === "active" ? "#0f766e" : st ? "#14b8a6" : "#ffffff",
+        weight: st ? 3 : 1.4, dashArray: st === "cart" ? "7 4" : st ? null : "4 4", opacity: 0.95, bubblingMouseEvents: false })
+        .bindTooltip(`${esc(key)} — ${st === "active" ? "📌 active booking" : st ? "🛒 in the cart (not booked yet) · click to remove" : "click to add to the cart"}`, { className: "parktip", sticky: true })
         .on("click", () => toggleCart(p, key))
         .addTo(parkFieldsLayer);
     });
@@ -489,8 +489,11 @@ function buildCity() {
     const pv = privOps(p);
     const fl = !PRIV_BY_PARK[p.id]?.length && flags[p.id];
     const ult = ultimateOf(p);
-    const inCart = workMode === "book" ? (bookLocs[whoBooks()] || []).filter(x => x.park_id === p.id).length : 0;
-    if (inCart) L.circleMarker(ll, { radius: 13, color: "#14b8a6", weight: 4, fill: false, interactive: false }).addTo(cityLayer);
+    const mineHere = workMode === "book" ? myLocs().filter(x => x.park_id === p.id) : [];
+    const nAct = mineHere.filter(isActive).length, inCart = mineHere.length - nAct;
+    // Book mode: parks with active bookings get a solid dark-teal ring; cart-only parks a dashed one.
+    if (nAct) L.circleMarker(ll, { radius: 14, color: "#0f766e", weight: 5, fill: true, fillColor: "#14b8a6", fillOpacity: 0.25, interactive: false }).addTo(cityLayer);
+    else if (inCart) L.circleMarker(ll, { radius: 13, color: "#14b8a6", weight: 3, dashArray: "4 3", fill: false, interactive: false }).addTo(cityLayer);
     // An ultimate club's home: a bigger diamond whose centre is the club's colours.
     const clubCol = ult.find(o => o.colors)?.colors;
     const isAmua = pv?.some(o => o.amua);
@@ -505,7 +508,7 @@ function buildCity() {
         : pv?.length ? `<br><b style="color:${PRIV_COLOR}">◆ Privately managed: contact ${esc(pv[0].short)}</b> first` : "")
       + (ult.length ? `<br><b style="color:${ULT_COLOR}">🥏 ${ult.some(o => o.booking_only) ? "Book only through" : "Ultimate club"}: ${esc(ult.map(o => o.operator).join(", "))}</b>` : "")
       + (fl ? `<br><b style="color:${PRIV_COLOR}">◇ Flagged: probably club-run${fl.club ? " (" + esc(fl.club) + ")" : ""}</b>` : "")
-      + (workMode === "book" ? `<br>🛒 ${inCart ? `${inCart} field${inCart > 1 ? "s" : ""} in the cart · ` : ""}<i>Click to book fields</i>` : `<br><i>Click to rate</i>`),
+      + (workMode === "book" ? `<br>${nAct ? `📌 ${nAct} active booking field${nAct > 1 ? "s" : ""} · ` : ""}${inCart ? `🛒 ${inCart} in the cart · ` : ""}<i>Click to book fields</i>` : `<br><i>Click to rate</i>`),
       { className: "parktip", direction: "top", offset: [0, -6] });
     mk.on("click", () => openPark(p.id));
     mk.addTo(cityLayer);
@@ -670,14 +673,33 @@ function parkWorkflow(p) {
 const venueLink = (provider, park) => `${BASE}?venue=${encodeURIComponent(provider + "|" + park)}`;
 const cartId = (p, key) => `cf-${p.id}--${slug(key)}`;
 const whoBooks = () => (bookFor = (bookFor || session?.user?.email || "demo@local").toLowerCase());
-const cartIds = () => new Set((bookLocs[whoBooks()] || []).map(x => x.id));
+// A booker's council fields: "cart" entries are being chosen; saving the cart makes them
+// "active" bookings, which the booking site offers as Provider → Location → Facility.
+const isActive = x => x.status === "active";
+const myLocs = () => bookLocs[whoBooks()] || [];
+const cartOf = () => myLocs().filter(x => !isActive(x));
+const activeOf = () => myLocs().filter(isActive);
+const locState = id => { const x = myLocs().find(y => y.id === id); return !x ? null : isActive(x) ? "active" : "cart"; };
+// Save every cart field as an active booking.
+async function saveCartActive() {
+  const who = whoBooks(), before = myLocs().map(x => ({ ...x })), n = cartOf().length;
+  if (!n) return;
+  const at = new Date().toISOString();
+  bookLocs[who] = before.map(x => isActive(x) ? x : { ...x, status: "active", activated_at: at });
+  if (!(await saveBookLocs())) { bookLocs[who] = before; return; }
+  setStatus(`Saved ${n} field${n > 1 ? "s" : ""} as active bookings. They're now in the booking site under Provider → Location.`);
+  render(); renderTabs(); if (view === "book") renderBook();
+}
 // Add or remove one field (or "Whole park") of a park in the booker's cart; saves at once.
 async function toggleCart(p, key) {
   const who = whoBooks(), before = [...(bookLocs[who] || [])], list = [...before], id = cartId(p, key), i = list.findIndex(x => x.id === id);
+  if (i >= 0 && isActive(list[i])) {
+    setStatus(`${p.name} – ${key} is an active booking. Remove it under 🛒 Cart → Active bookings.`); return;
+  }
   if (i >= 0) list.splice(i, 1);
   else {
     const wf = parkWorkflow(p), f = fieldKeys(p).find(x => x.key === key)?.f, c = f?.c || [p.lat, p.lon];
-    list.push({ id, park_id: p.id, park: p.name, region: p.region, field: key, lat: c[0], lon: c[1], kind: wf.kind, operator: wf.operator,
+    list.push({ id, park_id: p.id, park: p.name, region: p.region, field: key, lat: c[0], lon: c[1], kind: wf.kind, operator: wf.operator, status: "cart",
       added_at: new Date().toISOString(), added_by: session?.user?.email || "" });
   }
   bookLocs[who] = list;
@@ -700,34 +722,44 @@ function workflowHtml(wf) {
 }
 // Book mode's bar under the park map: booker, this park's fields in the cart, workflow, fee.
 function renderBookBar(p) {
-  const who = whoBooks(), wf = parkWorkflow(p), inPark = (bookLocs[who] || []).filter(x => x.park_id === p.id);
+  const who = whoBooks(), wf = parkWorkflow(p), inPark = myLocs().filter(x => x.park_id === p.id);
+  const actHere = inPark.filter(isActive), cartHere = inPark.filter(x => !isActive(x)), nCart = cartOf().length;
   const whole = inPark.some(x => x.field === "Whole park"), known = Object.keys(bookLocs).filter(e => e !== who);
   $("bookBar").innerHTML = `<div class="bb-row"><label>Booking for ${IS_ADMIN ? `<input id="bookWho2" list="bookWhoList2" value="${esc(who)}" title="The booker whose cart this is">` : `<b>${esc(who)}</b>`}</label>
       <datalist id="bookWhoList2">${known.map(e => `<option value="${esc(e)}">`).join("")}</datalist>
       <button class="b" id="bbWhole" aria-pressed="${whole}" title="Book the park without choosing fields">Whole park</button>
-      <button class="b" id="bbCart">🛒 Cart (${(bookLocs[who] || []).length})</button>
-      <a href="${venueLink(wf.provider, p.name)}" target="_blank" rel="noopener">Open in bookings ↗</a></div>
-    <div class="bb-row">${inPark.length ? inPark.map(x => `<span class="chipf">${esc(x.field)} <button data-uncart="${esc(x.field)}" title="Remove">✕</button></span>`).join("") : `<span class="muted">Click a field area on the map to add it to the cart.</span>`}</div>
+      <button class="b" id="bbCart">🛒 Cart (${nCart})</button>
+      ${nCart ? `<button class="b save" id="bbSave" title="Save every cart field as an active booking">✅ Save cart as active bookings</button>` : ""}
+      ${actHere.length ? `<a href="${venueLink(wf.provider, p.name)}" target="_blank" rel="noopener">Book in Facility Booking ↗</a>` : ""}</div>
+    <div class="bb-row">${actHere.map(x => `<span class="chipf act" title="Active booking">📌 ${esc(x.field)}</span>`).join("")}
+      ${cartHere.map(x => `<span class="chipf" title="In the cart, not booked yet">🛒 ${esc(x.field)} <button data-uncart="${esc(x.field)}" title="Remove">✕</button></span>`).join("")}
+      ${inPark.length ? "" : `<span class="muted">Click a field area on the map to add it to the cart.</span>`}</div>
     <div class="bb-row">${workflowHtml(wf)}</div>
     <div class="bb-row muted">Council fee: $10 per field per application, pending until AMUA sends it, then split between the bookers sharing each field.</div>`;
 }
-// The Cart tab: everything in the booker's cart, by park.
+// The Cart tab: fields being chosen (cart), then the booker's active bookings.
 function renderBook() {
-  const who = whoBooks(), mine = bookLocs[who] || [], known = Object.keys(bookLocs).filter(e => e !== who);
-  const byPark = {};
-  mine.forEach(x => (byPark[x.park] ||= []).push(x));
+  const who = whoBooks(), known = Object.keys(bookLocs).filter(e => e !== who), cart = cartOf(), act = activeOf();
+  const tag = x => `<span class="tag${x.kind === "council_private" ? " priv" : ""}">${x.kind === "council_private" ? "◆ " + esc(x.operator?.short || "operator") + " + council" : "🏛 council"}</span>`;
+  const prov = x => x.kind === "council_private" ? "op_" + x.operator.id : "akl_council";
+  const parks = xs => new Set(xs.map(x => x.park)).size;
   $("bookPanel").innerHTML = `<div class="bk-who"><h3>🛒 Cart</h3><label>for ${IS_ADMIN ? `<input id="bookWho" list="bookWhoList" value="${esc(who)}" title="The booker whose cart this is">` : `<b>${esc(who)}</b>`}</label>
       <datalist id="bookWhoList">${known.map(e => `<option value="${esc(e)}">`).join("")}</datalist></div>
-    <p class="muted">Switch to <b>📅 Book</b> mode, open a park from the Auckland map and click its field areas to add them. Cart fields appear in the booking site's location dropdown for this booker.</p>
-    <div><b>${mine.length} field${mine.length === 1 ? "" : "s"}</b> <span class="muted">at ${Object.keys(byPark).length} park${Object.keys(byPark).length === 1 ? "" : "s"}</span></div><div class="bk-list">`
-    + (mine.length ? Object.entries(byPark).map(([park, xs]) => xs.map(x => `<div class="bk-row"><span class="n">${esc(park)} – ${esc(x.field)}</span>
-        <span class="tag${x.kind === "council_private" ? " priv" : ""}">${x.kind === "council_private" ? "◆ " + esc(x.operator?.short || "operator") + " + council" : "🏛 council"}</span>
+    <p class="muted">1. In <b>📅 Book</b> mode, open a park from the Auckland map and click its field areas to add them here.
+      2. <b>Save them as active bookings</b>. 3. Book dates and times for them in Facility Booking (Provider → Location → Facility).</p>
+    <section class="bk-sec"><h4>🛒 In the cart <span class="muted">${cart.length} field${cart.length === 1 ? "" : "s"}${cart.length ? ` at ${parks(cart)} park${parks(cart) === 1 ? "" : "s"}` : ""} · not booked yet</span></h4>
+      <div class="bk-list">${cart.length ? cart.map(x => `<div class="bk-row"><span class="n">${esc(x.park)} – ${esc(x.field)}</span>${tag(x)}
         <button data-bkopen="${esc(x.park_id)}" title="Open this park in Book mode">open</button>
-        <a href="${venueLink(x.kind === "council_private" ? "op_" + x.operator.id : "akl_council", park)}" target="_blank" rel="noopener">book ↗</a>
-        <button data-bkdel="${esc(x.id)}" title="Remove from the cart">✕</button></div>`).join("")).join("")
-      : `<p class="muted">The cart is empty.</p>`) + `</div>`;
+        <button data-bkdel="${esc(x.id)}" title="Remove from the cart">✕</button></div>`).join("") : `<p class="muted">Nothing in the cart.</p>`}</div>
+      ${cart.length ? `<div class="bk-go"><button class="primary" id="bkSave">✅ Save ${cart.length} field${cart.length === 1 ? "" : "s"} as active bookings</button></div>` : ""}</section>
+    <section class="bk-sec act"><h4>📌 Active bookings <span class="muted">${act.length} field${act.length === 1 ? "" : "s"} · in Facility Booking</span></h4>
+      <div class="bk-list">${act.length ? act.map(x => `<div class="bk-row"><span class="n">${esc(x.park)} – ${esc(x.field)}</span>${tag(x)}
+        <button data-bkopen="${esc(x.park_id)}" title="Open this park in Book mode">open</button>
+        <a href="${venueLink(prov(x), x.park)}" target="_blank" rel="noopener">book dates ↗</a>
+        <button data-bkdel="${esc(x.id)}" data-active="1" title="Remove this active booking field">✕</button></div>`).join("") : `<p class="muted">No active bookings yet. Save cart fields to make them bookable.</p>`}</div></section>`;
 }
-function renderTabs() { $("bookTab").textContent = `🛒 Cart${(bookLocs[whoBooks()] || []).length ? ` (${(bookLocs[whoBooks()] || []).length})` : ""}`; }
+function renderTabs() { const c = cartOf().length, a = activeOf().length;
+  $("bookTab").textContent = `🛒 Cart${c ? ` (${c})` : ""}${a ? ` · 📌 ${a}` : ""}`; }
 function applyModeUi() {
   const book = workMode === "book";
   $("modeRate").setAttribute("aria-checked", String(!book)); $("modeBook").setAttribute("aria-checked", String(book));
@@ -750,9 +782,12 @@ function bindBook() {
   $("bookBar").addEventListener("click", e => { const p = current(); if (!p) return;
     const un = e.target.closest("[data-uncart]"); if (un) return toggleCart(p, un.dataset.uncart);
     if (e.target.id === "bbWhole") return toggleCart(p, "Whole park");
-    if (e.target.id === "bbCart") setView("book"); });
+    if (e.target.id === "bbCart") setView("book");
+    if (e.target.id === "bbSave") saveCartActive(); });
   $("bookPanel").addEventListener("click", async e => {
     const del = e.target.closest("[data-bkdel]");
+    if (e.target.id === "bkSave") return saveCartActive();
+    if (del && del.dataset.active && !confirm("Remove this field from the active bookings? It won't be offered in Facility Booking any more (existing bookings stay).")) return;
     if (del) { const w = whoBooks(), before = bookLocs[w] || []; bookLocs[w] = before.filter(x => x.id !== del.dataset.bkdel);
       if (await saveBookLocs()) setStatus("Removed from " + w + "'s cart."); else bookLocs[w] = before;
       renderBook(); renderTabs(); return; }
