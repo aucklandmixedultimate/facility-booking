@@ -59,12 +59,6 @@
                     <span class="ico" id="centreIco">🔒</span>
                   </button>
                   <span class="centrelbl" id="centreLbl">Unlock · rate fit</span>
-                  <div class="fitpop" id="fitPop" hidden role="group" aria-label="How many fields fit here">
-                    <span class="fp-h">Fits here</span>
-                    <button data-fit="reduced">Reduced size</button>
-                    <button data-fit="full">1 full field</button>
-                    <button data-fit="multi">2+ fields</button>
-                  </div>
                 </div>
                 <div class="toolbar" role="toolbar" aria-label="Map tools">
                   <button id="backCity" title="Back to the Auckland map (C)">◂ Auckland</button>
@@ -80,11 +74,20 @@
                   <label>End zone (m) <input type="number" id="fEz" min="0" max="30" step="1"></label>
                   <button id="fReset">WFDF standard</button>
                 </div>
+                <div class="fitbar" id="fitPop" hidden role="group" aria-label="Rate the fit at this spot">
+                  <span class="fb-msg" id="fitMsg">Pan to fine-tune, then rate the fit here</span>
+                  <span class="fb-btns">
+                    <button data-fit="reduced">Reduced size</button>
+                    <button data-fit="full">1 full field</button>
+                    <button data-fit="multi">2+ fields</button>
+                  </span>
+                </div>
                 <div class="legend" id="legend" hidden></div>
                 <div class="rotatehint" id="rotateHint" hidden>Move the mouse to turn the field · click to lock it</div>
                 <div class="maphint" id="mapHint">Click the map to mark a light pole</div>
               </div>
               <div class="info" id="info">
+                <div class="privbox" id="privBox" hidden></div>
                 <div class="tags">
                   <span class="k">Quality</span><div class="seg stars" id="segQuality"></div>
                   <span class="k">Fit</span><div class="seg" id="segFit"></div>
@@ -117,7 +120,7 @@
           </div>
           <div class="list" id="list"></div>
           <div class="railtools"><button id="exportBtn">Download CSV</button></div>
-          <p class="help">Scroll zooms the map. Click the map to mark light poles (click one to remove it). Unlock the centre button to turn the field, lock it to rate the fit. Keys: <kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd>, <kbd>S</kbd> later, <kbd>Z</kbd> undo, <kbd>1</kbd>–<kbd>5</kbd> quality, <kbd>Enter</kbd> lock/unlock, <kbd>C</kbd> Auckland, <kbd>T</kbd> field, <kbd>V</kbd> satellite, <kbd>M</kbd> next map.</p>
+          <p class="help">Scroll zooms the map. Click the map to mark light poles (click one to remove it). Unlock the centre button to turn the field and lock it to fix the angle; pan to fine-tune, then rate the fit to save that spot. ◆ parks are privately managed: ask the operator first. Keys: <kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd>, <kbd>S</kbd> later, <kbd>Z</kbd> undo, <kbd>1</kbd>–<kbd>5</kbd> quality, <kbd>Enter</kbd> lock/unlock, <kbd>C</kbd> Auckland, <kbd>T</kbd> field, <kbd>V</kbd> satellite, <kbd>M</kbd> next map.</p>
         </aside>
       </div>
     </div>
