@@ -479,8 +479,9 @@ function buildCity() {
     const ult = ultimateOf(p);
     const inCart = workMode === "book" ? (bookLocs[whoBooks()] || []).filter(x => x.park_id === p.id).length : 0;
     if (inCart) L.circleMarker(ll, { radius: 13, color: "#14b8a6", weight: 4, fill: false, interactive: false }).addTo(cityLayer);
-    if (ult.length) L.circleMarker(ll, { radius: 15, color: ULT_COLOR, weight: 3, fill: true, fillColor: ULT_COLOR, fillOpacity: 0.18, interactive: false }).addTo(cityLayer);
-    const mk = pv?.length ? privMarker(ll, col, isCur, top) : L.circleMarker(ll, { radius: r ? 8 : 6,
+    // An ultimate club's home: a bigger diamond whose centre is the club's colours.
+    const clubCol = ult.find(o => o.colors)?.colors;
+    const mk = pv?.length ? privMarker(ll, col, isCur, top, clubCol) : L.circleMarker(ll, { radius: r ? 8 : 6,
       color: top ? "#e0a647" : isCur ? "#15211c" : fl ? PRIV_COLOR : "#ffffff", weight: top || isCur || fl ? 3 : 1.5, dashArray: fl ? "3 3" : null,
       fillColor: col, fillOpacity: r ? 0.95 : 0.7, bubblingMouseEvents: false });
     const tags = r ? [r.decision === "top" ? "★ Top pick" : r.decision === "yes" ? "Shortlisted" : "Rejected",
@@ -510,9 +511,12 @@ function buildCity() {
   });
   return pts;
 }
-function privMarker(ll, fill, isCur, top) {
-  return L.marker(ll, { icon: L.divIcon({ className: "", iconSize: [22, 22], iconAnchor: [11, 11],
-    html: `<div class="privpin${isCur ? " cur" : ""}" style="background:${fill};${top ? "border-color:#e0a647;" : ""}margin:3px"></div>` }), keyboard: false, bubblingMouseEvents: false });
+function privMarker(ll, fill, isCur, top, club) {
+  const style = club
+    ? `background:${club.fill};border-color:${club.edge || "#fff"};box-shadow:0 0 0 2.5px ${PRIV_COLOR},0 1px 5px rgba(0,0,0,.5);width:18px;height:18px;margin:2px`
+    : `background:${fill};${top ? "border-color:#e0a647;" : ""}margin:3px`;
+  return L.marker(ll, { icon: L.divIcon({ className: "", iconSize: [26, 26], iconAnchor: [13, 13],
+    html: `<div class="privpin${isCur ? " cur" : ""}" style="${style}"></div>` }), keyboard: false, bubblingMouseEvents: false });
 }
 function privContacts(o) {
   const c = o.contact || {}, bits = [];
@@ -552,7 +556,7 @@ function syncCityFields() {
 function renderLegend() {
   const row = (c, t) => `<div><i style="background:${c}"></i>${t}</div>`;
   $("legend").innerHTML = `<button class="lg-h" id="legendToggle" aria-expanded="true">Suitability <span aria-hidden="true">▾</span></button>`
-    + `<div class="lg-b">${row(`hsl(${suitHue(0.95)} 72% 42%)`, "Excellent")}${row(`hsl(${suitHue(0.7)} 72% 42%)`, "Good")}${row(`hsl(${suitHue(0.5)} 72% 42%)`, "Fair")}${row(`hsl(${suitHue(0.2)} 72% 42%)`, "Poor")}${row("#b3372d", "Rejected")}${row("#8a958f", "Not rated")}<div><i style="background:#8a958f;box-shadow:0 0 0 3px ${ULT_COLOR}"></i><b style="color:${ULT_COLOR}">Ultimate club home</b></div><div><span class="dia"></span>Privately managed</div><div><i style="background:#8a958f;border:2px dashed ${PRIV_COLOR};box-shadow:none"></i>Flagged: probably club-run</div><div class="lg-note">Gold ring = top pick</div></div>`;
+    + `<div class="lg-b">${row(`hsl(${suitHue(0.95)} 72% 42%)`, "Excellent")}${row(`hsl(${suitHue(0.7)} 72% 42%)`, "Good")}${row(`hsl(${suitHue(0.5)} 72% 42%)`, "Fair")}${row(`hsl(${suitHue(0.2)} 72% 42%)`, "Poor")}${row("#b3372d", "Rejected")}${row("#8a958f", "Not rated")}<div><span class="dia" style="background:#c8102e;border-color:#f2b705;box-shadow:0 0 0 2px ${PRIV_COLOR}"></span><b>Ultimate club home</b> <span class="lg-note">(club colours)</span></div><div><span class="dia"></span>Privately managed</div><div><i style="background:#8a958f;border:2px dashed ${PRIV_COLOR};box-shadow:none"></i>Flagged: probably club-run</div><div class="lg-note">Gold ring = top pick</div></div>`;
   // Collapsed by default on small screens so it doesn't cover the map; the choice is remembered.
   const setOpen = open => { $("legend").classList.toggle("collapsed", !open); $("legendToggle").setAttribute("aria-expanded", String(open)); };
   setOpen(store.get("vet-legend-open", !matchMedia("(max-width: 640px)").matches));
@@ -808,7 +812,7 @@ function render() {
     // Chips: the managing club (◆) and any ultimate club (🥏), which may be the booking contact.
     const lead = (pv || []).find(o => o.code !== "ultimate"), ult = ultimateOf(p);
     $("decChip").innerHTML = (lead ? `<span class="chip priv" title="Ask ${esc(lead.operator)} before applying to council">◆ ${esc(lead.short)}</span> ` : "")
-      + ult.map(o => `<span class="chip ult" title="Home of ${esc(o.operator)}">🥏 ${esc(o.short)}</span> `).join("") + (r ? `<span class="chip ${r.decision === "no" ? "no" : r.decision === "top" ? "top" : ""}">${r.decision === "top" ? "Top pick" : r.decision === "yes" ? "Shortlisted" : "Rejected"}${r.by ? " · " + esc(r.by.split("@")[0]) : ""}</span>` : "");
+      + ult.map(o => `<span class="chip ult" title="Home of ${esc(o.operator)}"${o.colors ? ` style="background:${o.colors.fill};color:#fff;box-shadow:inset 0 0 0 2px ${o.colors.edge || "#fff"}"` : ""}>🥏 ${esc(o.short)}</span> `).join("") + (r ? `<span class="chip ${r.decision === "no" ? "no" : r.decision === "top" ? "top" : ""}">${r.decision === "top" ? "Top pick" : r.decision === "yes" ? "Shortlisted" : "Rejected"}${r.by ? " · " + esc(r.by.split("@")[0]) : ""}</span>` : "");
     const i = Math.min(mapIdx[p.id] || 0, Math.max(0, p.maps.length - 1));
     $("thumbs").innerHTML = p.maps.length > 1 ? p.maps.map((m, k) => `<button data-map="${k}" aria-pressed="${k === i}" title="${esc(m.title)}">${m.season === "winter" ? "❄ Winter" : "☀ Summer"}${/area/i.test(m.title) ? " area" : ""}</button>`).join("") : "";
     const cf = councilFields(p).map(f => f.n).filter(Boolean);
