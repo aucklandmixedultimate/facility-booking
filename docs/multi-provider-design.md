@@ -437,7 +437,7 @@ class, `council_private`, and their own request workflow:
 | 4 | Confirm the slot, lights and access with the private operator | operator |
 
 **Data.** `public/council-maps/private-managed.json` is the seed list: 11 grounds in the
-default Auckland view, North Harbour Stadium to Opaheke Sports Park.
+default Auckland view, North Harbour Stadium to Opaheke Sports Park (13 operators).
 - **Each entry holds:**
   - the operator, its type (club / trust / CCO) and what it manages;
   - its contacts: email, phone, address and web page;
@@ -450,6 +450,12 @@ default Auckland view, North Harbour Stadium to Opaheke Sports Park.
   - each operator becomes a `providers` row with `kind = 'council_private'`;
   - each ground becomes a `provider_sites` row linked to its council park;
   - the contacts seed `provider_contacts`.
+
+**Several clubs on one ground.** Only one operator is the point of contact:
+- the one marked `primary`, e.g. PURC at Lloyd Elsmore Park, confirmed by AMUA;
+- otherwise the rugby or football club (`code`).
+
+The others are listed as "also on site".
 
 **Statuses.** A `council_private` booking walks the stages above. It uses the §4.3
 provider stages for steps 1 and 4 and the council stages for steps 2 and 3. It's only

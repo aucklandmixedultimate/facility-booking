@@ -39,7 +39,7 @@ const store = { get(k, d) { try { const v = localStorage.getItem(k); return v ==
 function setStatus(t, warn) { $("status").textContent = t; $("status").classList.toggle("warn", !!warn); }
 
 let PARKS = [], BYID = {};
-let PRIV = { operators: [], workflow: [] }, PRIV_BY_PARK = {};   // privately managed grounds (private-managed.json)
+let PRIV = { operators: [], workflow: [] }, PRIV_BY_PARK = {};   // park_id -> [operators] from private-managed.json (a ground can have several)
 let reviews = {};              // park_id -> review
 let mode = "local";            // "shared" (Supabase) | "local" (this browser)
 let session = null;
@@ -315,13 +315,13 @@ function buildCity() {
     const r = reviews[p.id], col = suitColor(r), top = r?.decision === "top", isCur = view === "city" && cur?.id === p.id && !!focusId;
     pts.push(ll);
     const pv = PRIV_BY_PARK[p.id];
-    const mk = pv ? privMarker(ll, col, isCur, top) : L.circleMarker(ll, { radius: r ? 8 : 6, color: top ? "#e0a647" : isCur ? "#15211c" : "#ffffff", weight: top || isCur ? 3 : 1.5,
+    const mk = pv?.length ? privMarker(ll, col, isCur, top) : L.circleMarker(ll, { radius: r ? 8 : 6, color: top ? "#e0a647" : isCur ? "#15211c" : "#ffffff", weight: top || isCur ? 3 : 1.5,
       fillColor: col, fillOpacity: r ? 0.95 : 0.7, bubblingMouseEvents: false });
     const tags = r ? [r.decision === "top" ? "★ Top pick" : r.decision === "yes" ? "Shortlisted" : "Rejected",
       r.quality ? r.quality + "/5" : "", r.fit && r.fit !== "unknown" ? FIT_LABEL[r.fit] : "",
       r.lights === "full" || r.lights === "training" ? "💡 lights" : r.lights === "none" ? "no lights" : ""].filter(Boolean).join(" · ") : "Not rated yet";
     mk.bindTooltip(`<b>${esc(p.name)}</b><br>${esc(p.region)} · <b style="color:${col}">${suitWord(r)}</b><br>${esc(tags)}${r?.fields ? "<br>Fields: " + esc(r.fields) : ""}`
-      + (pv ? `<br><b style="color:${PRIV_COLOR}">◆ Privately managed: ${esc(pv.short)}</b> — ask them first` : "") + `<br><i>Click to rate</i>`,
+      + (pv?.length ? `<br><b style="color:${PRIV_COLOR}">◆ Privately managed: contact ${esc(pv[0].short)}</b> first` : "") + `<br><i>Click to rate</i>`,
       { className: "parktip", direction: "top", offset: [0, -6] });
     mk.on("click", () => openPark(p.id));
     mk.addTo(cityLayer);
@@ -335,7 +335,7 @@ function buildCity() {
   // Private grounds that aren't in the council maps: hollow diamonds with the operator's contacts.
   PRIV.operators.filter(o => !o.park_id || !BYID[o.park_id]).forEach(o => {
     const ll = [o.lat, o.lon]; pts.push(ll);
-    privMarker(ll, "transparent", false, false).bindPopup(privHtml(o, true), { className: "parktip", maxWidth: 320 })
+    privMarker(ll, "transparent", false, false).bindPopup(privHtml(o), { className: "parktip", maxWidth: 320 })
       .bindTooltip(`<b>${esc(o.park)}</b><br><b style="color:${PRIV_COLOR}">◆ ${esc(o.operator)}</b><br>Not in the council field maps · click for contacts`, { className: "parktip", direction: "top", offset: [0, -8] })
       .addTo(cityLayer);
   });
@@ -345,16 +345,26 @@ function privMarker(ll, fill, isCur, top) {
   return L.marker(ll, { icon: L.divIcon({ className: "", iconSize: [22, 22], iconAnchor: [11, 11],
     html: `<div class="privpin${isCur ? " cur" : ""}" style="background:${fill};${top ? "border-color:#e0a647;" : ""}margin:3px"></div>` }), keyboard: false, bubblingMouseEvents: false });
 }
-function privHtml(o, full) {
+function privContacts(o) {
   const c = o.contact || {}, bits = [];
   if (c.email) bits.push(`<a href="mailto:${esc(c.email)}">${esc(c.email)}</a>`);
   if (c.phone) bits.push(`<a href="tel:${esc(c.phone.replace(/[^+\d]/g, ""))}">${esc(c.phone)}</a>`);
   if (c.url) bits.push(`<a href="${esc(c.url)}" target="_blank" rel="noopener">website ↗</a>`);
-  const steps = `<ol>${PRIV.workflow.map(w => `<li title="${esc(w.detail)}">${esc(w.label)}</li>`).join("")}</ol>`;
-  const status = { confirmed: "confirmed", likely: "likely", "to-verify": "to verify" }[o.status] || o.status;
-  return full
-    ? `<b>${esc(o.park)}</b>${o.approx ? " (approx. location)" : ""}<br><b style="color:${PRIV_COLOR}">◆ ${esc(o.operator)}</b> · ${esc(status)}<br>${esc(o.manages)}<br>${bits.join(" · ")}${c.address ? "<br>" + esc(c.address) : ""}<br><b>Request steps</b>${steps}${o.notes ? `<i>${esc(o.notes)}</i>` : ""}`
-    : `<span><b>◆ Privately managed: ${esc(o.operator)}</b> (${esc(status)}) — ${esc(o.manages)}</span><span>${bits.join(" · ")}</span><span><b>Request steps:</b> ${steps}</span>`;
+  return bits.join(" · ");
+}
+const privStatus = o => ({ confirmed: "confirmed", likely: "likely", "to-verify": "to verify" }[o.status] || o.status);
+const privSteps = () => `<ol>${PRIV.workflow.map(w => `<li title="${esc(w.detail)}">${esc(w.label)}</li>`).join("")}</ol>`;
+// Popup for a private ground that isn't a council park.
+function privHtml(o) {
+  const c = o.contact || {};
+  return `<b>${esc(o.park)}</b>${o.approx ? " (approx. location)" : ""}<br><b style="color:${PRIV_COLOR}">◆ ${esc(o.operator)}</b> · ${esc(privStatus(o))}<br>${esc(o.manages)}<br>${privContacts(o)}${c.address ? "<br>" + esc(c.address) : ""}<br><b>Request steps</b>${privSteps()}${o.notes ? `<i>${esc(o.notes)}</i>` : ""}`;
+}
+// Park card banner: every operator on this ground, then the request steps once.
+function privBanner(ops) {
+  const [lead, ...rest] = ops;
+  return `<span><b>◆ Contact: ${esc(lead.operator)}</b> (${esc(privStatus(lead))}) — ${esc(lead.manages)} · ${privContacts(lead)}</span>`
+    + (rest.length ? `<span>Also on site: ${rest.map(o => `${esc(o.operator)} (${esc(o.code || o.type)}${o.contact?.url ? `, <a href="${esc(o.contact.url)}" target="_blank" rel="noopener">website ↗</a>` : ""})`).join(" · ")}</span>` : "")
+    + `<span><b>Request steps:</b> ${privSteps()}</span>`;
 }
 function syncCityFields() {
   if (view !== "city") return;
@@ -454,9 +464,9 @@ function render() {
     if (next?.maps.length) $("behindImg").src = BASE + "council-maps/" + next.maps[0].file;
     $("parkName").textContent = p.name; $("parkRegion").textContent = p.region;
     const pv = PRIV_BY_PARK[p.id];
-    $("privBox").hidden = !pv; $("privBox").innerHTML = pv ? privHtml(pv, false) : "";
+    $("privBox").hidden = !pv?.length; $("privBox").innerHTML = pv?.length ? privBanner(pv) : "";
     const r = reviews[p.id];
-    $("decChip").innerHTML = (pv ? `<span class="chip priv" title="Ask ${esc(pv.operator)} before applying to council">◆ ${esc(pv.short)}</span> ` : "") + (r ? `<span class="chip ${r.decision === "no" ? "no" : r.decision === "top" ? "top" : ""}">${r.decision === "top" ? "Top pick" : r.decision === "yes" ? "Shortlisted" : "Rejected"}${r.by ? " · " + esc(r.by.split("@")[0]) : ""}</span>` : "");
+    $("decChip").innerHTML = (pv?.length ? `<span class="chip priv" title="Ask ${esc(pv[0].operator)} before applying to council">◆ ${esc(pv[0].short)}</span> ` : "") + (r ? `<span class="chip ${r.decision === "no" ? "no" : r.decision === "top" ? "top" : ""}">${r.decision === "top" ? "Top pick" : r.decision === "yes" ? "Shortlisted" : "Rejected"}${r.by ? " · " + esc(r.by.split("@")[0]) : ""}</span>` : "");
     const i = Math.min(mapIdx[p.id] || 0, Math.max(0, p.maps.length - 1));
     $("thumbs").innerHTML = p.maps.length > 1 ? p.maps.map((m, k) => `<button data-map="${k}" aria-pressed="${k === i}" title="${esc(m.title)}">${m.season === "winter" ? "❄ Winter" : "☀ Summer"}${/area/i.test(m.title) ? " area" : ""}</button>`).join("") : "";
     const cf = councilFields(p).map(f => f.n).filter(Boolean);
@@ -617,7 +627,8 @@ function exportCsv() {
   PARKS.forEach(p => { const r = reviews[p.id]; if (!r) return; const pl = r.placement;
     rows.push([p.region, p.name, r.decision === "top" ? "top pick" : r.decision === "yes" ? "shortlist" : "reject", suitWord(r), r.lights, pl?.lights?.length || 0,
       FIT_LABEL[r.fit] || r.fit, r.quality || "", r.fields, r.notes, pl?.lat != null ? `${pl.lat}, ${pl.lon}, ${pl.angle}` : "",
-      PRIV_BY_PARK[p.id]?.operator || "", [PRIV_BY_PARK[p.id]?.contact?.email, PRIV_BY_PARK[p.id]?.contact?.phone].filter(Boolean).join(" / "), r.by || "", r.at || ""]); });
+      PRIV_BY_PARK[p.id]?.[0]?.operator || "",
+      [PRIV_BY_PARK[p.id]?.[0]?.contact?.email, PRIV_BY_PARK[p.id]?.[0]?.contact?.phone].filter(Boolean).join(" / "), r.by || "", r.at || ""]); });
   const csv = rows.map(r => r.map(v => { const s = String(v ?? ""); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }).join(",")).join("\n");
   const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); a.download = "council-field-vetting.csv"; a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
@@ -628,7 +639,11 @@ function gate(html) { $("gate").innerHTML = html; $("gate").hidden = false; $("a
 async function start() {
   const res = await fetch(BASE + "council-maps/parks.json"); PARKS = (await res.json()).parks; BYID = Object.fromEntries(PARKS.map(p => [p.id, p]));
   try { const pr = await fetch(BASE + "council-maps/private-managed.json"); if (pr.ok) PRIV = await pr.json(); } catch { /* optional data */ }
-  PRIV_BY_PARK = Object.fromEntries((PRIV.operators || []).filter(o => o.park_id).map(o => [o.park_id, o]));
+  PRIV_BY_PARK = {};
+  (PRIV.operators || []).filter(o => o.park_id).forEach(o => (PRIV_BY_PARK[o.park_id] ||= []).push(o));
+  // Point of contact first: the operator marked primary, else the rugby or football club.
+  const rank = o => o.primary ? 0 : ["rugby", "football"].includes(o.code) ? 1 : 2;
+  Object.values(PRIV_BY_PARK).forEach(ops => ops.sort((a, b) => rank(a) - rank(b)));
   const regions = [...new Set(PARKS.map(p => p.region))];
   $("region").insertAdjacentHTML("beforeend", regions.map(r => `<option>${esc(r)}</option>`).join(""));
   $("region").value = store.get("vet-region", ""); $("mode").value = store.get("vet-mode", "todo"); $("mapsOnly").checked = store.get("vet-mapsOnly", true);
