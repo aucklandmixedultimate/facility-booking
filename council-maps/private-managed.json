@@ -192,7 +192,8 @@
       "icons": [
         {
           "mono": "ANI",
-          "bg": "#1d4ed8"
+          "bg": "#1d4ed8",
+          "img": "logos/ani.png"
         }
       ],
       "category": "community"
@@ -224,7 +225,8 @@
       "icons": [
         {
           "mono": "STC",
-          "bg": "#7f1d1d"
+          "bg": "#7f1d1d",
+          "img": "logos/stcuthberts.png"
         }
       ]
     },
@@ -252,7 +254,8 @@
       "icons": [
         {
           "mono": "SHC",
-          "bg": "#1e3a8a"
+          "bg": "#1e3a8a",
+          "img": "logos/sacred-heart.png"
         }
       ]
     },
