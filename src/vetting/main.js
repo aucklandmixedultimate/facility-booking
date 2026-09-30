@@ -148,8 +148,36 @@ function tagsFor(p) {
     draft[p.id] = { lights: r.lights || "unknown", lightPts: (r.placement?.lights || []).map(x => [...x]), fit: r.fit || "unknown",
       quality: r.quality || 0, fields: r.fields || "", notes: r.notes || "", fieldsManual: !!r.fields,
       // The confirmed field spot: set when a fit is rated, and only this spot is saved.
-      spot: r.placement?.lat != null ? { lat: r.placement.lat, lon: r.placement.lon, angle: r.placement.angle || 0 } : null }; }
+      spot: r.placement?.lat != null ? { lat: r.placement.lat, lon: r.placement.lon, angle: r.placement.angle || 0 } : null,
+      // Per-council-field ratings, keyed by field: {name, fit, lat, lon, angle, lights: [[lat, lon]]}.
+      fr: JSON.parse(JSON.stringify(r.placement?.fields || {})), sel: null };
+    const d = draft[p.id];
+    // Older reviews saved one spot for the park: treat it as a rating of its first field.
+    if (!Object.keys(d.fr).length && d.spot && d.fit !== "unknown") {
+      const name = (r.fields || "").split(",")[0].trim() || "This spot";
+      d.fr[name] = { name, fit: d.fit, lat: d.spot.lat, lon: d.spot.lon, angle: d.spot.angle, lights: [] };
+    }
+  }
   return draft[p.id];
+}
+const FIT_RANK = { unknown: 0, reduced: 1, full: 2, multi: 3 };
+// Park-level fit, fields and spot follow from the per-field ratings: the best fit wins.
+function syncFromFields(t) {
+  const rated = Object.values(t.fr).filter(x => x.fit && x.fit !== "unknown");
+  const best = rated.sort((a, b) => FIT_RANK[b.fit] - FIT_RANK[a.fit])[0];
+  t.fit = best ? best.fit : "unknown";
+  t.spot = best ? { lat: best.lat, lon: best.lon, angle: best.angle } : null;
+  if (!t.fieldsManual || !t.fields.trim()) { t.fields = rated.map(x => x.name).join(", "); t.fieldsManual = false; }
+  const n = allLights(t).length;
+  if (n && t.lights !== "full" && t.lights !== "training") t.lights = "full";
+  if (!n && (t.lights === "full")) t.lights = "unknown";
+}
+const allLights = t => t.lightPts.concat(...Object.values(t.fr).map(x => x.lights || []));
+// Bulbs go to the selected field; with no field selected they're park-wide.
+function activeLights(t) {
+  if (!t.sel) return t.lightPts;
+  t.fr[t.sel] ||= { name: t.sel, fit: "unknown", lights: [] };
+  return (t.fr[t.sel].lights ||= []);
 }
 // "Majority configured": at least three of lights, fit, quality and fields are set.
 function ratedCount(t) { return [t.lights !== "unknown", t.fit !== "unknown", t.quality > 0, !!t.fields.trim()].filter(Boolean).length; }
@@ -187,7 +215,7 @@ function showMap(p) {
     map.setView(p.lat ? [p.lat, p.lon] : [-36.87, 174.77], p.lat ? 16.5 : 11, { animate: false });
     baseZoom = null;
   }
-  shownPark = p.id + "#" + i; pin = null; updateLayer(); sizeField(); drawParkFields(p); drawLights(p);
+  shownPark = p.id + "#" + i; pin = null; tagsFor(p).sel = null; updateLayer(); sizeField(); drawParkFields(p); drawLights(p);
 }
 function councilVisible() {
   if (!overlay) return false;
@@ -204,34 +232,68 @@ function councilFields(p) {
   const i = Math.min(mapIdx[p.id] || 0, Math.max(0, p.maps.length - 1));
   return p.maps[i]?.fields || [];
 }
+// Council field areas are clickable: selecting one targets it for rating (or editing an
+// existing rating) and shows only its lights.
+function fieldKeys(p) {
+  const seen = {};
+  return councilFields(p).map((f, i) => { let key = f.n || `Field ${i + 1}`;
+    if (seen[key]) key += ` (${++seen[key]})`; else seen[key] = 1;
+    return { f, key }; });
+}
+const FIT_COLOR = { multi: "#1f7a4d", full: "#46b37b", reduced: "#e0a647" };
 function drawParkFields(p) {
   parkFieldsLayer.clearLayers();
-  const chosen = new Set(tagsFor(p).fields.split(",").map(s => s.trim().toLowerCase()).filter(Boolean));
-  councilFields(p).forEach(f => {
-    const on = chosen.has((f.n || "").toLowerCase());
-    L.polygon(f.p, { pane: "fieldsPane", interactive: false, fill: on, fillColor: "#ffd400", fillOpacity: 0.12,
-      color: on ? "#ffd400" : "#ffffff", weight: on ? 2.5 : 1.2, dashArray: on ? null : "4 4", opacity: 0.9 }).addTo(parkFieldsLayer);
+  const t = tagsFor(p);
+  fieldKeys(p).forEach(({ f, key }) => {
+    const rt = t.fr[key], sel = t.sel === key, fc = rt?.fit && FIT_COLOR[rt.fit];
+    L.polygon(f.p, { pane: "fieldsPane", fill: true, fillColor: fc || "#ffd400", fillOpacity: fc ? 0.3 : sel ? 0.12 : 0.02,
+      color: sel ? "#ffd400" : fc || "#ffffff", weight: sel ? 3.5 : fc ? 2.5 : 1.2, dashArray: sel || fc ? null : "4 4", opacity: 0.95, bubblingMouseEvents: false })
+      .bindTooltip(`${esc(key)}${rt?.fit && rt.fit !== "unknown" ? " · " + FIT_LABEL[rt.fit] : ""}${rt?.lights?.length ? " · 💡" + rt.lights.length : ""} — click to ${rt?.fit && rt.fit !== "unknown" ? "edit" : "rate"}`, { className: "parktip", sticky: true })
+      .on("click", () => { if (rotating) return lockField(); selectField(p, key === t.sel ? null : key); })
+      .addTo(parkFieldsLayer);
   });
+}
+function selectField(p, key) {
+  const t = tagsFor(p); t.sel = key;
+  if (key) {
+    const hit = fieldKeys(p).find(x => x.key === key), rt = t.fr[key];
+    if (rt?.lat != null) { angle = rt.angle; pin = L.latLng(rt.lat, rt.lon); }
+    else if (hit) { pin = L.latLng(hit.f.c[0], hit.f.c[1]); angle = longAxis(hit.f.p); }
+    if (pin) map.panTo(pin, { animate: true });
+    $("fitPop").hidden = false;
+  } else $("fitPop").hidden = true;
+  sizeField(); drawParkFields(p); drawLights(p); previewFields(p); renderTags(p);
+}
+// Screen angle of a polygon's longest edge, so a new field lines up with the council field.
+function longAxis(pts) {
+  let best = 0, ang = angle;
+  for (let i = 0; i < pts.length; i++) {
+    const a = map.latLngToLayerPoint(pts[i]), b = map.latLngToLayerPoint(pts[(i + 1) % pts.length]), d = a.distanceTo(b);
+    if (d > best) { best = d; ang = Math.atan2(b.y - a.y, b.x - a.x) * 180 / Math.PI; }
+  }
+  return Math.round(ang);
 }
 // Light poles: bulbs dragged from the dispenser onto the map. Placed bulbs can be dragged to
 // adjust them, dragged back onto the dispenser to remove them, or clicked to remove them.
 function drawLights(p) {
   lightLayer.clearLayers();
-  const t = tagsFor(p);
-  t.lightPts.forEach((ll, k) => {
-    const mk = L.marker(ll, { icon: L.divIcon({ className: "", html: `<div class="lightpin">💡</div>`, iconSize: [26, 26], iconAnchor: [13, 13] }),
-      title: "Light pole — drag to move, drag back to the dispenser (or click) to remove", keyboard: false, draggable: true });
+  const t = tagsFor(p), arr = activeLights(t);
+  const icon = cls => L.divIcon({ className: "", html: `<div class="lightpin${cls}">💡</div>`, iconSize: [26, 26], iconAnchor: [13, 13] });
+  if (!t.sel) Object.values(t.fr).forEach(x => (x.lights || []).forEach(ll =>
+    L.marker(ll, { icon: icon(" other"), interactive: false, keyboard: false }).addTo(lightLayer)));
+  arr.forEach((ll, k) => {
+    const mk = L.marker(ll, { icon: icon(""), title: "Light pole — drag to move, drag back to the dispenser (or click) to remove", keyboard: false, draggable: true });
     mk.on("click", e => { L.DomEvent.stopPropagation(e); removeLight(p, k); });
     mk.on("drag", e => $("dispenser").classList.toggle("target", overDispenser(e.originalEvent)));
-    mk.on("dragend", e => {
+    mk.on("dragend", () => {
       $("dispenser").classList.remove("target");
-      const oe = lastPointer;
-      if (oe && overDispenser(oe)) return removeLight(p, k);
-      const l = mk.getLatLng(); t.lightPts[k] = [+l.lat.toFixed(6), +l.lng.toFixed(6)];
+      if (lastPointer && overDispenser(lastPointer)) return removeLight(p, k);
+      const l = mk.getLatLng(); arr[k] = [+l.lat.toFixed(6), +l.lng.toFixed(6)];
     });
     mk.addTo(lightLayer);
   });
-  $("bulbCount").textContent = t.lightPts.length;
+  $("bulbCount").textContent = arr.length;
+  $("dispenser").title = t.sel ? `Lights for ${t.sel}: drag a bulb onto each pole, drag one back to remove it` : "Park-wide lights: drag a bulb onto each pole (select a field to give it its own lights)";
   $("noLightsBtn").setAttribute("aria-pressed", String(t.lights === "none"));
 }
 let lastPointer = null;
@@ -242,14 +304,12 @@ function overDispenser(ev) {
 }
 function addLight(p, latlng) {
   const t = tagsFor(p);
-  t.lightPts.push([+latlng.lat.toFixed(6), +latlng.lng.toFixed(6)]);
-  if (t.lights !== "full" && t.lights !== "training") t.lights = "full";
-  drawLights(p); renderTags(p);
+  activeLights(t).push([+latlng.lat.toFixed(6), +latlng.lng.toFixed(6)]);
+  syncFromFields(t); drawLights(p); drawParkFields(p); renderTags(p);
 }
 function removeLight(p, k) {
-  const t = tagsFor(p); t.lightPts.splice(k, 1);
-  if (!t.lightPts.length && (t.lights === "full" || t.lights === "training")) t.lights = "unknown";
-  drawLights(p); renderTags(p);
+  const t = tagsFor(p); activeLights(t).splice(k, 1);
+  syncFromFields(t); drawLights(p); drawParkFields(p); renderTags(p);
 }
 // Drag a bulb out of the dispenser: a ghost follows the pointer and drops where released.
 function bindDispenser() {
@@ -272,7 +332,7 @@ function bindDispenser() {
   src.addEventListener("pointerup", drop);
   src.addEventListener("pointercancel", () => { if (ghost) { ghost.remove(); ghost = null; } });
   $("noLightsBtn").onclick = () => { const p = current(); if (!p) return; const t = tagsFor(p);
-    if (t.lights === "none") t.lights = "unknown"; else { t.lights = "none"; t.lightPts = []; }
+    if (t.lights === "none") t.lights = "unknown"; else { t.lights = "none"; t.lightPts = []; Object.values(t.fr).forEach(x => { x.lights = []; }); }
     drawLights(p); renderTags(p); };
 }
 
@@ -333,28 +393,31 @@ function lockField() {
   setRotating(false);
   pin = map.getCenter(); sizeField();
   const p = current(); if (!p) return;
-  $("fitPop").hidden = false; previewFields(p); renderCentre();
+  // The rating applies to the single council field closest to where the field was locked.
+  const n = nearestFields(p); tagsFor(p).sel = n ? n.key : null;
+  $("fitPop").hidden = false; drawParkFields(p); drawLights(p); previewFields(p); renderTags(p);
 }
-function nearestFields(p, fit) {
-  const fs = councilFields(p).filter(f => f.n); if (!fs.length) return null;
+function nearestFields(p) {
+  const fs = fieldKeys(p); if (!fs.length) return null;
   const c = fieldCentre(), kx = 111320 * Math.cos(c.lat * Math.PI / 180), ky = 110540;
-  const d = f => Math.hypot((f.c[1] - c.lng) * kx, (f.c[0] - c.lat) * ky);
-  const byDist = fs.map(f => ({ f, m: d(f) })).sort((a, b) => a.m - b.m);
-  const pick = fit === "multi" ? byDist.filter(x => x.m <= Math.max(dims.len, 60) * 1.2) : [byDist[0]];
-  return { nearest: byDist[0], names: [...new Set((pick.length ? pick : [byDist[0]]).map(x => x.f.n))] };
+  const byDist = fs.map(x => ({ ...x, m: Math.hypot((x.f.c[1] - c.lng) * kx, (x.f.c[0] - c.lat) * ky) })).sort((a, b) => a.m - b.m);
+  return byDist[0];
 }
+// The rating being edited: the selected field's, if it has a spot.
+const curRating = t => t.sel && t.fr[t.sel]?.lat != null ? t.fr[t.sel] : null;
 function spotMoved(t) {
-  if (!t.spot) return false;
+  const sp = curRating(t); if (!sp) return false;
   const c = fieldCentre(), kx = 111320 * Math.cos(c.lat * Math.PI / 180);
-  const dm = Math.hypot((t.spot.lon - c.lng) * kx, (t.spot.lat - c.lat) * 110540);
-  const da = Math.abs((((angle - t.spot.angle) % 360) + 540) % 360 - 180);
+  const dm = Math.hypot((sp.lon - c.lng) * kx, (sp.lat - c.lat) * 110540);
+  const da = Math.abs((((angle - sp.angle) % 360) + 540) % 360 - 180);
   return dm > 3 || da > 2;
 }
 function previewFields(p) {
-  const t = tagsFor(p), n = nearestFields(p, t.fit), moved = spotMoved(t);
-  const near = n ? ` · nearest: ${n.nearest.f.n} (${Math.round(n.nearest.m)} m)` : "";
-  $("fitMsg").textContent = moved ? `Field moved — rate the fit again to save this spot${near}` : (pin ? `Rate the fit at this spot${near}` : `Pan to fine-tune, then rate the fit here${near}`);
+  const t = tagsFor(p), moved = spotMoved(t);
+  const target = t.sel ? `Rating ${t.sel}` : (() => { const n = nearestFields(p); return n ? `Nearest: ${n.key} (${Math.round(n.m)} m)` : "Rate the fit here"; })();
+  $("fitMsg").textContent = moved ? `${target} — moved, rate it again to save this spot` : `${target}${t.sel && t.fr[t.sel]?.fit && t.fr[t.sel].fit !== "unknown" ? " · click a fit to change it, or the same one to clear it" : pin ? "" : " · pan to fine-tune"}`;
   $("fitMsg").classList.toggle("warn", moved);
+  $("fitPop").querySelectorAll("[data-fit]").forEach(b => b.setAttribute("aria-pressed", String(!!t.sel && t.fr[t.sel]?.fit === b.dataset.fit && !moved)));
 }
 function afterMove() {
   const p = current(); if (!p) return;
@@ -363,26 +426,26 @@ function afterMove() {
   if (!$("fitPop").hidden) previewFields(p);
   renderCentre();
 }
+// Rate the targeted field (the selected one, else the single closest). Rating the same fit
+// again clears that field's rating; its lights stay.
 function confirmSpot(p, fit) {
   const t = tagsFor(p), c = fieldCentre();
-  t.fit = fit;
-  t.spot = { lat: +c.lat.toFixed(6), lon: +c.lng.toFixed(6), angle: Math.round(angle) };
-  const n = nearestFields(p, fit);
-  if (n) {
-    if (!t.fieldsManual || !t.fields.trim()) { t.fields = n.names.join(", "); t.fieldsManual = false; }
-    $("fieldList").textContent = `Nearest council field: ${n.nearest.f.n} (${Math.round(n.nearest.m)} m from centre)`;
-  }
-  $("fitPop").hidden = true; drawParkFields(p); renderTags(p);
+  if (!t.sel) { const n = nearestFields(p); t.sel = n ? n.key : "This spot"; }
+  const cur = t.fr[t.sel] || { name: t.sel, lights: [] };
+  if (cur.fit === fit && !spotMoved(t)) { cur.fit = "unknown"; delete cur.lat; delete cur.lon; delete cur.angle; }
+  else Object.assign(cur, { name: t.sel, fit, lat: +c.lat.toFixed(6), lon: +c.lng.toFixed(6), angle: Math.round(angle) });
+  t.fr[t.sel] = cur;
+  syncFromFields(t);
+  $("fitPop").hidden = true; drawParkFields(p); drawLights(p); renderTags(p);
 }
 function renderCentre() {
   const p = current(), t = p ? tagsFor(p) : null, moved = !!t && spotMoved(t);
   $("centreWrap").classList.toggle("unlocked", rotating);
-  $("centreWrap").classList.toggle("needfit", !rotating && !!t && (!t.spot || moved));
+  $("centreWrap").classList.toggle("needfit", !rotating && !!t && (!curRating(t) || moved));
   $("centreIco").textContent = rotating ? "🔓" : "🔒";
   $("centreLbl").textContent = rotating ? (matchMedia("(hover: none)").matches ? "Tap to lock it here" : "Click to lock it here")
-    : !t?.spot ? "Unlock to turn · then rate the fit"
-    : moved ? "Moved · rate the fit again" : `Fits: ${FIT_LABEL[t.fit]} · spot saved`;
-  $("fitPop").querySelectorAll("[data-fit]").forEach(b => b.setAttribute("aria-pressed", String(!!t && t.fit === b.dataset.fit && !moved)));
+    : !curRating(t) ? "Unlock to turn · then rate the fit"
+    : moved ? "Moved · rate the fit again" : `${t.sel}: ${FIT_LABEL[curRating(t).fit]}`;
 }
 
 // ── Auckland view: every park coloured by suitability ────────────────────────
@@ -500,9 +563,11 @@ function renderTags(p) {
   const t = tagsFor(p);
   $("segQuality").innerHTML = [1, 2, 3, 4, 5].map(n => `<button data-tag="quality" data-val="${n}" aria-pressed="${t.quality === n}" title="${n}/5">${n <= t.quality ? "★" : "☆"}</button>`).join("");
   // Fit and lights are set on the map (fit bar, bulb dispenser); here they're read-outs.
-  $("fitVal").textContent = t.fit === "unknown" ? "lock the field, then rate" : FIT_LABEL[t.fit];
+  const rated = Object.values(t.fr).filter(x => x.fit && x.fit !== "unknown");
+  $("fitVal").textContent = rated.length ? rated.map(x => `${x.name}: ${FIT_LABEL[x.fit]}`).join(" · ") : "click a field area, or lock the field, then rate";
   $("fitVal").classList.toggle("unset", t.fit === "unknown");
-  $("lightsVal").textContent = t.lightPts.length ? `💡 ${t.lightPts.length} pole${t.lightPts.length > 1 ? "s" : ""}`
+  const nl = allLights(t).length, ns = t.sel ? (t.fr[t.sel]?.lights || []).length : null;
+  $("lightsVal").textContent = nl ? `💡 ${nl} pole${nl > 1 ? "s" : ""}${ns !== null ? ` (${ns} on ${t.sel})` : ""}`
     : t.lights === "none" ? "none" : t.lights === "training" || t.lights === "full" ? "yes" : "drag 💡 onto poles";
   $("lightsVal").classList.toggle("unset", t.lights === "unknown");
   if (document.activeElement !== $("fieldsIn")) $("fieldsIn").value = t.fields;
@@ -580,7 +645,7 @@ function render() {
     if (fresh) showMap(p);
     renderTags(p);
     // Restore a saved field placement for a reviewed park.
-    if (fresh && r?.placement?.lat != null && !tagsFor(p)._placed) { angle = r.placement.angle || 0; map.setView([r.placement.lat, r.placement.lon], map.getZoom(), { animate: false }); pin = L.latLng(r.placement.lat, r.placement.lon); tagsFor(p)._placed = true; sizeField(); renderCentre(); }
+    if (fresh && tagsFor(p).spot && !tagsFor(p)._placed) { const sp = tagsFor(p).spot; angle = sp.angle || 0; map.setView([sp.lat, sp.lon], map.getZoom(), { animate: false }); pin = L.latLng(sp.lat, sp.lon); tagsFor(p)._placed = true; sizeField(); renderCentre(); }
   }
   ["noBtn", "yesBtn", "topBtn", "skipBtn"].forEach(b => $(b).disabled = !p);
   $("undoBtn").disabled = !undoStack.length;
@@ -589,13 +654,13 @@ function render() {
 
 // ── Decisions ────────────────────────────────────────────────────────────────
 function askPlacement(p, t, decision) {
-  const dlg = $("saveDlg"), sp = t.spot, moved = spotMoved(t);
-  $("dlgTitle").textContent = `${decision === "top" ? "Top pick" : decision === "yes" ? "Shortlist" : "Reject"} ${p.name} — save the field spot?`;
-  $("dlgBody").textContent = `Field centred at ${sp.lat.toFixed(5)}, ${sp.lon.toFixed(5)}, turned ${((sp.angle % 360) + 360) % 360}°`
-    + ` · fits ${FIT_LABEL[t.fit]}${t.fields.trim() ? ` · on ${t.fields.trim()}` : ""}`
-    + ` · ${t.lightPts.length ? t.lightPts.length + " light pole" + (t.lightPts.length > 1 ? "s" : "") : "lights " + t.lights}.`
-    + (moved ? " You've moved the field since rating the fit; this saves the spot you rated, not the current view." : "")
-    + " Saving it restores this spot next time and plots the park there on the Auckland map.";
+  const dlg = $("saveDlg"), moved = spotMoved(t);
+  const rated = Object.values(t.fr).filter(x => x.fit && x.fit !== "unknown"), nl = allLights(t).length;
+  $("dlgTitle").textContent = `${decision === "top" ? "Top pick" : decision === "yes" ? "Shortlist" : "Reject"} ${p.name} — save the field spots?`;
+  $("dlgBody").textContent = rated.map(x => `${x.name}: ${FIT_LABEL[x.fit]} (turned ${((x.angle % 360) + 360) % 360}°${x.lights?.length ? `, ${x.lights.length} light${x.lights.length > 1 ? "s" : ""}` : ""})`).join(" · ")
+    + ` · ${nl ? nl + " light pole" + (nl > 1 ? "s" : "") + " in all" : "lights " + t.lights}.`
+    + (moved ? " You've moved the field since rating it; this saves the spots you rated, not the current view." : "")
+    + " Saving restores each field's spot and lights next time and plots the park at its best field on the Auckland map.";
   return new Promise(res => {
     dlg.returnValue = "";
     dlg.addEventListener("close", () => res(dlg.returnValue || "cancel"), { once: true });
@@ -618,7 +683,9 @@ async function decide(decision) {
   card.style.transform = `translate(${x}px, ${y}px) rotate(${x / 25}deg)`; card.style.opacity = "0";
   const pos = withField ? { ...t.spot, ...dims }
     : prevPl?.lat != null ? { lat: prevPl.lat, lon: prevPl.lon, angle: prevPl.angle, len: prevPl.len, wid: prevPl.wid, ez: prevPl.ez } : { lat: null, lon: null };
-  const placement = (pos.lat != null || t.lightPts.length) ? { ...pos, lights: t.lightPts } : null;
+  // Per-field ratings and their lights are kept either way; "without" only skips the park's pin.
+  const fr = Object.fromEntries(Object.entries(t.fr).filter(([, x]) => (x.fit && x.fit !== "unknown") || x.lights?.length));
+  const placement = (pos.lat != null || t.lightPts.length || Object.keys(fr).length) ? { ...pos, lights: t.lightPts, fields: fr } : null;
   const rev = { decision, lights: t.lights, fit: t.fit, quality: t.quality || null, fields: t.fields.trim(), notes: t.notes.trim(), placement };
   const prev = reviews[p.id] ? { ...reviews[p.id] } : null;
   await new Promise(r => setTimeout(r, matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 220));
@@ -727,7 +794,7 @@ function bind() {
   document.addEventListener("keydown", e => {
     if ($("saveDlg").open || e.target.matches("input, textarea, select")) return;
     const p = current();
-    if (e.key === "Escape") { if (rotating) setRotating(false); $("sizePanel").hidden = true; $("fitPop").hidden = true; return; }
+    if (e.key === "Escape") { if (rotating) setRotating(false); $("sizePanel").hidden = true; $("fitPop").hidden = true; if (p && tagsFor(p).sel) selectField(p, null); return; }
     if (/^[cC]$/.test(e.key)) { focusId = null; setView(view === "city" ? "park" : "city"); return; }
     if (view === "city") return;
     if (e.key === "ArrowRight") { e.preventDefault(); decide("yes"); }

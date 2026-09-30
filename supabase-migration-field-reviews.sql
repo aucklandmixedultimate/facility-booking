@@ -15,7 +15,7 @@ create table if not exists public.field_reviews (
   quality      smallint check (quality between 1 and 5),
   fields       text not null default '',          -- which council fields suit, free text
   notes        text not null default '',
-  placement    jsonb,                             -- {lat, lon, angle, len, wid, ez, lights: [[lat, lon], …]}: field position + marked light poles
+  placement    jsonb,                             -- {lat, lon, angle, len, wid, ez, lights, fields: {name: {fit, lat, lon, angle, lights}}}
   reviewed_by  uuid references auth.users(id) on delete set null,
   reviewer_email text,
   updated_at   timestamptz not null default now()
