@@ -10,6 +10,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import "./vetting.css";
 import { createClient } from "@supabase/supabase-js";
+import { councilState, fmtRange, fmtDay, COUNCIL_LINKS, COUNCIL_CONTACTS } from "../councilSeasons.js";
 
 const BASE = import.meta.env.BASE_URL;
 const SB_URL = import.meta.env.VITE_SUPABASE_URL, SB_ANON = import.meta.env.VITE_SUPABASE_ANON;
@@ -60,6 +61,9 @@ const undoStack = [];
 const later = new Set();
 const draft = {};              // park_id -> tags being edited before deciding
 const mapIdx = {};
+// Council booking state (season phases) and the season whose field maps show by default.
+const COUNCIL_NOW = councilState();
+const mapIndex = p => mapIdx[p.id] ?? Math.max(0, p.maps.findIndex(m => m.season === COUNCIL_NOW.mapSeason));
 let cursor = 0, busy = false;
 let dims = store.get("vet-field-dims", WFDF);
 let fieldOn = store.get("vet-field-on", true);
@@ -219,7 +223,7 @@ function initMap() {
 
 // ── Park view: Esri satellite + council overlay that drops away when you zoom off it ─
 function showMap(p) {
-  const i = Math.min(mapIdx[p.id] || 0, Math.max(0, p.maps.length - 1)), m = p.maps[i];
+  const i = Math.min(mapIndex(p), Math.max(0, p.maps.length - 1)), m = p.maps[i];
   if (overlay) { overlay.remove(); overlay = null; }
   map.invalidateSize();
   if (m) {
@@ -245,7 +249,7 @@ function updateLayer() {
 }
 // Council fields traced from the map PDFs: [{n: name, c: [lat, lon], p: [[lat, lon], …]}].
 function councilFields(p) {
-  const i = Math.min(mapIdx[p.id] || 0, Math.max(0, p.maps.length - 1));
+  const i = Math.min(mapIndex(p), Math.max(0, p.maps.length - 1));
   return p.maps[i]?.fields || [];
 }
 // Council field areas are clickable: selecting one targets it for rating (or editing an
@@ -743,7 +747,7 @@ function renderBook() {
   const tag = x => `<span class="tag${x.kind === "council_private" ? " priv" : ""}">${x.kind === "council_private" ? "◆ " + esc(x.operator?.short || "operator") + " + council" : "🏛 council"}</span>`;
   const prov = x => x.kind === "council_private" ? "op_" + x.operator.id : "akl_council";
   const parks = xs => new Set(xs.map(x => x.park)).size;
-  $("bookPanel").innerHTML = `<div class="bk-who"><h3>🛒 Cart</h3><label>for ${IS_ADMIN ? `<input id="bookWho" list="bookWhoList" value="${esc(who)}" title="The booker whose cart this is">` : `<b>${esc(who)}</b>`}</label>
+  $("bookPanel").innerHTML = `<div class="bk-who"><h3>📌 Active bookings / 🛒 Cart</h3><label>for ${IS_ADMIN ? `<input id="bookWho" list="bookWhoList" value="${esc(who)}" title="The booker whose cart this is">` : `<b>${esc(who)}</b>`}</label>
       <datalist id="bookWhoList">${known.map(e => `<option value="${esc(e)}">`).join("")}</datalist></div>
     <p class="muted">1. In <b>📅 Book</b> mode, open a park from the Auckland map and click its field areas to add them here.
       2. <b>Save them as active bookings</b>. 3. Book dates and times for them in Facility Booking (Provider → Location → Facility).</p>
@@ -759,7 +763,7 @@ function renderBook() {
         <button data-bkdel="${esc(x.id)}" data-active="1" title="Remove this active booking field">✕</button></div>`).join("") : `<p class="muted">No active bookings yet. Save cart fields to make them bookable.</p>`}</div></section>`;
 }
 function renderTabs() { const c = cartOf().length, a = activeOf().length;
-  $("bookTab").textContent = `🛒 Cart${c ? ` (${c})` : ""}${a ? ` · 📌 ${a}` : ""}`; }
+  $("bookTab").innerHTML = `📌<span class="tl"> Active bookings</span>${a ? ` (${a})` : ""} / 🛒<span class="tl"> Cart</span>${c ? ` (${c})` : ""}`; }
 function applyModeUi() {
   const book = workMode === "book";
   $("modeRate").setAttribute("aria-checked", String(!book)); $("modeBook").setAttribute("aria-checked", String(book));
@@ -943,7 +947,7 @@ function render() {
     const lead = (pv || []).find(o => o.code !== "ultimate"), ult = ultimateOf(p);
     $("decChip").innerHTML = (lead ? `<span class="chip priv" title="Ask ${esc(lead.operator)} before applying to council">◆ ${esc(lead.short)}</span> ` : "")
       + ult.map(o => `<span class="chip ult" title="Home of ${esc(o.operator)}"${o.colors ? ` style="background:${o.colors.pattern || o.colors.fill};color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.8);box-shadow:inset 0 0 0 2px ${o.colors.edge || "#fff"}"` : ""}>🥏 ${esc(o.short)}</span> `).join("") + (r ? `<span class="chip ${r.decision === "no" ? "no" : r.decision === "top" ? "top" : ""}">${r.decision === "top" ? "Top pick" : r.decision === "yes" ? "Shortlisted" : "Rejected"}${r.by ? " · " + esc(r.by.split("@")[0]) : ""}</span>` : "");
-    const i = Math.min(mapIdx[p.id] || 0, Math.max(0, p.maps.length - 1));
+    const i = Math.min(mapIndex(p), Math.max(0, p.maps.length - 1));
     $("thumbs").innerHTML = p.maps.length > 1 ? p.maps.map((m, k) => `<button data-map="${k}" aria-pressed="${k === i}" title="${esc(m.title)}">${m.season === "winter" ? "❄ Winter" : "☀ Summer"}${/area/i.test(m.title) ? " area" : ""}</button>`).join("") : "";
     const cf = councilFields(p).map(f => f.n).filter(Boolean);
     $("fieldList").textContent = cf.length ? "Council fields: " + [...new Set(cf)].join(" · ") : p.fields.length ? "Council fields: " + p.fields.join(" · ") : (p.maps.length ? "" : "No council map for this park (often a school or stadium ground). Satellite only.");
@@ -1122,7 +1126,7 @@ function bind() {
     else if (e.key === "0") $("fitBtn").click();
     else if (/^[rR]$/.test(e.key)) { angle = (angle + 15) % 360; sizeField(); afterMove(); }
     else if (p && /^[1-5]$/.test(e.key)) { tagsFor(p).quality = +e.key; renderTags(p); }
-    else if (p && /^[mM]$/.test(e.key) && p.maps.length > 1) { mapIdx[p.id] = ((mapIdx[p.id] || 0) + 1) % p.maps.length; render(); }
+    else if (p && /^[mM]$/.test(e.key) && p.maps.length > 1) { mapIdx[p.id] = ((mapIndex(p)) + 1) % p.maps.length; render(); }
   });
 }
 function exportCsv() {
@@ -1137,6 +1141,19 @@ function exportCsv() {
   const csv = rows.map(r => r.map(v => { const s = String(v ?? ""); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }).join(",")).join("\n");
   const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); a.download = "council-field-vetting.csv"; a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+// ── Council booking state: what the council's sports-field calendar is doing now ──
+function renderSeasonBar() {
+  const { now, next, mapSeason } = COUNCIL_NOW, el = $("seasonBar");
+  const chip = p => `<span class="sb-p ${p.season}" title="${p.approx ? "Estimated from last year's dates" : "Published dates"}"><b>${p.label}</b> ${fmtRange(p)}</span>`;
+  el.innerHTML = `<details><summary><span class="sb-k">Council bookings now</span>
+      ${now.length ? now.map(chip).join("") : `<span class="sb-p">Between phases</span>`}
+      <span class="sb-map">${mapSeason === "winter" ? "❄ Winter" : "☀ Summer"} maps shown</span></summary>
+    <div class="sb-more"><div><span class="sb-k">Next</span> ${next.map(p => `<span class="sb-p ${p.season}"><b>${p.label}</b> from ${p.approx ? "≈ " : ""}${fmtDay(p.from)}</span>`).join("")}</div>
+      <div class="muted">≈ = estimated from this year's published dates (same week of the year). Confirm on the council's
+        <a href="${COUNCIL_LINKS[0].url}" target="_blank" rel="noopener">How to book our sports facilities</a> page ·
+        <a href="mailto:${COUNCIL_CONTACTS.email}">${COUNCIL_CONTACTS.email}</a> · ${COUNCIL_CONTACTS.phone}</div></div></details>`;
 }
 
 // ── Profile (same look as the booking site's user button) ────────────────────
@@ -1198,7 +1215,7 @@ async function start() {
     reviews = store.get("vet-reviews", {}); flags = store.get("vet-flags", {});
     setStatus("Demo mode (no Supabase configured): decisions are kept in this browser.", true);
   }
-  $("app").hidden = false;
+  $("app").hidden = false; renderSeasonBar();
   await loadBookLocs(); await loadCouncilOnly(); await syncCartWorkflows();
   initMap(); drawField(); showField(fieldOn); renderLegend(); bind();
   setView(view === "park" || view === "book" ? view : "city", { refit: true });

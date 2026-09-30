@@ -413,3 +413,21 @@ This needs `supabase-migration-council-fields-access.sql`, which makes these cha
 - adds `set_my_council_facilities(entries)`, a security-definer function that replaces only the
   caller's own entry in the `council_facilities` setting. The settings table stays
   admin-write only.
+
+## Council booking state and seasons
+
+`src/councilSeasons.js` holds the council's sports-field calendar, contacts and links. It's
+used by the Council fields page and by the booking site's About → How to Book → Council
+tabs.
+- **The calendar:** one year of published dates, from the council's "How to book our
+  sports facilities" page and the parksbookings news email.
+  - Winter 2026: applications 15 Dec 2025 – 8 Feb 2026; season 4 Apr – 6 Sep 2026.
+  - Summer 2026/27: applications 13 Jul – 21 Aug 2026; allocation to 21 Sep; casual 21 Sep
+    2026 – 15 Feb 2027; season 24 Oct 2026 – 21 Mar 2027.
+- **Other years:** these dates are reused as approximations, moved to the same week of the
+  year and shown with "≈". Replace the base dates when the council publishes new ones.
+- **The season bar** under the Council fields header shows the council phases in progress.
+  Expand it for the next phases, contacts and the council link.
+- **Default map:** a park opens on the map for the current season. That's winter from two
+  weeks before the winter season starts until it ends, and summer otherwise. The
+  Summer/Winter buttons still switch between them.
