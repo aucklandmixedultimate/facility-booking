@@ -1113,7 +1113,10 @@ async function start() {
     const { data } = await supabase.auth.getSession(); session = data.session;
     if (!session) {
       gate(`<h2>Sign in to rate council fields</h2>Use the same Google account as the booking site.<br><button id="signIn">Sign in with Google</button>`);
-      $("signIn").onclick = () => supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo: location.href } });
+      // Sign in through the booking site's URL (the one on Supabase's redirect list); it sends
+      // the browser back here once the session is stored (same origin, shared storage).
+      $("signIn").onclick = () => { try { sessionStorage.setItem("amua-after-login", "vetting.html"); } catch { /* storage blocked */ }
+        supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo: location.origin + BASE } }); };
       setStatus(""); return;
     }
     if (session.user?.app_metadata?.role !== "admin") { gate(`<h2>Admins only</h2>Council field vetting is limited to AMUA admins. <a href="./">Back to bookings</a>`); setStatus(""); return; }

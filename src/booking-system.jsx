@@ -10574,8 +10574,13 @@ export default function App() {
   // Bootstrap auth session and subscribe to changes
   useEffect(() => {
     if (!supabase) { setSession(null); return; }
+    // Pages on this site that signed in through here (their own URL isn't a Supabase redirect
+    // URL) leave a return path; go back once the session has landed.
+    const bounce = s => { try { const back = sessionStorage.getItem("amua-after-login");
+      if (s && back && /^[\w.-]+\.html$/.test(back)) { sessionStorage.removeItem("amua-after-login"); location.replace(import.meta.env.BASE_URL + back); } } catch { /* storage blocked */ } };
     supabase.auth.getSession().then(({ data }) => {
       const s = data.session;
+      bounce(s);
       setSession(s);
       _accessToken = s?.access_token || null;
       _currentUser = s?.user ? { id: s.user.id, email: s.user.email, role: s.user.app_metadata?.role } : null;
@@ -10585,7 +10590,7 @@ export default function App() {
       setSession(s);
       _accessToken = s?.access_token || null;
       _currentUser = s?.user ? { id: s.user.id, email: s.user.email, role: s.user.app_metadata?.role } : null;
-      if (evt === "SIGNED_IN") logActivity("sign_in", { email: s?.user?.email });
+      if (evt === "SIGNED_IN") { logActivity("sign_in", { email: s?.user?.email }); bounce(s); }
     });
     return () => sub.subscription.unsubscribe();
   }, []);
