@@ -265,7 +265,7 @@ The page always fits one screen: nothing scrolls except the map, where the wheel
   shown). The council's field map is laid over it at its true position: every council
   map page is a GeoPDF (EPSG:2193), and its corner coordinates give the bounds. Zooming
   two or three wheel clicks in or out from the fitted map drops the council map to show
-  the satellite, and **Fit** brings it back. The council's field outlines are traced from
+  the satellite, and **⤢** zooms back to it. The council's field outlines are traced from
   the PDF vectors and their names read by OCR (`maps[].fields` in `parks.json`), so they
   stay visible as dashed outlines over the satellite.
 - **Ultimate field to scale.** The field is WFDF standard: 100 × 37 m, 18 m end zones,
@@ -282,15 +282,13 @@ The page always fits one screen: nothing scrolls except the map, where the wheel
 - **Privately managed grounds (◆).** Some council grounds are run by a club, trust or
   CCO, e.g. Grammar TEC at Orakei Domain B. They show as purple diamonds, and hollow
   diamonds mark private grounds that aren't in the council maps. Their card shows the
-  operator, contacts and the request steps:
-  1. get the operator's permission;
-  2. apply to council;
-  3. wait;
-  4. confirm with the operator.
+  operator to contact.
   The data is in `public/council-maps/private-managed.json`; see multi-provider design §7.1.
-- **Lights.** Click the map to drop a light pole, and click a pole to remove it. Any pole
-  marks the park as lit. **None** records that you checked and there aren't any. Lights
-  only matter for evening slots.
+  The card shows only who to contact. The request steps belong to booking, not vetting.
+- **Lights.** Drag a 💡 bulb from the dispenser at the top right of the map onto each light
+  pole. Drag a placed bulb to move it, or drag it back onto the dispenser (or click it) to
+  remove it. Any bulb marks the park as lit. **No lights** records that you checked and
+  there aren't any. Lights only matter for evening slots.
 - **Saving the position.** Once a spot is confirmed and at least three of quality, fit,
   lights and fields are set, a decision asks whether to save the confirmed spot. The position is the centre
   lat/lon, the angle and the dimensions. Saved positions are restored next time and
