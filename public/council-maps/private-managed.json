@@ -368,6 +368,30 @@
         "https://www.aucklandcouncil.govt.nz/en/parks-recreation/find-park-beach/park-detail/195.html"
       ],
       "notes": ""
+    },
+    {
+      "id": "mapafc-anderson",
+      "park_id": "central-anderson-park",
+      "park": "Anderson Park",
+      "lat": -36.8923,
+      "lon": 174.7095,
+      "operator": "Mount Albert-Ponsonby AFC",
+      "short": "Mt Albert-Ponsonby AFC",
+      "type": "club",
+      "code": "football",
+      "manages": "Home ground and clubrooms (Friday-night senior games); the park's football fields (Football 1, Summer Football 1B)",
+      "contact": {
+        "email": "info@mapafc.co.nz",
+        "address": "19A Preston Avenue, Mount Albert",
+        "url": "https://www.sporty.co.nz/mtalbertponsonbyafc"
+      },
+      "status": "to-verify",
+      "sources": [
+        "https://en.wikipedia.org/wiki/Mount_Albert-Ponsonby_AFC",
+        "https://www.footballgroundmap.com/ground/anderson-park/mount-albert-ponsonby",
+        "https://www.aucklandcouncil.govt.nz/en/parks-recreation/find-park-beach/park-detail/80.html"
+      ],
+      "notes": "Resident NRFL Championship club since the 1970s; ask whether it holds the field's seasonal allocation. Email from a search summary; check it on the club site."
     }
   ],
   "_contact_rule": "Where several clubs operate at one ground, contact the operator marked primary; if none is marked, the rugby or football club comes first."

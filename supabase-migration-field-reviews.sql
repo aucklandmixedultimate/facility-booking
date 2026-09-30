@@ -43,3 +43,22 @@ create policy "field_reviews admin update" on public.field_reviews
 drop policy if exists "field_reviews admin delete" on public.field_reviews;
 create policy "field_reviews admin delete" on public.field_reviews
   for delete to authenticated using (public.is_admin());
+
+-- ------------------------------------------------------------
+-- Club-run flags: a park an admin thinks is probably run by a club but that isn't in
+-- public/council-maps/private-managed.json yet. Separate from field_reviews so a park can
+-- be flagged without a decision.
+-- ------------------------------------------------------------
+create table if not exists public.field_flags (
+  park_id          text primary key,
+  club             text not null default '',      -- which club, if known
+  flagged_by       uuid references auth.users(id) on delete set null,
+  flagged_by_email text,
+  updated_at       timestamptz not null default now()
+);
+
+alter table public.field_flags enable row level security;
+
+drop policy if exists "field_flags admin all" on public.field_flags;
+create policy "field_flags admin all" on public.field_flags
+  for all to authenticated using (public.is_admin()) with check (public.is_admin());
