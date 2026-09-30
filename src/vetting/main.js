@@ -537,7 +537,7 @@ function buildCity() {
 }
 // AMUA's existing providers (GTEC, booked through CPSA at Cornwall Park): a gold star whose
 // centre shows the suitability colour.
-// A round badge per logo (two overlap, e.g. AMUA + Carlton Juniors at Cornwall Park). The
+// A round badge per logo (several overlap if a ground lists more than one). The
 // image sits over the club's letters; if the logo file isn't there yet it removes itself.
 function logoMarker(ll, icons, ring, isCur, z = 600) {
   const badge = (ic, i) => `<span class="lp" style="background:${ic.bg || "#334155"};z-index:${9 - i}"><b>${esc(ic.mono || "")}</b>`

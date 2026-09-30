@@ -32,9 +32,8 @@
       "id": "gtec-cornwall",
       "park_id": null,
       "park": "Cornwall Park",
-      "lat": -36.8975,
-      "lon": 174.7855,
-      "approx": true,
+      "lat": -36.888659,
+      "lon": 174.779739,
       "operator": "Grammar TEC Rugby Football Club (via CPSA)",
       "short": "GTEC · CPSA",
       "type": "club",
@@ -58,11 +57,31 @@
           "img": "logos/amua.jpg",
           "mono": "AMUA",
           "bg": "#15211c"
-        },
+        }
+      ]
+    },
+    {
+      "id": "cpsa-cornwall",
+      "park_id": null,
+      "park": "Cornwall Park – CPSA fields (Carlton Grammar)",
+      "lat": -36.888505,
+      "lon": 174.778269,
+      "operator": "Cornwall Park Sports Association (CPSA)",
+      "short": "CPSA",
+      "type": "association",
+      "code": "rugby",
+      "provider_id": "gtec",
+      "amua": true,
+      "manages": "The CPSA fields used by Carlton Grammar (Carlton Juniors Rugby); booked through GTEC's Sporty system in the booking site",
+      "contact": {},
+      "status": "confirmed",
+      "notes": "BOOKING ONLY AVAILABLE THROUGH AMUA (GTEC / CPSA workflow in the AMUA booking site). Carlton Juniors Rugby's field calendar shows these fields' existing bookings.",
+      "must_book_through": "AMUA",
+      "icons": [
         {
           "img": "logos/cjr.png",
-          "mono": "CJR",
-          "bg": "#334155"
+          "mono": "CPSA",
+          "bg": "#14532d"
         }
       ]
     },
