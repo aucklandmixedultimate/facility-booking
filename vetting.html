@@ -6,10 +6,10 @@
     <title>Council Fields</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap">
-    <script type="module" crossorigin src="/facility-booking/assets/vetting-AoRy3jUy.js"></script>
-    <link rel="modulepreload" crossorigin href="/facility-booking/assets/index-U3PgYvYW.js">
+    <script type="module" crossorigin src="/facility-booking/assets/vetting-pA4NBzz5.js"></script>
+    <link rel="modulepreload" crossorigin href="/facility-booking/assets/index-VH2SDcMh.js">
     <link rel="modulepreload" crossorigin href="/facility-booking/assets/_commonjsHelpers-Cpj98o6Y.js">
-    <link rel="stylesheet" crossorigin href="/facility-booking/assets/vetting-avEuj5Os.css">
+    <link rel="stylesheet" crossorigin href="/facility-booking/assets/vetting-QKR4PNbL.css">
   </head>
   <body>
     <div class="wrap">
@@ -29,7 +29,7 @@
           <div class="viewtabs" role="tablist" aria-label="View">
             <button id="cityTab" role="tab" aria-selected="false" title="All of Auckland, coloured by suitability (C)">🗺 Auckland</button>
             <button id="parkTab" role="tab" aria-selected="true" title="One park at a time (C)">🔍 Park</button>
-            <button id="bookTab" role="tab" aria-selected="false" title="The booker's cart: council fields added for booking">🛒 Cart</button>
+            <button id="bookTab" role="tab" aria-selected="false" title="Active bookings and the cart: council fields saved for booking, and ones still being chosen">📌 Active bookings / 🛒 Cart</button>
           </div>
           <div class="modetabs" role="radiogroup" aria-label="Mode">
             <button id="modeRate" role="radio" aria-checked="true" title="Rate parks and fields (B toggles)">⭐ Rate</button>
@@ -50,6 +50,7 @@
           </div>
         </div>
       </header>
+      <div class="seasonbar" id="seasonBar"></div>
       <div class="status" id="status">Loading…</div>
 
       <div id="gate" class="empty" hidden></div>
