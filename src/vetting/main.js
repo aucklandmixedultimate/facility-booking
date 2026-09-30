@@ -292,7 +292,7 @@ function setRotating(on) {
   if (on && pin) { map.setView(pin, map.getZoom(), { animate: false }); pin = null; }
   rotating = on; $("field").classList.toggle("live", on); $("rotateHint").hidden = !on;
   $("rotateHint").textContent = matchMedia("(hover: none)").matches
-    ? "Drag out from the centre button to turn · pan the map to move · tap the button to lock it there"
+    ? "Twist with two fingers to turn · drag to move · tap the button to lock it there"
     : "Move the mouse to turn · drag the map to move · click to lock it there";
   if (on) $("fitPop").hidden = true;
   sizeField(); renderCentre();
@@ -355,7 +355,7 @@ function renderCentre() {
   $("centreWrap").classList.toggle("unlocked", rotating);
   $("centreWrap").classList.toggle("needfit", !rotating && !!t && (!t.spot || moved));
   $("centreIco").textContent = rotating ? "🔓" : "🔒";
-  $("centreLbl").textContent = rotating ? "Click to lock it here"
+  $("centreLbl").textContent = rotating ? (matchMedia("(hover: none)").matches ? "Tap to lock it here" : "Click to lock it here")
     : !t?.spot ? "Unlock to turn · then rate the fit"
     : moved ? "Moved · rate the fit again" : `Fits: ${FIT_LABEL[t.fit]} · spot saved`;
   $("fitPop").querySelectorAll("[data-fit]").forEach(b => b.setAttribute("aria-pressed", String(!!t && t.fit === b.dataset.fit && !moved)));
@@ -646,6 +646,15 @@ function bind() {
     twist = { x: e.clientX, y: e.clientY, moved: false }; $("centreBtn").setPointerCapture(e.pointerId); e.preventDefault(); });
   $("centreBtn").addEventListener("pointermove", e => { if (!twist) return;
     if (Math.hypot(e.clientX - twist.x, e.clientY - twist.y) > 8) twist.moved = true; if (twist.moved) turnTo(e); });
+  // Two-finger twist (touch): the change in angle between the fingers turns the field.
+  // Pinch-zoom still works at the same time, so the field scales and turns together.
+  let pivot = null;
+  const fingerAngle = ts => Math.atan2(ts[1].clientY - ts[0].clientY, ts[1].clientX - ts[0].clientX) * 180 / Math.PI;
+  const mapbox = $("map").parentElement;
+  mapbox.addEventListener("touchstart", e => { pivot = rotating && e.touches.length === 2 ? { a0: fingerAngle(e.touches), base: angle } : null; }, { capture: true, passive: true });
+  mapbox.addEventListener("touchmove", e => { if (!pivot || e.touches.length !== 2) return;
+    angle = pivot.base + (fingerAngle(e.touches) - pivot.a0); sizeField(); }, { capture: true, passive: true });
+  mapbox.addEventListener("touchend", e => { if (e.touches.length < 2) pivot = null; }, { capture: true, passive: true });
   let swallowClick = false;   // a twist ends in a click on the button; don't let it lock
   $("centreBtn").addEventListener("pointerup", () => { if (twist?.moved) swallowClick = true; twist = null; });
   $("centreBtn").onclick = e => { e.stopPropagation(); if (swallowClick) { swallowClick = false; return; } if (rotating) lockField(); else setRotating(true); };

@@ -271,8 +271,8 @@ The page always fits one screen: nothing scrolls except the map, where the wheel
 - **Ultimate field to scale.** The field is WFDF standard: 100 × 37 m, 18 m end zones,
   brick marks 20 m in. It's editable under ⚙. It stays centred in the frame and scales
   with zoom, so you pan the map underneath it to test a spot.
-  1. **Unlock** the centre button (Enter). Move the mouse to turn the field (on a phone, drag
-     out from the button) and drag the map to move it.
+  1. **Unlock** the centre button (Enter). Move the mouse to turn the field (on a phone, twist
+     with two fingers, or drag out from the button) and drag the map to move it.
   2. **Lock** it by clicking the map or the button. The field is pinned to that spot, so
      panning afterwards moves the map under it. The bar at the bottom previews the nearest
      council field.
