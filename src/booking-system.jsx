@@ -102,20 +102,28 @@ const sb = {
 //            not own — it is not part of the GTEC/CPSA feed, so the sync never touches it
 //            (mapCJRFacility only ever returns f3/f4/f5, and CPSA_FIELD_IDS excludes it).
 // defaultRate  $/hr used for both day and evening until an admin sets a rate explicitly.
+// provider   who AMUA hires the facility from (a key of PROVIDERS). Official invoicing
+//            raises one purchase order per provider, and only "gtec" facilities take part
+//            in the GTEC/CPSA workflow.
 const FACILITIES = [
-  { id:"f1", name:"Meeting Room – Ground Floor", capacity:20,  color:"#a78bfa", kind:"social" }, // light purple
-  { id:"f2", name:"Function Room – Upstairs",    capacity:100, color:"#7c3aed", kind:"social" }, // deep purple
-  { id:"f3", name:"Field #1",                    capacity:50,  color:"#166534", kind:"field"  }, // darkest green
-  { id:"f4", name:"Field #2",                    capacity:50,  color:"#22c55e", kind:"field"  }, // mid green
-  { id:"f5", name:"Field #3",                    capacity:50,  color:"#86efac", kind:"field"  }, // light green
+  { id:"f1", name:"Meeting Room – Ground Floor", capacity:20,  color:"#a78bfa", kind:"social", provider:"gtec" }, // light purple
+  { id:"f2", name:"Function Room – Upstairs",    capacity:100, color:"#7c3aed", kind:"social", provider:"gtec" }, // deep purple
+  { id:"f3", name:"Field #1",                    capacity:50,  color:"#166534", kind:"field", provider:"gtec" }, // darkest green
+  { id:"f4", name:"Field #2",                    capacity:50,  color:"#22c55e", kind:"field", provider:"gtec" }, // mid green
+  { id:"f5", name:"Field #3",                    capacity:50,  color:"#86efac", kind:"field", provider:"gtec" }, // light green
   // GTEC Orakei (Reihana St) — managed by GTEC but not a CPSA ground, so it sits outside
   // the sync entirely and is hidden from bookers until AMUA decides to open it up.
   { id:"g1", name:"GTEC Orakei – Field 1",       capacity:50,  color:"#0e7490", kind:"field",
-    site:"GTEC Orakei", adminOnly:true, defaultRate:45 },   // dark cyan
+    site:"GTEC Orakei", provider:"gtec", adminOnly:true, defaultRate:45 },   // dark cyan
   { id:"g2", name:"GTEC Orakei – Field 2",       capacity:50,  color:"#0891b2", kind:"field",
-    site:"GTEC Orakei", adminOnly:true, defaultRate:45 },   // mid cyan
+    site:"GTEC Orakei", provider:"gtec", adminOnly:true, defaultRate:45 },   // mid cyan
   { id:"g3", name:"GTEC Orakei – Field 3",       capacity:50,  color:"#22d3ee", kind:"field",
-    site:"GTEC Orakei", adminOnly:true, defaultRate:45 },   // light cyan
+    site:"GTEC Orakei", provider:"gtec", adminOnly:true, defaultRate:45 },   // light cyan
+  // St Cuthbert's College (Epsom) — hired directly from the school, not through GTEC, so
+  // it has its own purchase order and never enters the GTEC queue or sync. Admin-only
+  // until AMUA opens it to bookers; set its rate under Pricing.
+  { id:"s1", name:"St Cuthberts – Field #1",     capacity:50,  color:"#c2410c", kind:"field",
+    site:"St Cuthberts", provider:"stcuthberts", adminOnly:true },   // burnt orange
 ];
 // Facilities the current viewer may see. Lookups by id are deliberately NOT filtered — a
 // booking on an admin-only facility must still render its name wherever it appears.
@@ -124,7 +132,7 @@ const FACILITIES = [
 let _isAdminView = false;
 function visibleFacilities() { return FACILITIES.filter(f => !f.adminOnly || _isAdminView); }
 // Light tint of each facility colour for day-view column backgrounds.
-const FACILITY_TINT = { f1:"#f5f3ff", f2:"#ede9fe", f3:"#dcfce7", f4:"#ecfdf5", f5:"#f0fdf4", g1:"#cffafe", g2:"#ecfeff", g3:"#f0fdff" };
+const FACILITY_TINT = { f1:"#f5f3ff", f2:"#ede9fe", f3:"#dcfce7", f4:"#ecfdf5", f5:"#f0fdf4", g1:"#cffafe", g2:"#ecfeff", g3:"#f0fdff", s1:"#ffedd5" };
 function isSocialFac(id) { return FACILITIES.find(f=>f.id===id)?.kind==="social"; }
 const EMAIL_COLORS = ["#6366f1","#ec4899","#f59e0b","#10b981","#ef4444","#8b5cf6","#06b6d4","#84cc16","#f97316","#14b8a6","#e879f9","#fb7185","#34d399","#60a5fa","#fbbf24"];
 const _ecc = {}; let _eci = 0;
@@ -230,6 +238,18 @@ const MONTHS=["January","February","March","April","May","June","July","August",
 // e.g. P260607GTE10 — PO, Jun→Jul 2026, recipient GTE, issued the 10th.
 const RECIPIENT_CODE_AMUA = "AMU";
 const RECIPIENT_CODE_GTEC = "GTE";
+
+// Facility providers — who AMUA hires from and raises purchase orders to. Keyed by the
+// `provider` on each facility. `short` names the provider in Drive folder names.
+// (Interim: see docs/multi-provider-design.md for moving this into Supabase.)
+const PROVIDERS = {
+  gtec:        { ...VENDOR_GTEC, short:"GTEC", recipientCode: RECIPIENT_CODE_GTEC },
+  stcuthberts: { id:"stcuthberts", name:"St Cuthbert's College", short:"St Cuthberts",
+                 address:"", gstNumber:"", recipientCode:"STC" },
+};
+function providerOfFacility(facilityId) {
+  return FACILITIES.find(f => f.id === facilityId)?.provider || "gtec";
+}
 function cleanRecipientCode(code) {
   return (code||"").toUpperCase().replace(/[^A-Z0-9]/g,"").padEnd(3,"X").slice(0,3);
 }
@@ -4880,6 +4900,8 @@ function driveBatchFolderName(records) {
   return order ? `${range} — ${order}` : `${range} — ${po.batchId||po.id}`;
 }
 const DRIVE_SUBFOLDERS = { po:"PO (to GTEC)", fromGtec:"Invoice (from GTEC)", toClubs:"Invoice (to Clubs)" };
+// Each provider's PO files under its own folder; GTEC keeps the original name.
+const drivePoFolderName = rec => `PO (to ${(PROVIDERS[rec.provider||"gtec"]||PROVIDERS.gtec).short})`;
 
 function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onCreateReceipt, onLoadToSummary, isAdmin=false, loggedInEmail="", emailAliases={}, aliasNames={}, driveEnabled=false, onDriveSync, onRenameBatch, onDriveAttach, onEmailOfficial, onQueueInvoiceEmails, silentMode=false, onToggleSilent }) {
   const [filterStatus, setFilterStatus] = useState("all");
@@ -4928,16 +4950,17 @@ function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onCreat
     }
     const bs = Object.entries(batchMap).map(([batchId, recs]) => {
       const invRecs = recs.filter(r => r.type !== "purchase_order");
-      const poRec = recs.find(r => r.type === "purchase_order");
-      // Display order: PO → grouped INVs (future: GTEC receipt → club receipts)
-      const ordered = [poRec, ...invRecs].filter(Boolean);
+      const poRecs = recs.filter(r => r.type === "purchase_order");
+      const poRec = poRecs[0];
+      // Display order: POs → grouped INVs (future: GTEC receipt → club receipts)
+      const ordered = [...poRecs, ...invRecs];
       const worstStatus = recs.reduce((worst, r) => {
         const wi = PIPELINE_KEYS.indexOf(worst);
         const ri = PIPELINE_KEYS.indexOf(r.status || "draft");
         return ri < wi ? (r.status || "draft") : worst;
       }, "complete");
       return {
-        batchId, records: ordered, invRecs, poRec,
+        batchId, records: ordered, invRecs, poRec, poRecs,
         orderName: recs[0].orderName || "",
         createdAt: recs[0].createdAt || "",
         dateFrom: recs[0].dateFrom || "",
@@ -5273,7 +5296,7 @@ function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onCreat
             <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
               <span style={{fontFamily:"monospace",fontSize:10,background:"#6366f1",padding:"2px 7px",borderRadius:4,color:"#fff",fontWeight:700,letterSpacing:"0.04em"}}>BATCH</span>
               {batch.orderName&&<span style={{fontSize:12,fontWeight:800,color:"#312e81"}}>{batch.orderName}</span>}
-              <span style={{fontSize:11,color:"#6366f1",fontWeight:600}}>{batch.invRecs.length} invoice{batch.invRecs.length!==1?"s":""} + {batch.poRec?"1 PO":"no PO"}</span>
+              <span style={{fontSize:11,color:"#6366f1",fontWeight:600}}>{batch.invRecs.length} invoice{batch.invRecs.length!==1?"s":""} + {batch.poRecs.length?`${batch.poRecs.length} PO${batch.poRecs.length!==1?"s":""}`:"no PO"}</span>
             </div>
             <div style={{fontSize:11,color:"#6b7280",marginTop:3,display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
               <span>{fmtDate(batch.dateFrom)}{batch.dateTo&&batch.dateTo!==batch.dateFrom?` – ${fmtDate(batch.dateTo)}`:""}</span>
@@ -5289,7 +5312,7 @@ function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onCreat
                   ? { borderActive:"#1d4ed8", borderIdle:"#bfdbfe", bgActive:"#1d4ed8", bgIdle:"#dbeafe", fgActive:"#fff", fgIdle:"#1d4ed8" }
                   : { borderActive:"#4f46e5", borderIdle:"#c7d2fe", bgActive:"#4f46e5", bgIdle:"#eef2ff", fgActive:"#fff", fgIdle:"#4338ca" };
                 const dt = isPOChip ? "purchase_order" : "invoice";
-                const label = isPOChip ? "PO · GTEC" : `INV · ${displayName(r.bookerEmail)}`;
+                const label = isPOChip ? `PO · ${(PROVIDERS[r.provider||"gtec"]||PROVIDERS.gtec).short}` : `INV · ${displayName(r.bookerEmail)}`;
                 return (
                   <div key={r.id} style={{display:"inline-flex",borderRadius:6,overflow:"hidden",border:`1.5px solid ${active?tone.borderActive:tone.borderIdle}`}}>
                     <button onClick={e=>{e.stopPropagation();setExpandedBatchId(batch.batchId);setExpandedSubId(r.id);}}
@@ -6249,6 +6272,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
     ].filter(Boolean).join("; ");
     return {
       date:   b.date,
+      facilityId: b.facility_id,
       desc:   `${fac?.name||b.facility_id} · ${timeStr}`,
       detail: `${b.purpose||""}${fixed?" · fixed price":""}${slotNote}${shareNote}`,
       hours:  b.duration,
@@ -6271,17 +6295,18 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
         const facName = fac?.name || b.facility_id;
         if (day > 0) {
           const key = b.facility_id + ":day";
-          if (!groups[key]) groups[key] = { desc:`${facName} – Daytime`, hours:0, rate:rates.day, cost:0 };
+          if (!groups[key]) groups[key] = { desc:`${facName} – Daytime`, facilityId:b.facility_id, hours:0, rate:rates.day, cost:0 };
           groups[key].hours += day; groups[key].cost += day * rates.day;
         }
         if (evening > 0) {
           const key = b.facility_id + ":evening";
-          if (!groups[key]) groups[key] = { desc:`${facName} – Evening`, hours:0, rate:rates.evening, cost:0 };
+          if (!groups[key]) groups[key] = { desc:`${facName} – Evening`, facilityId:b.facility_id, hours:0, rate:rates.evening, cost:0 };
           groups[key].hours += evening; groups[key].cost += evening * rates.evening;
         }
       });
       const groupedLines = Object.values(groups).map(g => ({
         desc:  g.desc,
+        facilityId: g.facilityId,
         detail:`${fmtHrs(g.hours)} @ ${fmtCost(g.rate)}/hr`,
         hours: g.hours,
         rate:  g.rate,
@@ -6298,6 +6323,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
         const splitNote = day>0&&evening>0 ? ` (${fmtHrs(day)} day + ${fmtHrs(evening)} eve)` : "";
         return {
           date:   b.date,
+          facilityId: b.facility_id,
           desc:   `${fac?.name||b.facility_id} · ${timeStr}`,
           detail: `${b.purpose}${splitNote}`,
           hours:  day + evening,
@@ -6334,6 +6360,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
       const origTimeStr = `${fmtTime(snap.start_hour)}–${fmtTime(snap.start_hour+snap.duration)}`;
       return [{
         date:    b.date,
+        facilityId: b.facility_id,
         desc:    `[${signedCost>0?"Invoice adj.":"Credit adj."}] ${fac?.name||b.facility_id}`,
         detail:  `GTEC amendment: billed ${origTimeStr} ${snap.duration}h → amended ${timeStr} ${b.duration}h (${bs||"pending"})`,
         hours:   b.duration - snap.duration,
@@ -6462,12 +6489,12 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
   // unique against reserved codes, every profile's code, and the rest of this batch.
   function recipientCodeFor(email, batchRecs=[]) {
     const e = (email||"").toLowerCase();
-    if (e === "gtec") return RECIPIENT_CODE_GTEC;
+    if (PROVIDERS[e]) return PROVIDERS[e].recipientCode;
     if (e === "combined" || e === "") return "CMB";
     const canonKey = (emailAliases[e] || e);
     const prof = (profiles||{})[canonKey] || {};
     if (prof.billingCode) return cleanRecipientCode(prof.billingCode);
-    const used = [RECIPIENT_CODE_AMUA, RECIPIENT_CODE_GTEC,
+    const used = [RECIPIENT_CODE_AMUA, ...Object.values(PROVIDERS).map(p=>p.recipientCode),
       ...Object.values(profiles||{}).map(p=>p?.billingCode).filter(Boolean),
       ...batchRecs.map(r=>r.recipientCode).filter(Boolean)];
     const name = prof.officialName || prof.fullName || (aliasNames||{})[canonKey] || canonKey.split("@")[0];
@@ -6523,56 +6550,67 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
     };
   }
 
-  // Build one combined PO record (AMUA → GTEC) covering all booker scopes.
-  // Lines are one entry per booker showing their subtotal; references invoice IDs.
-  function buildGtecPoRecord(scopes, invoiceRecords, allRecs) {
-    const allBkgsFlat = scopes.flatMap(s=>s.bkgs);
-    const allDates = allBkgsFlat.map(b=>b.date).filter(Boolean).sort();
-    const poFrom = dateFrom || allDates[0] || todayKey();
-    const poTo   = dateTo   || allDates[allDates.length-1] || todayKey();
-    // A PO is issued TO GTEC, so the recipient code is GTEC's.
-    const recipientCode = RECIPIENT_CODE_GTEC;
-    const poId = genBankRef({ type:"P", dateFrom:poFrom, dateTo:poTo, recipientCode, existingRefs: [...allRecs.map(r=>r.id), ...invoiceRecords.map(r=>r.id)] });
-    const poLines = scopes.map(scope=>{
-      const canonKey = (emailAliases[scope.email] || scope.email).toLowerCase();
-      const prof = (profiles||{})[canonKey] || {};
-      const name = prof.fullName || bookerNameMap[scope.email?.toLowerCase()] || scope.email?.split("@")[0] || "Unknown";
-      const inv = invoiceRecords.find(r=>r.bookerEmail===scope.email);
-      const subtotal = (inv?.lines||[]).reduce((s,l)=>s+l.cost,0);
-      const { pre } = gstAmounts(subtotal, invGst);
-      const hours = (inv?.lines||[]).reduce((s,l)=>s+(l.hours||0),0);
-      return { desc:`${name}${inv?.id?` · ${inv.id}`:""}`, detail: inv?.id||"", hours: hours || null, rate: null, cost: pre };
-    });
-    // Simpler: just sum totals directly
-    const sumTotal = invoiceRecords.reduce((s,r)=>s+(r.total||0),0);
-    const sumSubtotal = invoiceRecords.reduce((s,r)=>s+(r.subtotal||0),0);
-    const sumGst = invoiceRecords.reduce((s,r)=>s+(r.gst||0),0);
-    return {
-      id: poId,
-      bankRef: poId,
-      recipientCode,
-      type: "purchase_order",
-      orderName: invOrderName || "",
-      createdAt: new Date().toISOString(),
-      dateFrom: poFrom,
-      dateTo:   poTo,
-      bookerEmail: "gtec",
-      bookerName:  VENDOR_GTEC.name,
-      bookerAddress: VENDOR_GTEC.address,
-      bookerGst:   VENDOR_GTEC.gstNumber,
-      bookingIds:  allBkgsFlat.map(b=>b.id),
-      linkedInvoiceIds: invoiceRecords.map(r=>r.id),
-      lines: poLines,
-      // Itemised view: every booking across all bookers, prefixed with the booker
-      // name, reusing each invoice's own per-booking lines (so totals reconcile).
-      individualLines: invoiceRecords.flatMap(inv =>
-        (inv.individualLines||[]).map(l => ({ ...l, desc: `${inv.bookerName} · ${l.desc||l.description||l.label||""}` }))
-      ),
-      subtotal: sumSubtotal, gst: sumGst, total: sumTotal, gstMode: invGst,
-      status: "draft",
-      gtecInvoiceNumber: "",
-      notes: "",
-    };
+  // Build one PO per facility provider (AMUA → GTEC, AMUA → St Cuthbert's, …) covering
+  // all booker scopes. Each PO carries only the lines for its provider's facilities, as
+  // one entry per booker with their subtotal plus the invoice reference.
+  function buildProviderPoRecords(scopes, invoiceRecords, allRecs) {
+    const lineProvider = l => providerOfFacility(l.facilityId);
+    const providerIds = [...new Set(invoiceRecords.flatMap(inv => (inv.lines||[]).map(lineProvider)))];
+    const pos = [];
+    for (const pid of providerIds) {
+      const prov = PROVIDERS[pid] || PROVIDERS.gtec;
+      const bkgs = scopes.flatMap(s=>s.bkgs).filter(b => providerOfFacility(b.facility_id) === pid);
+      const dates = bkgs.map(b=>b.date).filter(Boolean).sort();
+      const poFrom = dateFrom || dates[0] || todayKey();
+      const poTo   = dateTo   || dates[dates.length-1] || todayKey();
+      const recipientCode = prov.recipientCode;
+      const poId = genBankRef({ type:"P", dateFrom:poFrom, dateTo:poTo, recipientCode,
+        existingRefs: [...allRecs.map(r=>r.id), ...invoiceRecords.map(r=>r.id), ...pos.map(r=>r.id)] });
+      const linked = [];
+      let subtotal = 0, gst = 0, total = 0;
+      const poLines = scopes.map(scope => {
+        const inv = invoiceRecords.find(r=>r.bookerEmail===scope.email);
+        const lines = (inv?.lines||[]).filter(l => lineProvider(l) === pid);
+        if (!lines.length) return null;
+        linked.push(inv);
+        const canonKey = (emailAliases[scope.email] || scope.email).toLowerCase();
+        const prof = (profiles||{})[canonKey] || {};
+        const name = prof.fullName || bookerNameMap[scope.email?.toLowerCase()] || scope.email?.split("@")[0] || "Unknown";
+        const amt = gstAmounts(lines.reduce((t,l)=>t+l.cost,0), invGst);
+        subtotal += amt.pre; gst += amt.gst; total += amt.total;
+        const hours = lines.reduce((t,l)=>t+(l.hours||0),0);
+        return { desc:`${name}${inv?.id?` · ${inv.id}`:""}`, detail: inv?.id||"", hours: hours || null, rate: null, cost: amt.pre };
+      }).filter(Boolean);
+      pos.push({
+        id: poId,
+        bankRef: poId,
+        recipientCode,
+        type: "purchase_order",
+        provider: pid,
+        orderName: invOrderName || "",
+        createdAt: new Date().toISOString(),
+        dateFrom: poFrom,
+        dateTo:   poTo,
+        bookerEmail: pid,
+        bookerName:  prov.name,
+        bookerAddress: prov.address,
+        bookerGst:   prov.gstNumber,
+        bookingIds:  bkgs.map(b=>b.id),
+        linkedInvoiceIds: linked.map(r=>r.id),
+        lines: poLines,
+        // Itemised view: this provider's bookings across all bookers, prefixed with the
+        // booker name, reusing each invoice's own per-booking lines (so totals reconcile).
+        individualLines: linked.flatMap(inv =>
+          (inv.individualLines||[]).filter(l => lineProvider(l) === pid)
+            .map(l => ({ ...l, desc: `${inv.bookerName} · ${l.desc||l.description||l.label||""}` }))
+        ),
+        subtotal, gst, total, gstMode: invGst,
+        status: "draft",
+        gtecInvoiceNumber: "",
+        notes: "",
+      });
+    }
+    return pos;
   }
 
   // Full name from profiles for official invoices; falls back to booking name then alias
@@ -7807,11 +7845,14 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
                             <span style={{color:"#64748b",fontSize:11}}>← AMUA invoice to booker</span>
                           </div>
                         ))}
-                        <div style={{display:"flex",gap:6,alignItems:"center",marginTop:2,paddingTop:6,borderTop:"1px dashed #bae6fd"}}>
-                          <span style={{fontFamily:"monospace",fontSize:10,background:"#dbeafe",padding:"1px 5px",borderRadius:4,color:"#1d4ed8"}}>PO</span>
-                          <span style={{fontWeight:600}}>{VENDOR_GTEC.name}</span>
-                          <span style={{color:"#64748b",fontSize:11}}>← combined PO for all {sel.length} booker{sel.length!==1?"s":""}</span>
-                        </div>
+                        {/* One PO per provider whose facilities appear in these bookings. */}
+                        {[...new Set(activeForInvoice.filter(b=>sel.includes(invKey(b.email))).map(b=>providerOfFacility(b.facility_id)))].map((pid,i)=>(
+                          <div key={pid} style={{display:"flex",gap:6,alignItems:"center",marginTop:i?0:2,paddingTop:i?0:6,borderTop:i?"none":"1px dashed #bae6fd"}}>
+                            <span style={{fontFamily:"monospace",fontSize:10,background:"#dbeafe",padding:"1px 5px",borderRadius:4,color:"#1d4ed8"}}>PO</span>
+                            <span style={{fontWeight:600}}>{(PROVIDERS[pid]||PROVIDERS.gtec).name}</span>
+                            <span style={{color:"#64748b",fontSize:11}}>← combined PO for its facilities</span>
+                          </div>
+                        ))}
                         <div style={{fontSize:10,color:"#0369a1",marginTop:2}}>
                           Bookings remain uninvoiced until this record advances from Draft → next stage.
                         </div>
@@ -7835,15 +7876,15 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
                         allRecs.push(rec);
                         return rec;
                       });
-                      const poRecord = buildGtecPoRecord(officialScopes, invoiceRecords, allRecs);
-                      onCreateOfficialInvoice([...invoiceRecords, poRecord], null); // pass null — no immediate invoicing
+                      const poRecords = buildProviderPoRecords(officialScopes, invoiceRecords, allRecs);
+                      onCreateOfficialInvoice([...invoiceRecords, ...poRecords], null); // pass null — no immediate invoicing
                       setShowInvoice(false);
                     }} disabled={!officialReady}
                     style={S.btn({background:officialReady?"#4338ca":"#94a3b8",color:"#fff",gap:6,display:"flex",alignItems:"center",fontWeight:700,cursor:officialReady?"pointer":"not-allowed"})}>
                       📋 Create Invoices + GTEC PO
                     </button>
                     <div style={{fontSize:10,color:"#94a3b8",marginTop:6}}>
-                      Creates {invSelectedEmails.size||allInvoiceEmails.length} booker invoice{(invSelectedEmails.size||allInvoiceEmails.length)!==1?"s":""} + 1 combined GTEC PO ·
+                      Creates {invSelectedEmails.size||allInvoiceEmails.length} booker invoice{(invSelectedEmails.size||allInvoiceEmails.length)!==1?"s":""} + one PO per facility provider ·
                       Bookings marked invoiced only when record leaves Draft status.
                     </div>
                   </div>
@@ -9485,11 +9526,12 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                     <td style={{padding:"3px 8px"}} onClick={e=>e.stopPropagation()}>
                       <div style={{display:"flex",gap:3,justifyContent:"flex-end",flexWrap:"wrap"}}>
                         {isPending&&!isDeleteQueued&&<>
-                          {isAmuaStage&&<button onClick={()=>queueAction(b.id,"queued_cpsa")} title="Queue for GTEC"
+                          {isAmuaStage&&providerOfFacility(b.facility_id)==="gtec"&&<button onClick={()=>queueAction(b.id,"queued_cpsa")} title="Queue for GTEC"
                             style={S.btn({padding:"3px 7px",fontSize:10,background:queued?.newStatus==="queued_cpsa"?"#1d4ed8":"#3b82f6",color:"#fff",outline:queued?.newStatus==="queued_cpsa"?"2px solid #1d4ed8":"none"})}>GTEC →</button>}
                           {(b.status==="queued_cpsa"||b.status==="amua_submit")&&<button onClick={()=>queueAction(b.id,"pending_cpsa")} title="Mark as Pending GTEC Review (no email)"
                             style={S.btn({padding:"3px 7px",fontSize:10,background:queued?.newStatus==="pending_cpsa"?"#0369a1":"#0ea5e9",color:"#fff",outline:queued?.newStatus==="pending_cpsa"?"2px solid #0369a1":"none"})}>⏳</button>}
-                          {isCpsaStage&&<button onClick={()=>queueAction(b.id,"approved")} title="Mark GTEC Approved"
+                          {/* Non-GTEC facilities skip the GTEC queue: AMUA approves them directly. */}
+                          {(isCpsaStage||(isAmuaStage&&providerOfFacility(b.facility_id)!=="gtec"))&&<button onClick={()=>queueAction(b.id,"approved")} title={isCpsaStage?"Mark GTEC Approved":"Approve"}
                             style={S.btn({padding:"3px 7px",fontSize:10,background:queued?.newStatus==="approved"?"#15803d":"#22c55e",color:"#fff",outline:queued?.newStatus==="approved"?"2px solid #15803d":"none"})}>✓</button>}
                           <button onClick={()=>queueAction(b.id,"rejected")} title="Reject"
                             style={S.btn({padding:"3px 7px",fontSize:10,background:queued?.newStatus==="rejected"?"#be123c":"#f43f5e",color:"#fff",outline:queued?.newStatus==="rejected"?"2px solid #be123c":"none"})}>✗</button>
@@ -10134,7 +10176,7 @@ export default function App() {
       emails = billingRecords.filter(r=>rec.linkedInvoiceIds.includes(r.id)).map(r=>r.bookerEmail).filter(Boolean);
     } else {
       const em = (rec.bookerEmail||"").toLowerCase();
-      if (em && em!=="combined" && em!=="gtec") emails = [em];
+      if (em && em!=="combined" && !PROVIDERS[em]) emails = [em];
     }
     const canon = new Set(emails.map(e=>(emailAliases[e.toLowerCase()]||e).toLowerCase()).filter(Boolean));
     setListBookerFilter(canon);
@@ -11200,7 +11242,11 @@ export default function App() {
       let batchFolder = null;
       if (knownFolderId) { try { batchFolder = await renameFile(knownFolderId, folderName); } catch { /* deleted or inaccessible — look up by name */ } }
       if (!batchFolder) batchFolder = await ensureFolderPath([DRIVE_ROOT_FOLDER, year, folderName]);
-      const subPo    = await ensureFolder(DRIVE_SUBFOLDERS.po, batchFolder.id);
+      const poFolders = {};
+      const poFolderFor = async rec => {
+        const name = drivePoFolderName(rec);
+        return poFolders[name] || (poFolders[name] = await ensureFolder(name, batchFolder.id));
+      };
       const subClubs = await ensureFolder(DRIVE_SUBFOLDERS.toClubs, batchFolder.id);
       // Always create the drop-point for the invoice GTEC sends us, even though
       // nothing is uploaded into it here (see handleDriveAttachGtec).
@@ -11209,7 +11255,7 @@ export default function App() {
         try {
           const isPO = rec.type==="purchase_order";
           const docType = isPO ? "purchase_order" : rec.type==="receipt" ? "receipt" : "invoice";
-          const folder = isPO ? subPo : subClubs; // receipts file with the club-facing docs
+          const folder = isPO ? await poFolderFor(rec) : subClubs; // receipts file with the club-facing docs
           const base = billingDocBaseName(rec);
           const html = buildBillingDocHtml(rec, docType, rec.lines||[]);
           const pdfBlob = await htmlToPdfBlob(html);
