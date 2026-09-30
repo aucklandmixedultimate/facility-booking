@@ -84,6 +84,7 @@ main{display:flex;flex-direction:column;min-height:0;min-width:0}
 .toolbar button{pointer-events:auto;background:rgba(255,255,255,.94);color:#15211c;border:1px solid rgba(0,0,0,.15);border-radius:8px;padding:4px 9px;font-size:13px;font-weight:600;box-shadow:0 1px 4px rgba(0,0,0,.25)}
 .toolbar button[aria-pressed="true"]{background:#15211c;color:#fff}
 .toolbar button:disabled{opacity:.55;cursor:default}
+.card.book .mapbox,.card.book #info,.card.book .dispenser{display:none!important}
 .card.city .toolbar,.card.city .fitbar,.card.city .field,.card.city .centre,.card.city .rotatehint,.card.city .sizepanel{display:none!important}
 .thumbs{display:contents}
 .sizepanel{position:absolute;top:46px;right:10px;z-index:650;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px;display:grid;gap:6px;font-size:13px;box-shadow:0 6px 20px rgba(0,0,0,.25)}
@@ -121,6 +122,7 @@ main{display:flex;flex-direction:column;min-height:0;min-width:0}
 .privbox .pb-short{display:none}
 .privbox .pb-ult{display:block;width:100%;color:#9d174d;background:#fce7f3;border-radius:6px;padding:2px 6px}
 .privbox .pb-ult a{color:#be185d}
+.privbox .pb-only{border:2px solid #ec4899;font-size:13px}
 .chip.ult{background:#fce7f3;color:#be185d}
 @media (prefers-color-scheme: dark){.privbox .pb-ult{background:#3b1027;color:#f9a8d4}.privbox .pb-ult a{color:#f9a8d4}.chip.ult{background:#3b1027;color:#f9a8d4}}
 .privbox ol{display:inline-flex;flex-wrap:wrap;gap:2px 12px;margin:0;padding:0;list-style:none;counter-reset:st}
@@ -214,3 +216,27 @@ kbd{font-family:var(--font-mono);font-size:10px;border:1px solid var(--line);bor
 .dlg-actions button{border-radius:8px;padding:7px 12px;font-weight:600;border:1px solid var(--line);background:var(--surface)}
 .dlg-actions .primary{background:var(--turf);border-color:var(--turf);color:#fff}
 @media (prefers-reduced-motion:reduce){.card.fly,.card.snap,.card.deal,.council-overlay,.field svg,.centre.needfit .centrebtn{transition:none;animation:none}}
+
+/* Book view: pick council fields to add to a booker's booking locations. */
+.bookpanel{flex:1;min-height:0;overflow:auto;padding:12px 14px;display:flex;flex-direction:column;gap:14px;font-size:14px}
+.bookpanel h3{font-family:var(--font-display);font-size:20px;margin:0}
+.bookpanel .bk-who{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center}
+.bookpanel .bk-who input{padding:5px 9px;border:1px solid var(--line);border-radius:8px;background:var(--surface);min-width:240px}
+.bookpanel .bk-fields{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:6px}
+.bookpanel label.bk-f{display:flex;gap:8px;align-items:center;border:1px solid var(--line);border-radius:10px;padding:6px 9px;cursor:pointer}
+.bookpanel label.bk-f.on{border-color:var(--turf);background:var(--turf-soft)}
+.bookpanel .bk-f small{color:var(--muted);display:block;font-size:11px}
+.bookpanel .bk-wf{border-radius:10px;padding:8px 10px;background:var(--bg);font-size:13px}
+.bookpanel .bk-wf ol{margin:4px 0 0;padding-left:20px}
+.bookpanel .bk-wf.priv{background:#efe8fd;color:#3b1d7a}
+.bookpanel .bk-go{display:flex;gap:8px;flex-wrap:wrap}
+.bookpanel button.primary{background:var(--turf);color:#fff;border:0;border-radius:8px;padding:7px 14px;font-weight:600}
+.bookpanel button.primary:disabled{opacity:.5}
+.bookpanel .bk-list{display:flex;flex-direction:column;gap:6px}
+.bookpanel .bk-row{display:flex;gap:8px;align-items:center;border:1px solid var(--line);border-radius:10px;padding:6px 10px;flex-wrap:wrap}
+.bookpanel .bk-row .n{font-weight:600;flex:1;min-width:160px}
+.bookpanel .bk-row .tag{font-size:11px;padding:1px 7px;border-radius:999px;background:var(--line);color:var(--muted)}
+.bookpanel .bk-row .tag.priv{background:#efe8fd;color:#5b21b6}
+.bookpanel .bk-row button{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:3px 8px;font-size:12px}
+.bookpanel .muted{color:var(--muted);font-size:13px}
+@media (prefers-color-scheme: dark){.bookpanel .bk-wf.priv{background:#241a3a;color:#d9ccff}.bookpanel .bk-row .tag.priv{background:#241a3a;color:#c4b0ff}}

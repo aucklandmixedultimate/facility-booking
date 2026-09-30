@@ -473,7 +473,7 @@ function buildCity() {
       r.lights === "full" || r.lights === "training" ? "💡 lights" : r.lights === "none" ? "no lights" : ""].filter(Boolean).join(" · ") : "Not rated yet";
     mk.bindTooltip(`<b>${esc(p.name)}</b><br>${esc(p.region)} · <b style="color:${col}">${suitWord(r)}</b><br>${esc(tags)}${r?.fields ? "<br>Fields: " + esc(r.fields) : ""}`
       + (pv?.length ? `<br><b style="color:${PRIV_COLOR}">◆ Privately managed: contact ${esc(pv[0].short)}</b> first` : "")
-      + (ult.length ? `<br><b style="color:${ULT_COLOR}">🥏 Ultimate club: ${esc(ult.map(o => o.operator).join(", "))}</b>` : "")
+      + (ult.length ? `<br><b style="color:${ULT_COLOR}">🥏 ${ult.some(o => o.booking_only) ? "Book only through" : "Ultimate club"}: ${esc(ult.map(o => o.operator).join(", "))}</b>` : "")
       + (fl ? `<br><b style="color:${PRIV_COLOR}">◇ Flagged: probably club-run${fl.club ? " (" + esc(fl.club) + ")" : ""}</b>` : "") + `<br><i>Click to rate</i>`,
       { className: "parktip", direction: "top", offset: [0, -6] });
     mk.on("click", () => openPark(p.id));
@@ -515,10 +515,12 @@ function privHtml(o) {
 // Park card banner: every operator on this ground, then the request steps once.
 function privBanner(all) {
   // Ultimate clubs get their own line; the field contact is the managing club.
-  const ult = all.filter(o => o.code === "ultimate"), ops = all.filter(o => o.code !== "ultimate");
+  const ult = all.filter(o => o.code === "ultimate" && !o.booking_only), ops = all.filter(o => o.code !== "ultimate" || o.booking_only);
   const ultLine = ult.map(o => `<span class="pb-ult"><b>🥏 ${esc(o.operator)}</b> — ${privContacts(o) || "no contact found"}${o.notes ? ` <i>${esc(o.notes)}</i>` : ""}</span>`).join("");
   if (!ops.length) return ultLine;
   const [lead, ...rest] = ops;
+  if (lead.booking_only) return `<span class="pb-ult pb-only"><b>🥏 BOOKING ONLY AVAILABLE THROUGH ${esc(lead.operator)}</b> — ${privContacts(lead) || "no contact found"}${lead.notes ? ` <i>${esc(lead.notes)}</i>` : ""}</span>`
+    + (rest.length ? `<span class="pb-full">Fields managed by: ${rest.map(o => `${esc(o.operator)} (${esc(o.code || o.type)})`).join(" · ")}</span>` : "") + ultLine;
   return `<span class="pb-full"><b>◆ Contact: ${esc(lead.operator)}</b> (${esc(privStatus(lead))}) — ${esc(lead.manages)} · ${privContacts(lead)}</span>`
     + `<span class="pb-short"><b>◆ ${esc(lead.short)}</b> · ${privContacts(lead)}${rest.length ? ` · +${rest.length} club${rest.length > 1 ? "s" : ""}` : ""}</span>`
     + ultLine
@@ -543,9 +545,12 @@ function renderLegend() {
 function setView(v, { refit } = {}) {
   const was = view; view = v; store.set("vet-view", v);
   $("cityTab").setAttribute("aria-selected", String(v === "city")); $("parkTab").setAttribute("aria-selected", String(v === "park"));
-  $("card").classList.toggle("city", v === "city");
-  $("info").hidden = v === "city"; $("cityInfo").hidden = v !== "city"; $("legend").hidden = v !== "city";
-  $("actions").hidden = v === "city";
+  $("bookTab").setAttribute("aria-selected", String(v === "book"));
+  $("card").classList.toggle("city", v === "city"); $("card").classList.toggle("book", v === "book");
+  $("info").hidden = v !== "park"; $("cityInfo").hidden = v !== "city"; $("legend").hidden = v !== "city";
+  $("bookPanel").hidden = v !== "book";
+  $("actions").hidden = v !== "park";
+  if (v === "book" && rotating) setRotating(false);
   if (v === "city") {
     if (rotating) setRotating(false);
     $("fitPop").hidden = true;
@@ -568,6 +573,99 @@ function setView(v, { refit } = {}) {
   render();
 }
 function openPark(id) { focusId = id; setView("park"); }
+
+// ── Book: add council fields to a booker's booking locations ─────────────────
+// Stored in the shared settings table under "council_facilities" as
+// { "<booker email>": [ {id, park_id, park, region, field, lat, lon, kind, operator, added_at, added_by} ] }.
+// The booking site turns each entry into a facility at the "<provider>|<park>" venue, visible
+// to that booker (and admins), with the council or council + private-operator workflow.
+const BOOK_KEY = "council_facilities";
+let bookLocs = {}, bookFor = "", bookSel = new Set(), bookSelPark = null;
+const slug = s => String(s).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+async function loadBookLocs() {
+  if (supabase && session) {
+    const { data, error } = await supabase.from("settings").select("value").eq("key", BOOK_KEY).maybeSingle();
+    if (!error) { bookLocs = data?.value || {}; return; }
+  }
+  bookLocs = store.get("vet-booklocs", {});
+}
+async function saveBookLocs() {
+  if (supabase && session) {
+    // Re-read first so two admins adding at once don't overwrite each other's bookers.
+    const { data } = await supabase.from("settings").select("value").eq("key", BOOK_KEY).maybeSingle();
+    const fresh = data?.value || {}, who = bookFor.toLowerCase();
+    fresh[who] = bookLocs[who] || []; if (!fresh[who].length) delete fresh[who];
+    const { error } = await supabase.from("settings").upsert({ key: BOOK_KEY, value: fresh, updated_at: new Date().toISOString() });
+    if (error) { setStatus("Couldn't save booking locations (" + error.message + ").", true); return false; }
+    bookLocs = fresh; return true;
+  }
+  store.set("vet-booklocs", bookLocs); return true;
+}
+function parkWorkflow(p) {
+  const lead = (PRIV_BY_PARK[p.id] || []).find(o => o.booking_only || o.code !== "ultimate");
+  return lead ? { kind: "council_private", provider: "op_" + lead.id, operator: { id: lead.id, name: lead.operator, short: lead.short,
+      email: lead.contact?.email || "", phone: lead.contact?.phone || "", url: lead.contact?.url || "" } }
+    : { kind: "council", provider: "akl_council", operator: null };
+}
+const venueLink = (provider, park) => `${BASE}?venue=${encodeURIComponent(provider + "|" + park)}`;
+function renderBook() {
+  const p = current(), who = (bookFor || session?.user?.email || "demo@local").toLowerCase(); bookFor = who;
+  const mine = bookLocs[who] || [], el = $("bookPanel");
+  const known = Object.keys(bookLocs).filter(e => e !== who);
+  let html = `<div class="bk-who"><h3>Booking locations</h3><label>for <input id="bookWho" list="bookWhoList" value="${esc(who)}" title="The booker these fields are added for"></label>
+    <datalist id="bookWhoList">${known.map(e => `<option value="${esc(e)}">`).join("")}</datalist></div>`;
+  if (p) {
+    const wf = parkWorkflow(p), t = tagsFor(p), have = new Set(mine.map(x => x.id));
+    if (bookSelPark !== p.id) { // preselect the selected or rated fields
+      bookSelPark = p.id; bookSel = new Set();
+      if (t.sel) bookSel.add(t.sel); else Object.values(t.fr).filter(x => x.fit && x.fit !== "unknown").forEach(x => bookSel.add(x.name));
+    }
+    const opts = fieldKeys(p).map(x => ({ key: x.key, fit: t.fr[x.key]?.fit })).concat([{ key: "Whole park" }]);
+    html += `<div><b>${esc(p.name)}</b> <span class="muted">· pick the fields to add</span></div><div class="bk-fields">`
+      + opts.map(o => { const id = `cf-${p.id}--${slug(o.key)}`, on = bookSel.has(o.key), saved = have.has(id);
+          return `<label class="bk-f${on || saved ? " on" : ""}"><input type="checkbox" data-bk="${esc(o.key)}" ${on || saved ? "checked" : ""} ${saved ? "disabled" : ""}>
+            <span>${esc(o.key)}<small>${saved ? "✓ already added" : o.fit && o.fit !== "unknown" ? "rated: " + FIT_LABEL[o.fit] : ""}</small></span></label>`; }).join("")
+      + `</div>`;
+    html += wf.kind === "council_private"
+      ? `<div class="bk-wf priv"><b>◆ Council + private operator: ${esc(wf.operator.name)}</b>${wf.operator.email || wf.operator.phone ? ` · ${esc([wf.operator.email, wf.operator.phone].filter(Boolean).join(" · "))}` : ""}<ol>${PRIV.workflow.map(w => `<li>${esc(w.label)}</li>`).join("")}</ol></div>`
+      : `<div class="bk-wf"><b>🏛 Council booking</b><ol><li>AMUA review</li><li>Apply to Auckland Council</li><li>Wait for the council decision</li><li>Approved</li></ol></div>`;
+    html += `<p class="muted">Council application fee: <b>$10 per field</b> per application (pay later). ${bookSel.size ? `This selection: $${bookSel.size * 10}.` : ""}</p>`;
+    html += `<div class="bk-go"><button class="primary" id="bookAdd" ${bookSel.size ? "" : "disabled"}>Add ${bookSel.size || ""} field${bookSel.size === 1 ? "" : "s"} to ${esc(who)}</button>
+      <a href="${venueLink(wf.provider, p.name)}" target="_blank" rel="noopener">Open ${esc(p.name)} in bookings ↗</a></div>`;
+  } else html += `<p class="muted">Open a park from the Auckland map (or the Park view) to add its fields.</p>`;
+  const byPark = {};
+  mine.forEach(x => (byPark[x.park] ||= []).push(x));
+  html += `<div><b>Saved for ${esc(who)}</b> <span class="muted">· ${mine.length} field${mine.length === 1 ? "" : "s"}; they appear in the booking site's location dropdown</span></div><div class="bk-list">`
+    + (mine.length ? Object.entries(byPark).map(([park, xs]) => xs.map(x => `<div class="bk-row"><span class="n">${esc(park)} – ${esc(x.field)}</span>
+        <span class="tag${x.kind === "council_private" ? " priv" : ""}">${x.kind === "council_private" ? "◆ " + esc(x.operator?.short || "operator") + " + council" : "🏛 council"}</span>
+        <a href="${venueLink(x.kind === "council_private" ? "op_" + x.operator.id : "akl_council", park)}" target="_blank" rel="noopener">book ↗</a>
+        <button data-bkdel="${esc(x.id)}" title="Remove from this booker's locations">✕</button></div>`).join("")).join("")
+      : `<p class="muted">Nothing yet.</p>`) + `</div>`;
+  el.innerHTML = html;
+}
+function bindBook() {
+  $("bookPanel").addEventListener("change", e => {
+    const cb = e.target.closest("[data-bk]"); if (cb) { cb.checked ? bookSel.add(cb.dataset.bk) : bookSel.delete(cb.dataset.bk); renderBook(); return; }
+    if (e.target.id === "bookWho") { bookFor = e.target.value.trim().toLowerCase(); renderBook(); }
+  });
+  $("bookPanel").addEventListener("click", async e => {
+    const del = e.target.closest("[data-bkdel]");
+    if (del) { const who = bookFor; bookLocs[who] = (bookLocs[who] || []).filter(x => x.id !== del.dataset.bkdel);
+      if (await saveBookLocs()) setStatus("Removed from " + who + "'s booking locations."); renderBook(); return; }
+    if (e.target.id === "bookAdd") {
+      const p = current(); if (!p || !bookSel.size) return;
+      const who = bookFor, wf = parkWorkflow(p), list = bookLocs[who] || [], have = new Set(list.map(x => x.id));
+      const fk = Object.fromEntries(fieldKeys(p).map(x => [x.key, x.f]));
+      [...bookSel].forEach(key => { const id = `cf-${p.id}--${slug(key)}`; if (have.has(id)) return;
+        const c = fk[key]?.c || [p.lat, p.lon];
+        list.push({ id, park_id: p.id, park: p.name, region: p.region, field: key, lat: c[0], lon: c[1], kind: wf.kind, operator: wf.operator,
+          added_at: new Date().toISOString(), added_by: session?.user?.email || "" }); });
+      bookLocs[who] = list;
+      if (await saveBookLocs()) setStatus(`Added ${bookSel.size} field${bookSel.size === 1 ? "" : "s"} at ${p.name} to ${who}'s booking locations.`);
+      bookSel = new Set(); renderBook();
+    }
+  });
+}
 
 // ── Render ───────────────────────────────────────────────────────────────────
 function renderTags(p) {
@@ -629,7 +727,14 @@ function renderCity() {
   $("emptyState").hidden = true; $("card").hidden = false; $("behind").hidden = true;
   buildCity(); syncCityFields();
 }
+function renderParkHeader() {
+  const p = current();
+  $("emptyState").hidden = true; $("card").hidden = false; $("behind").hidden = true;
+  $("parkName").textContent = p ? p.name : "Booking locations"; $("parkRegion").textContent = p ? p.region : "";
+  $("decChip").innerHTML = ""; $("handleHint").textContent = "Pick council fields to add to a booker's booking locations";
+}
 function render() {
+  if (view === "book") { renderParkHeader(); renderBook(); renderRail(); return; }
   if (view === "city") return renderCity();
   const q = queue(), p = current(), next = focusId ? null : (q[cursor + 1] || (q.length > 1 ? q[0] : null));
   const card = $("card");
@@ -645,7 +750,7 @@ function render() {
     $("privBox").hidden = !pv?.length; $("privBox").innerHTML = pv?.length ? privBanner(pv) : "";
     renderFlag(p);
     const r = reviews[p.id];
-    const lead = (pv || []).find(o => o.code !== "ultimate"), ult = ultimateOf(p);
+    const lead = (pv || []).find(o => o.booking_only || o.code !== "ultimate"), ult = ultimateOf(p).filter(o => o !== lead);
     $("decChip").innerHTML = (lead ? `<span class="chip priv" title="Ask ${esc(lead.operator)} before applying to council">◆ ${esc(lead.short)}</span> ` : "")
       + ult.map(o => `<span class="chip ult" title="Home of ${esc(o.operator)}">🥏 ${esc(o.short)}</span> `).join("") + (r ? `<span class="chip ${r.decision === "no" ? "no" : r.decision === "top" ? "top" : ""}">${r.decision === "top" ? "Top pick" : r.decision === "yes" ? "Shortlisted" : "Rejected"}${r.by ? " · " + esc(r.by.split("@")[0]) : ""}</span>` : "");
     const i = Math.min(mapIdx[p.id] || 0, Math.max(0, p.maps.length - 1));
@@ -681,7 +786,7 @@ function askPlacement(p, t, decision) {
   });
 }
 async function decide(decision) {
-  const p = current(); if (!p || busy || view === "city") return;
+  const p = current(); if (!p || busy || view !== "park") return;
   const t = tagsFor(p);
   let withField = false;
   const prevPl = reviews[p.id]?.placement;
@@ -786,7 +891,10 @@ function bind() {
     await saveFlag(p.id, { club: $("clubIn").value.trim() }); renderFlag(p); });
   $("fitBtn").onclick = () => { const p = current(); if (p) showMap(p); };
   $("cityTab").onclick = () => { if (view !== "city") { focusId = null; setView("city"); } else setView("city", { refit: true }); };
-  $("parkTab").onclick = () => { if (view !== "park") { focusId = null; setView("park"); } };
+  $("parkTab").onclick = () => { if (view !== "park") { if (view === "city") focusId = null; setView("park"); } };
+  $("bookTab").onclick = () => { if (view !== "book") setView("book"); };
+  $("bookBtn").onclick = () => setView("book");
+  bindBook();
   $("sizeBtn").onclick = () => { $("sizePanel").hidden = !$("sizePanel").hidden; };
   const syncDims = () => { $("fLen").value = dims.len; $("fWid").value = dims.wid; $("fEz").value = dims.ez; };
   ["fLen", "fWid", "fEz"].forEach(id => $(id).addEventListener("change", () => {
@@ -809,6 +917,7 @@ function bind() {
     const p = current();
     if (e.key === "Escape") { if (rotating) setRotating(false); $("sizePanel").hidden = true; $("fitPop").hidden = true; if (p && tagsFor(p).sel) selectField(p, null); return; }
     if (/^[cC]$/.test(e.key)) { focusId = null; setView(view === "city" ? "park" : "city"); return; }
+    if (/^[bB]$/.test(e.key)) { setView(view === "book" ? "park" : "book"); return; }
     if (view === "city") return;
     if (e.key === "ArrowRight") { e.preventDefault(); decide("yes"); }
     else if (e.key === "ArrowLeft") { e.preventDefault(); decide("no"); }
@@ -845,7 +954,9 @@ async function start() {
   PRIV_BY_PARK = {};
   (PRIV.operators || []).filter(o => o.park_id).forEach(o => (PRIV_BY_PARK[o.park_id] ||= []).push(o));
   // Point of contact first: the operator marked primary, else the rugby or football club.
-  const rank = o => o.code === "ultimate" ? 3 : o.primary ? 0 : ["rugby", "football"].includes(o.code) ? 1 : 2;
+  // Contact order: the sole booking channel, then primary, then rugby/football; an ultimate
+  // club that isn't the booking channel is listed separately.
+  const rank = o => o.booking_only ? -1 : o.code === "ultimate" ? 3 : o.primary ? 0 : ["rugby", "football"].includes(o.code) ? 1 : 2;
   Object.values(PRIV_BY_PARK).forEach(ops => ops.sort((a, b) => rank(a) - rank(b)));
   const regions = [...new Set(PARKS.map(p => p.region))];
   $("region").insertAdjacentHTML("beforeend", regions.map(r => `<option>${esc(r)}</option>`).join(""));
@@ -865,8 +976,9 @@ async function start() {
     setStatus("Demo mode (no Supabase configured): decisions are kept in this browser.", true);
   }
   $("app").hidden = false;
+  await loadBookLocs();
   initMap(); drawField(); showField(fieldOn); renderLegend(); bind();
-  setView(view === "park" ? "park" : "city", { refit: true });
+  setView(view === "park" || view === "book" ? view : "city", { refit: true });
   if (mode === "shared") setInterval(async () => { if (!busy && !rotating && document.visibilityState === "visible" && !$("saveDlg").open) { await loadShared(); if (view === "city") render(); else renderRail(); } }, 30000);
 }
 start().catch(e => setStatus("Couldn't start: " + (e.message || e), true));

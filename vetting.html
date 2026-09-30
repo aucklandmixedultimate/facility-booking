@@ -18,6 +18,7 @@
           <div class="viewtabs" role="tablist" aria-label="View">
             <button id="cityTab" role="tab" aria-selected="false" title="All of Auckland, coloured by suitability (C)">🗺 Auckland</button>
             <button id="parkTab" role="tab" aria-selected="true" title="One park at a time (C)">🔍 Park</button>
+            <button id="bookTab" role="tab" aria-selected="false" title="Add council fields to a booker's booking locations (B)">📅 Book</button>
           </div>
           <select id="region" aria-label="Region"><option value="">All regions</option></select>
           <select id="mode" aria-label="Queue">
@@ -65,6 +66,7 @@
                   <button id="fitBtn" title="Zoom back to the council map (0)">⤢</button>
                   <span id="thumbs" class="thumbs"></span>
                   <button id="sizeBtn" title="Field dimensions">⚙</button>
+                  <button id="bookBtn" title="Add this park's fields to booking locations (B)">📅 Book</button>
                 </div>
                 <div class="sizepanel" id="sizePanel" hidden>
                   <label>Length (m) <input type="number" id="fLen" min="40" max="130" step="1"></label>
@@ -104,6 +106,7 @@
                 <div class="links"><a id="gmaps" target="_blank" rel="noopener">Google Maps ↗</a><span id="scaleNote"></span><span id="fieldList"></span></div>
               </div>
               <div class="info cityinfo" id="cityInfo" hidden></div>
+              <div class="bookpanel" id="bookPanel" hidden></div>
             </article>
             <div class="empty" id="emptyState" hidden></div>
           </div>

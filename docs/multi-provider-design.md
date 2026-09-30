@@ -252,8 +252,8 @@ opens an **Orbeon Forms** wizard (`SportApplicationForm`). There is no form POST
 - **Page navigation:** each "Next" first runs
   `validateBookingApplicationForm('next', <documentId>)`.
 - **Fee:** `GET /councilonline/yform/rest/getproductpricebycode?productCode=SSPPERMITBK`
-  → **$10.00, pay later**. That is the portal's listed product price, but AMUA
-  reports that council sports-field bookings are free in practice (see §8).
+  → **$10.00 per field, pay later**: the council's application fee for each field
+  applied for. The field hire itself is free (see §8).
 
 The wizard has 8 pages. Control names are the stable part of the ids:
 
@@ -457,6 +457,34 @@ with a deeper sweep of the central isthmus (league, rugby, football and cricket 
 - otherwise the rugby or football club (`code`).
 
 The others are listed as "also on site".
+
+**Booking it (built).**
+- **Adding fields.** On the Council fields page, the **📅 Book** view adds a park's council
+  fields (or "Whole park") to a booker's booking locations. They're stored in
+  `settings.council_facilities` as `{ "<booker email>": [ {id, park_id, park, field, kind,
+  operator, …} ] }`.
+- **Booking site.** Each field becomes a facility at the venue `<provider>|<park>`:
+  - the provider is `akl_council` (Auckland Council) for a plain council park;
+  - it's `op_<operator id>` for a privately managed one, with kind `council_private`,
+    carrying the operator's contact;
+  - the booker it was added for sees it (any of their linked emails), and admins see all;
+  - field hire is $0, and `?venue=<provider>|<park>` links open that venue directly.
+- **Workflows.** Bookings walk `WORKFLOW_STEPS` in `src/booking-system.jsx`:
+
+  | kind | steps |
+  |---|---|
+  | `gtec` | pending_amua → queued_cpsa → pending_cpsa → approved |
+  | `council` | pending_amua → council_apply → council_pending → approved |
+  | `council_private` | pending_amua → op_permission → council_apply → council_pending → op_confirm → approved |
+  | `direct` | pending_amua → approved |
+
+- **Admin controls.** The admin booking list shows the step number and a "next step"
+  button. Its tooltip shows the operator's contact on the operator steps, and the $10 per
+  field council application fee on the apply step.
+- **Emails.** The internal steps (op_permission, council_apply, op_confirm) don't email the
+  booker. The council decision and the approval do.
+- **Still to do:** billing the $10 application fee (who pays it, and on which invoice), and
+  the council portal pre-fill (§5.4).
 
 **Statuses.** A `council_private` booking walks the stages above. It uses the §4.3
 provider stages for steps 1 and 4 and the council stages for steps 2 and 3. It's only
