@@ -147,6 +147,7 @@ main{display:flex;flex-direction:column;min-height:0;min-width:0}
 .privbox .pb-ult{display:block;width:100%;color:#9d174d;background:#fce7f3;border-radius:6px;padding:2px 6px}
 .privbox .pb-ult a{color:#be185d}
 .privbox .pb-only{border:2px solid #ec4899;font-size:13px}
+.privbox .pb-amua.pb-only{border-color:#e0a647}
 .chip.ult{background:#fce7f3;color:#be185d}
 @media (prefers-color-scheme: dark){.privbox .pb-ult{background:#3b1027;color:#f9a8d4}.privbox .pb-ult a{color:#f9a8d4}.chip.ult{background:#3b1027;color:#f9a8d4}}
 .privbox ol{display:inline-flex;flex-wrap:wrap;gap:2px 12px;margin:0;padding:0;list-style:none;counter-reset:st}
@@ -274,3 +275,7 @@ kbd{font-family:var(--font-mono);font-size:10px;border:1px solid var(--line);bor
 .bookpanel .bk-row button{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:3px 8px;font-size:12px}
 .bookpanel .muted{color:var(--muted);font-size:13px}
 @media (prefers-color-scheme: dark){.bookpanel .bk-wf.priv{background:#241a3a;color:#d9ccff}.bookpanel .bk-row .tag.priv{background:#241a3a;color:#c4b0ff}}
+/* Bookers (non-admins): Book mode only; ratings are read-only. */
+body.viewer #modeRate,body.viewer .modetabs{display:none}
+body.viewer .filters #mode{display:none}
+body.viewer .handle .hint,body.viewer .rail .help,body.viewer #fieldBtn,body.viewer #sizeBtn{display:none}
