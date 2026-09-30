@@ -341,6 +341,13 @@ The page always fits one screen: nothing scrolls except the map, where the wheel
   `supabase-migration-field-reviews.sql`; until it's run, flags stay in the browser). On
   the Auckland map the park gets a dashed purple ring, and the CSV has a "Flagged club-run"
   column. Promote confirmed flags into `private-managed.json`.
+- **Council only (🏛).** Some parks in the private list have a club on site, but bookings go
+  straight to the council, with no club permission step (e.g. Thompson Park). Press
+  **🏛 Council only?** on the card to drop the private-operator workflow. Press it again to
+  restore the workflow. The card shows a blue "Council booking only" box and the map marker
+  becomes a plain council park. Overrides are stored in the `council_only_parks` setting; a
+  data-file entry can set `council_only: true` as the default. Fields already in carts are
+  re-filed under the new workflow. AMUA grounds (GTEC) can't be switched.
 - **Lights.** Drag a 💡 bulb from the dispenser at the top right of the map onto each light
   pole. Drag a placed bulb to move it, or drag it back onto the dispenser (or click it) to
   remove it. Any bulb marks the park as lit. **No lights** records that you checked and

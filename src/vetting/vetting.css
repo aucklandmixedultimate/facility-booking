@@ -204,8 +204,11 @@ main{display:flex;flex-direction:column;min-height:0;min-width:0}
 .tags .val.unset{color:var(--muted)}
 .flagbtn{border:1px dashed #7c3aed;background:transparent;color:#5b21b6;border-radius:8px;padding:3px 9px;font-size:12px;font-weight:600}
 .flagbtn[aria-pressed="true"]{background:#efe8fd;border-style:solid}
+.cobtn{border-color:#0369a1;color:#075985}.cobtn[aria-pressed="true"]{background:#e0f2fe}
+.privbox.co{background:#e0f2fe;border-color:#7dd3fc;color:#075985}
 .clubin{padding:3px 8px;border:1px solid #c9b5f5;border-radius:8px;background:var(--surface);font-size:12px;min-width:0;width:170px}
 @media (prefers-color-scheme: dark){.flagbtn{color:#c4b0ff}.flagbtn[aria-pressed="true"]{background:#241a3a}}
+@media (prefers-color-scheme: dark){.cobtn{color:#7dd3fc}.cobtn[aria-pressed="true"]{background:#0c2a3d}.privbox.co{background:#0c2a3d;border-color:#0369a1;color:#bae6fd}}
 .stars button{font-size:17px;line-height:1;padding:2px 6px}
 .tags2 input{width:100%;padding:5px 9px;border:1px solid var(--line);border-radius:8px;background:var(--surface);min-width:0}
 .cityinfo{flex-direction:row;flex-wrap:wrap;align-items:center;gap:6px 16px;font-size:13px;color:var(--muted)}
