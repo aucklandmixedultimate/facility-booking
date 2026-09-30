@@ -468,6 +468,54 @@ function venueFacilities(keepId) {
   const k = activeVenueKey();
   return visibleFacilities().filter(f => k === ALL_VENUES || venueKeyOf(f) === k || f.id === keepId);
 }
+// The booking form picks a facility in three steps: provider → venue (a provider's site) →
+// facility. Every facility the viewer can book is offered (council fields added on the
+// Council fields page included), not just the calendar's current venue. `keepId` keeps a
+// booking's current facility listed even if the viewer can no longer see it.
+function bookableFacilities(keepId) {
+  const vis = visibleFacilities();
+  const keep = keepId && !vis.some(f => f.id === keepId) ? FACILITIES.find(f => f.id === keepId) : null;
+  return keep ? [...vis, keep] : vis;
+}
+function bookableVenues(keepId) {
+  const cur = activeVenueKey(), facs = bookableFacilities(keepId), order = listVenues().map(v => v.key);
+  const byKey = new Map();
+  facs.forEach(f => { const k = venueKeyOf(f), [pid, site] = k.split("|");
+    if (!byKey.has(k)) byKey.set(k, { key: k, pid, site: site || PROVIDERS[pid]?.short || pid, facs: [] });
+    byKey.get(k).facs.push(f); });
+  const rank = k => k === cur ? -1 : order.indexOf(k) < 0 ? 999 : order.indexOf(k);
+  return [...byKey.values()].sort((a, b) => rank(a.key) - rank(b.key));
+}
+function ProviderVenuePicker({ facilityId, onPick, small }) {
+  const venues = bookableVenues(facilityId);
+  if (venues.length <= 1) return null;
+  const f = FACILITIES.find(x => x.id === facilityId), curKey = f ? venueKeyOf(f) : venues[0].key, curPid = curKey.split("|")[0];
+  const pids = [...new Set(venues.map(v => v.pid))];
+  const st = small ? { ...S.inp, fontSize: 12 } : S.inp;
+  const pickVenue = k => { const v = venues.find(x => x.key === k); if (v?.facs[0]) onPick(v.facs[0].id); };
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+      <div>
+        <label style={S.lbl}>Provider</label>
+        <select style={st} value={curPid} onChange={e => pickVenue(venues.find(v => v.pid === e.target.value)?.key)}>
+          {pids.map(pid => <option key={pid} value={pid}>{PROVIDERS[pid]?.name || pid}</option>)}
+        </select>
+      </div>
+      <div>
+        <label style={S.lbl}>Venue</label>
+        <select style={st} value={curKey} onChange={e => pickVenue(e.target.value)}>
+          {venues.filter(v => v.pid === curPid).map(v => <option key={v.key} value={v.key}>📍 {v.site}</option>)}
+        </select>
+      </div>
+    </div>
+  );
+}
+// The facility <option>s at the chosen facility's venue.
+function FacilityOptions({ keepId }) {
+  const f = FACILITIES.find(x => x.id === keepId), k = f ? venueKeyOf(f) : null;
+  const facs = bookableFacilities(keepId).filter(x => !k || venueKeyOf(x) === k);
+  return facs.map(x => <option key={x.id} value={x.id}>{x.name}</option>);
+}
 function providerOfFacility(facilityId) {
   return FACILITIES.find(f => f.id === facilityId)?.provider || "gtec";
 }
@@ -2345,11 +2393,12 @@ function SlotRow({ slot, idx, onChange, onRemove, canRemove, allBookings }) {
   return (
     <div style={{border:"1.5px solid #e2e8f0",borderRadius:10,padding:12,background:"#fafafa",display:"flex",flexDirection:"column",gap:8,position:"relative"}}>
       {canRemove && <button onClick={()=>onRemove(idx)} title="Remove slot" style={{position:"absolute",top:8,right:8,background:"#fff1f2",border:"1px solid #fda4af",borderRadius:6,color:"#f43f5e",cursor:"pointer",fontSize:12,fontWeight:700,padding:"1px 7px",lineHeight:1.5}}>✕</button>}
+      <ProviderVenuePicker facilityId={slot.facility_id} onPick={id=>upd("facility_id",id)}/>
       <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr 1fr":"1.5fr 1.3fr 1fr 1fr",gap:8}}>
         <div>
           <label style={S.lbl}>Facility *</label>
           <select style={S.inp} value={slot.facility_id} onChange={e=>upd("facility_id",e.target.value)}>
-            {venueFacilities(slot.facility_id).map(f=><option key={f.id} value={f.id}>{f.name}</option>)}
+            <FacilityOptions keepId={slot.facility_id}/>
           </select>
         </div>
         <div>
@@ -2747,11 +2796,12 @@ function InlineDraftEditor({ draft, onSave, onCancel }) {
   const [purpose,  setPurpose]  = useState(draft.purpose);
   return (
     <div style={{background:'#f0f4ff',border:'1.5px solid #c7d2fe',borderRadius:8,padding:'10px 12px',display:'flex',flexDirection:'column',gap:8}}>
+      <ProviderVenuePicker facilityId={facility} onPick={setFacility} small/>
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
         <div>
           <label style={S.lbl}>Facility</label>
           <select style={{...S.inp,fontSize:12}} value={facility} onChange={e=>setFacility(e.target.value)}>
-            {venueFacilities(facility).map(f=><option key={f.id} value={f.id}>{f.name}</option>)}
+            <FacilityOptions keepId={facility}/>
           </select>
         </div>
         <div>
