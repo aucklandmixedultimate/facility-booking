@@ -327,6 +327,47 @@
         "https://www.suburbsrugby.co.nz/About-us/Clubrooms-1"
       ],
       "notes": "Not in the council field maps."
+    },
+    {
+      "id": "aufc-nicholson",
+      "park_id": "central-nicholson-park",
+      "park": "Nicholson Park",
+      "lat": -36.88407,
+      "lon": 174.7645,
+      "operator": "Auckland United FC",
+      "short": "Auckland United",
+      "type": "club",
+      "code": "football",
+      "manages": "Uses the playing field (General Sport 1) as one of the club's sports fields",
+      "contact": {
+        "url": "https://www.aucklandunitedfc.org.nz/sports-fields"
+      },
+      "status": "likely",
+      "sources": [
+        "https://www.aucklandunitedfc.org.nz/sports-fields"
+      ],
+      "notes": "Same club as Keith Hay Park; ask whether it holds the field's seasonal allocation."
+    },
+    {
+      "id": "tennis-nicholson",
+      "park_id": "central-nicholson-park",
+      "park": "Nicholson Park",
+      "lat": -36.88407,
+      "lon": 174.7645,
+      "operator": "Nicholson Park Tennis Centre (Mount Eden Tennis Club)",
+      "short": "Nicholson Park Tennis",
+      "type": "club",
+      "code": "tennis",
+      "manages": "Tennis courts at the northern end of the park, beside Mount Eden Bowling Club; not the playing field",
+      "contact": {
+        "url": "https://clubspark.kiwi/NicholsonParkTennisCentre"
+      },
+      "status": "to-verify",
+      "sources": [
+        "https://clubspark.kiwi/NicholsonParkTennisCentre",
+        "https://www.aucklandcouncil.govt.nz/en/parks-recreation/find-park-beach/park-detail/195.html"
+      ],
+      "notes": ""
     }
   ],
   "_contact_rule": "Where several clubs operate at one ground, contact the operator marked primary; if none is marked, the rugby or football club comes first."
