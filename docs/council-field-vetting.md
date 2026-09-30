@@ -307,6 +307,13 @@ The page always fits one screen: nothing scrolls except the map, where the wheel
   - Fergusson Domain: Te Papapa Ultimate (fields managed by Te Papapa Onehunga RFC).
   They're entries with `code: "ultimate"` in `private-managed.json`, and there's an
   "Ultimate club" CSV column.
+- **📅 Book (B).** Adds the current park's council fields (or "Whole park") to a booker's
+  booking locations. The booker defaults to you; admins can type any booker's email. The
+  panel pre-ticks the selected or rated fields and shows the workflow the booking will
+  follow: council, or council + private operator with the operator's contact. It also shows
+  the $10 per field council application fee. Saved fields appear in the booking site's
+  location dropdown for that booker, and "book ↗" links open that venue directly. See
+  multi-provider design §7.1.
 - **Flag as club-run (◇).** For a park that isn't in the private list but looks club-run
   (clubrooms, a resident club), press **◇ Club-run?** on the card and optionally name the
   club. The flag saves straight away, with no decision needed, to `field_flags` (in

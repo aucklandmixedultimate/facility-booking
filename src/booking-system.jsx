@@ -130,7 +130,14 @@ const FACILITIES = [
 // Mirrored at module level in the same way as the alias/colour maps, so the 13 pickers
 // and calendar columns don't each need the admin flag threaded through them.
 let _isAdminView = false;
-function visibleFacilities() { return FACILITIES.filter(f => !f.adminOnly || _isAdminView); }
+function visibleFacilities() { return FACILITIES.filter(f => (!f.adminOnly || _isAdminView) && (!f.council || _isAdminView || ownsCouncilFacility(f))); }
+// Council fields are added per booker (Council fields page → Book), so a booker sees only
+// the ones added for them (any of their linked emails); admins see all.
+function ownsCouncilFacility(f) {
+  const me = (_currentUser?.email || "").toLowerCase(); if (!me) return false;
+  const prim = _emailAliases[me] || me;
+  return (f.owners || []).some(o => o === me || o === prim || (_emailAliases[o] || o) === prim);
+}
 // Light tint of each facility colour for day-view column backgrounds.
 const FACILITY_TINT = { f1:"#f5f3ff", f2:"#ede9fe", f3:"#dcfce7", f4:"#ecfdf5", f5:"#f0fdf4", g1:"#cffafe", g2:"#ecfeff", g3:"#f0fdff", s1:"#ffedd5" };
 function isSocialFac(id) { return FACILITIES.find(f=>f.id===id)?.kind==="social"; }
@@ -189,15 +196,30 @@ const STATUS_META = {
   clash:        {bg:"#fef3c7",border:"#d97706",text:"#92400e",dot:"#d97706",label:"Clash"},
   amua_submit:  {bg:"#dbeafe",border:"#93c5fd",text:"#1e40af",dot:"#3b82f6",label:"(2/4) Queued for GTEC"},
   pending:      {bg:"#fff8e1",border:"#f59e0b",text:"#92400e",dot:"#f59e0b",label:"(1/4) Pending AMUA Review"},
+  // Council workflows (see WORKFLOW_STEPS): AMUA review → [ask the private operator] →
+  // apply to council → council decision → [confirm with the operator] → approved.
+  op_permission:  {bg:"#f3e8ff",border:"#a855f7",text:"#6b21a8",dot:"#a855f7",label:"🤝 Asking operator permission"},
+  council_apply:  {bg:"#e0f2f1",border:"#14b8a6",text:"#115e59",dot:"#14b8a6",label:"🏛 Applying to council"},
+  council_pending:{bg:"#ccfbf1",border:"#0d9488",text:"#134e4a",dot:"#0d9488",label:"⏳ Awaiting council decision"},
+  op_confirm:     {bg:"#ede9fe",border:"#7c3aed",text:"#4c1d95",dot:"#7c3aed",label:"🤝 Confirming with operator"},
+};
+// Each provider kind walks its own steps. Stored statuses stay provider-neutral keys.
+const COUNCIL_STAGE_STATUSES = ["op_permission","council_apply","council_pending","op_confirm"];
+const WORKFLOW_STEPS = {
+  gtec:            ["pending_amua","queued_cpsa","pending_cpsa","approved"],
+  council:         ["pending_amua","council_apply","council_pending","approved"],
+  council_private: ["pending_amua","op_permission","council_apply","council_pending","op_confirm","approved"],
+  direct:          ["pending_amua","approved"],
 };
 // invoiced is an orthogonal billing flag (booking.invoiced boolean), not a workflow status.
 const INVOICED_META = {bg:"#f5f3ff",border:"#7c3aed",text:"#5b21b6",dot:"#7c3aed",label:"🧾 Invoiced"};
-const REVIEW_STATUSES = new Set(["pending_amua","queued_cpsa","amua_submit","pending_cpsa","pending","cpsa_review_needed"]);
+const REVIEW_STATUSES = new Set(["pending_amua","queued_cpsa","amua_submit","pending_cpsa","pending","cpsa_review_needed",...COUNCIL_STAGE_STATUSES]);
 // Solid status colours used as the primary background in week/month calendar blocks.
 // Field colour becomes the left-border accent; booker email colour appears as a small dot.
 // Matches STATUS_META.dot exactly so calendar chips and status badges use the same palette.
 const STATUS_CAL_COLOR = {
   pending_amua:"#f59e0b", queued_cpsa:"#3b82f6", amua_submit:"#3b82f6",
+  op_permission:"#a855f7", council_apply:"#14b8a6", council_pending:"#0d9488", op_confirm:"#7c3aed",
   pending_cpsa:"#0ea5e9", pending:"#f59e0b",     approved:"#22c55e",
   cpsa_confirmed:"#0891b2", cpsa_review_needed:"#fef9c3",
   clash:"#d97706", rejected:"#f43f5e", cancelled:"#94a3b8",
@@ -274,6 +296,53 @@ const PROVIDERS = {
   stcuthberts: { id:"stcuthberts", name:"St Cuthbert's College", short:"St Cuthberts",
                  address:"", gstNumber:"", recipientCode:"STC", defaultSite:"St Cuthberts" },
 };
+// Council fields added per booker on the Council fields page (settings "council_facilities"):
+// { "<booker email>": [ {id, park_id, park, region, field, lat, lon, kind, operator, …} ] }.
+// Each becomes a facility at the "<provider>|<park>" venue. Plain council parks use the
+// Auckland Council provider; a council ground run by a club/trust/CCO gets that operator as
+// its provider (kind council_private), so the booking walks the operator + council steps.
+// The council's booking portal lists its sports-field permit (SSPPERMITBK) at $10 per field
+// per application, paid later. Shown on the "apply to council" step; not billed yet.
+const COUNCIL_APPLICATION_FEE = 10;
+const COUNCIL_COLORS = ["#0d9488","#0891b2","#7c3aed","#be185d","#b45309","#15803d","#4338ca","#9f1239"];
+function applyCouncilFacilities(map) {
+  for (let i = FACILITIES.length - 1; i >= 0; i--) if (FACILITIES[i].council) FACILITIES.splice(i, 1);
+  Object.keys(PROVIDERS).forEach(k => { if (PROVIDERS[k].dynamic) delete PROVIDERS[k]; });
+  const byId = new Map();
+  Object.entries(map || {}).forEach(([email, list]) => (Array.isArray(list) ? list : []).forEach(e => {
+    if (!e?.id || !e.park) return;
+    const owner = email.toLowerCase(), have = byId.get(e.id);
+    if (have) { if (!have.owners.includes(owner)) have.owners.push(owner); return; }
+    let pid = "akl_council";
+    if (e.kind === "council_private" && e.operator?.id) {
+      pid = "op_" + e.operator.id;
+      if (!PROVIDERS[pid]) PROVIDERS[pid] = { id: pid, name: e.operator.name, short: e.operator.short || e.operator.name, kind: "council_private",
+        dynamic: true, contact: e.operator, address: "", gstNumber: "",
+        recipientCode: deriveRecipientCode(e.operator.short || e.operator.name, Object.values(PROVIDERS).map(p => p.recipientCode)) };
+    } else if (!PROVIDERS.akl_council) {
+      PROVIDERS.akl_council = { id: "akl_council", name: "Auckland Council", short: "Council", kind: "council", dynamic: true,
+        address: "", gstNumber: "", recipientCode: "AKC" };
+    }
+    byId.set(e.id, { id: e.id, name: `${e.park} – ${e.field}`, capacity: 50, color: COUNCIL_COLORS[byId.size % COUNCIL_COLORS.length],
+      kind: "field", site: e.park, provider: pid, defaultRate: 0, council: e, owners: [owner] });
+  }));
+  FACILITIES.push(...byId.values());
+}
+function workflowOf(facilityId) {
+  const pid = providerOfFacility(facilityId);
+  return pid === "gtec" ? "gtec" : (PROVIDERS[pid]?.kind || "direct");
+}
+function nextWorkflowStatus(b) {
+  const steps = WORKFLOW_STEPS[workflowOf(b.facility_id)] || WORKFLOW_STEPS.direct;
+  const i = steps.indexOf(b.status === "pending" ? "pending_amua" : b.status);
+  return i >= 0 && i < steps.length - 1 ? steps[i + 1] : null;
+}
+// "Step 2 of 6" for council workflows, shown beside the status.
+function workflowStep(b) {
+  const wf = workflowOf(b.facility_id); if (wf !== "council" && wf !== "council_private") return "";
+  const steps = WORKFLOW_STEPS[wf], i = steps.indexOf(b.status === "pending" ? "pending_amua" : b.status);
+  return i >= 0 ? `${i + 1}/${steps.length}` : "";
+}
 function defaultProviderId() {
   return Object.keys(PROVIDERS).find(k => PROVIDERS[k].isDefault) || Object.keys(PROVIDERS)[0];
 }
@@ -4380,7 +4449,7 @@ function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkApply, o
     return aliasNames[primary] || primary.split("@")[0];
   };
 
-  const active = bookings.filter(b=>(["approved","cpsa_confirmed","cpsa_review_needed","pending_cpsa","queued_cpsa","pending_amua","amua_submit","pending"].includes(b.status)||b.invoiced)&&!isAdminBooking(b));
+  const active = bookings.filter(b=>(["approved","cpsa_confirmed","cpsa_review_needed","pending_cpsa","queued_cpsa","pending_amua","amua_submit","pending",...COUNCIL_STAGE_STATUSES].includes(b.status)||b.invoiced)&&!isAdminBooking(b));
   const canonEmail = em => (emailAliases[(em||"").toLowerCase()] || (em||"").toLowerCase());
   const patternMap = buildOverlapPatternMap(active, facSensitive, canonEmail);
 
@@ -9641,7 +9710,11 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                 const queued=actionQueue.find(a=>a.id===b.id);
                 const isDeleteQueued=deleteIds.has(b.id);
                 const rowBg=isDeleteQueued?"#fff1f2":queued?"#f0fdf4":selected.has(b.id)?"#f5f3ff":"#fff";
-                const queueLabel = queued ? {queued_cpsa:"→ Queue for GTEC",approved:"✓ GTEC Approved",rejected:"✗ Reject"}[queued.newStatus]||queued.newStatus : null;
+                const queueLabel = queued ? {queued_cpsa:"→ Queue for GTEC",approved:"✓ GTEC Approved",rejected:"✗ Reject"}[queued.newStatus]||("→ "+(STATUS_META[queued.newStatus]?.label||queued.newStatus)) : null;
+                const wf=workflowOf(b.facility_id), isCouncilWf=wf==="council"||wf==="council_private", nxt=nextWorkflowStatus(b);
+                const opContact=PROVIDERS[providerOfFacility(b.facility_id)]?.contact;
+                const opHint=(opContact&&(nxt==="op_permission"||nxt==="op_confirm")?` — ${[opContact.name,opContact.email,opContact.phone].filter(Boolean).join(" · ")}`:"")
+                  +(nxt==="council_apply"?` — council application fee $${COUNCIL_APPLICATION_FEE} per field (pay later)`:"");
                 return (
                   <tr key={b.id} onClick={()=>onView&&onView(b)} style={{background:rowBg,borderTop:ri>0?"1px solid #f1f5f9":"none",transition:"background 0.1s",cursor:"pointer"}}
                     onMouseEnter={e=>{if(!rowBg||rowBg==="#fff")e.currentTarget.style.background="#f8fafc";}}
@@ -9664,6 +9737,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                     </td>
                     <td style={{padding:"3px 6px"}}>
                       <Badge status={b.status}/>
+                      {workflowStep(b)&&<span title="Step in the council workflow" style={{fontSize:9,fontWeight:700,color:"#0f766e",marginLeft:3}}>{workflowStep(b)}</span>}
                       {b.invoiced&&<span style={{fontSize:9,fontWeight:700,background:INVOICED_META.bg,color:INVOICED_META.text,border:`1px solid ${INVOICED_META.border}`,borderRadius:4,padding:"1px 4px",marginLeft:2}}>🧾</span>}
                       {queueLabel&&<div style={{fontSize:9,fontWeight:700,color:queued.newStatus==="rejected"?"#991b1b":"#166634"}}>{queueLabel}</div>}
                       {isDeleteQueued&&<div style={{fontSize:9,fontWeight:700,color:"#991b1b"}}>🗑</div>}
@@ -9679,8 +9753,12 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                             style={S.btn({padding:"3px 7px",fontSize:10,background:queued?.newStatus==="queued_cpsa"?"#1d4ed8":"#3b82f6",color:"#fff",outline:queued?.newStatus==="queued_cpsa"?"2px solid #1d4ed8":"none"})}>GTEC →</button>}
                           {(b.status==="queued_cpsa"||b.status==="amua_submit")&&<button onClick={()=>queueAction(b.id,"pending_cpsa")} title="Mark as Pending GTEC Review (no email)"
                             style={S.btn({padding:"3px 7px",fontSize:10,background:queued?.newStatus==="pending_cpsa"?"#0369a1":"#0ea5e9",color:"#fff",outline:queued?.newStatus==="pending_cpsa"?"2px solid #0369a1":"none"})}>⏳</button>}
-                          {/* Non-GTEC facilities skip the GTEC queue: AMUA approves them directly. */}
-                          {(isCpsaStage||(isAmuaStage&&providerOfFacility(b.facility_id)!=="gtec"))&&<button onClick={()=>queueAction(b.id,"approved")} title={isCpsaStage?"Mark GTEC Approved":"Approve"}
+                          {/* Council workflows step through their stages one at a time. */}
+                          {isCouncilWf&&nxt&&nxt!=="approved"&&<button onClick={()=>queueAction(b.id,nxt)} title={`Next step: ${STATUS_META[nxt]?.label}${opHint}`}
+                            style={S.btn({padding:"3px 7px",fontSize:10,background:queued?.newStatus===nxt?"#0f766e":STATUS_META[nxt]?.dot,color:"#fff",outline:queued?.newStatus===nxt?"2px solid #0f766e":"none"})}>{STATUS_META[nxt]?.label.split(" ")[0]} →</button>}
+                          {/* Non-GTEC facilities skip the GTEC queue: AMUA approves them directly;
+                              council workflows approve only from their last step. */}
+                          {(isCpsaStage||(isAmuaStage&&wf==="direct")||(isCouncilWf&&nxt==="approved"))&&<button onClick={()=>queueAction(b.id,"approved")} title={isCpsaStage?"Mark GTEC Approved":"Approve"}
                             style={S.btn({padding:"3px 7px",fontSize:10,background:queued?.newStatus==="approved"?"#15803d":"#22c55e",color:"#fff",outline:queued?.newStatus==="approved"?"2px solid #15803d":"none"})}>✓</button>}
                           <button onClick={()=>queueAction(b.id,"rejected")} title="Reject"
                             style={S.btn({padding:"3px 7px",fontSize:10,background:queued?.newStatus==="rejected"?"#be123c":"#f43f5e",color:"#fff",outline:queued?.newStatus==="rejected"?"2px solid #be123c":"none"})}>✗</button>
@@ -10012,7 +10090,7 @@ function findMatchingUserBooking(allBookings, ev, facilityIds, gtecLinks={}, ema
   // Facility is NOT required — any time overlap on the same date is a potential link.
   const candidates = allBookings.filter(b => {
     if (b.email === "admin") return false;
-    if (!["approved","cpsa_confirmed","cpsa_review_needed","clash","pending_cpsa","queued_cpsa","pending_amua","amua_submit","pending"].includes(b.status) && !b.invoiced) return false;
+    if (!["approved","cpsa_confirmed","cpsa_review_needed","clash","pending_cpsa","queued_cpsa","pending_amua","amua_submit","pending",...COUNCIL_STAGE_STATUSES].includes(b.status) && !b.invoiced) return false;
     if (b.date !== date) return false;
     if (b.start_hour + b.duration <= start_hour) return false;
     if (start_hour + duration <= b.start_hour) return false;
@@ -10205,7 +10283,17 @@ export default function App() {
   const [dbError,  setDbError]  =useState("");
   const [tab,      setTab]      =useState("about");
   const [selFac,   setSelFac]   =useState("all");
-  const [venue, setVenueState] = useState(()=>{ try{ return localStorage.getItem("fb_venue") || null; }catch{ return null; } });
+  // ?venue=<provider>|<site> (from the Council fields page's "book" links) picks the venue.
+  const [venue, setVenueState] = useState(()=>{
+    try{
+      const q = new URLSearchParams(window.location.search).get("venue");
+      if (q) { localStorage.setItem("fb_venue", q); return q; }
+      return localStorage.getItem("fb_venue") || null;
+    }catch{ return null; } });
+  // Bumped when council facilities load, so pickers and venues re-render with them.
+  const [, setCouncilFacRev] = useState(()=>{
+    try{ const c = JSON.parse(localStorage.getItem("fb_council_facilities")||"null"); if (c) applyCouncilFacilities(c); }catch{ /* ignore */ }
+    return 0; });
   _activeVenue = venue;
   function setVenue(v) {
     setVenueState(v); _activeVenue = v;
@@ -10457,6 +10545,11 @@ export default function App() {
       if (map.alias_colors && typeof map.alias_colors === "object") {
         setAliasColors(map.alias_colors); _emailColorOverrides = map.alias_colors;
         try{localStorage.setItem("fb_alias_colors",JSON.stringify(map.alias_colors));}catch{ /* ignore */ }
+      }
+      // Council fields added per booker from the Council fields page.
+      if (map.council_facilities && typeof map.council_facilities === "object") {
+        applyCouncilFacilities(map.council_facilities); setCouncilFacRev(n => n + 1);
+        try{localStorage.setItem("fb_council_facilities",JSON.stringify(map.council_facilities));}catch{ /* ignore */ }
       }
       if (map.amua_org && typeof map.amua_org === "object") {
         applyAmuaOrg(map.amua_org); setAmuaOrg(map.amua_org);
@@ -11781,7 +11874,7 @@ export default function App() {
     }
 
     if (!silentMode) {
-      const noEmailStatuses = new Set(["pending_cpsa"]);
+      const noEmailStatuses = new Set(["pending_cpsa","op_permission","council_apply","op_confirm"]);
       // Status-change emails — grouped into one email per booker + status, so a booker
       // with several bookings moving to the same status gets a single confirmation.
       const statusByKey = {};

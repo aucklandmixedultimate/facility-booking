@@ -208,8 +208,8 @@ Orbeon document exposes the §5.3 control names read-only. It blocks 2.3b only.
   - It waits for each Ajax round-trip to settle (no pending `xforms-server` request)
     before the next field, because dropdowns are chained: region → park → field.
   - It selects by **label**, never by the list-position values.
-- **Stops before page 6.** The admin reviews, agrees and submits. There is no fee:
-  council field bookings are free.
+- **Stops before page 6.** The admin reviews, agrees and submits. The council charges a
+  **$10 application fee per field** (permit product SSPPERMITBK, pay later).
 - **Read-back:** after submit, it reads the new application number and code and upserts
   `external_requests`. It links the series' `booking_ids` and moves the bookings to
   `pending_cpsa`.
