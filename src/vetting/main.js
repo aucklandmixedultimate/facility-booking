@@ -489,7 +489,7 @@ function buildCity() {
       r.quality ? r.quality + "/5" : "", r.fit && r.fit !== "unknown" ? FIT_LABEL[r.fit] : "",
       r.lights === "full" || r.lights === "training" ? "💡 lights" : r.lights === "none" ? "no lights" : ""].filter(Boolean).join(" · ") : "Not rated yet";
     mk.bindTooltip(`<b>${esc(p.name)}</b><br>${esc(p.region)} · <b style="color:${col}">${suitWord(r)}</b><br>${esc(tags)}${r?.fields ? "<br>Fields: " + esc(r.fields) : ""}`
-      + (isAmua ? `<br><b style="color:#b7791f">★ AMUA venue: ${esc(pv.find(o => o.amua).short)}</b> (booked through the booking site's GTEC workflow)`
+      + (isAmua ? `<br><b style="color:#b7791f">★ AMUA venue (${esc(pv.find(o => o.amua).short)}): MUST BOOK THROUGH AMUA</b>`
         : pv?.length ? `<br><b style="color:${PRIV_COLOR}">◆ Privately managed: contact ${esc(pv[0].short)}</b> first` : "")
       + (ult.length ? `<br><b style="color:${ULT_COLOR}">🥏 ${ult.some(o => o.booking_only) ? "Book only through" : "Ultimate club"}: ${esc(ult.map(o => o.operator).join(", "))}</b>` : "")
       + (fl ? `<br><b style="color:${PRIV_COLOR}">◇ Flagged: probably club-run${fl.club ? " (" + esc(fl.club) + ")" : ""}</b>` : "")
@@ -538,7 +538,7 @@ const privStatus = o => ({ confirmed: "confirmed", likely: "likely", "to-verify"
 // Popup for a private ground that isn't a council park.
 function privHtml(o) {
   const c = o.contact || {};
-  return `<b>${esc(o.park)}</b>${o.approx ? " (approx. location)" : ""}<br><b style="color:${PRIV_COLOR}">◆ ${esc(o.operator)}</b> · ${esc(privStatus(o))}<br>${esc(o.manages)}<br>${privContacts(o)}${c.address ? "<br>" + esc(c.address) : ""}${o.notes ? `<br><i>${esc(o.notes)}</i>` : ""}`;
+  return `<b>${esc(o.park)}</b>${o.approx ? " (approx. location)" : ""}${o.must_book_through === "AMUA" ? `<br><b style="color:#b7791f">★ MUST BOOK THROUGH AMUA</b> (booking site, GTEC / CPSA workflow)` : ""}<br><b style="color:${PRIV_COLOR}">◆ ${esc(o.operator)}</b> · ${esc(privStatus(o))}<br>${esc(o.manages)}<br>${privContacts(o)}${c.address ? "<br>" + esc(c.address) : ""}${o.notes ? `<br><i>${esc(o.notes)}</i>` : ""}`;
 }
 // Park card banner: every operator on this ground, then the request steps once.
 function privBanner(all) {
@@ -547,6 +547,11 @@ function privBanner(all) {
   const ultLine = ult.map(o => `<span class="pb-ult"><b>🥏 ${esc(o.operator)}</b> — ${privContacts(o) || "no contact found"}${o.notes ? ` <i>${esc(o.notes)}</i>` : ""}</span>`).join("");
   if (!ops.length) return ultLine;
   const [lead, ...rest] = ops;
+  // AMUA's own provider grounds (GTEC / CPSA): booked through the AMUA booking site.
+  const amua = all.find(o => o.must_book_through === "AMUA");
+  if (amua) return `<span class="pb-amua"><b>★ MUST BOOK THROUGH AMUA</b> — ${esc(amua.park)} is a ${esc(amua.short)} ground: book it in the AMUA booking site (GTEC / CPSA workflow), not directly with GTEC.</span>`
+    + `<span class="pb-full">Managed by ${esc(amua.operator)} · ${privContacts(amua)}</span>`
+    + (rest.filter(o => o !== amua).length ? `<span class="pb-full">Also on site: ${rest.filter(o => o !== amua).map(o => esc(o.operator)).join(" · ")}</span>` : "") + ultLine;
   if (lead.booking_only) return `<span class="pb-ult pb-only"><b>🥏 BOOKING ONLY AVAILABLE THROUGH ${esc(lead.operator)}</b> — ${privContacts(lead) || "no contact found"}${lead.notes ? ` <i>${esc(lead.notes)}</i>` : ""}</span>`
     + (rest.length ? `<span class="pb-full">Fields managed by: ${rest.map(o => `${esc(o.operator)} (${esc(o.code || o.type)})`).join(" · ")}</span>` : "") + ultLine;
   return `<span class="pb-full"><b>◆ Contact: ${esc(lead.operator)}</b> (${esc(privStatus(lead))}) — ${esc(lead.manages)} · ${privContacts(lead)}</span>`

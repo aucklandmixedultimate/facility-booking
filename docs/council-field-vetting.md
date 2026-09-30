@@ -303,7 +303,9 @@ The page always fits one screen: nothing scrolls except the map, where the wheel
 - **AMUA venues (★).** AMUA's existing provider grounds (GTEC, booked through CPSA) show
   as a gold star with the suitability colour in the centre: Cornwall Park (not a council
   park; approximate location), Orakei Domain B and Shore Road Reserve. They're the
-  `amua: true` entries in `private-managed.json`.
+  `amua: true` entries in `private-managed.json`. Their card, tooltip and popup say
+  **MUST BOOK THROUGH AMUA**: book them in the AMUA booking site (GTEC / CPSA workflow),
+  not directly with GTEC.
 - **Ultimate club homes (🥏).** Parks where an ultimate club is based show as a larger
   diamond on the Auckland map. Its centre and edge are the club's colours (`colors` on the
   operator in `private-managed.json`), and the card has a 🥏 chip in the same colours plus a

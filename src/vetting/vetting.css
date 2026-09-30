@@ -142,6 +142,8 @@ main{display:flex;flex-direction:column;min-height:0;min-width:0}
 .privbox{font-size:12px;background:#efe8fd;color:#3b1d7a;border:1px solid #c9b5f5;border-radius:8px;padding:5px 9px;display:flex;flex-wrap:wrap;gap:3px 12px;align-items:center}
 .privbox b{font-weight:700}
 .privbox .pb-short{display:none}
+.privbox .pb-amua{display:block;width:100%;background:#fef3c7;color:#78350f;border:2px solid #e0a647;border-radius:6px;padding:3px 7px;font-size:13px}
+@media (prefers-color-scheme: dark){.privbox .pb-amua{background:#3a2c12;color:#fcd34d}}
 .privbox .pb-ult{display:block;width:100%;color:#9d174d;background:#fce7f3;border-radius:6px;padding:2px 6px}
 .privbox .pb-ult a{color:#be185d}
 .privbox .pb-only{border:2px solid #ec4899;font-size:13px}

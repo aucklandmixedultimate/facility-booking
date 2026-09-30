@@ -51,7 +51,8 @@
       "sources": [
         "https://www.grammartec.co.nz/venue-hire-fields-1/venue-hire-1"
       ],
-      "notes": "Cornwall Park is trust land, not a council park; bookings go through the booking site's GTEC (CPSA) workflow."
+      "notes": "MUST BOOK THROUGH AMUA: book it in the AMUA booking site (GTEC / CPSA workflow), not directly with GTEC. Cornwall Park is trust land, not a council park; bookings go through the booking site's GTEC (CPSA) workflow.",
+      "must_book_through": "AMUA"
     },
     {
       "id": "gtec-orakei",
@@ -76,8 +77,9 @@
         "https://www.grammartec.co.nz/venue-hire-fields-1/grammar-fields/Orakei-Domain",
         "https://www.grammartec.co.nz/venue-hire-fields-1/venue-hire-1"
       ],
-      "notes": "Same operator as AMUA's Cornwall Park fields (provider 'gtec'). Council-owned domain; GTEC holds the fields' use.",
-      "amua": true
+      "notes": "MUST BOOK THROUGH AMUA: book it in the AMUA booking site (GTEC / CPSA workflow), not directly with GTEC. Same operator as AMUA's Cornwall Park fields (provider 'gtec'). Council-owned domain; GTEC holds the fields' use.",
+      "amua": true,
+      "must_book_through": "AMUA"
     },
     {
       "id": "tau-north-harbour",
@@ -795,9 +797,10 @@
       "sources": [
         "http://www.grammartec.co.nz/Our-Sites/Shore-Road-Reserve"
       ],
-      "notes": "Parnell Cricket Club is based here in summer.",
+      "notes": "MUST BOOK THROUGH AMUA: book it in the AMUA booking site (GTEC / CPSA workflow), not directly with GTEC. Parnell Cricket Club is based here in summer.",
       "provider_id": "gtec",
-      "amua": true
+      "amua": true,
+      "must_book_through": "AMUA"
     },
     {
       "id": "parnell-shore-road",
