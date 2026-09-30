@@ -10342,20 +10342,27 @@ async function fetchCJREvents(year, month) {
   // month is 0-based
   const dateStr = `${year}-${String(month+1).padStart(2,"0")}-01`;
   const target = `https://www.carltonjuniorsrugby.co.nz/api/v1/calendar/MonthCalendarEvents?organisationId=%2014520&sportId=0&ical=${encodeURIComponent(CJR_ICAL)}&date=${dateStr}`;
-  // Try corsproxy.io first, fall back to allorigins
+  // Free public CORS proxies time out now and then (HTTP 408), so each attempt is capped at
+  // 20 s and the whole list is tried twice, with a short pause, before giving up.
   const proxies = [
     `https://corsproxy.io/?url=${encodeURIComponent(target)}`,
     `https://api.allorigins.win/raw?url=${encodeURIComponent(target)}`,
+    `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(target)}`,
   ];
-  let lastErr;
-  for (const url of proxies) {
-    try {
-      const r = await fetch(url);
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      return await r.json();
-    } catch(e) { lastErr = e; }
+  const errs = [];
+  for (let round = 0; round < 2; round++) {
+    if (round) await new Promise(res => setTimeout(res, 2000));
+    for (const url of proxies) {
+      const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 20000);
+      try {
+        const r = await fetch(url, { signal: ctl.signal });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return await r.json();
+      } catch(e) { errs.push(`${new URL(url).hostname}: ${e.name === "AbortError" ? "timed out" : e.message}`); }
+      finally { clearTimeout(timer); }
+    }
   }
-  throw new Error("All proxies failed: " + lastErr?.message);
+  throw new Error("All proxies failed: " + errs.slice(-proxies.length).join("; "));
 }
 
 export default function App() {
