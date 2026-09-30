@@ -39,9 +39,13 @@ The goal was to make St Cuthberts usable and correctly billed without committing
 full schema.
 
 - **`provider` on every facility.** The existing grounds are `gtec`. A new facility
-  `s1` "St Cuthberts – Field #1" (site *St Cuthberts*) is `stcuthberts`. It is
-  **admin-only** until AMUA opens it to bookers, and has **no default rate**; set it in
-  Pricing.
+  `s1` "St Cuthberts – Field #1" is `stcuthberts`. It is **admin-only** until AMUA opens
+  it to bookers, and has **no default rate**; set it in Pricing. Its location is
+  *Cornwall Park*, with ARL's placeholder `a1` "ARL – Lower CPSA field area" (provider
+  `arl`, admin-only, details to come).
+- **Provider + location picker.** The calendars pick a **Provider** (default GTEC / CPSA)
+  and then a **📍 Location**, the provider's site (default Cornwall Park). A venue is that
+  provider + location pair. The booking form picks Provider → Location → Facility.
 - **Interim `PROVIDERS` registry in code:** name, short name, address, GST number and
   recipient code for each provider. St Cuthbert's College uses recipient code `STC`,
   with blank address and GST for now.
