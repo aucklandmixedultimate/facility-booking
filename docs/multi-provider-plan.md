@@ -44,7 +44,8 @@ builds on this phase.
   | `akl_council` | Auckland Council | Council | `AKC` | submit `extension_council`, sync `extension_council` |
 
   The `gtec` row takes its address and GST from `VENDOR_GTEC`. Its `config` holds the
-  calendar URL and form URL.
+  calendar URL and form URL. The `akl_council` row gets Private Bag 92300, Auckland 1142
+  and GST 104-736-998, from its tax invoice.
 - **Seed facilities:** `f1`–`f5`, `g1`–`g3` and `s1` with today's names, colours, tints,
   sites and `admin_only` flags. `external_ref` holds:
   - `sporty_label`: today's `FACILITY_MAP` in the extension's
@@ -203,8 +204,8 @@ Orbeon document exposes the §5.3 control names read-only. It blocks 2.3b only.
   - It waits for each Ajax round-trip to settle (no pending `xforms-server` request)
     before the next field, because dropdowns are chained: region → park → field.
   - It selects by **label**, never by the list-position values.
-- **Stops before page 6.** The admin reviews, agrees and submits, and pays the $10 fee
-  later.
+- **Stops before page 6.** The admin reviews, agrees and submits. There is no fee:
+  council field bookings are free.
 - **Read-back:** after submit, it reads the new application number and code and upserts
   `external_requests`. It links the series' `booking_ids` and moves the bookings to
   `pending_cpsa`.
@@ -309,10 +310,14 @@ Depends on 1.1 and 1.3.
 
 Depends on 1.5.
 
-- **5.1 Council as a billing provider — S.** When AMUA is the applicant, the council
-  provider has a rate (for example the $10 application fee plus hourly charges, if the
-  council bills them). It is then invoiced and PO'd like any provider, with no special
-  cases. If clubs apply directly, the facility has no rate and nothing is invoiced.
+- **5.1 Free council fields and event permits — S.**
+  - Council facilities have a $0 rate, and `buildProviderPoRecords` skips any provider
+    whose lines total $0, so no empty PO goes to the council.
+  - A booker's invoice leaves out $0 council lines, or shows them for reference behind a
+    setting.
+  - For big-event hire, record the council's **event permit** invoice as a provider
+    invoice: attach it, enter the number and amount (e.g. 234000005905, $101 incl. GST),
+    and optionally add a one-off recharge line to the organiser's invoice.
 - **5.2 Provider invoice reconciliation — M.** On each PO, compare the provider's actual
   invoice (attached file + `providerInvoiceNumber` + amount entered) against the PO
   total, and flag differences in the Billing tab.
@@ -381,4 +386,6 @@ Depends on 1.5.
 3. **Council profile** for pre-fill: primary and secondary contacts, key holder, and
    the postal address as the council's address search shows it. Needed for 2.4.
 4. **Mailboxes** that will forward into AMUA's Gmail. Needed for 3.4.
-5. **Council fees:** passed on to clubs, or absorbed? Needed for 5.1.
+5. **Event permit costs:** council fields are free, so the only council charge is an
+   event permit for big-event hire. Recharge it to the organiser or clubs, or absorb it?
+   Needed for 5.1.

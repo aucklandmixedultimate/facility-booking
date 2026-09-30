@@ -249,7 +249,8 @@ opens an **Orbeon Forms** wizard (`SportApplicationForm`). There is no form POST
 - **Page navigation:** each "Next" first runs
   `validateBookingApplicationForm('next', <documentId>)`.
 - **Fee:** `GET /councilonline/yform/rest/getproductpricebycode?productCode=SSPPERMITBK`
-  → **$10.00, pay later**.
+  → **$10.00, pay later**. That is the portal's listed product price, but AMUA
+  reports that council sports-field bookings are free in practice (see §8).
 
 The wizard has 8 pages. Control names are the stable part of the ids:
 
@@ -302,8 +303,8 @@ sends its usual Ajax, and walks pages 1–5:
   `providers.config`);
 - one Park details block per park, with its fields, dates, weekdays and times.
 
-The admin then reviews pages 6–8, ticks the agreements and submits, and pays the $10
-fee later. The extension reads back the new application number and code into
+The admin then reviews pages 6–8, ticks the agreements and submits. Nothing is paid:
+the bookings are free (§8). The extension reads back the new application number and code into
 `external_requests` and links the booking series to it.
 
 **Catalogue refresh.** Park and field lists change. The extension can also harvest them
@@ -419,10 +420,28 @@ Field numbers and layouts appear only in the map images.
 - **Invoices from providers:** generalise the Drive "Invoice (from GTEC)" drop folder to
   `Invoice (from <provider>)`. Generalise `gtecInvoiceNumber` to `providerInvoiceNumber`,
   keeping the old field as an alias.
-- **Council fees:** council casual bookings are charged to the applicant. When AMUA is
-  the applicant, the council is a provider like any other (PO → council, invoice →
-  clubs). When a club applies directly, AMUA only tracks the booking, and the facility
-  has no rate, so nothing is invoiced.
+- **Council fields are free.** Seasonal and casual sports-park bookings cost nothing,
+  so council facilities have a $0 rate. They appear on bookers' invoices at $0 (or are
+  left off), and they produce **no PO to the council**. `buildProviderPoRecords` should
+  skip a provider whose lines total $0.
+- **Big-event hire needs an event permit, which is invoiced.** Hiring a council park for
+  a large event, such as a tournament, goes through a separate **event permit**, not
+  the sports-park application. The permit is charged. Reference invoice: Auckland Council
+  tax invoice 234000005905, 28 Aug 2025, for the NZ Tertiary Ultimate Championship at
+  Lloyd Elsmore Park: $101.00 GST inclusive, "Event Permit Other Community – Low"
+  (product `SBFH_ACEOCL`), service type *Facility hire*, payment due immediately. It
+  quotes a contract number and an invoice number, the latter used as the payment
+  reference.
+  - **Handling:** record the council's invoice against the event, using the provider
+    invoice fields and the Drive "Invoice (from Council)" folder, and recharge it to
+    the event's organiser or clubs as a one-off invoice line if AMUA wants to recover
+    it. No hourly rate is involved.
+  - **Addressee:** that permit invoice was addressed to an individual. Future permits
+    should be applied for under the AMUA account so the invoice names AMUA.
+- **Council vendor details** for the `akl_council` provider row, from that invoice:
+  Auckland Council, Private Bag 92300, Auckland 1142, GST 104-736-998. Payment is to
+  account 12-3113-0131289-00 ("Auckland Counc"), quoting the invoice number, with
+  remittances to direct.credit@aucklandcouncil.govt.nz.
 
 ## 9. Phases
 
@@ -453,5 +472,6 @@ The work items, files, acceptance criteria and dependencies are in
    council's address search knows it.
 5. **Mailboxes for the intake:** which ones besides AMUA's Gmail? Each owner needs to
    set up a forwarding filter (option C).
-6. **Council fees:** when AMUA applies to the council, are the council's fees passed on
-   to clubs through invoices?
+6. **Event permit costs:** council fields are free, so this is the only council charge.
+   For big events, should a permit's cost be recharged to the organiser or clubs, or
+   absorbed by AMUA?
