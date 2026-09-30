@@ -957,6 +957,75 @@
         "https://easternsuburbs.org.nz/about-us/our-grounds/"
       ],
       "notes": ""
+    },
+    {
+      "id": "ellerslie-ultimate-michaels",
+      "park_id": "central-michaels-avenue-reserve",
+      "park": "Michaels Avenue Reserve",
+      "lat": -36.89425,
+      "lon": 174.81775,
+      "operator": "Ellerslie Ultimate Club",
+      "short": "Ellerslie Ultimate",
+      "type": "club",
+      "code": "ultimate",
+      "manages": "Ultimate club based at Michaels Ave; the fields are managed by Ellerslie AFC. Auckland Ultimate's UltiM4TES (East) league also plays here",
+      "contact": {
+        "url": "https://auckland.ultimatecentral.com/clubs"
+      },
+      "status": "confirmed",
+      "sources": [
+        "https://auckland.ultimatecentral.com/e/2025-summer-ultim4tes-east",
+        "https://auckland.ultimatecentral.com/clubs"
+      ],
+      "notes": "Confirmed by AMUA. No direct club contact found online; reach them through Auckland Ultimate's clubs list. Book the fields through Ellerslie AFC."
+    },
+    {
+      "id": "tepapapa-rfc-fergusson",
+      "park_id": "central-fergusson-domain",
+      "park": "Fergusson Domain",
+      "lat": -36.9121,
+      "lon": 174.7985,
+      "operator": "Te Papapa Onehunga Rugby Football & Sports Club",
+      "short": "Te Papapa RFC",
+      "type": "club",
+      "code": "rugby",
+      "manages": "Home ground and clubrooms at Fergusson Domain (Rugby 1–2); also runs squash and hosts Te Papapa Ultimate",
+      "contact": {
+        "email": "tepapapasportsclub@gmail.com",
+        "phone": "09 579 4623",
+        "address": "5 Olea Road, Fergusson Domain, Onehunga",
+        "url": "https://www.tepapapasportsclub.nz/contact-us.html"
+      },
+      "status": "likely",
+      "sources": [
+        "https://www.tepapapasportsclub.nz/contact-us.html",
+        "https://en.wikipedia.org/wiki/Te_Papapa_Onehunga_RFC"
+      ],
+      "notes": "Junior rugby: tepapapajuniorsrugby@gmail.com."
+    },
+    {
+      "id": "tepapapa-ultimate-fergusson",
+      "park_id": "central-fergusson-domain",
+      "park": "Fergusson Domain",
+      "lat": -36.9121,
+      "lon": 174.7985,
+      "operator": "Te Papapa Ultimate",
+      "short": "Te Papapa Ultimate",
+      "type": "club",
+      "code": "ultimate",
+      "manages": "Ultimate club (est. 2024, grew out of MDC Kudos), part of the Te Papapa Rugby Football & Squash Club at Fergusson Domain",
+      "contact": {
+        "email": "tepapapasportsclub@gmail.com",
+        "phone": "09 579 4623",
+        "address": "5 Olea Road, Fergusson Domain, Onehunga",
+        "url": "https://www.tepapapasportsclub.nz/contact-us.html"
+      },
+      "status": "confirmed",
+      "sources": [
+        "https://www.tepapapasportsclub.nz/contact-us.html",
+        "https://sidelinebandit.substack.com/p/the-current-state-of-new-zealand"
+      ],
+      "notes": "Confirmed by AMUA. The contact is the host sports club's; the ultimate team also posts on Instagram."
     }
   ],
   "_contact_rule": "Where several clubs operate at one ground, contact the operator marked primary; if none is marked, the rugby or football club comes first."

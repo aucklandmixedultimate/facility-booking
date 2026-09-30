@@ -29,6 +29,9 @@ const REVEAL_OUT = 1, REVEAL_IN = 1.5;
 // Default Auckland view: North Harbour Stadium in the north to Opaheke Sports Park in the south.
 const DEFAULT_VIEW = [[-36.72666, 174.70198], [-37.08545, 174.95175]];
 const PRIV_COLOR = "#7c3aed";
+// Parks that are home to an ultimate club stand out in hot pink.
+const ULT_COLOR = "#ec4899";
+const ultimateOf = p => (PRIV_BY_PARK[p.id] || []).filter(o => o.code === "ultimate");
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -460,6 +463,8 @@ function buildCity() {
     pts.push(ll);
     const pv = PRIV_BY_PARK[p.id];
     const fl = !pv?.length && flags[p.id];
+    const ult = ultimateOf(p);
+    if (ult.length) L.circleMarker(ll, { radius: 15, color: ULT_COLOR, weight: 3, fill: true, fillColor: ULT_COLOR, fillOpacity: 0.18, interactive: false }).addTo(cityLayer);
     const mk = pv?.length ? privMarker(ll, col, isCur, top) : L.circleMarker(ll, { radius: r ? 8 : 6,
       color: top ? "#e0a647" : isCur ? "#15211c" : fl ? PRIV_COLOR : "#ffffff", weight: top || isCur || fl ? 3 : 1.5, dashArray: fl ? "3 3" : null,
       fillColor: col, fillOpacity: r ? 0.95 : 0.7, bubblingMouseEvents: false });
@@ -468,6 +473,7 @@ function buildCity() {
       r.lights === "full" || r.lights === "training" ? "💡 lights" : r.lights === "none" ? "no lights" : ""].filter(Boolean).join(" · ") : "Not rated yet";
     mk.bindTooltip(`<b>${esc(p.name)}</b><br>${esc(p.region)} · <b style="color:${col}">${suitWord(r)}</b><br>${esc(tags)}${r?.fields ? "<br>Fields: " + esc(r.fields) : ""}`
       + (pv?.length ? `<br><b style="color:${PRIV_COLOR}">◆ Privately managed: contact ${esc(pv[0].short)}</b> first` : "")
+      + (ult.length ? `<br><b style="color:${ULT_COLOR}">🥏 Ultimate club: ${esc(ult.map(o => o.operator).join(", "))}</b>` : "")
       + (fl ? `<br><b style="color:${PRIV_COLOR}">◇ Flagged: probably club-run${fl.club ? " (" + esc(fl.club) + ")" : ""}</b>` : "") + `<br><i>Click to rate</i>`,
       { className: "parktip", direction: "top", offset: [0, -6] });
     mk.on("click", () => openPark(p.id));
@@ -507,10 +513,15 @@ function privHtml(o) {
   return `<b>${esc(o.park)}</b>${o.approx ? " (approx. location)" : ""}<br><b style="color:${PRIV_COLOR}">◆ ${esc(o.operator)}</b> · ${esc(privStatus(o))}<br>${esc(o.manages)}<br>${privContacts(o)}${c.address ? "<br>" + esc(c.address) : ""}${o.notes ? `<br><i>${esc(o.notes)}</i>` : ""}`;
 }
 // Park card banner: every operator on this ground, then the request steps once.
-function privBanner(ops) {
+function privBanner(all) {
+  // Ultimate clubs get their own line; the field contact is the managing club.
+  const ult = all.filter(o => o.code === "ultimate"), ops = all.filter(o => o.code !== "ultimate");
+  const ultLine = ult.map(o => `<span class="pb-ult"><b>🥏 ${esc(o.operator)}</b> — ${privContacts(o) || "no contact found"}${o.notes ? ` <i>${esc(o.notes)}</i>` : ""}</span>`).join("");
+  if (!ops.length) return ultLine;
   const [lead, ...rest] = ops;
   return `<span class="pb-full"><b>◆ Contact: ${esc(lead.operator)}</b> (${esc(privStatus(lead))}) — ${esc(lead.manages)} · ${privContacts(lead)}</span>`
     + `<span class="pb-short"><b>◆ ${esc(lead.short)}</b> · ${privContacts(lead)}${rest.length ? ` · +${rest.length} club${rest.length > 1 ? "s" : ""}` : ""}</span>`
+    + ultLine
     + (rest.length ? `<span class="pb-full">Also on site: ${rest.map(o => `${esc(o.operator)} (${esc(o.code || o.type)}${o.contact?.url ? `, <a href="${esc(o.contact.url)}" target="_blank" rel="noopener">website ↗</a>` : ""})`).join(" · ")}</span>` : "")
     ;
 }
@@ -523,7 +534,7 @@ function syncCityFields() {
 function renderLegend() {
   const row = (c, t) => `<div><i style="background:${c}"></i>${t}</div>`;
   $("legend").innerHTML = `<button class="lg-h" id="legendToggle" aria-expanded="true">Suitability <span aria-hidden="true">▾</span></button>`
-    + `<div class="lg-b">${row(`hsl(${suitHue(0.95)} 72% 42%)`, "Excellent")}${row(`hsl(${suitHue(0.7)} 72% 42%)`, "Good")}${row(`hsl(${suitHue(0.5)} 72% 42%)`, "Fair")}${row(`hsl(${suitHue(0.2)} 72% 42%)`, "Poor")}${row("#b3372d", "Rejected")}${row("#8a958f", "Not rated")}<div><span class="dia"></span>Privately managed</div><div><i style="background:#8a958f;border:2px dashed ${PRIV_COLOR};box-shadow:none"></i>Flagged: probably club-run</div><div class="lg-note">Gold ring = top pick</div></div>`;
+    + `<div class="lg-b">${row(`hsl(${suitHue(0.95)} 72% 42%)`, "Excellent")}${row(`hsl(${suitHue(0.7)} 72% 42%)`, "Good")}${row(`hsl(${suitHue(0.5)} 72% 42%)`, "Fair")}${row(`hsl(${suitHue(0.2)} 72% 42%)`, "Poor")}${row("#b3372d", "Rejected")}${row("#8a958f", "Not rated")}<div><i style="background:#8a958f;box-shadow:0 0 0 3px ${ULT_COLOR}"></i><b style="color:${ULT_COLOR}">Ultimate club home</b></div><div><span class="dia"></span>Privately managed</div><div><i style="background:#8a958f;border:2px dashed ${PRIV_COLOR};box-shadow:none"></i>Flagged: probably club-run</div><div class="lg-note">Gold ring = top pick</div></div>`;
   // Collapsed by default on small screens so it doesn't cover the map; the choice is remembered.
   const setOpen = open => { $("legend").classList.toggle("collapsed", !open); $("legendToggle").setAttribute("aria-expanded", String(open)); };
   setOpen(store.get("vet-legend-open", !matchMedia("(max-width: 640px)").matches));
@@ -634,7 +645,9 @@ function render() {
     $("privBox").hidden = !pv?.length; $("privBox").innerHTML = pv?.length ? privBanner(pv) : "";
     renderFlag(p);
     const r = reviews[p.id];
-    $("decChip").innerHTML = (pv?.length ? `<span class="chip priv" title="Ask ${esc(pv[0].operator)} before applying to council">◆ ${esc(pv[0].short)}</span> ` : "") + (r ? `<span class="chip ${r.decision === "no" ? "no" : r.decision === "top" ? "top" : ""}">${r.decision === "top" ? "Top pick" : r.decision === "yes" ? "Shortlisted" : "Rejected"}${r.by ? " · " + esc(r.by.split("@")[0]) : ""}</span>` : "");
+    const lead = (pv || []).find(o => o.code !== "ultimate"), ult = ultimateOf(p);
+    $("decChip").innerHTML = (lead ? `<span class="chip priv" title="Ask ${esc(lead.operator)} before applying to council">◆ ${esc(lead.short)}</span> ` : "")
+      + ult.map(o => `<span class="chip ult" title="Home of ${esc(o.operator)}">🥏 ${esc(o.short)}</span> `).join("") + (r ? `<span class="chip ${r.decision === "no" ? "no" : r.decision === "top" ? "top" : ""}">${r.decision === "top" ? "Top pick" : r.decision === "yes" ? "Shortlisted" : "Rejected"}${r.by ? " · " + esc(r.by.split("@")[0]) : ""}</span>` : "");
     const i = Math.min(mapIdx[p.id] || 0, Math.max(0, p.maps.length - 1));
     $("thumbs").innerHTML = p.maps.length > 1 ? p.maps.map((m, k) => `<button data-map="${k}" aria-pressed="${k === i}" title="${esc(m.title)}">${m.season === "winter" ? "❄ Winter" : "☀ Summer"}${/area/i.test(m.title) ? " area" : ""}</button>`).join("") : "";
     const cf = councilFields(p).map(f => f.n).filter(Boolean);
@@ -811,12 +824,13 @@ function bind() {
   });
 }
 function exportCsv() {
-  const rows = [["Region", "Park", "Decision", "Suitability", "Lights", "Light poles", "Fit", "Quality", "Fields", "Notes", "Field placement (lat, lon, angle°)", "Private operator", "Operator contact", "Flagged club-run", "Reviewer", "Reviewed at"]];
-  PARKS.forEach(p => { const r = reviews[p.id] || {}, fl = flags[p.id]; if (!reviews[p.id] && !fl) return; const pl = r.placement;
+  const rows = [["Region", "Park", "Decision", "Suitability", "Lights", "Light poles", "Fit", "Quality", "Fields", "Notes", "Field placement (lat, lon, angle°)", "Private operator", "Operator contact", "Ultimate club", "Flagged club-run", "Reviewer", "Reviewed at"]];
+  PARKS.forEach(p => { const r = reviews[p.id] || {}, fl = flags[p.id]; if (!reviews[p.id] && !fl && !ultimateOf(p).length) return; const pl = r.placement;
     rows.push([p.region, p.name, r.decision ? (r.decision === "top" ? "top pick" : r.decision === "yes" ? "shortlist" : "reject") : "", r.decision ? suitWord(r) : "", r.lights || "", pl?.lights?.length || 0,
       r.fit ? FIT_LABEL[r.fit] || r.fit : "", r.quality || "", r.fields || "", r.notes || "", pl?.lat != null ? `${pl.lat}, ${pl.lon}, ${pl.angle}` : "",
       PRIV_BY_PARK[p.id]?.[0]?.operator || "",
       [PRIV_BY_PARK[p.id]?.[0]?.contact?.email, PRIV_BY_PARK[p.id]?.[0]?.contact?.phone].filter(Boolean).join(" / "),
+      ultimateOf(p).map(o => o.operator + ([o.contact?.email, o.contact?.phone].filter(Boolean).length ? ` (${[o.contact?.email, o.contact?.phone].filter(Boolean).join(" / ")})` : "")).join("; "),
       fl ? "yes" + (fl.club ? ": " + fl.club : "") : "", r.by || "", r.at || ""]); });
   const csv = rows.map(r => r.map(v => { const s = String(v ?? ""); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }).join(",")).join("\n");
   const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); a.download = "council-field-vetting.csv"; a.click();
@@ -831,7 +845,7 @@ async function start() {
   PRIV_BY_PARK = {};
   (PRIV.operators || []).filter(o => o.park_id).forEach(o => (PRIV_BY_PARK[o.park_id] ||= []).push(o));
   // Point of contact first: the operator marked primary, else the rugby or football club.
-  const rank = o => o.primary ? 0 : ["rugby", "football"].includes(o.code) ? 1 : 2;
+  const rank = o => o.code === "ultimate" ? 3 : o.primary ? 0 : ["rugby", "football"].includes(o.code) ? 1 : 2;
   Object.values(PRIV_BY_PARK).forEach(ops => ops.sort((a, b) => rank(a) - rank(b)));
   const regions = [...new Set(PARKS.map(p => p.region))];
   $("region").insertAdjacentHTML("beforeend", regions.map(r => `<option>${esc(r)}</option>`).join(""));
