@@ -1,4 +1,4 @@
-// Council fields (vetting.html) — admin tool for rating Auckland Council sports parks for
+// Council / Community fields (vetting.html) — admin tool for rating Auckland Council sports parks for
 // ultimate. Two views on one Leaflet map:
 //  · Auckland: every park plotted and coloured by its overall suitability rating; click one
 //    to open it. This is how you move around between parks.
@@ -32,6 +32,8 @@ const DEFAULT_VIEW = [[-36.72666, 174.70198], [-37.08545, 174.95175]];
 const PRIV_COLOR = "#7c3aed";
 // Parks that are home to an ultimate club stand out in hot pink.
 const ULT_COLOR = "#ec4899";
+// Community facilities (schools and trusts, not council parks) ring in blue.
+const COMM_COLOR = "#2563eb";
 const ultimateOf = p => (PRIV_BY_PARK[p.id] || []).filter(o => o.code === "ultimate");
 
 const $ = id => document.getElementById(id);
@@ -529,7 +531,7 @@ function buildCity() {
   // Private grounds that aren't in the council maps: hollow diamonds with the operator's contacts.
   PRIV.operators.filter(o => !o.park_id || !BYID[o.park_id]).forEach(o => {
     const ll = [o.lat, o.lon]; pts.push(ll);
-    (o.icons ? logoMarker(ll, o.icons, o.amua ? "#e0a647" : PRIV_COLOR, false, o.amua ? 700 : 550) : o.amua ? amuaMarker(ll, "#ffffff", false) : privMarker(ll, "transparent", false, false)).bindPopup(privHtml(o), { className: "parktip", maxWidth: 320 })
+    (o.icons ? logoMarker(ll, o.icons, o.category === "community" ? COMM_COLOR : o.amua ? "#e0a647" : PRIV_COLOR, false, o.amua ? 700 : 550) : o.amua ? amuaMarker(ll, "#ffffff", false) : privMarker(ll, "transparent", false, false)).bindPopup(privHtml(o), { className: "parktip", maxWidth: 320 })
       .bindTooltip(`<b>${esc(o.park)}</b><br><b style="color:${PRIV_COLOR}">◆ ${esc(o.operator)}</b><br>Not in the council field maps · click for contacts`, { className: "parktip", direction: "top", offset: [0, -8] })
       .addTo(cityLayer);
   });
@@ -603,7 +605,7 @@ function syncCityFields() {
 function renderLegend() {
   const row = (c, t) => `<div><i style="background:${c}"></i>${t}</div>`;
   $("legend").innerHTML = `<button class="lg-h" id="legendToggle" aria-expanded="true">Suitability <span aria-hidden="true">▾</span></button>`
-    + `<div class="lg-b">${row(`hsl(${suitHue(0.95)} 72% 42%)`, "Excellent")}${row(`hsl(${suitHue(0.7)} 72% 42%)`, "Good")}${row(`hsl(${suitHue(0.5)} 72% 42%)`, "Fair")}${row(`hsl(${suitHue(0.2)} 72% 42%)`, "Poor")}${row("#b3372d", "Rejected")}${row("#8a958f", "Not rated")}<div><span class="dia" style="background:linear-gradient(45deg,#f2b705 50%,#c8102e 50%);border-color:#f2b705;box-shadow:0 0 0 2px ${PRIV_COLOR}"></span><b>Ultimate club home</b> <span class="lg-note">(club colours)</span></div><div><span class="amualg"><span></span></span><b>AMUA venue</b> <span class="lg-note">(GTEC · CPSA)</span></div><div><span class="logolg">A</span>Club or venue logo</div><div><span class="dia"></span>Privately managed</div><div><i style="background:#8a958f;border:2px dashed ${PRIV_COLOR};box-shadow:none"></i>Flagged: probably club-run</div><div class="lg-note">Gold ring = top pick</div></div>`;
+    + `<div class="lg-b">${row(`hsl(${suitHue(0.95)} 72% 42%)`, "Excellent")}${row(`hsl(${suitHue(0.7)} 72% 42%)`, "Good")}${row(`hsl(${suitHue(0.5)} 72% 42%)`, "Fair")}${row(`hsl(${suitHue(0.2)} 72% 42%)`, "Poor")}${row("#b3372d", "Rejected")}${row("#8a958f", "Not rated")}<div><span class="dia" style="background:linear-gradient(45deg,#f2b705 50%,#c8102e 50%);border-color:#f2b705;box-shadow:0 0 0 2px ${PRIV_COLOR}"></span><b>Ultimate club home</b> <span class="lg-note">(club colours)</span></div><div><span class="amualg"><span></span></span><b>AMUA venue</b> <span class="lg-note">(GTEC · CPSA)</span></div><div><span class="logolg">A</span>Club or venue logo</div><div><span class="logolg" style="border-color:${COMM_COLOR}">S</span>Community facility <span class="lg-note">(school)</span></div><div><span class="dia"></span>Privately managed</div><div><i style="background:#8a958f;border:2px dashed ${PRIV_COLOR};box-shadow:none"></i>Flagged: probably club-run</div><div class="lg-note">Gold ring = top pick</div></div>`;
   // Collapsed by default on small screens so it doesn't cover the map; the choice is remembered.
   const setOpen = open => { $("legend").classList.toggle("collapsed", !open); $("legendToggle").setAttribute("aria-expanded", String(open)); };
   setOpen(store.get("vet-legend-open", !matchMedia("(max-width: 640px)").matches));
@@ -868,6 +870,86 @@ async function loadCouncilOnly() {
   }
   councilOnlyOv = store.get("vet-council-only", {});
 }
+// ── Operator info (ⓘ): local-board links from the data file, and AMUA's relationship history
+// with each operator from the settings key "operator_relations" (signed-in users only):
+// { operator_id: { rating, contacts:[{name,role}], community:[{name,link,with}], events:[{date,tag,ref,tone}] } }.
+const REL_KEY = "operator_relations";
+const REL = {
+  rating: { good: "Good", neutral: "Neutral", difficult: "Difficult", unknown: "Unknown" },
+  role: { contact: "contact", manager: "manager", president: "president", secretary: "secretary", groundsperson: "groundsperson" },
+  link: { knows_contact: "knows", dealt_with: "dealt with them", organised_event: "organised an event there", member: "member" },
+  tag: { event_held: "Event held there", tournament_damage: "Tournament damage", booking_granted: "Booking granted", booking_declined: "Booking declined", access_issue: "Access issue", cooperative: "Cooperative", no_response: "No response" },
+  tone: { positive: "👍", neutral: "·", negative: "👎" },
+};
+let relations = {}, infoOpenFor = null;
+// People are often tagged here without asking them, so only a first name and last initial is
+// ever kept: "Clare Gibson" → "Clare G.", "Rory H" → "Rory H.".
+const shortName = s => { const w = String(s || "").trim().split(/\s+/).filter(Boolean);
+  return w.length < 2 ? (w[0] || "") : `${w[0]} ${w[w.length - 1][0].toUpperCase()}.`; };
+async function loadRelations() {
+  if (!supabase || !session) { relations = store.get("vet-relations", {}); return; }
+  const { data, error } = await supabase.from("settings").select("value").eq("key", REL_KEY).maybeSingle();
+  relations = error ? {} : data?.value || {};
+}
+async function saveRelation(id, rel) {
+  const entry = { ...rel, updated_by: session?.user?.email || "", updated_at: new Date().toISOString() };
+  if (supabase && session) {
+    const { data } = await supabase.from("settings").select("value").eq("key", REL_KEY).maybeSingle();
+    const fresh = { ...(data?.value || {}), [id]: entry };
+    const { error } = await supabase.from("settings").upsert({ key: REL_KEY, value: fresh, updated_at: entry.updated_at });
+    if (error) { setStatus("Couldn't save (" + error.message + ").", true); return false; }
+    relations = fresh;
+  } else { relations[id] = entry; store.set("vet-relations", relations); }
+  return true;
+}
+// Rugby and league clubs tend to run their own grounds regardless of council bookings.
+const influenceOf = o => o.influence || (["rugby", "league"].includes(o.code) ? "low" : null);
+const hasInfo = o => !!(o.local_board || o.tenure || o.board_links?.length || influenceOf(o) || relations[o.id]);
+function infoHtml(ops) {
+  const E = PRIV.enums || {}, LBS = PRIV.local_boards || {}, lab = (t, k) => esc(E[t]?.[k] || k);
+  return ops.filter(hasInfo).map(o => {
+    const lb = LBS[o.local_board], rel = relations[o.id] || {}, inf = influenceOf(o);
+    const facts = [lb ? `<a href="${esc(lb.url)}" target="_blank" rel="noopener">${esc(lb.name)} Local Board</a>` : "",
+      o.tenure && o.tenure.kind !== "unknown" ? `${lab("tenure", o.tenure.kind)}${o.tenure.until ? ` → ${esc(o.tenure.until.slice(0, 4))}` : ""}` : "",
+      (o.board_links || []).map(b => lab("board_link", b)).join(", "),
+      inf ? `council influence: ${lab("influence", inf)}${o.influence ? "" : " <span class='muted'>(typical for " + esc(o.code) + ")</span>"}` : "",
+      (o.refs || []).map((r, i) => o.sources?.[r] ? `<a href="${esc(o.sources[r])}" target="_blank" rel="noopener">[${i + 1}]</a>` : "").join(" ")].filter(Boolean).join(" · ");
+    const people = (rel.contacts || []).map((c, i) => `${esc(shortName(c.name))} (${esc(REL.role[c.role] || c.role)})${IS_ADMIN ? ` <button class="ip-x" data-del="contacts:${i}" title="Remove">✕</button>` : ""}`).join(", ");
+    const events = (rel.events || []).map((e, i) => `${esc(e.date || "")} ${esc(REL.tag[e.tag] || e.tag)}${e.ref ? ` · ${esc(e.ref)}` : ""} ${REL.tone[e.tone] || ""}${IS_ADMIN ? ` <button class="ip-x" data-del="events:${i}" title="Remove">✕</button>` : ""}`).join("; ");
+    const comm = (rel.community || []).map((c, i) => `${esc(shortName(c.name))} (${esc(REL.link[c.link] || c.link)}${c.with ? " " + esc(shortName(c.with)) : ""})${IS_ADMIN ? ` <button class="ip-x" data-del="community:${i}" title="Remove">✕</button>` : ""}`).join(", ");
+    const opt = (m, v) => Object.entries(m).map(([k, t]) => `<option value="${k}"${k === v ? " selected" : ""}>${esc(t)}</option>`).join("");
+    const editor = IS_ADMIN ? `<details class="ip-edit"><summary>Edit relationship</summary>
+      <label>Rating <select data-f="rating">${opt(REL.rating, rel.rating || "unknown")}</select></label>
+      <div class="ip-row"><input data-f="cName" placeholder="Operator person (first name)"><select data-f="cRole">${opt(REL.role)}</select><button data-add="contact">Add</button></div>
+      <div class="ip-row"><input data-f="mName" placeholder="Community person (first name + initial)"><select data-f="mLink">${opt(REL.link)}</select><input data-f="mWith" placeholder="whom (optional)"><button data-add="community">Add</button></div>
+      <div class="ip-row"><input data-f="eDate" type="date"><select data-f="eTag">${opt(REL.tag)}</select><input data-f="eRef" placeholder="Ref e.g. NZTUC25" maxlength="24"><select data-f="eTone">${opt({ positive: "positive", neutral: "neutral", negative: "negative" })}</select><button data-add="event">Add</button></div></details>` : "";
+    return `<div class="ip-op" data-op="${esc(o.id)}"><div class="ip-h">${esc(o.short || o.operator)}</div>
+      ${facts ? `<div><span class="ip-k">Local board</span> ${facts}</div>` : ""}
+      ${rel.rating || people || events ? `<div><span class="ip-k">Relationship</span> ${rel.rating ? esc(REL.rating[rel.rating]) : ""}${people ? " · " + people : ""}${events ? " · " + events : ""}</div>` : ""}
+      ${comm ? `<div><span class="ip-k">Community</span> ${comm}</div>` : ""}${editor}</div>`;
+  }).join("");
+}
+function renderInfo(p) {
+  const ops = PRIV_BY_PARK[p.id] || [], any = ops.some(hasInfo), box = $("privBox"), panel = $("infoPanel");
+  if (any && !box.hidden) box.insertAdjacentHTML("beforeend", `<button class="pb-info" id="pbInfo" aria-expanded="${infoOpenFor === p.id}" title="Local board, history and community contacts">ⓘ</button>`);
+  panel.hidden = !(any && infoOpenFor === p.id && !box.hidden);
+  panel.innerHTML = panel.hidden ? "" : infoHtml(ops);
+}
+function bindInfo() {
+  $("privBox").addEventListener("click", e => { if (!e.target.closest("#pbInfo")) return; const p = current(); if (!p) return;
+    infoOpenFor = infoOpenFor === p.id ? null : p.id; render(); });
+  $("infoPanel").addEventListener("change", async e => { const f = e.target.dataset.f; if (f !== "rating") return;
+    const id = e.target.closest("[data-op]").dataset.op; if (await saveRelation(id, { ...(relations[id] || {}), rating: e.target.value })) render(); });
+  $("infoPanel").addEventListener("click", async e => {
+    const op = e.target.closest("[data-op]"); if (!op) return; const id = op.dataset.op, rel = { ...(relations[id] || {}) }, v = n => op.querySelector(`[data-f="${n}"]`)?.value.trim() || "";
+    const del = e.target.closest("[data-del]"), add = e.target.closest("[data-add]"); if (!del && !add) return;
+    if (del) { const [k, i] = del.dataset.del.split(":"); rel[k] = (rel[k] || []).filter((_, j) => j !== +i); }
+    else if (add.dataset.add === "contact") { if (!v("cName")) return; rel.contacts = [...(rel.contacts || []), { name: shortName(v("cName")), role: v("cRole") }]; }
+    else if (add.dataset.add === "community") { if (!v("mName")) return; rel.community = [...(rel.community || []), { name: shortName(v("mName")), link: v("mLink"), ...(v("mWith") ? { with: shortName(v("mWith")) } : {}) }]; }
+    else if (add.dataset.add === "event") { if (!v("eDate") && !v("eRef")) return; rel.events = [...(rel.events || []), { date: v("eDate"), tag: v("eTag"), ref: v("eRef"), tone: v("eTone") }]; }
+    if (await saveRelation(id, rel)) render();
+  });
+}
 // Saves the override, then re-files the park's fields already in anyone's cart under the new
 // workflow, so the booking site picks it up.
 async function setCouncilOnly(p, on) {
@@ -973,6 +1055,7 @@ function render() {
     const pv = privOps(p), co = councilOnly(p);
     $("privBox").hidden = !pv.length && !co; $("privBox").classList.toggle("co", co);
     $("privBox").innerHTML = co ? councilOnlyBanner(p) : pv.length ? privBanner(pv) : "";
+    renderInfo(p);
     renderFlag(p); renderCouncilOnly(p);
     const r = reviews[p.id];
     // Chips: the managing club (◆) and any ultimate club (🥏), which may be the booking contact.
@@ -1114,6 +1197,7 @@ function bind() {
   bindDispenser();
   $("clubFlagBtn").onclick = async () => { const p = current(); if (!p) return;
     if (await saveFlag(p.id, flags[p.id] ? null : { club: "" })) { renderFlag(p); if (flags[p.id]) $("clubIn").focus(); } };
+  bindInfo();
   $("councilOnlyBtn").onclick = async () => { const p = current(); if (!p) return;
     if (await setCouncilOnly(p, !councilOnly(p))) render(); };
   $("clubIn").addEventListener("change", async () => { const p = current(); if (!p || !flags[p.id]) return;
@@ -1144,7 +1228,7 @@ function bind() {
     if ($("saveDlg").open || e.target.matches("input, textarea, select")) return;
     const p = current();
     if (!IS_ADMIN && !/^(Escape|c|C)$/.test(e.key)) return;   // bookers: no rating keys
-    if (e.key === "Escape") { if (rotating) setRotating(false); $("sizePanel").hidden = true; $("fitPop").hidden = true; if (p && tagsFor(p).sel) selectField(p, null); return; }
+    if (e.key === "Escape") { if (infoOpenFor) { infoOpenFor = null; render(); return; } if (rotating) setRotating(false); $("sizePanel").hidden = true; $("fitPop").hidden = true; if (p && tagsFor(p).sel) selectField(p, null); return; }
     if (/^[cC]$/.test(e.key)) { focusId = null; setView(view === "city" ? "park" : "city"); return; }
     if (/^[bB]$/.test(e.key)) { setMode(workMode === "book" ? "rate" : "book"); return; }
     if (view === "city") return;
@@ -1161,15 +1245,23 @@ function bind() {
     else if (p && /^[mM]$/.test(e.key) && p.maps.length > 1) { mapIdx[p.id] = ((mapIndex(p)) + 1) % p.maps.length; render(); }
   });
 }
+function opCsv(o) {
+  if (!o) return ["", "", "", "", "", "", ""];
+  const E = PRIV.enums || {}, rel = relations[o.id] || {}, ev = (rel.events || []).slice(-1)[0], inf = influenceOf(o);
+  return [PRIV.local_boards?.[o.local_board]?.name || "", o.tenure ? E.tenure?.[o.tenure.kind] || o.tenure.kind : "", o.tenure?.until || "",
+    (o.board_links || []).map(b => E.board_link?.[b] || b).join("; "), inf ? E.influence?.[inf] || inf : "", rel.rating ? REL.rating[rel.rating] : "",
+    ev ? [ev.date, REL.tag[ev.tag] || ev.tag, ev.ref].filter(Boolean).join(" ") : ""];
+}
 function exportCsv() {
-  const rows = [["Region", "Park", "Decision", "Suitability", "Lights", "Light poles", "Fit", "Quality", "Fields", "Notes", "Field placement (lat, lon, angle°)", "Private operator", "Operator contact", "Ultimate club", "Flagged club-run", "Reviewer", "Reviewed at"]];
+  const rows = [["Region", "Park", "Decision", "Suitability", "Lights", "Light poles", "Fit", "Quality", "Fields", "Notes", "Field placement (lat, lon, angle°)", "Private operator", "Operator contact", "Ultimate club", "Flagged club-run", "Reviewer", "Reviewed at",
+    "Local board", "Tenure", "Tenure until", "Board links", "Council influence", "Relationship", "Last event"]];
   PARKS.forEach(p => { const r = reviews[p.id] || {}, fl = flags[p.id]; if (!reviews[p.id] && !fl && !ultimateOf(p).length) return; const pl = r.placement;
     rows.push([p.region, p.name, r.decision ? (r.decision === "top" ? "top pick" : r.decision === "yes" ? "shortlist" : "reject") : "", r.decision ? suitWord(r) : "", r.lights || "", pl?.lights?.length || 0,
       r.fit ? FIT_LABEL[r.fit] || r.fit : "", r.quality || "", r.fields || "", r.notes || "", pl?.lat != null ? `${pl.lat}, ${pl.lon}, ${pl.angle}` : "",
       privOps(p)[0]?.operator || "",
       [privOps(p)[0]?.contact?.email, privOps(p)[0]?.contact?.phone].filter(Boolean).join(" / "),
       ultimateOf(p).map(o => o.operator + ([o.contact?.email, o.contact?.phone].filter(Boolean).length ? ` (${[o.contact?.email, o.contact?.phone].filter(Boolean).join(" / ")})` : "")).join("; "),
-      fl ? "yes" + (fl.club ? ": " + fl.club : "") : "", r.by || "", r.at || ""]); });
+      fl ? "yes" + (fl.club ? ": " + fl.club : "") : "", r.by || "", r.at || "", ...opCsv(PRIV_BY_PARK[p.id]?.[0])]); });
   const csv = rows.map(r => r.map(v => { const s = String(v ?? ""); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }).join(",")).join("\n");
   const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); a.download = "council-field-vetting.csv"; a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
@@ -1250,7 +1342,7 @@ async function start() {
     setStatus("Demo mode (no Supabase configured): decisions are kept in this browser.", true);
   }
   $("app").hidden = false; renderSeasonBar();
-  await loadBookLocs(); await loadCouncilOnly(); await syncCartWorkflows();
+  await loadBookLocs(); await loadCouncilOnly(); await loadRelations(); await syncCartWorkflows();
   initMap(); drawField(); showField(fieldOn); renderLegend(); bind();
   setView(view === "park" || view === "book" ? view : "city", { refit: true });
   if (mode === "shared") setInterval(async () => { if (!busy && !rotating && document.visibilityState === "visible" && !$("saveDlg").open) { await loadShared(); if (view === "city") render(); else renderRail(); } }, 30000);
