@@ -73,6 +73,8 @@ builds on this phase.
     hard-coded `f3`/`f4`/`f5`.
 - **Inactive facilities:** hidden from pickers, but still resolved by id so old
   bookings keep rendering.
+- **Venue selector:** fed from the tables with no code change. Venues are distinct
+  provider × site pairs; the default is `providers.is_default` + `default_site`.
 - **Acceptance:**
   - With the tables seeded, the app looks exactly as it does today.
   - With the tables missing or unreachable, it falls back to the constants.
@@ -305,6 +307,11 @@ Depends on 1.1 and 1.3.
   - show the regional coordinator's name and email.
 - **Schedule Summary:** a "Council season" badge on patterns that cross a season
   boundary.
+
+### 4.4–4.8 Council field vetting — ~1 week
+Lights, fit for ultimate, quality tiers, reliability computed from application outcomes,
+crowd-sourced field reports, and using them when applying and booking. See
+[`council-field-vetting.md`](council-field-vetting.md) for the model and work items.
 
 ---
 
