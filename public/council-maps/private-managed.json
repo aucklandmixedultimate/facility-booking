@@ -52,7 +52,19 @@
         "https://www.grammartec.co.nz/venue-hire-fields-1/venue-hire-1"
       ],
       "notes": "BOOKING ONLY AVAILABLE THROUGH AMUA (GTEC / CPSA workflow in the AMUA booking site), not directly with GTEC. Cornwall Park is trust land, not a council park; bookings go through the booking site's GTEC (CPSA) workflow.",
-      "must_book_through": "AMUA"
+      "must_book_through": "AMUA",
+      "icons": [
+        {
+          "img": "logos/amua.jpg",
+          "mono": "AMUA",
+          "bg": "#15211c"
+        },
+        {
+          "img": "logos/cjr.png",
+          "mono": "CJR",
+          "bg": "#334155"
+        }
+      ]
     },
     {
       "id": "gtec-orakei",
@@ -79,7 +91,14 @@
       ],
       "notes": "BOOKING ONLY AVAILABLE THROUGH AMUA (GTEC / CPSA workflow in the AMUA booking site), not directly with GTEC. Same operator as AMUA's Cornwall Park fields (provider 'gtec'). Council-owned domain; GTEC holds the fields' use.",
       "amua": true,
-      "must_book_through": "AMUA"
+      "must_book_through": "AMUA",
+      "icons": [
+        {
+          "img": "logos/gtec.png",
+          "mono": "GTEC",
+          "bg": "#334155"
+        }
+      ]
     },
     {
       "id": "tau-north-harbour",
@@ -649,7 +668,14 @@
         "https://ellersliefootball.org.nz/field-bookings",
         "https://ellersliefootball.org.nz/michaels-ave-community-centre"
       ],
-      "notes": "General enquiries: info@ellersliefootball.org.nz. Manages the fields; booking requests go through Ellerslie Ultimate Club."
+      "notes": "General enquiries: info@ellersliefootball.org.nz. Manages the fields; booking requests go through Ellerslie Ultimate Club.",
+      "icons": [
+        {
+          "img": "logos/ellerslie-afc.png",
+          "mono": "EAFC",
+          "bg": "#334155"
+        }
+      ]
     },
     {
       "id": "marist-halberg",
@@ -801,7 +827,14 @@
       "notes": "BOOKING ONLY AVAILABLE THROUGH AMUA (GTEC / CPSA workflow in the AMUA booking site), not directly with GTEC. Parnell Cricket Club is based here in summer.",
       "provider_id": "gtec",
       "amua": true,
-      "must_book_through": "AMUA"
+      "must_book_through": "AMUA",
+      "icons": [
+        {
+          "img": "logos/gtec.png",
+          "mono": "GTEC",
+          "bg": "#334155"
+        }
+      ]
     },
     {
       "id": "parnell-shore-road",
@@ -1040,7 +1073,14 @@
         "https://www.tepapapasportsclub.nz/contact-us.html",
         "https://en.wikipedia.org/wiki/Te_Papapa_Onehunga_RFC"
       ],
-      "notes": "Junior rugby: tepapapajuniorsrugby@gmail.com."
+      "notes": "Junior rugby: tepapapajuniorsrugby@gmail.com.",
+      "icons": [
+        {
+          "img": "logos/tepapapa.png",
+          "mono": "TPS",
+          "bg": "#334155"
+        }
+      ]
     },
     {
       "id": "tepapapa-ultimate-fergusson",

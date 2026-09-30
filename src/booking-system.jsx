@@ -1427,8 +1427,19 @@ function EmailLoginScreen() {
 }
 
 // ─── Small UI atoms ───────────────────────────────────────────────────────────
-function Badge({status}) {
-  const m=STATUS_META[status]||STATUS_META.pending_amua;
+// Status pill. With the booking's workflow (`wf`), the label carries its step in that
+// workflow, e.g. "(3/6)" at a privately operated council ground; the operator-only steps are
+// numbered in the council + operator workflow even without it.
+function stepLabel(status, wf) {
+  const m = STATUS_META[status] || STATUS_META.pending_amua, bare = m.label.replace(/^\(\d+\/\d+\)\s*/, "");
+  const w = wf && WORKFLOW_STEPS[wf]?.includes(status === "pending" ? "pending_amua" : status) ? wf
+    : ["op_permission","op_confirm"].includes(status) ? "council_private" : null;
+  if (!w || (w === "gtec" && !wf)) return m.label;
+  const steps = WORKFLOW_STEPS[w], i = steps.indexOf(status === "pending" ? "pending_amua" : status);
+  return `(${i + 1}/${steps.length}) ${bare}`;
+}
+function Badge({status, wf}) {
+  const m={...(STATUS_META[status]||STATUS_META.pending_amua), label: stepLabel(status, wf)};
   return <span style={{display:"inline-flex",alignItems:"center",gap:5,padding:"2px 10px",borderRadius:999,background:m.bg,border:`1px solid ${m.border}`,color:m.text,fontSize:12,fontWeight:600,whiteSpace:"nowrap"}}><span style={{width:6,height:6,borderRadius:"50%",background:m.dot,display:"inline-block"}}/>{m.label}</span>;
 }
 function EmailChip({email}) {
@@ -2177,7 +2188,7 @@ function OverlapWarning({title,description,bookings:bkgs,onProceed,onCancel}) {
               </div>
               <div style={{fontSize:12,color:"#64748b"}}>{b.purpose} · {fmtTime(b.start_hour)}–{fmtTime(b.start_hour+b.duration)} · {b.name}</div>
             </div>
-            <Badge status={b.status}/>
+            <Badge status={b.status} wf={workflowOf(b.facility_id)}/>
           </div>
         );})}
       </div>
@@ -3350,7 +3361,7 @@ function BookingDetail({booking,onEdit,onClose,onCancel,isAdmin,onStatusChange,o
               </select>
             </label>
           ) : (
-            <Badge status={booking.status}/>
+            <Badge status={booking.status} wf={workflowOf(booking.facility_id)}/>
           )}
           {booking.invoiced&&<span style={{fontSize:12,fontWeight:700,background:INVOICED_META.bg,color:INVOICED_META.text,border:`1px solid ${INVOICED_META.border}`,borderRadius:8,padding:"3px 9px"}}>🧾 Invoiced</span>}
           {REVIEW_STATUSES.has(booking.status)&&<p style={{margin:0,fontSize:13,color:m.text}}>Awaiting admin review.</p>}
@@ -4284,7 +4295,7 @@ function DayTimelinePopup({ date, bookings, onClose, onBookingClick, onNewBookin
 function AboutStep({ n, col, title, children }) {
   return (
     <div style={{ display:"flex", gap:12, alignItems:"flex-start", marginBottom:12 }}>
-      <div style={{ width:28, height:28, borderRadius:"50%", background:col, color:"#fff", fontWeight:700, fontSize:13,
+      <div style={{ minWidth:28, height:28, padding:"0 6px", boxSizing:"border-box", borderRadius:14, background:col, color:"#fff", fontWeight:700, fontSize:12,
         display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>{n}</div>
       <div>
         <div style={{fontWeight:600,fontSize:14,color:"#0f172a"}}>{title}</div>
@@ -4297,8 +4308,8 @@ function AboutTab() {
   const h2 = { margin:"0 0 12px", fontSize:16, fontWeight:700, color:"#0f172a" };
   const step = { display:"flex", gap:12, alignItems:"flex-start", marginBottom:12 };
   const stepNum = (col) => ({
-    width:28, height:28, borderRadius:"50%", background:col, color:"#fff",
-    fontWeight:700, fontSize:13, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0
+    minWidth:28, height:28, padding:"0 6px", boxSizing:"border-box", borderRadius:14, background:col, color:"#fff",
+    fontWeight:700, fontSize:12, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0
   });
   const arrow = { textAlign:"center", color:"#94a3b8", fontSize:18, margin:"4px 0 4px 14px" };
   const link = { color:"#2563eb", textDecoration:"underline" };
@@ -4354,13 +4365,13 @@ function AboutTab() {
             Provider → 📍 Location.
           </p>
           <h3 style={{margin:"12px 0 8px",fontSize:14,fontWeight:700,color:"#0f172a"}}>Approval Process</h3>
-          <AboutStep n={1} col="#6366f1" title="Submit booking request">Book the dates and times on your active council field. Status <Badge status="pending_amua"/>.</AboutStep>
+          <AboutStep n="1/4" col="#6366f1" title="Submit booking request">Book the dates and times on your active council field. Status <Badge status="pending_amua" wf="council"/>.</AboutStep>
           <div style={arrow}>↓</div>
-          <AboutStep n={2} col="#14b8a6" title="AMUA applies to the council">AMUA reviews it and adds it to the next council application (with other bookers' fields at that park). Status <Badge status="council_apply"/>.</AboutStep>
+          <AboutStep n="2/4" col="#14b8a6" title="AMUA applies to the council">AMUA reviews it and adds it to the next council application (with other bookers' fields at that park). Status <Badge status="council_apply" wf="council"/>.</AboutStep>
           <div style={arrow}>↓</div>
-          <AboutStep n={3} col="#0d9488" title="Awaiting the council's decision">Once AMUA submits, the application number and your share of the fee are recorded. Status <Badge status="council_pending"/>.</AboutStep>
+          <AboutStep n="3/4" col="#0d9488" title="Awaiting the council's decision">Once AMUA submits, the application number and your share of the fee are recorded. Status <Badge status="council_pending" wf="council"/>.</AboutStep>
           <div style={arrow}>↓</div>
-          <AboutStep n={4} col="#22c55e" title="Council decision">The council's parks booking coordinator confirms (<Badge status="approved"/>) or declines (<Badge status="rejected"/>). Seasonal applications are allocated after the application window closes; casual applications are processed once seasonal ones are settled.</AboutStep>
+          <AboutStep n="4/4" col="#22c55e" title="Council decision">The council's parks booking coordinator confirms (<Badge status="approved" wf="council"/>) or declines (<Badge status="rejected" wf="council"/>). Seasonal applications are allocated after the application window closes; casual applications are processed once seasonal ones are settled.</AboutStep>
           {councilTimes}
         </>)}
         {howTab==="private"&&(<>
@@ -4370,13 +4381,17 @@ function AboutTab() {
             GTEC's grounds (Cornwall Park, Orakei, Shore Road) are <b>BOOKING ONLY AVAILABLE THROUGH AMUA</b> — use the CPSA / GTEC process.
           </p>
           <h3 style={{margin:"12px 0 8px",fontSize:14,fontWeight:700,color:"#0f172a"}}>Approval Process</h3>
-          <AboutStep n={1} col="#6366f1" title="Submit booking request">Book on your active field at that park. Status <Badge status="pending_amua"/>.</AboutStep>
+          <AboutStep n="1/6" col="#6366f1" title="Submit booking request">Book on your active field at that park. Status <Badge status="pending_amua" wf="council_private"/>.</AboutStep>
           <div style={arrow}>↓</div>
-          <AboutStep n={2} col="#a855f7" title="AMUA asks the operator">AMUA contacts the club or operator (their contact is on the Council fields page) for permission. Status <Badge status="op_permission"/>.</AboutStep>
+          <AboutStep n="2/6" col="#a855f7" title="AMUA asks the operator">AMUA contacts the club or operator (their contact is on the Council fields page) for permission. Status <Badge status="op_permission" wf="council_private"/>.</AboutStep>
           <div style={arrow}>↓</div>
-          <AboutStep n={3} col="#14b8a6" title="AMUA applies to the council">With the operator's agreement, the field goes into the next council application. Status <Badge status="council_apply"/>, then <Badge status="council_pending"/>.</AboutStep>
+          <AboutStep n="3/6" col="#14b8a6" title="AMUA applies to the council">With the operator's agreement, the field goes into the next council application. Status <Badge status="council_apply" wf="council_private"/>.</AboutStep>
           <div style={arrow}>↓</div>
-          <AboutStep n={4} col="#7c3aed" title="Confirm with the operator">After the council's permit, AMUA confirms the arrangements (keys, lights) with the operator. Status <Badge status="op_confirm"/>, then <Badge status="approved"/>.</AboutStep>
+          <AboutStep n="4/6" col="#0d9488" title="Awaiting the council's decision">The application number and your share of the $10-per-field fee are recorded. Status <Badge status="council_pending" wf="council_private"/>.</AboutStep>
+          <div style={arrow}>↓</div>
+          <AboutStep n="5/6" col="#7c3aed" title="Confirm with the operator">After the council's permit, AMUA confirms the arrangements (keys, lights) with the operator. Status <Badge status="op_confirm" wf="council_private"/>.</AboutStep>
+          <div style={arrow}>↓</div>
+          <AboutStep n="6/6" col="#22c55e" title="Approved">The booking is confirmed: <Badge status="approved" wf="council_private"/> (or <Badge status="rejected"/> if the operator or council declines).</AboutStep>
           {councilTimes}
         </>)}
         {howTab==="gtec"&&(<>
@@ -4388,7 +4403,7 @@ function AboutTab() {
         </p>
         <h3 style={{margin:"12px 0 8px",fontSize:14,fontWeight:700,color:"#0f172a"}}>Approval Process</h3>
         <div style={step}>
-          <div style={stepNum("#6366f1")}>1</div>
+          <div style={stepNum("#6366f1")}>1/4</div>
           <div>
             <div style={{fontWeight:600,fontSize:14,color:"#0f172a"}}>Submit booking request</div>
             <div style={{fontSize:13,color:"#475569",marginTop:2}}>Fill in the booking form with your group name, facility, date, time, and purpose. Your request is saved with status <Badge status="pending_amua"/>.</div>
@@ -4396,7 +4411,7 @@ function AboutTab() {
         </div>
         <div style={arrow}>↓</div>
         <div style={step}>
-          <div style={stepNum("#f59e0b")}>2</div>
+          <div style={stepNum("#f59e0b")}>2/4</div>
           <div>
             <div style={{fontWeight:600,fontSize:14,color:"#0f172a"}}>AMUA reviews your request</div>
             <div style={{fontSize:13,color:"#475569",marginTop:2}}>AMUA checks availability and eligibility. If accepted, the booking is queued for submission to GTEC — status becomes <Badge status="queued_cpsa"/>. If there is a conflict or issue, AMUA may reject or request revision.</div>
@@ -4404,7 +4419,7 @@ function AboutTab() {
         </div>
         <div style={arrow}>↓</div>
         <div style={step}>
-          <div style={stepNum("#0ea5e9")}>3</div>
+          <div style={stepNum("#0ea5e9")}>3/4</div>
           <div>
             <div style={{fontWeight:600,fontSize:14,color:"#0f172a"}}>AMUA submits to GTEC</div>
             <div style={{fontSize:13,color:"#475569",marginTop:2}}>AMUA lodges the request with GTEC using the{" "}
@@ -4415,7 +4430,7 @@ function AboutTab() {
         </div>
         <div style={arrow}>↓</div>
         <div style={step}>
-          <div style={stepNum("#22c55e")}>4</div>
+          <div style={stepNum("#22c55e")}>4/4</div>
           <div>
             <div style={{fontWeight:600,fontSize:14,color:"#0f172a"}}>GTEC decision &amp; reconciliation</div>
             <div style={{fontSize:13,color:"#475569",marginTop:2}}>
@@ -7555,7 +7570,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
                                         {credit<0&&<span style={{fontSize:9,color:"#16a34a",marginLeft:3,fontWeight:700}}>(−{fmtCost(Math.abs(credit))})</span>}
                                         {deficit>0&&<span style={{fontSize:9,color:"#b45309",marginLeft:3,fontWeight:700}}>(+{fmtCost(deficit)})</span>}
                                       </td>
-                                      <td style={{padding:"3px 8px"}}><Badge status={b.status}/>{b.invoiced&&<span style={{marginLeft:3,fontSize:9,fontWeight:700,color:"#5b21b6"}}>🧾</span>}</td>
+                                      <td style={{padding:"3px 8px"}}><Badge status={b.status} wf={workflowOf(b.facility_id)}/>{b.invoiced&&<span style={{marginLeft:3,fontSize:9,fontWeight:700,color:"#5b21b6"}}>🧾</span>}</td>
                                     </tr>
                                   );
                                 })}
@@ -9978,7 +9993,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                       </span>
                     </td>
                     <td style={{padding:"3px 6px"}}>
-                      <Badge status={b.status}/>
+                      <Badge status={b.status} wf={workflowOf(b.facility_id)}/>
                       {workflowStep(b)&&<span title="Step in the council workflow" style={{fontSize:9,fontWeight:700,color:"#0f766e",marginLeft:3}}>{workflowStep(b)}</span>}
                       {isCouncilBooking(b)&&!["rejected","cancelled"].includes(b.status)&&(()=>{ const app=parseCouncilApp(b.system_notes);
                         return <span title={app?`Council application ${app.id} (sent ${fmtDate(app.at.slice(0,10))}): this booking's share of the $${COUNCIL_APPLICATION_FEE}-per-field fee`:`Council application fee: pending until AMUA sends the application ($${COUNCIL_APPLICATION_FEE} per field, shared)`}
@@ -12643,7 +12658,7 @@ export default function App() {
                                     </span>
                                   </td>
                                   <td style={{padding:"3px 6px"}}>
-                                    <Badge status={b.status}/>
+                                    <Badge status={b.status} wf={workflowOf(b.facility_id)}/>
                                     {isClash&&<span style={{display:"block",fontSize:9,fontWeight:700,color:"#ef4444"}}>⚡clash</span>}
                                   </td>
                                   <td style={{padding:"3px 6px",whiteSpace:"nowrap",color:"#475569",fontSize:11}}>{fmt24(b.start_hour)}–{fmt24(b.start_hour+b.duration)}</td>
