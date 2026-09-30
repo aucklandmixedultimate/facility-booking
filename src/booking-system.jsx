@@ -136,6 +136,14 @@ const FACILITIES = [
 // Mirrored at module level in the same way as the alias/colour maps, so the 13 pickers
 // and calendar columns don't each need the admin flag threaded through them.
 let _isAdminView = false;
+// Booker contact details for council applications (table booker_contacts, keyed by
+// lowercase email). null until loaded — or if the table isn't set up — so nothing is gated.
+let _bookerContacts = null;
+function councilContactOk(email) {
+  if (!_bookerContacts) return true;
+  const e = (email || "").toLowerCase(), c = _bookerContacts[e] || _bookerContacts[_emailAliases[e] || e];
+  return !!(c?.full_name?.trim() && c?.phone?.trim());
+}
 function visibleFacilities() { return FACILITIES.filter(f => !f.inactive && (!f.adminOnly || _isAdminView) && (!f.council || _isAdminView || ownsCouncilFacility(f))); }
 // Council fields are added per booker (Council fields page → Book), so a booker sees only
 // the ones added for them (any of their linked emails); admins see all.
@@ -3105,6 +3113,12 @@ function BookingForm({ booking, allBookings, onAddToCart, onClose, isAdmin, logg
     for (let i=0; i<slots.length; i++) {
       if (!slots[i].facility_id || !slots[i].date) { setError(`Slot #${i+1}: choose a facility and date.`); return false; }
     }
+    // Council fields: the booker is the key holder on AMUA's council application, so their
+    // name and phone must be on file first.
+    if (slots.some(sl => FACILITIES.find(f => f.id === sl.facility_id)?.council) && !councilContactOk(email)) {
+      setError(`Council fields need the booker's contact details — they're listed as the key holder on the council application. ${isAdmin && email.toLowerCase() !== (loggedInEmail||"").toLowerCase() ? `Add them for ${email} under` : "Add yours under"} User menu → 📇 My council contact.`);
+      return false;
+    }
     return true;
   }
 
@@ -4291,6 +4305,39 @@ function DayTimelinePopup({ date, bookings, onClose, onBookingClick, onNewBookin
   );
 }
 
+// The booker's contact details for council applications: they're the key holder on AMUA's
+// application for the fields they book. Admins can enter them for any booker.
+function CouncilContactModal({ email, isAdmin, contacts, tableReady, onClose, onSave }) {
+  const [who, setWho] = useState((email||"").toLowerCase());
+  const cur = contacts[who] || {};
+  const [d, setD] = useState({ full_name: cur.full_name||"", phone: cur.phone||"", contact_email: cur.contact_email||"" });
+  const pick = e => { const w = e.toLowerCase(); setWho(w); const c = contacts[w] || {}; setD({ full_name:c.full_name||"", phone:c.phone||"", contact_email:c.contact_email||"" }); };
+  const si = { ...S.inp, fontSize:13 };
+  const ok = d.full_name.trim() && d.phone.trim();
+  return (
+    <Modal title="📇 Council contact" onClose={onClose} width={480}>
+      <div style={{fontSize:13,color:"#475569",marginBottom:12}}>
+        AMUA applies to Auckland Council for the council fields you book. You're listed as the <b>key holder</b> for your fields and named with your team,
+        so the council's booking coordinator can reach you. Council fields can be booked once your name and phone are here.
+      </div>
+      {!tableReady && <div style={{fontSize:12,color:"#92400e",background:"#fffbeb",border:"1px solid #fde68a",borderRadius:8,padding:"8px 10px",marginBottom:10}}>
+        The contacts table isn't set up yet (an admin needs to run <code>supabase-migration-booker-contacts.sql</code>).</div>}
+      <div style={{display:"flex",flexDirection:"column",gap:10}}>
+        <label style={S.lbl}>Booker (sign-in email)
+          {isAdmin ? <input style={si} list="ccBookers" value={who} onChange={e=>pick(e.target.value)}/> : <div style={{...si,background:"#f1f5f9"}}>{who}</div>}
+          {isAdmin && <datalist id="ccBookers">{Object.keys(contacts).map(e=><option key={e} value={e}/>)}</datalist>}
+        </label>
+        <label style={S.lbl}>Full name *<input style={si} value={d.full_name} onChange={e=>setD({...d,full_name:e.target.value})} placeholder="As the council should address you"/></label>
+        <label style={S.lbl}>Phone *<input style={si} type="tel" value={d.phone} onChange={e=>setD({...d,phone:e.target.value})} placeholder="e.g. 021 123 4567"/></label>
+        <label style={S.lbl}>Contact email <span style={{textTransform:"none",fontWeight:400}}>(if not {who})</span><input style={si} type="email" value={d.contact_email} onChange={e=>setD({...d,contact_email:e.target.value})}/></label>
+      </div>
+      <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:14}}>
+        <button onClick={onClose} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#475569"})}>Cancel</button>
+        <button disabled={!ok||!tableReady||!who} onClick={()=>onSave({ email:who, full_name:d.full_name.trim(), phone:d.phone.trim(), contact_email:d.contact_email.trim() })}
+          style={S.btn({background:ok&&tableReady?"#0d9488":"#94a3b8",color:"#fff"})}>Save</button>
+      </div>
+    </Modal>);
+}
 // One numbered step in About → How to Book.
 function AboutStep({ n, col, title, children }) {
   return (
@@ -4365,6 +4412,10 @@ function AboutTab() {
             Provider → 📍 Location.
           </p>
           <h3 style={{margin:"12px 0 8px",fontSize:14,fontWeight:700,color:"#0f172a"}}>Approval Process</h3>
+          <p style={{margin:"0 0 12px",fontSize:13,color:"#475569"}}>
+            AMUA applies as the organisation, and each application names the bookers and teams using the fields, with their player numbers. <b>You're the key holder</b> for
+            the fields you book, so add your name and phone under User menu → 📇 My council contact first — council fields can't be booked without them.
+          </p>
           <AboutStep n="1/4" col="#6366f1" title="Submit booking request">Book the dates and times on your active council field. Status <Badge status="pending_amua" wf="council"/>.</AboutStep>
           <div style={arrow}>↓</div>
           <AboutStep n="2/4" col="#14b8a6" title="AMUA applies to the council">AMUA reviews it and adds it to the next council application (with other bookers' fields at that park). Status <Badge status="council_apply" wf="council"/>.</AboutStep>
@@ -10633,6 +10684,17 @@ export default function App() {
     return init;
   });
   const [showAmuaModal, setShowAmuaModal] = useState(false);
+  const [showContactModal, setShowContactModal] = useState(()=>{ try{ return new URLSearchParams(window.location.search).get("contact")==="1"; }catch{ return false; } });
+  const [bookerContacts, setBookerContacts] = useState(null);
+  async function loadBookerContacts() {
+    if (!configured) return;
+    try {
+      const r = await fetch(`${SUPABASE_URL}/rest/v1/booker_contacts?select=*`, { headers: authHeaders() });
+      if (!r.ok) return;   // table not set up yet: nothing is gated
+      const map = {}; (await r.json()).forEach(c => { map[(c.email||"").toLowerCase()] = c; });
+      _bookerContacts = map; setBookerContacts(map);
+    } catch { /* offline */ }
+  }
   const [aliasColors, setAliasColors] = useState(()=>{
     let init = {}; try{ init = JSON.parse(localStorage.getItem("fb_alias_colors")||"{}"); }catch{ /* ignore */ }
     _emailColorOverrides = init; // make available to module-level emailColor on first render
@@ -11253,7 +11315,7 @@ export default function App() {
   const signedInId = session?.user?.id || null;
   useEffect(()=>{
     if(!signedInId) return;
-    (async()=>{ await loadSettings(); purgeOldLogs(); })();
+    (async()=>{ await loadSettings(); purgeOldLogs(); loadBookerContacts(); })();
     let last = Date.now();
     const onVis = () => { if (document.visibilityState === "visible" && Date.now() - last > 15000) { last = Date.now(); loadSettings(); } };
     document.addEventListener("visibilitychange", onVis); window.addEventListener("focus", onVis);
@@ -12423,6 +12485,7 @@ export default function App() {
                         </div>
                       )}
                       <UserMenuItem icon="🗺" label="Council fields" onClick={()=>{setShowUserMenu(false);window.open(import.meta.env.BASE_URL+"vetting.html","_blank","noopener");}}/>
+                      <UserMenuItem icon="📇" label="My council contact" onClick={()=>{setShowUserMenu(false);setShowContactModal(true);}}/>
                       <UserMenuItem icon="↪" label="Sign out" onClick={()=>{setShowUserMenu(false);handleLogout();}} danger/>
                     </div>
                   </>
@@ -12761,6 +12824,12 @@ export default function App() {
         </Modal>
       )}
 
+      {showContactModal&&session&&(
+        <CouncilContactModal email={loggedInEmail} isAdmin={isAdmin} contacts={bookerContacts||{}} tableReady={bookerContacts!==null}
+          onClose={()=>setShowContactModal(false)}
+          onSave={async row=>{ try{ await sb.upsert("booker_contacts", { ...row, updated_at:new Date().toISOString() }, "email"); await loadBookerContacts(); setShowContactModal(false); showToast("Council contact saved."); }
+            catch(e){ showToast("Couldn't save: "+(e.message||e).slice(0,140),"error"); } }}/>
+      )}
       {showActivityLog&&isAdmin&&(
         <ActivityLogModal onClose={()=>setShowActivityLog(false)} bookers={knownBookers}/>
       )}
