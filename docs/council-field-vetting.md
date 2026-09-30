@@ -245,25 +245,48 @@ harvest):
 
 ## Vetting tool (live)
 
-**Admin menu → Field vetting** opens `vetting.html` on the booking site. Its source is
+**Admin menu → Council fields** opens `vetting.html` on the booking site. Its source is
 `vetting.html` and `src/vetting/`; the maps and park data are in `public/council-maps/`.
-- **One park per card.** Swipe the title bar, or use ← → ↑: reject, shortlist or top
-  pick. **Later** (S) moves the park to the back of the queue, and **Undo** (Z) takes
+The page always fits one screen: nothing scrolls except the map, where the wheel zooms.
+- **Auckland view** (C toggles it). Every park is plotted across the city and coloured by
+  its overall suitability: excellent, good, fair, poor, rejected, or not rated. Top picks
+  have a gold ring. Zoom in to see each park's council fields shaded in the same colour.
+  Click a park to open and rate it. Deciding returns you to the Auckland map. **Rate next**
+  jumps to the next unrated park in the queue.
+  - Suitability starts from quality (x/5).
+  - Fit adjusts it: +0.2 for 2+ fields, +0.1 for 1 full field, −0.15 for reduced size.
+  - Lights add 0.1, and a top pick adds 0.15.
+  - A rejected park scores 0.
+- **Park view.** One park per card. Swipe the title bar, or use ← → ↑: reject, shortlist or
+  top pick. **Later** (S) moves the park to the back of the queue, and **Undo** (Z) takes
   back the last decision.
 - **Live satellite map.** The map is Esri World Imagery (no key needed; attribution
   shown). The council's field map is laid over it at its true position: every council
   map page is a GeoPDF (EPSG:2193), and its corner coordinates give the bounds. Zooming
   two or three wheel clicks in or out from the fitted map drops the council map to show
-  the satellite, and **Fit** brings it back.
+  the satellite, and **Fit** brings it back. The council's field outlines are traced from
+  the PDF vectors and their names read by OCR (`maps[].fields` in `parks.json`), so they
+  stay visible as dashed outlines over the satellite.
 - **Ultimate field to scale.** The field is WFDF standard: 100 × 37 m, 18 m end zones,
   brick marks 20 m in. It's editable under ⚙. It stays centred in the frame and scales
-  with zoom, so you pan the map underneath it to test a spot. Click the field, move the
-  mouse to turn it, and click again to fix it (R turns it 15°). The field's position
-  and angle are saved with the decision.
-- **Lights button** on the map cycles unknown → none → training → full.
+  with zoom, so you pan the map underneath it to test a spot. The yellow **centre
+  button** (Enter) unlocks the field, and the field then turns to follow the mouse.
+  Locking it again does three things:
+  - fixes the angle;
+  - fills **Fields** with the nearest council field, measured from the field centre to
+    each traced field's centre (with 2+ fields, every field within about 120 m);
+  - asks how much fits: **reduced size**, **1 full field** or **2+ fields**.
+- **Lights.** Click the map to drop a light pole, and click a pole to remove it. Any pole
+  marks the park as lit. **None** records that you checked and there aren't any. Lights
+  only matter for evening slots.
+- **Saving the position.** Once at least three of quality, fit, lights and fields are set,
+  a decision asks whether to save the field position. The position is the centre
+  lat/lon, the angle and the dimensions. Saved positions are restored next time and
+  place the park on the Auckland map.
 - **Saving.** Decisions go to Supabase `field_reviews`, admin-only
-  (`supabase-migration-field-reviews.sql`). Until that migration is run, decisions stay
-  in the browser. **Download CSV** exports them.
+  (`supabase-migration-field-reviews.sql`; re-run it for the "2+ fields" option).
+  `placement` holds the field position and the light poles. Until the migration is run,
+  decisions stay in the browser. **Download CSV** exports them.
 
 ## Manual data entry, until the app screens exist
 

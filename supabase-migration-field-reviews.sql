@@ -11,15 +11,20 @@ create table if not exists public.field_reviews (
   park         text not null,
   decision     text not null check (decision in ('top','yes','no')),  -- top pick / shortlist / reject
   lights       text not null default 'unknown' check (lights in ('unknown','none','training','full')),
-  fit          text not null default 'unknown' check (fit in ('unknown','full','reduced','no')),
+  fit          text not null default 'unknown',           -- reduced / full (one field) / multi (2+ fields); check below
   quality      smallint check (quality between 1 and 5),
   fields       text not null default '',          -- which council fields suit, free text
   notes        text not null default '',
-  placement    jsonb,                             -- {lat, lon, angle, length, width, endzone} of the field overlay when decided
+  placement    jsonb,                             -- {lat, lon, angle, len, wid, ez, lights: [[lat, lon], …]}: field position + marked light poles
   reviewed_by  uuid references auth.users(id) on delete set null,
   reviewer_email text,
   updated_at   timestamptz not null default now()
 );
+
+-- Fit ratings: reduced size, one full field, or two or more fields.
+alter table public.field_reviews drop constraint if exists field_reviews_fit_check;
+alter table public.field_reviews add constraint field_reviews_fit_check
+  check (fit in ('unknown','reduced','full','multi','no'));
 
 alter table public.field_reviews enable row level security;
 
