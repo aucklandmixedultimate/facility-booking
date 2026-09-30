@@ -312,3 +312,16 @@ body.viewer .handle .hint,body.viewer .rail .help,body.viewer #fieldBtn,body.vie
 .bookpanel .bk-sec{text-align:left;align-items:stretch;display:flex;flex-direction:column;gap:8px;border:1px solid var(--line);border-radius:12px;padding:10px 12px}
 .bookpanel .bk-sec.act{border-color:#0f766e;background:rgba(15,118,110,.06)}
 .bookpanel .bk-sec h4{margin:0;font-size:15px}.bookpanel .bk-sec h4 .muted{font-weight:400;font-size:12px}
+
+/* Council booking state bar */
+.seasonbar{flex:none;font-size:12px;margin:4px 0 0}
+.seasonbar summary{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center;cursor:pointer;list-style:none}
+.seasonbar summary::-webkit-details-marker{display:none}
+.seasonbar .sb-k{font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;font-size:10px}
+.seasonbar .sb-p{display:inline-flex;gap:5px;align-items:center;border-radius:999px;padding:2px 9px;background:var(--line);color:var(--ink)}
+.seasonbar .sb-p.summer{background:#fef3c7;color:#78350f}.seasonbar .sb-p.winter{background:#e0f2fe;color:#075985}
+.seasonbar .sb-map{margin-left:auto;color:var(--muted)}
+.seasonbar .sb-more{display:flex;flex-direction:column;gap:5px;padding:6px 0 2px}
+.seasonbar .sb-more>div{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center}
+@media (prefers-color-scheme: dark){.seasonbar .sb-p.summer{background:#3a2c12;color:#fcd34d}.seasonbar .sb-p.winter{background:#0c2a3d;color:#bae6fd}}
+@media (max-width:640px){.seasonbar{font-size:11px}.seasonbar .sb-map{display:none}.seasonbar .sb-p b{font-weight:600}#bookTab .tl{display:none}}
