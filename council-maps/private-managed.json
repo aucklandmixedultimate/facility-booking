@@ -27,6 +27,80 @@
     "likely": "The operator has a field-bookings or hire page for this ground",
     "to-verify": "Resident club with clubrooms and a seasonal allocation; ask whether it sub-allocates"
   },
+  "local_boards": {
+    "upper-harbour": {
+      "name": "Upper Harbour",
+      "url": "https://www.aucklandcouncil.govt.nz/en/about-auckland-council/how-auckland-council-works/local-boards/all-local-boards/upper-harbour-local-board.html"
+    },
+    "orakei": {
+      "name": "Ōrākei",
+      "url": "https://www.aucklandcouncil.govt.nz/en/about-auckland-council/how-auckland-council-works/local-boards/all-local-boards/orakei-local-board.html"
+    },
+    "puketapapa": {
+      "name": "Puketāpapa",
+      "url": "https://www.aucklandcouncil.govt.nz/en/about-auckland-council/how-auckland-council-works/local-boards/all-local-boards/puketapapa-local-board.html"
+    },
+    "devonport-takapuna": {
+      "name": "Devonport-Takapuna",
+      "url": "https://www.aucklandcouncil.govt.nz/en/about-auckland-council/how-auckland-council-works/local-boards/all-local-boards/devonport-takapuna-local-board.html"
+    },
+    "waitemata": {
+      "name": "Waitematā",
+      "url": "https://www.aucklandcouncil.govt.nz/en/about-auckland-council/how-auckland-council-works/local-boards/all-local-boards/waitemata-local-board.html"
+    },
+    "howick": {
+      "name": "Howick",
+      "url": "https://www.aucklandcouncil.govt.nz/en/about-auckland-council/how-auckland-council-works/local-boards/all-local-boards/howick-local-board.html"
+    },
+    "albert-eden": {
+      "name": "Albert-Eden",
+      "url": "https://www.aucklandcouncil.govt.nz/en/about-auckland-council/how-auckland-council-works/local-boards/all-local-boards/albert-eden-local-board.html"
+    },
+    "papakura": {
+      "name": "Papakura",
+      "url": "https://www.aucklandcouncil.govt.nz/en/about-auckland-council/how-auckland-council-works/local-boards/all-local-boards/papakura-local-board.html"
+    },
+    "whau": {
+      "name": "Whau",
+      "url": "https://www.aucklandcouncil.govt.nz/en/about-auckland-council/how-auckland-council-works/local-boards/all-local-boards/whau-local-board.html"
+    },
+    "maungakiekie-tamaki": {
+      "name": "Maungakiekie-Tāmaki",
+      "url": "https://www.aucklandcouncil.govt.nz/en/about-auckland-council/how-auckland-council-works/local-boards/all-local-boards/maungakiekie-tamaki-local-board.html"
+    },
+    "mangere-otahuhu": {
+      "name": "Māngere-Ōtāhuhu",
+      "url": "https://www.aucklandcouncil.govt.nz/en/about-auckland-council/how-auckland-council-works/local-boards/all-local-boards/mangere-otahuhu-local-board.html"
+    }
+  },
+  "enums": {
+    "tenure": {
+      "ground_lease": "Ground lease",
+      "building_lease": "Building lease",
+      "licence": "Licence to occupy",
+      "trust_owned": "Trust-owned building",
+      "none": "No tenure",
+      "unknown": "Unknown"
+    },
+    "board_link": {
+      "lease": "Lease",
+      "facility_partnership": "Facility partnership",
+      "strategic_grant": "Strategic partnership grant",
+      "landowner_approval": "Landowner approval",
+      "plan": "In board facility plan",
+      "deputation": "Deputation to board"
+    },
+    "influence": {
+      "high": "Council can steer bookings",
+      "medium": "Shared say",
+      "low": "Operator effectively decides"
+    },
+    "category": {
+      "council": "Council park",
+      "community": "Community facility (school or trust)"
+    }
+  },
+  "_contact_rule": "Where several clubs operate at one ground, contact the operator marked booking_only (the only booking channel), then primary, then the rugby or football club.",
   "operators": [
     {
       "id": "gtec-cornwall",
@@ -86,6 +160,103 @@
       ]
     },
     {
+      "id": "ani-epsom",
+      "park_id": null,
+      "park": "Auckland Normal Intermediate (school field)",
+      "lat": -36.885,
+      "lon": 174.763,
+      "approx": true,
+      "operator": "Auckland Normal Intermediate",
+      "short": "ANI",
+      "type": "school",
+      "code": "multi",
+      "provider_id": "ani",
+      "amua": true,
+      "manages": "School field on Poronui Street, Epsom; hired by AMUA at $20/hr",
+      "contact": {
+        "email": "ani@ani.school.nz",
+        "phone": "09 630 1109",
+        "url": "https://ani.school.nz/"
+      },
+      "status": "confirmed",
+      "notes": "BOOKING ONLY AVAILABLE THROUGH AMUA. No booking form yet: AMUA books by email to the school. $20/hr. Position approximate until pinned.",
+      "must_book_through": "AMUA",
+      "local_board": "albert-eden",
+      "tenure": {
+        "kind": "none"
+      },
+      "sources": [
+        "https://ani.school.nz/",
+        "https://www.educationcounts.govt.nz/find-school/school/profile?school=1211"
+      ],
+      "icons": [
+        {
+          "mono": "ANI",
+          "bg": "#1d4ed8"
+        }
+      ],
+      "category": "community"
+    },
+    {
+      "id": "stcuthberts-epsom",
+      "park_id": null,
+      "park": "St Cuthbert's College (school field)",
+      "lat": -36.8878,
+      "lon": 174.7765,
+      "approx": true,
+      "operator": "St Cuthbert's College",
+      "short": "St Cuthberts",
+      "type": "school",
+      "code": "multi",
+      "category": "community",
+      "provider_id": "stcuthberts",
+      "amua": true,
+      "manages": "School field hired directly by AMUA (not through GTEC); its own purchase order",
+      "contact": {
+        "url": "https://www.stcuthberts.school.nz/"
+      },
+      "status": "confirmed",
+      "notes": "BOOKING ONLY AVAILABLE THROUGH AMUA (St Cuthbert's provider in the AMUA booking site). Position approximate until pinned.",
+      "must_book_through": "AMUA",
+      "sources": [
+        "https://www.stcuthberts.school.nz/"
+      ],
+      "icons": [
+        {
+          "mono": "STC",
+          "bg": "#7f1d1d"
+        }
+      ]
+    },
+    {
+      "id": "sacred-heart-glen-innes",
+      "park_id": null,
+      "park": "Sacred Heart College (school field)",
+      "lat": -36.8745,
+      "lon": 174.8585,
+      "approx": true,
+      "operator": "Sacred Heart College",
+      "short": "Sacred Heart",
+      "type": "school",
+      "code": "multi",
+      "category": "community",
+      "manages": "School fields in Glen Innes, used for ultimate events (e.g. Tamaki Throwdown 2019)",
+      "contact": {
+        "url": "https://www.sacredheart.school.nz/"
+      },
+      "status": "likely",
+      "notes": "Community (school) facility. Position approximate until pinned; booking arrangements to confirm.",
+      "sources": [
+        "https://www.sacredheart.school.nz/"
+      ],
+      "icons": [
+        {
+          "mono": "SHC",
+          "bg": "#1e3a8a"
+        }
+      ]
+    },
+    {
       "id": "arl-cornwall-lower",
       "park_id": null,
       "park": "Cornwall Park – lower CPSA fields (ARL clubhouse)",
@@ -140,7 +311,8 @@
           "mono": "GTEC",
           "bg": "#334155"
         }
-      ]
+      ],
+      "local_board": "orakei"
     },
     {
       "id": "tau-north-harbour",
@@ -162,7 +334,11 @@
         "https://www.aucklandstadiums.co.nz/our-venues/north-harbour-stadium",
         "https://ourauckland.aucklandcouncil.govt.nz/news/2025/07/north-harbour-stadium-retains-operators-in-eoi-decision/"
       ],
-      "notes": "Owned by Auckland Council, operated by its CCO Tātaki Auckland Unlimited."
+      "notes": "Owned by Auckland Council, operated by its CCO Tātaki Auckland Unlimited.",
+      "local_board": "upper-harbour",
+      "tenure": {
+        "kind": "unknown"
+      }
     },
     {
       "id": "aurfc-colin-maiden",
@@ -185,7 +361,11 @@
         "https://aucc.bookanet.co.nz/terms",
         "https://akhockey.org.nz/colin-maiden-park-project-overview-and-faqs/"
       ],
-      "notes": "Council-managed park with several club-run areas; ask the club that runs the part you want."
+      "notes": "Council-managed park with several club-run areas; ask the club that runs the part you want.",
+      "local_board": "orakei",
+      "tenure": {
+        "kind": "unknown"
+      }
     },
     {
       "id": "aufc-keith-hay",
@@ -207,7 +387,11 @@
         "https://www.aucklandunitedfc.org.nz/field-bookings",
         "https://www.aucklandunitedfc.org.nz/our-facilities"
       ],
-      "notes": ""
+      "notes": "",
+      "local_board": "puketapapa",
+      "tenure": {
+        "kind": "unknown"
+      }
     },
     {
       "id": "esafc-madills",
@@ -230,7 +414,11 @@
       "sources": [
         "https://easternsuburbs.org.nz/about-us/our-grounds/"
       ],
-      "notes": "Club office in the clubrooms, weekdays 10am–3pm. Alternate contact dani@esafc.org.nz."
+      "notes": "Club office in the clubrooms, weekdays 10am–3pm. Alternate contact dani@esafc.org.nz.",
+      "local_board": "orakei",
+      "tenure": {
+        "kind": "unknown"
+      }
     },
     {
       "id": "nsu-devonport",
@@ -253,7 +441,11 @@
       "sources": [
         "https://nsu.org.nz/club-info"
       ],
-      "notes": ""
+      "notes": "",
+      "local_board": "devonport-takapuna",
+      "tenure": {
+        "kind": "unknown"
+      }
     },
     {
       "id": "wsafc-seddon",
@@ -276,7 +468,11 @@
         "https://wsafc.org.nz/",
         "https://en.wikipedia.org/wiki/Seddon_Fields"
       ],
-      "notes": "Turfs are council-booked; the club is the resident user."
+      "notes": "Turfs are council-booked; the club is the resident user.",
+      "local_board": "waitemata",
+      "tenure": {
+        "kind": "unknown"
+      }
     },
     {
       "id": "bbafc-lloyd-elsmore",
@@ -296,7 +492,11 @@
       "sources": [
         "https://www.sporty.co.nz/bbafc/about-us-1/our-history"
       ],
-      "notes": "Lloyd Elsmore Park has several resident clubs; ask the one whose code and fields you want."
+      "notes": "Lloyd Elsmore Park has several resident clubs; ask the one whose code and fields you want.",
+      "local_board": "howick",
+      "tenure": {
+        "kind": "unknown"
+      }
     },
     {
       "id": "purc-bell-park",
@@ -318,10 +518,25 @@
       "sources": [
         "https://www.purc.co.nz/about-us-1/PURC-1",
         "https://www.purc.co.nz/about-us-1/Facilities",
-        "https://www.purc.co.nz/touch-1/Senior-Touch-1"
+        "https://www.purc.co.nz/touch-1/Senior-Touch-1",
+        "https://infocouncil.aucklandcouncil.govt.nz/Open/2024/07/20240718_HW_AGN_11583.htm",
+        "https://www.aucklandcouncil.govt.nz/content/dam/ac/docs/about-council/howick-sport-and-active-recreation-facilities-plan.pdf"
       ],
       "notes": "AMUA's point of contact for Lloyd Elsmore Park (confirmed by AMUA).",
-      "primary": true
+      "primary": true,
+      "local_board": "howick",
+      "tenure": {
+        "kind": "ground_lease",
+        "until": "2041-12-31"
+      },
+      "board_links": [
+        "lease",
+        "plan"
+      ],
+      "refs": [
+        3,
+        4
+      ]
     },
     {
       "id": "hpcc-lloyd-elsmore",
@@ -341,7 +556,11 @@
       "sources": [
         "https://hpcc.org.nz/the-gear-bag/lloyd-elsmore-park"
       ],
-      "notes": ""
+      "notes": "",
+      "local_board": "howick",
+      "tenure": {
+        "kind": "unknown"
+      }
     },
     {
       "id": "bill-mckinlay",
@@ -366,7 +585,11 @@
         "https://www.billmckinlaypark.co.nz/mckinlay_park.html",
         "https://en.wikipedia.org/wiki/Bill_McKinlay_Park"
       ],
-      "notes": "Not in the council field maps; council step may not apply — ask the operator."
+      "notes": "Not in the council field maps; council step may not apply — ask the operator.",
+      "local_board": "albert-eden",
+      "tenure": {
+        "kind": "unknown"
+      }
     },
     {
       "id": "bruce-pulman",
@@ -391,7 +614,11 @@
         "https://www.brucepulmanpark.com/CONTACT/Contact-1",
         "https://www.sporty.co.nz/brucepulmanpark/CONTACT/Sports-Facility-Hire-Enquiry"
       ],
-      "notes": "Not in the council field maps; council step may not apply — ask the trust."
+      "notes": "Not in the council field maps; council step may not apply — ask the trust.",
+      "local_board": "papakura",
+      "tenure": {
+        "kind": "unknown"
+      }
     },
     {
       "id": "suburbs-shabolt",
@@ -415,7 +642,11 @@
       "sources": [
         "https://www.suburbsrugby.co.nz/About-us/Clubrooms-1"
       ],
-      "notes": "Not in the council field maps."
+      "notes": "Not in the council field maps.",
+      "local_board": "whau",
+      "tenure": {
+        "kind": "unknown"
+      }
     },
     {
       "id": "aufc-nicholson",
@@ -435,7 +666,11 @@
       "sources": [
         "https://www.aucklandunitedfc.org.nz/sports-fields"
       ],
-      "notes": "Same club as Keith Hay Park; ask whether it holds the field's seasonal allocation."
+      "notes": "Same club as Keith Hay Park; ask whether it holds the field's seasonal allocation.",
+      "local_board": "albert-eden",
+      "tenure": {
+        "kind": "unknown"
+      }
     },
     {
       "id": "tennis-nicholson",
@@ -454,9 +689,20 @@
       "status": "to-verify",
       "sources": [
         "https://clubspark.kiwi/NicholsonParkTennisCentre",
-        "https://www.aucklandcouncil.govt.nz/en/parks-recreation/find-park-beach/park-detail/195.html"
+        "https://www.aucklandcouncil.govt.nz/en/parks-recreation/find-park-beach/park-detail/195.html",
+        "https://infocouncil.aucklandcouncil.govt.nz/Open/2021/07/AE_20210720_AGN_10008_AT.HTM"
       ],
-      "notes": ""
+      "notes": "",
+      "local_board": "albert-eden",
+      "tenure": {
+        "kind": "unknown"
+      },
+      "board_links": [
+        "lease"
+      ],
+      "refs": [
+        2
+      ]
     },
     {
       "id": "mapafc-anderson",
@@ -480,7 +726,11 @@
         "https://www.footballgroundmap.com/ground/anderson-park/mount-albert-ponsonby",
         "https://www.aucklandcouncil.govt.nz/en/parks-recreation/find-park-beach/park-detail/80.html"
       ],
-      "notes": "Resident NRFL Championship club since the 1970s; ask whether it holds the field's seasonal allocation. Email from a search summary; check it on the club site."
+      "notes": "Resident NRFL Championship club since the 1970s; ask whether it holds the field's seasonal allocation. Email from a search summary; check it on the club site.",
+      "local_board": "albert-eden",
+      "tenure": {
+        "kind": "unknown"
+      }
     },
     {
       "id": "richmond-grey-lynn",
@@ -503,7 +753,11 @@
         "http://www.richmondroversrugbyleague.com/contact-us.html",
         "https://en.wikipedia.org/wiki/Richmond_Rovers"
       ],
-      "notes": "Club secretary handles enquiries and clubroom hire."
+      "notes": "Club secretary handles enquiries and clubroom hire.",
+      "local_board": "waitemata",
+      "tenure": {
+        "kind": "unknown"
+      }
     },
     {
       "id": "mtalbert-lions-fowlds",
@@ -527,7 +781,11 @@
         "https://www.sporty.co.nz/MtAlbertLions/Contact-us",
         "https://en.wikipedia.org/wiki/Fowlds_Park"
       ],
-      "notes": ""
+      "notes": "",
+      "local_board": "albert-eden",
+      "tenure": {
+        "kind": "unknown"
+      }
     },
     {
       "id": "ptchev-walker",
@@ -551,7 +809,11 @@
         "https://www.cab.org.nz/community-directory/KB00027257",
         "https://en.wikipedia.org/wiki/Point_Chevalier_Pirates"
       ],
-      "notes": ""
+      "notes": "",
+      "local_board": "albert-eden",
+      "tenure": {
+        "kind": "unknown"
+      }
     },
     {
       "id": "eagles-ellerslie",
@@ -575,7 +837,11 @@
         "https://www.ellerslieeagles.co.nz/contact",
         "https://en.wikipedia.org/wiki/Ellerslie_Eagles"
       ],
-      "notes": ""
+      "notes": "",
+      "local_board": "orakei",
+      "tenure": {
+        "kind": "unknown"
+      }
     },
     {
       "id": "eden-gribblehirst",
@@ -599,7 +865,11 @@
         "https://www.edenrugby.co.nz/ABOUT-1/VENUE-HIRE-1",
         "https://en.wikipedia.org/wiki/Eden_RFC"
       ],
-      "notes": "Operations manager (opsmanager@edenrugby.co.nz) handles venue hire."
+      "notes": "Operations manager (opsmanager@edenrugby.co.nz) handles venue hire.",
+      "local_board": "albert-eden",
+      "tenure": {
+        "kind": "unknown"
+      }
     },
     {
       "id": "ponsonby-springs",
@@ -623,7 +893,11 @@
         "http://www.ponsonbyrugby.co.nz/About-1/Facilities-1",
         "http://www.ponsonbyrugby.co.nz/About-1/Field-Layout"
       ],
-      "notes": ""
+      "notes": "",
+      "local_board": "waitemata",
+      "tenure": {
+        "kind": "unknown"
+      }
     },
     {
       "id": "ponsonby-coxs",
@@ -645,7 +919,11 @@
       "sources": [
         "https://www.nzherald.co.nz/sport/ex-international-ponsonby-rugby-club-players-desperate-plea-as-western-springs-stadium-consultation-nears-end/AXX4DI4CZBDL3PPKV7FTNF5324/"
       ],
-      "notes": "Also used by Grafton United CC (cricket) and Western Springs AFC (Field 4 weekday training, May–Sep)."
+      "notes": "Also used by Grafton United CC (cricket) and Western Springs AFC (Field 4 weekday training, May–Sep).",
+      "local_board": "waitemata",
+      "tenure": {
+        "kind": "unknown"
+      }
     },
     {
       "id": "grafton-coxs",
@@ -665,7 +943,11 @@
       "sources": [
         "https://en.wikipedia.org/wiki/Grafton_United_Cricket_Club"
       ],
-      "notes": ""
+      "notes": "",
+      "local_board": "waitemata",
+      "tenure": {
+        "kind": "unknown"
+      }
     },
     {
       "id": "grafton-victoria",
@@ -686,7 +968,11 @@
         "https://en.wikipedia.org/wiki/Victoria_Park,_Auckland",
         "https://en.wikipedia.org/wiki/Grafton_United_Cricket_Club"
       ],
-      "notes": "Pavilion shared with the Auckland and District Pipe Band and Northern Region football referees."
+      "notes": "Pavilion shared with the Auckland and District Pipe Band and Northern Region football referees.",
+      "local_board": "waitemata",
+      "tenure": {
+        "kind": "unknown"
+      }
     },
     {
       "id": "ellerslie-afc-michaels",
@@ -708,7 +994,8 @@
       "status": "likely",
       "sources": [
         "https://ellersliefootball.org.nz/field-bookings",
-        "https://ellersliefootball.org.nz/michaels-ave-community-centre"
+        "https://ellersliefootball.org.nz/michaels-ave-community-centre",
+        "https://infocouncil.aucklandcouncil.govt.nz/Open/2018/11/OR_20181115_AGN_7721_AT.htm"
       ],
       "notes": "General enquiries: info@ellersliefootball.org.nz. Manages the fields; booking requests go through Ellerslie Ultimate Club.",
       "icons": [
@@ -717,6 +1004,16 @@
           "mono": "EAFC",
           "bg": "#334155"
         }
+      ],
+      "local_board": "orakei",
+      "tenure": {
+        "kind": "ground_lease"
+      },
+      "board_links": [
+        "lease"
+      ],
+      "refs": [
+        2
       ]
     },
     {
@@ -738,7 +1035,11 @@
         "https://en.wikipedia.org/wiki/Marist_Saints",
         "https://www.nzherald.co.nz/nz/marist-saints-rugby-league-clubrooms-in-auckland-destroyed-in-fire-police-investigating/C4IHCT6H3ZGFLJOVI4R23TAD2I/"
       ],
-      "notes": ""
+      "notes": "",
+      "local_board": "albert-eden",
+      "tenure": {
+        "kind": "unknown"
+      }
     },
     {
       "id": "mtwgtn-rfc-hamlin",
@@ -759,7 +1060,11 @@
         "https://en.wikipedia.org/wiki/Mt_Wellington_RFC",
         "https://www.stuff.co.nz/auckland/local-news/east-bays-courier/69793345/mt-wellington-rugby-football-clubrooms-up-for-sale"
       ],
-      "notes": "The clubrooms were put up for sale in 2015; check whether the club is still resident."
+      "notes": "The clubrooms were put up for sale in 2015; check whether the club is still resident.",
+      "local_board": "maungakiekie-tamaki",
+      "tenure": {
+        "kind": "unknown"
+      }
     },
     {
       "id": "marist-rfc-mtwgtn",
@@ -779,7 +1084,11 @@
       "sources": [
         "https://www.aucklandcouncil.govt.nz/en/parks-recreation/find-park-beach/park-detail/181.html"
       ],
-      "notes": ""
+      "notes": "",
+      "local_board": "maungakiekie-tamaki",
+      "tenure": {
+        "kind": "unknown"
+      }
     },
     {
       "id": "mtwgtn-rfc-memorial",
@@ -799,7 +1108,11 @@
       "sources": [
         "https://www.aucklandcouncil.govt.nz/en/parks-recreation/find-park-beach/park-detail/181.html"
       ],
-      "notes": ""
+      "notes": "",
+      "local_board": "maungakiekie-tamaki",
+      "tenure": {
+        "kind": "unknown"
+      }
     },
     {
       "id": "mtwgtn-warriors-thompson",
@@ -821,7 +1134,11 @@
         "https://www.sporty.co.nz/mtwellingtonrl/history-1"
       ],
       "notes": "Club is based here, but bookings go straight to Auckland Council; no club permission needed.",
-      "council_only": true
+      "council_only": true,
+      "local_board": "maungakiekie-tamaki",
+      "tenure": {
+        "kind": "unknown"
+      }
     },
     {
       "id": "onehunga-waikaraka",
@@ -842,9 +1159,20 @@
       "status": "to-verify",
       "sources": [
         "https://en.wikipedia.org/wiki/Onehunga_Sports",
-        "https://www.footballgroundmap.com/ground/waikaraka-park/onehunga-sports"
+        "https://www.footballgroundmap.com/ground/waikaraka-park/onehunga-sports",
+        "https://www.onehungasports.net/general-information"
       ],
-      "notes": ""
+      "notes": "",
+      "local_board": "maungakiekie-tamaki",
+      "tenure": {
+        "kind": "trust_owned"
+      },
+      "board_links": [
+        "plan"
+      ],
+      "refs": [
+        2
+      ]
     },
     {
       "id": "gtec-shore-road",
@@ -876,7 +1204,8 @@
           "mono": "GTEC",
           "bg": "#334155"
         }
-      ]
+      ],
+      "local_board": "orakei"
     },
     {
       "id": "parnell-shore-road",
@@ -896,7 +1225,11 @@
       "sources": [
         "https://parnellcricket.co.nz/history-1"
       ],
-      "notes": ""
+      "notes": "",
+      "local_board": "orakei",
+      "tenure": {
+        "kind": "unknown"
+      }
     },
     {
       "id": "parnell-bloodworth",
@@ -916,7 +1249,11 @@
       "sources": [
         "https://parnellcricket.co.nz/history-1"
       ],
-      "notes": ""
+      "notes": "",
+      "local_board": "orakei",
+      "tenure": {
+        "kind": "unknown"
+      }
     },
     {
       "id": "ofc-ngahue",
@@ -936,7 +1273,11 @@
       "sources": [
         "https://en.wikipedia.org/wiki/Ngahue_Reserve"
       ],
-      "notes": ""
+      "notes": "",
+      "local_board": "orakei",
+      "tenure": {
+        "kind": "unknown"
+      }
     },
     {
       "id": "roskill-rfc-fearon",
@@ -957,7 +1298,11 @@
       "sources": [
         "https://www.sporty.co.nz/roskillrfc/About-us-1/Playing-Fields"
       ],
-      "notes": ""
+      "notes": "",
+      "local_board": "puketapapa",
+      "tenure": {
+        "kind": "unknown"
+      }
     },
     {
       "id": "roskill-rfc-mayroad",
@@ -977,7 +1322,11 @@
       "sources": [
         "https://www.sporty.co.nz/roskillrfc/About-us-1/Playing-Fields"
       ],
-      "notes": ""
+      "notes": "",
+      "local_board": "puketapapa",
+      "tenure": {
+        "kind": "unknown"
+      }
     },
     {
       "id": "bayroskill-blockhouse",
@@ -997,7 +1346,11 @@
       "sources": [
         "https://en.wikipedia.org/wiki/Bay_Roskill_Vikings"
       ],
-      "notes": ""
+      "notes": "",
+      "local_board": "whau",
+      "tenure": {
+        "kind": "unknown"
+      }
     },
     {
       "id": "otahuhu-rfc-sturges",
@@ -1018,7 +1371,11 @@
       "sources": [
         "https://en.wikipedia.org/wiki/Otahuhu_RFC"
       ],
-      "notes": ""
+      "notes": "",
+      "local_board": "mangere-otahuhu",
+      "tenure": {
+        "kind": "unknown"
+      }
     },
     {
       "id": "esafc-glover",
@@ -1040,7 +1397,11 @@
       "sources": [
         "https://easternsuburbs.org.nz/about-us/our-grounds/"
       ],
-      "notes": ""
+      "notes": "",
+      "local_board": "orakei",
+      "tenure": {
+        "kind": "unknown"
+      }
     },
     {
       "id": "esafc-crossfield",
@@ -1062,7 +1423,11 @@
       "sources": [
         "https://easternsuburbs.org.nz/about-us/our-grounds/"
       ],
-      "notes": ""
+      "notes": "",
+      "local_board": "orakei",
+      "tenure": {
+        "kind": "unknown"
+      }
     },
     {
       "id": "ellerslie-ultimate-michaels",
@@ -1091,6 +1456,10 @@
         "edge": "#f2b705",
         "pattern": "linear-gradient(45deg,#f2b705 50%,#c8102e 50%)",
         "source": "Confirmed by AMUA: gold/red, bisected"
+      },
+      "local_board": "orakei",
+      "tenure": {
+        "kind": "unknown"
       }
     },
     {
@@ -1113,7 +1482,9 @@
       "status": "likely",
       "sources": [
         "https://www.tepapapasportsclub.nz/contact-us.html",
-        "https://en.wikipedia.org/wiki/Te_Papapa_Onehunga_RFC"
+        "https://en.wikipedia.org/wiki/Te_Papapa_Onehunga_RFC",
+        "https://ourauckland.aucklandcouncil.govt.nz/news/2026/05/onehunga-sports-memberships-surge-with-local-board-funding/",
+        "https://infocouncil.aucklandcouncil.govt.nz/Open/2025/06/20250624_MT_AGN_13288_AT.htm"
       ],
       "notes": "Junior rugby: tepapapajuniorsrugby@gmail.com.",
       "icons": [
@@ -1122,6 +1493,18 @@
           "mono": "TPS",
           "bg": "#334155"
         }
+      ],
+      "local_board": "maungakiekie-tamaki",
+      "tenure": {
+        "kind": "unknown"
+      },
+      "board_links": [
+        "strategic_grant",
+        "facility_partnership"
+      ],
+      "refs": [
+        2,
+        3
       ]
     },
     {
@@ -1154,8 +1537,11 @@
         "edge": "#f2b705",
         "pattern": "repeating-linear-gradient(0deg,#1e3a8a 0 3px,#f2b705 3px 6px,#ffffff 6px 9px)",
         "source": "Confirmed by AMUA: navy/gold/white stripes"
+      },
+      "local_board": "maungakiekie-tamaki",
+      "tenure": {
+        "kind": "unknown"
       }
     }
-  ],
-  "_contact_rule": "Where several clubs operate at one ground, contact the operator marked booking_only (the only booking channel), then primary, then the rugby or football club."
+  ]
 }
