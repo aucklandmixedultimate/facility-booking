@@ -304,7 +304,7 @@ The page always fits one screen: nothing scrolls except the map, where the wheel
   as a gold star with the suitability colour in the centre: Cornwall Park (not a council
   park; approximate location), Orakei Domain B and Shore Road Reserve. They're the
   `amua: true` entries in `private-managed.json`. Their card, tooltip and popup say
-  **MUST BOOK THROUGH AMUA**: book them in the AMUA booking site (GTEC / CPSA workflow),
+  **BOOKING ONLY AVAILABLE THROUGH AMUA**, the same wording as the ultimate clubs: book them in the AMUA booking site (GTEC / CPSA workflow),
   not directly with GTEC.
 - **Ultimate club homes (🥏).** Parks where an ultimate club is based show as a larger
   diamond on the Auckland map. Its centre and edge are the club's colours (`colors` on the
@@ -390,3 +390,14 @@ be imported when 4.4 lands.
    spreadsheet's Settings sheet.
 3. **Existing knowledge:** is there an existing list, spreadsheet or group chat of known
    good council fields? Importing it would seed Tier A immediately.
+
+## Access for bookers
+
+Every signed-in user can open Council fields (User menu → 🗺 Council fields). Bookers who
+aren't admins see the Auckland and park maps with the ratings, read-only, and Book mode for
+their own cart only. Rating, decisions, flags and the council-only toggle stay admin-only.
+This needs `supabase-migration-council-fields-access.sql`, which makes these changes:
+- lets signed-in users read `field_reviews` and `field_flags`;
+- adds `set_my_council_facilities(entries)`, a security-definer function that replaces only the
+  caller's own entry in the `council_facilities` setting. The settings table stays
+  admin-write only.

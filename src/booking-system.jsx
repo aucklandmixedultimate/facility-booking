@@ -304,6 +304,8 @@ const PROVIDERS = {
 // The council's booking portal lists its sports-field permit (SSPPERMITBK) at $10 per field
 // per application, paid later. The fee stays "pending" while bookings wait with AMUA; it's
 // fixed when AMUA sends a batch of applications to the council (handleSendToCouncil).
+// Auckland Council's online sports-field application (the form the council extension fills).
+const COUNCIL_APPLICATION_URL = "https://onlineservices.aucklandcouncil.govt.nz/councilonline/application/sportapplication?bookingApplicationType=SEASONAL_ALL_SPORTS_PARKS&productCode=SSPPERMITBK";
 const COUNCIL_APPLICATION_FEE = 10;
 // Stamped in system_notes when a booking is sent: [COUNCIL_APP <app id> <sent at> fee=<share>].
 const COUNCIL_APP_RE = /\[COUNCIL_APP (\S+) (\S+) fee=([\d.]+)\]/;
@@ -12224,7 +12226,7 @@ export default function App() {
                           <UserMenuItem icon="🧩" label="Install Extensions" onClick={()=>{setShowUserMenu(false);setShowExtensionModal(true);}}/>
                           <UserMenuItem icon="💲" label="Facility Rates" onClick={()=>{setShowUserMenu(false);setShowRatesModal(true);}}/>
                           <UserMenuItem icon="👥" label="Player Counts" onClick={()=>{setShowUserMenu(false);setShowPlayersModal(true);}}/>
-                          <UserMenuItem icon="🗺" label="Council fields" onClick={()=>{setShowUserMenu(false);window.open(import.meta.env.BASE_URL+"vetting.html","_blank","noopener");}}/>
+                          <UserMenuItem icon="🏛" label="Council application" onClick={()=>{setShowUserMenu(false);window.open(COUNCIL_APPLICATION_URL,"_blank","noopener");}}/>
                           <UserMenuItem icon="🏢" label="AMUA details" onClick={()=>{setShowUserMenu(false);setShowAmuaModal(true);}}/>
                           <UserMenuItem icon="👤" label="User Management" onClick={()=>{setShowUserMenu(false);setShowUserMgmtModal(true);}}/>
                           <UserMenuItem icon="📜" label="Activity Log" onClick={()=>{setShowUserMenu(false);setShowActivityLog(true);}}/>
@@ -12232,6 +12234,7 @@ export default function App() {
                           <UserMenuItem icon="⬇" label="Reload from DB" onClick={()=>{setShowUserMenu(false);handleSyncDB();}}/>
                         </div>
                       )}
+                      <UserMenuItem icon="🗺" label="Council fields" onClick={()=>{setShowUserMenu(false);window.open(import.meta.env.BASE_URL+"vetting.html","_blank","noopener");}}/>
                       <UserMenuItem icon="↪" label="Sign out" onClick={()=>{setShowUserMenu(false);handleLogout();}} danger/>
                     </div>
                   </>

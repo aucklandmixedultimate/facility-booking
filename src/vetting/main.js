@@ -64,6 +64,8 @@ let cursor = 0, busy = false;
 let dims = store.get("vet-field-dims", WFDF);
 let fieldOn = store.get("vet-field-on", true);
 let view = store.get("vet-view", "city");   // "city" | "park" | "book" (the cart)
+// Admins rate and book for anyone; other signed-in bookers see the ratings and book for themselves.
+let IS_ADMIN = true;
 let workMode = store.get("vet-work-mode", "rate");   // "rate" | "book": what clicking a park's field areas does
 let focusId = null;                          // park opened from the Auckland map (overrides the queue)
 
@@ -499,7 +501,7 @@ function buildCity() {
       r.quality ? r.quality + "/5" : "", r.fit && r.fit !== "unknown" ? FIT_LABEL[r.fit] : "",
       r.lights === "full" || r.lights === "training" ? "💡 lights" : r.lights === "none" ? "no lights" : ""].filter(Boolean).join(" · ") : "Not rated yet";
     mk.bindTooltip(`<b>${esc(p.name)}</b><br>${esc(p.region)} · <b style="color:${col}">${suitWord(r)}</b><br>${esc(tags)}${r?.fields ? "<br>Fields: " + esc(r.fields) : ""}`
-      + (isAmua ? `<br><b style="color:#b7791f">★ AMUA venue (${esc(pv.find(o => o.amua).short)}): MUST BOOK THROUGH AMUA</b>`
+      + (isAmua ? `<br><b style="color:#b7791f">★ Book only through: AMUA</b>`
         : pv?.length ? `<br><b style="color:${PRIV_COLOR}">◆ Privately managed: contact ${esc(pv[0].short)}</b> first` : "")
       + (ult.length ? `<br><b style="color:${ULT_COLOR}">🥏 ${ult.some(o => o.booking_only) ? "Book only through" : "Ultimate club"}: ${esc(ult.map(o => o.operator).join(", "))}</b>` : "")
       + (fl ? `<br><b style="color:${PRIV_COLOR}">◇ Flagged: probably club-run${fl.club ? " (" + esc(fl.club) + ")" : ""}</b>` : "")
@@ -548,7 +550,7 @@ const privStatus = o => ({ confirmed: "confirmed", likely: "likely", "to-verify"
 // Popup for a private ground that isn't a council park.
 function privHtml(o) {
   const c = o.contact || {};
-  return `<b>${esc(o.park)}</b>${o.approx ? " (approx. location)" : ""}${o.must_book_through === "AMUA" ? `<br><b style="color:#b7791f">★ MUST BOOK THROUGH AMUA</b> (booking site, GTEC / CPSA workflow)` : ""}<br><b style="color:${PRIV_COLOR}">◆ ${esc(o.operator)}</b> · ${esc(privStatus(o))}<br>${esc(o.manages)}<br>${privContacts(o)}${c.address ? "<br>" + esc(c.address) : ""}${o.notes ? `<br><i>${esc(o.notes)}</i>` : ""}`;
+  return `<b>${esc(o.park)}</b>${o.approx ? " (approx. location)" : ""}${o.must_book_through === "AMUA" ? `<br><b style="color:#b7791f">★ BOOKING ONLY AVAILABLE THROUGH AMUA</b>` : ""}<br><b style="color:${PRIV_COLOR}">◆ ${esc(o.operator)}</b> · ${esc(privStatus(o))}<br>${esc(o.manages)}<br>${privContacts(o)}${c.address ? "<br>" + esc(c.address) : ""}${o.notes ? `<br><i>${esc(o.notes)}</i>` : ""}`;
 }
 // Park card banner: every operator on this ground, then the request steps once.
 function privBanner(all) {
@@ -559,9 +561,8 @@ function privBanner(all) {
   const [lead, ...rest] = ops;
   // AMUA's own provider grounds (GTEC / CPSA): booked through the AMUA booking site.
   const amua = all.find(o => o.must_book_through === "AMUA");
-  if (amua) return `<span class="pb-amua"><b>★ MUST BOOK THROUGH AMUA</b> — ${esc(amua.park)} is a ${esc(amua.short)} ground: book it in the AMUA booking site (GTEC / CPSA workflow), not directly with GTEC.</span>`
-    + `<span class="pb-full">Managed by ${esc(amua.operator)} · ${privContacts(amua)}</span>`
-    + (rest.filter(o => o !== amua).length ? `<span class="pb-full">Also on site: ${rest.filter(o => o !== amua).map(o => esc(o.operator)).join(" · ")}</span>` : "") + ultLine;
+  if (amua) return `<span class="pb-amua pb-only"><b>★ BOOKING ONLY AVAILABLE THROUGH AMUA</b> — <a href="${BASE}">AMUA booking site ↗</a> <i>GTEC / CPSA workflow; don't book directly with GTEC.</i></span>`
+    + `<span class="pb-full">Fields managed by: ${all.filter(o => o.code !== "ultimate").map(o => `${esc(o.operator)} (${esc(o.code || o.type)})`).join(" · ")}</span>` + ultLine;
   if (lead.booking_only) return `<span class="pb-ult pb-only"><b>🥏 BOOKING ONLY AVAILABLE THROUGH ${esc(lead.operator)}</b> — ${privContacts(lead) || "no contact found"}${lead.notes ? ` <i>${esc(lead.notes)}</i>` : ""}</span>`
     + (rest.length ? `<span class="pb-full">Fields managed by: ${rest.map(o => `${esc(o.operator)} (${esc(o.code || o.type)})`).join(" · ")}</span>` : "") + ultLine;
   return `<span class="pb-full"><b>◆ Contact: ${esc(lead.operator)}</b> (${esc(privStatus(lead))}) — ${esc(lead.manages)} · ${privContacts(lead)}</span>`
@@ -637,6 +638,13 @@ async function loadBookLocs() {
   bookLocs = store.get("vet-booklocs", {});
 }
 async function saveBookLocs() {
+  if (supabase && session && !IS_ADMIN) {
+    // Bookers can only change their own cart, through a database function.
+    const who = whoBooks();
+    const { data, error } = await supabase.rpc("set_my_council_facilities", { entries: bookLocs[who] || [] });
+    if (error) { setStatus("Couldn't save your cart (" + error.message + "). An admin may need to run supabase-migration-council-fields-access.sql.", true); return false; }
+    bookLocs = data || {}; return true;
+  }
   if (supabase && session) {
     // Re-read first so two admins adding at once don't overwrite each other's bookers.
     const { data } = await supabase.from("settings").select("value").eq("key", BOOK_KEY).maybeSingle();
@@ -677,7 +685,7 @@ async function toggleCart(p, key) {
   // A field added before it's been rated: switch to Rate mode on it, so its orientation
   // and fit get set (the ultimate field jumps onto it).
   const rt = tagsFor(p).fr[key];
-  if (saved && i < 0 && key !== "Whole park" && !(rt?.fit && rt.fit !== "unknown")) {
+  if (IS_ADMIN && saved && i < 0 && key !== "Whole park" && !(rt?.fit && rt.fit !== "unknown")) {
     setStatus(`Added ${p.name} – ${key} to ${who}'s cart. It isn't rated yet: set its orientation and fit, then switch back to Book.`);
     setMode("rate"); selectField(p, key); renderTabs(); return;
   }
@@ -693,7 +701,7 @@ function workflowHtml(wf) {
 function renderBookBar(p) {
   const who = whoBooks(), wf = parkWorkflow(p), inPark = (bookLocs[who] || []).filter(x => x.park_id === p.id);
   const whole = inPark.some(x => x.field === "Whole park"), known = Object.keys(bookLocs).filter(e => e !== who);
-  $("bookBar").innerHTML = `<div class="bb-row"><label>Booking for <input id="bookWho2" list="bookWhoList2" value="${esc(who)}" title="The booker whose cart this is"></label>
+  $("bookBar").innerHTML = `<div class="bb-row"><label>Booking for ${IS_ADMIN ? `<input id="bookWho2" list="bookWhoList2" value="${esc(who)}" title="The booker whose cart this is">` : `<b>${esc(who)}</b>`}</label>
       <datalist id="bookWhoList2">${known.map(e => `<option value="${esc(e)}">`).join("")}</datalist>
       <button class="b" id="bbWhole" aria-pressed="${whole}" title="Book the park without choosing fields">Whole park</button>
       <button class="b" id="bbCart">🛒 Cart (${(bookLocs[who] || []).length})</button>
@@ -707,7 +715,7 @@ function renderBook() {
   const who = whoBooks(), mine = bookLocs[who] || [], known = Object.keys(bookLocs).filter(e => e !== who);
   const byPark = {};
   mine.forEach(x => (byPark[x.park] ||= []).push(x));
-  $("bookPanel").innerHTML = `<div class="bk-who"><h3>🛒 Cart</h3><label>for <input id="bookWho" list="bookWhoList" value="${esc(who)}" title="The booker whose cart this is"></label>
+  $("bookPanel").innerHTML = `<div class="bk-who"><h3>🛒 Cart</h3><label>for ${IS_ADMIN ? `<input id="bookWho" list="bookWhoList" value="${esc(who)}" title="The booker whose cart this is">` : `<b>${esc(who)}</b>`}</label>
       <datalist id="bookWhoList">${known.map(e => `<option value="${esc(e)}">`).join("")}</datalist></div>
     <p class="muted">Switch to <b>📅 Book</b> mode, open a park from the Auckland map and click its field areas to add them. Cart fields appear in the booking site's location dropdown for this booker.</p>
     <div><b>${mine.length} field${mine.length === 1 ? "" : "s"}</b> <span class="muted">at ${Object.keys(byPark).length} park${Object.keys(byPark).length === 1 ? "" : "s"}</span></div><div class="bk-list">`
@@ -729,6 +737,7 @@ function applyModeUi() {
   if (book) $("fitPop").hidden = true;
 }
 function setMode(m) {
+  if (!IS_ADMIN) m = "book";
   workMode = m; store.set("vet-work-mode", m); applyModeUi();
   const p = current(); if (p && view === "park") { drawParkFields(p); drawLights(p); }
   render();
@@ -814,6 +823,7 @@ async function setCouncilOnly(p, on) {
 // Cart entries filed before a park's workflow changed (e.g. a data-file council_only default)
 // are re-filed on load, so the booking site uses the current workflow.
 async function syncCartWorkflows() {
+  if (!IS_ADMIN) return;
   let n = 0;
   Object.values(bookLocs).forEach(list => list.forEach(x => { const p = BYID[x.park_id]; if (!p) return;
     const wf = parkWorkflow(p);
@@ -1060,6 +1070,7 @@ function bind() {
   document.addEventListener("keydown", e => {
     if ($("saveDlg").open || e.target.matches("input, textarea, select")) return;
     const p = current();
+    if (!IS_ADMIN && !/^(Escape|c|C)$/.test(e.key)) return;   // bookers: no rating keys
     if (e.key === "Escape") { if (rotating) setRotating(false); $("sizePanel").hidden = true; $("fitPop").hidden = true; if (p && tagsFor(p).sel) selectField(p, null); return; }
     if (/^[cC]$/.test(e.key)) { focusId = null; setView(view === "city" ? "park" : "city"); return; }
     if (/^[bB]$/.test(e.key)) { setMode(workMode === "book" ? "rate" : "book"); return; }
@@ -1112,15 +1123,19 @@ async function start() {
   if (supabase) {
     const { data } = await supabase.auth.getSession(); session = data.session;
     if (!session) {
-      gate(`<h2>Sign in to rate council fields</h2>Use the same Google account as the booking site.<br><button id="signIn">Sign in with Google</button>`);
+      gate(`<h2>Sign in to see council fields</h2>Use the same Google account as the booking site.<br><button id="signIn">Sign in with Google</button>`);
       // Sign in through the booking site's URL (the one on Supabase's redirect list); it sends
       // the browser back here once the session is stored (same origin, shared storage).
       $("signIn").onclick = () => { try { sessionStorage.setItem("amua-after-login", "vetting.html"); } catch { /* storage blocked */ }
         supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo: location.origin + BASE } }); };
       setStatus(""); return;
     }
-    if (session.user?.app_metadata?.role !== "admin") { gate(`<h2>Admins only</h2>Council field vetting is limited to AMUA admins. <a href="./">Back to bookings</a>`); setStatus(""); return; }
+    IS_ADMIN = session.user?.app_metadata?.role === "admin";
     await loadShared();
+    if (!IS_ADMIN) {
+      workMode = "book"; document.body.classList.add("viewer");
+      setStatus("Pick a park, then click its field areas to add them to your cart. They show up in your booking site locations.");
+    }
   } else {
     reviews = store.get("vet-reviews", {}); flags = store.get("vet-flags", {});
     setStatus("Demo mode (no Supabase configured): decisions are kept in this browser.", true);
