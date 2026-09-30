@@ -302,8 +302,42 @@ const PROVIDERS = {
 // Auckland Council provider; a council ground run by a club/trust/CCO gets that operator as
 // its provider (kind council_private), so the booking walks the operator + council steps.
 // The council's booking portal lists its sports-field permit (SSPPERMITBK) at $10 per field
-// per application, paid later. Shown on the "apply to council" step; not billed yet.
+// per application, paid later. The fee stays "pending" while bookings wait with AMUA; it's
+// fixed when AMUA sends a batch of applications to the council (handleSendToCouncil).
 const COUNCIL_APPLICATION_FEE = 10;
+// Stamped in system_notes when a booking is sent: [COUNCIL_APP <app id> <sent at> fee=<share>].
+const COUNCIL_APP_RE = /\[COUNCIL_APP (\S+) (\S+) fee=([\d.]+)\]/;
+function parseCouncilApp(sysNotes) {
+  const m = COUNCIL_APP_RE.exec(sysNotes || "");
+  return m ? { id: m[1], at: m[2], fee: parseFloat(m[3]) } : null;
+}
+function isCouncilBooking(b) { const wf = workflowOf(b.facility_id); return wf === "council" || wf === "council_private"; }
+// Ready to go to the council: a plain council booking once AMUA has it, or a council +
+// operator booking once the operator has given permission (it's then at council_apply).
+function canSendToCouncil(b) {
+  const wf = workflowOf(b.facility_id);
+  return (wf === "council" && ["pending_amua", "pending", "council_apply"].includes(b.status))
+      || (wf === "council_private" && b.status === "council_apply");
+}
+// Split a batch's fee: each field applied for costs COUNCIL_APPLICATION_FEE, shared equally
+// by the bookers applying for it; a booker's share is spread over their bookings on it.
+function councilFeeSplit(bkgs) {
+  const canon = e => { const x = (e || "").toLowerCase(); return _emailAliases[x] || x; };
+  const byField = {};
+  bkgs.forEach(b => (byField[b.facility_id] ||= []).push(b));
+  const fees = {}, byBooker = {};
+  Object.values(byField).forEach(list => {
+    const groups = {};
+    list.forEach(b => (groups[canon(b.email)] ||= []).push(b));
+    const per = COUNCIL_APPLICATION_FEE / Object.keys(groups).length;
+    Object.entries(groups).forEach(([who, bs]) => {
+      byBooker[who] = (byBooker[who] || 0) + per;
+      bs.forEach(b => { fees[b.id] = Math.round(per / bs.length * 10000) / 10000; });
+    });
+  });
+  const fields = Object.keys(byField).length;
+  return { fees, byBooker, fields, total: fields * COUNCIL_APPLICATION_FEE };
+}
 const COUNCIL_COLORS = ["#0d9488","#0891b2","#7c3aed","#be185d","#b45309","#15803d","#4338ca","#9f1239"];
 function applyCouncilFacilities(map) {
   for (let i = FACILITIES.length - 1; i >= 0; i--) if (FACILITIES[i].council) FACILITIES.splice(i, 1);
@@ -6501,6 +6535,20 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
     };
   }
   function buildInvoiceLines(bkgs, detail) {
+    // Council application fee shares, charged once the application has been sent.
+    const feeBkgs = bkgs.map(b => ({ b, app: parseCouncilApp(b.system_notes) })).filter(x => x.app && x.app.fee > 0);
+    const feeLines = detail === "grouped"
+      ? Object.values(feeBkgs.reduce((g, { b, app }) => {
+          const k = b.facility_id; const fac = FACILITIES.find(f => f.id === k);
+          g[k] ||= { desc: `Council application fee – ${fac?.name || k}`, facilityId: k, detail: "", hours: null, rate: null, fixedPrice: true, cost: 0, apps: new Set() };
+          g[k].cost += app.fee; g[k].apps.add(app.id); return g; }, {}))
+          .map(({ apps, ...l }) => ({ ...l, cost: Math.round(l.cost * 100) / 100, detail: `$${COUNCIL_APPLICATION_FEE} per field per application, shared · ${[...apps].join(", ")}` }))
+      : feeBkgs.map(({ b, app }) => ({ date: b.date, facilityId: b.facility_id, hours: null, rate: null, fixedPrice: true,
+          desc: `Council application fee · ${FACILITIES.find(f => f.id === b.facility_id)?.name || b.facility_id}`,
+          detail: `Application ${app.id} ($${COUNCIL_APPLICATION_FEE} per field, shared)`, cost: Math.round(app.fee * 100) / 100 }));
+    return [...buildInvoiceLinesCore(bkgs, detail), ...feeLines];
+  }
+  function buildInvoiceLinesCore(bkgs, detail) {
     const special = bkgs.filter(isSpecialLine);
     const plain   = bkgs.filter(b => !isSpecialLine(b));
     const specialLines = special.map(specialLineFor);
@@ -8243,7 +8291,7 @@ function SyncedItemRow({ ab, bookings }) {
 }
 
 // ─── Admin Panel with action queue, bulk approve, facility rates ──────────────
-function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,clashes=[],deleteIds=new Set(),facilityRates={},onClearOldUnapproved,onBulkApply,onSaveMismatch,onInformCpsa,onQueueNotifications,onMarkAdjustmentSettled,onLinkClash,loggedInEmail,syncResults=[],onClearSyncResults,showSyncResults=false,onToggleSyncResults,bookerFilter=new Set(),onToggleBooker,onSetBookerFilter,aliasNames={},emailAliases={},pricingConditions=[],onAddPricingCondition,onUpdatePricingCondition,onRemovePricingCondition,cpsaDeleteLog=[],onClearDeleteLogEntry,onClearDeleteLog}) {
+function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,clashes=[],deleteIds=new Set(),facilityRates={},onClearOldUnapproved,onBulkApply,onSaveMismatch,onInformCpsa,onQueueNotifications,onMarkAdjustmentSettled,onLinkClash,loggedInEmail,syncResults=[],onClearSyncResults,showSyncResults=false,onToggleSyncResults,bookerFilter=new Set(),onToggleBooker,onSetBookerFilter,aliasNames={},emailAliases={},pricingConditions=[],onAddPricingCondition,onUpdatePricingCondition,onRemovePricingCondition,cpsaDeleteLog=[],onClearDeleteLogEntry,onClearDeleteLog,onSendToCouncil}) {
   const [showSchedulePanel, setShowSchedulePanel] = useState(false);
   const [showActivityPanel, setShowActivityPanel] = useState(false);
   // Which sync-result months are expanded in the grouped dropdown (monthKey set).
@@ -8847,6 +8895,14 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                   {bulkSending?"Adding…":`Add ${selected.size} to cart`}
                 </button>
               </div>
+              {/* Council bookings go to the council as one batch application; the $10-per-field
+                  fee is fixed then, split by the bookers sharing each field. */}
+              {onSendToCouncil&&(()=>{ const ready=bookings.filter(b=>selected.has(b.id)&&canSendToCouncil(b)); if(!ready.length) return null;
+                const sp=councilFeeSplit(ready);
+                return <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",background:"#f0fdfa",border:"1px solid #99f6e4",borderRadius:10,padding:"8px 10px"}}>
+                  <button onClick={()=>onSendToCouncil(ready.map(b=>b.id))} style={S.btn({background:"#0d9488",color:"#fff"})}>🏛 Send {ready.length} to council</button>
+                  <span style={{fontSize:12,color:"#115e59"}}>{sp.fields} field{sp.fields!==1?"s":""} · fee ${sp.total.toFixed(2)} ({Object.entries(sp.byBooker).map(([e,v])=>`${adminAlias(e)} $${v.toFixed(2)}`).join(", ")})</span>
+                </div>; })()}
               <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:12,color:"#64748b"}}>
                 <input type="checkbox" checked={bulkSkipEmail} onChange={e=>setBulkSkipEmail(e.target.checked)} style={{width:14,height:14,accentColor:"#0f172a"}}/>
                 Don&apos;t email bookers for this action
@@ -9738,6 +9794,9 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                     <td style={{padding:"3px 6px"}}>
                       <Badge status={b.status}/>
                       {workflowStep(b)&&<span title="Step in the council workflow" style={{fontSize:9,fontWeight:700,color:"#0f766e",marginLeft:3}}>{workflowStep(b)}</span>}
+                      {isCouncilBooking(b)&&!["rejected","cancelled"].includes(b.status)&&(()=>{ const app=parseCouncilApp(b.system_notes);
+                        return <span title={app?`Council application ${app.id} (sent ${fmtDate(app.at.slice(0,10))}): this booking's share of the $${COUNCIL_APPLICATION_FEE}-per-field fee`:`Council application fee: pending until AMUA sends the application ($${COUNCIL_APPLICATION_FEE} per field, shared)`}
+                          style={{fontSize:9,fontWeight:700,marginLeft:3,padding:"0 4px",borderRadius:4,background:app?"#ccfbf1":"#f1f5f9",color:app?"#115e59":"#64748b"}}>🏛 {app?`$${app.fee.toFixed(2)}`:"fee pending"}</span>; })()}
                       {b.invoiced&&<span style={{fontSize:9,fontWeight:700,background:INVOICED_META.bg,color:INVOICED_META.text,border:`1px solid ${INVOICED_META.border}`,borderRadius:4,padding:"1px 4px",marginLeft:2}}>🧾</span>}
                       {queueLabel&&<div style={{fontSize:9,fontWeight:700,color:queued.newStatus==="rejected"?"#991b1b":"#166634"}}>{queueLabel}</div>}
                       {isDeleteQueued&&<div style={{fontSize:9,fontWeight:700,color:"#991b1b"}}>🗑</div>}
@@ -10496,6 +10555,26 @@ export default function App() {
   }, []);
 
   function showToast(msg,type="success"){setToast({msg,type});setTimeout(()=>setToast(null),3500);}
+  // Send a batch of council bookings to the council as one application: fixes each booking's
+  // share of the $10-per-field fee and moves it to "awaiting council decision".
+  async function handleSendToCouncil(ids) {
+    const bkgs = bookings.filter(b => ids.includes(b.id) && canSendToCouncil(b));
+    if (!bkgs.length) return;
+    const sp = councilFeeSplit(bkgs);
+    const appId = `CA-${todayKey().replace(/-/g,"")}-${Math.random().toString(36).slice(2,6).toUpperCase()}`;
+    const split = Object.entries(sp.byBooker).map(([e,v])=>`${aliasNames[e]||e}: $${v.toFixed(2)}`).join("\n");
+    if (!window.confirm(`Send ${bkgs.length} booking${bkgs.length!==1?"s":""} to the council as application ${appId}?\n\n${sp.fields} field${sp.fields!==1?"s":""} × $${COUNCIL_APPLICATION_FEE} = $${sp.total.toFixed(2)}, split:\n${split}`)) return;
+    const at = new Date().toISOString();
+    try {
+      for (const b of bkgs) {
+        const sys = (b.system_notes||"").replace(new RegExp(COUNCIL_APP_RE.source,"g"),"").trim();
+        await sb.update("bookings", b.id, { status:"council_pending", system_notes:`${sys}${sys?"\n":""}[COUNCIL_APP ${appId} ${at} fee=${sp.fees[b.id]}]`, updated_at:at });
+      }
+      logActivity("council_application_sent", { appId, ids: bkgs.map(b=>b.id), fields: sp.fields, total: sp.total, split: sp.byBooker });
+      await loadBookings();
+      showToast(`Sent to council as ${appId} · fee $${sp.total.toFixed(2)} split across ${Object.keys(sp.byBooker).length} booker${Object.keys(sp.byBooker).length!==1?"s":""}.`);
+    } catch(e) { showToast("Couldn't record the council application: "+e.message, "error"); }
+  }
 
   async function loadBookings() {
     if(!configured){setLoading(false);return;}
@@ -12395,7 +12474,7 @@ export default function App() {
         {tab==="billing"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<BillingTab billingRecords={billingRecords} onUpdateRecord={handleUpdateBillingRecord} onDeleteRecord={id=>setBillingRecords(prev=>prev.filter(r=>r.id!==id))} onCreateReceipt={handleCreateReceipt} onLoadToSummary={handleLoadBillingToSummary} isAdmin={isAdmin} loggedInEmail={loggedInEmail} emailAliases={emailAliases} aliasNames={aliasNames} profiles={profiles} driveEnabled={driveConfigured()} onDriveSync={handleDriveSync} onRenameBatch={handleRenameBatch} onDriveAttach={handleDriveAttachGtec} onEmailOfficial={handleEmailOfficialInvoices} onQueueInvoiceEmails={handleQueueInvoiceEmails} silentMode={silentMode} onToggleSilent={isAdmin?setSilentMode:undefined}/>}</div>}
         {tab==="about"&&<div style={{padding:"8px 0"}}><AboutTab/></div>}
         {tab==="admin"&&isAdmin&&<div style={S.card}>
-          {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onView={setViewing} onQueueDelete={queueForRemovalSilent} clashes={allClashes} deleteIds={new Set(deleteQueue.map(b=>b.id))} facilityRates={facilityRates} onUpdateFacilityRate={updateFacilityRate} onClearOldUnapproved={handleClearOldUnapproved} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onSyncDB={handleSyncDB} onBulkApply={handleBulkApply} onSaveMismatch={handleSaveMismatch} onInformCpsa={setInformCpsaFor} onQueueNotifications={queueNotifications} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} onLinkClash={handleLinkClashToGtec} loggedInEmail={loggedInEmail} syncResults={syncResults} onClearSyncResults={()=>setSyncResults([])} showSyncResults={showSyncPanel} onToggleSyncResults={()=>setShowSyncPanel(v=>!v)} bookerFilter={listBookerFilter} onToggleBooker={toggleBooker} onSetBookerFilter={setListBookerFilter} aliasNames={aliasNames} emailAliases={emailAliases} pricingConditions={pricingConditions} onAddPricingCondition={addPricingCondition} onUpdatePricingCondition={updatePricingCondition} onRemovePricingCondition={removePricingCondition} cpsaDeleteLog={cpsaDeleteLog} onClearDeleteLogEntry={id=>setCpsaDeleteLog(prev=>prev.filter(e=>e.id!==id))} onClearDeleteLog={()=>setCpsaDeleteLog([])}/>}
+          {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onView={setViewing} onQueueDelete={queueForRemovalSilent} clashes={allClashes} deleteIds={new Set(deleteQueue.map(b=>b.id))} facilityRates={facilityRates} onUpdateFacilityRate={updateFacilityRate} onClearOldUnapproved={handleClearOldUnapproved} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onSyncDB={handleSyncDB} onBulkApply={handleBulkApply} onSaveMismatch={handleSaveMismatch} onInformCpsa={setInformCpsaFor} onQueueNotifications={queueNotifications} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} onLinkClash={handleLinkClashToGtec} loggedInEmail={loggedInEmail} syncResults={syncResults} onClearSyncResults={()=>setSyncResults([])} showSyncResults={showSyncPanel} onToggleSyncResults={()=>setShowSyncPanel(v=>!v)} bookerFilter={listBookerFilter} onToggleBooker={toggleBooker} onSetBookerFilter={setListBookerFilter} aliasNames={aliasNames} emailAliases={emailAliases} pricingConditions={pricingConditions} onAddPricingCondition={addPricingCondition} onUpdatePricingCondition={updatePricingCondition} onRemovePricingCondition={removePricingCondition} cpsaDeleteLog={cpsaDeleteLog} onClearDeleteLogEntry={id=>setCpsaDeleteLog(prev=>prev.filter(e=>e.id!==id))} onClearDeleteLog={()=>setCpsaDeleteLog([])} onSendToCouncil={handleSendToCouncil}/>}
         </div>}
       </div>
 

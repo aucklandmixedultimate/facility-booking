@@ -483,8 +483,19 @@ The others are listed as "also on site".
   field council application fee on the apply step.
 - **Emails.** The internal steps (op_permission, council_apply, op_confirm) don't email the
   booker. The council decision and the approval do.
-- **Still to do:** billing the $10 application fee (who pays it, and on which invoice), and
-  the council portal pre-fill (§5.4).
+- **Council application fee.** The council charges $10 per field per application.
+  - **Before sending:** while bookings wait with AMUA, the fee shows as "fee pending".
+  - **Sending:** AMUA selects council bookings in the admin list and uses **🏛 Send N to
+    council**. That records one application (`CA-<date>-<code>`) and moves the bookings to
+    "awaiting council decision". A plain council booking can be sent from AMUA review; a
+    council + operator booking only after operator permission (at council_apply).
+  - **The split:** each field in the batch costs $10, shared equally by the bookers applying
+    for it. A booker's share of a field is spread over their bookings on it. For example,
+    two bookers on one field pay $5 each, and a booker alone on a second field pays $10.
+  - **Storage and billing:** each booking gets `[COUNCIL_APP <id> <sent at> fee=<share>]` in
+    `system_notes`. Invoices add a fixed "Council application fee" line per booking (grouped
+    per field in grouped mode), so purchase orders to the council provider carry the fee too.
+- **Still to do:** the council portal pre-fill (§5.4).
 
 **Statuses.** A `council_private` booking walks the stages above. It uses the §4.3
 provider stages for steps 1 and 4 and the council stages for steps 2 and 3. It's only
