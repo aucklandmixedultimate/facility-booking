@@ -70,9 +70,8 @@
       "id": "arl-cornwall-lower",
       "park_id": null,
       "park": "Cornwall Park – lower CPSA fields (ARL clubhouse)",
-      "lat": -36.8989,
-      "lon": 174.7863,
-      "approx": true,
+      "lat": -36.889897,
+      "lon": 174.78483,
       "operator": "Auckland Rugby League (ARL)",
       "short": "ARL",
       "type": "association",
@@ -81,7 +80,7 @@
       "contact": {},
       "status": "to-verify",
       "sources": [],
-      "notes": "Placeholder: approximate position until AMUA pins the clubhouse; contact and rates to come. Booked through the booking site's ARL provider (admin-only).",
+      "notes": "ARL clubhouse at the lower CPSA fields (pinned by AMUA). Contact and rates to come. Booked through the booking site's ARL provider (admin-only).",
       "icons": [
         {
           "img": "logos/arl.png",
