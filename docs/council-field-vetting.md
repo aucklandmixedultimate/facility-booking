@@ -276,12 +276,24 @@ The page always fits one screen: nothing scrolls except the map, where the wheel
   2. **Lock** it by clicking the map or the button. The field is pinned to that spot, so
      panning afterwards moves the map under it. The bar at the bottom previews the nearest
      council field.
-  3. **Rate the fit**: reduced size, 1 full field or 2+ fields. Rating confirms the pinned
-     spot. It records the centre and angle, and fills **Fields** with the nearest traced
-     council field (with 2+ fields, every field within about 120 m).
-  Unlocking recentres on the field so you can move or turn it again. Relocking somewhere
-  else shows "Moved" until you rate again. Only the confirmed spot is ever saved, and a
-  saved spot is pinned when you reopen the park.
+  3. **Rate the fit**: reduced size, 1 full field or 2+ fields. The rating applies to the
+     single council field closest to the pinned field, and records its centre and angle.
+  **Per-field ratings.** Parks with several council fields get a rating for each. Click a
+  field area to select it. The ultimate field jumps onto it (lined up with its long edge,
+  or at its saved spot if it's already rated) and the fit bar rates that field. Click a
+  field again, or press Esc, to deselect it.
+  - **Editing.** Selecting a rated field shows its current fit. Choose another fit to change
+    it, or the same one to clear it.
+  - **Map colours.** Rated fields are shaded by fit: dark green for 2+, green for 1 full,
+    amber for reduced.
+  - **Lights.** Each field has its own lights. While a field is selected, the dispenser adds
+    to and shows only that field's bulbs. With nothing selected, bulbs are park-wide and
+    other fields' bulbs show faded.
+  - **Park rating.** The park's fit is its best field, **Fields** lists the rated fields,
+    and the park is plotted at its best field's spot. Saved reviews keep every field's fit,
+    spot and lights (`placement.fields`), and they're restored when you reopen the park.
+  - **Moving a field.** Relocking a rated field somewhere else shows "Moved" until you rate
+    it again.
 - **Privately managed grounds (◆).** Some council grounds are run by a club, trust or
   CCO, e.g. Grammar TEC at Orakei Domain B. They show as purple diamonds, and hollow
   diamonds mark private grounds that aren't in the council maps. Their card shows the
