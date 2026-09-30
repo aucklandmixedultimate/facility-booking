@@ -443,3 +443,30 @@ their player numbers.
   says so, and the Council fields cart shows a reminder.
 - The details are stored in `booker_contacts` (`supabase-migration-booker-contacts.sql`).
   RLS lets a booker see and edit only their own row, and admins all rows.
+
+## Operator info (ⓘ): local boards, relationships, community
+
+The card's front layer shows only who to contact. Extra detail sits behind a small **ⓘ**
+button at the end of the operator box, and pressing Escape closes it. Everything is stored as
+short categorical fields rather than prose.
+- **Public facts** (`private-managed.json`): the `local_boards` and `enums` lookup tables,
+  plus these fields on each operator:
+  - `local_board`;
+  - `tenure` (`{kind, until}`);
+  - `board_links` (lease, facility partnership, strategic grant, landowner approval, plan,
+    deputation);
+  - `influence` (high / medium / low; rugby and league default to low);
+  - `refs` (indexes into `sources`);
+  - `category` (`community` for schools and trusts).
+- **Relationship history** (the settings key `operator_relations`, readable by signed-in
+  users, written by admins in the ⓘ panel):
+  - `rating`;
+  - `contacts` (the operator's own people);
+  - `community` (people from the frisbee community who know the facility or its contact);
+  - `events` (date, tag, short ref such as "NZTUC25", tone).
+
+  People are only ever stored as a first name and last initial, e.g. "Clare G.", because
+  they're often tagged without being asked.
+- **Community facilities** (schools and trusts: Auckland Normal Intermediate, St Cuthbert's,
+  Sacred Heart) have a blue ring on the map. The page is now titled **Council / Community
+  Fields**.

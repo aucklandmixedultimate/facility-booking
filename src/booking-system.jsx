@@ -130,6 +130,10 @@ const FACILITIES = [
   // details (contact, rates); admin-only.
   { id:"a1", name:"ARL – Lower CPSA field area", capacity:50,  color:"#be123c", kind:"field",
     site:"Cornwall Park", provider:"arl", adminOnly:true },   // rose
+  // Auckland Normal Intermediate (Epsom) — school field hired directly by AMUA. No booking
+  // form yet: AMUA books by email to the school. $20/hr. Admin-only until opened to bookers.
+  { id:"n1", name:"ANI – School Field",          capacity:50,  color:"#1d4ed8", kind:"field",
+    site:"Auckland Normal Intermediate", provider:"ani", adminOnly:true, defaultRate:20 },   // blue
 ];
 // Facilities the current viewer may see. Lookups by id are deliberately NOT filtered — a
 // booking on an admin-only facility must still render its name wherever it appears.
@@ -153,7 +157,7 @@ function ownsCouncilFacility(f) {
   return (f.owners || []).some(o => o === me || o === prim || (_emailAliases[o] || o) === prim);
 }
 // Light tint of each facility colour for day-view column backgrounds.
-const FACILITY_TINT = { f1:"#f5f3ff", f2:"#ede9fe", f3:"#dcfce7", f4:"#ecfdf5", f5:"#f0fdf4", g1:"#cffafe", g2:"#ecfeff", g3:"#f0fdff", s1:"#ffedd5", a1:"#fff1f2" };
+const FACILITY_TINT = { f1:"#f5f3ff", f2:"#ede9fe", f3:"#dcfce7", f4:"#ecfdf5", f5:"#f0fdf4", g1:"#cffafe", g2:"#ecfeff", g3:"#f0fdff", s1:"#ffedd5", a1:"#fff1f2", n1:"#eff6ff" };
 function isSocialFac(id) { return FACILITIES.find(f=>f.id===id)?.kind==="social"; }
 const EMAIL_COLORS = ["#6366f1","#ec4899","#f59e0b","#10b981","#ef4444","#8b5cf6","#06b6d4","#84cc16","#f97316","#14b8a6","#e879f9","#fb7185","#34d399","#60a5fa","#fbbf24"];
 const _ecc = {}; let _eci = 0;
@@ -311,6 +315,9 @@ const PROVIDERS = {
                  address:"", gstNumber:"", recipientCode:"STC", defaultSite:"Cornwall Park" },
   arl:         { id:"arl", name:"ARL", short:"ARL", address:"", gstNumber:"", recipientCode:"ARL",
                  defaultSite:"Cornwall Park", placeholder:true },   // details to come
+  ani:         { id:"ani", name:"Auckland Normal Intermediate", short:"ANI", address:"Poronui Street, Epsom, Auckland",
+                 gstNumber:"", recipientCode:"ANI", defaultSite:"Auckland Normal Intermediate",
+                 bookBy:"email", email:"ani@ani.school.nz" },   // booked by email; no form yet
 };
 // Council fields added per booker on the Council fields page (settings "council_facilities"):
 // { "<booker email>": [ {id, park_id, park, region, field, lat, lon, kind, operator, …} ] }.
@@ -4408,7 +4415,7 @@ function AboutTab() {
           <p style={{margin:"0 0 12px",fontSize:13,color:"#475569"}}>
             Auckland Council parks are booked through the council's online services portal. AMUA batches its bookers' council fields into one application,
             and the council charges <b>${COUNCIL_APPLICATION_FEE} per field per application</b>, split between the bookers sharing each field. Pick fields on the{" "}
-            <a href={import.meta.env.BASE_URL+"vetting.html"} style={link}>Council fields</a> page (📅 Book → save them as 📌 Active bookings); they then appear here under
+            <a href={import.meta.env.BASE_URL+"vetting.html"} style={link}>Council / Community fields</a> page (📅 Book → save them as 📌 Active bookings); they then appear here under
             Provider → 📍 Location.
           </p>
           <h3 style={{margin:"12px 0 8px",fontSize:14,fontWeight:700,color:"#0f172a"}}>Approval Process</h3>
@@ -4427,7 +4434,7 @@ function AboutTab() {
         </>)}
         {howTab==="private"&&(<>
           <p style={{margin:"0 0 12px",fontSize:13,color:"#475569"}}>
-            Some council parks are run by a club, trust or other operator (◆ on the Council fields map). The operator has to agree first, and the council still issues the permit.
+            Some council parks are run by a club, trust or other operator (◆ on the Council / Community fields map). The operator has to agree first, and the council still issues the permit.
             Some grounds can only be booked through a particular club: for example <b>BOOKING ONLY AVAILABLE THROUGH Ellerslie Ultimate Club</b> (Michaels Ave) or <b>TPU</b> (Fergusson Domain).
             GTEC's grounds (Cornwall Park, Orakei, Shore Road) are <b>BOOKING ONLY AVAILABLE THROUGH AMUA</b> — use the CPSA / GTEC process.
           </p>
@@ -12484,7 +12491,7 @@ export default function App() {
                           <UserMenuItem icon="⬇" label="Reload from DB" onClick={()=>{setShowUserMenu(false);handleSyncDB();}}/>
                         </div>
                       )}
-                      <UserMenuItem icon="🗺" label="Council fields" onClick={()=>{setShowUserMenu(false);window.open(import.meta.env.BASE_URL+"vetting.html","_blank","noopener");}}/>
+                      <UserMenuItem icon="🗺" label="Council / Community fields" onClick={()=>{setShowUserMenu(false);window.open(import.meta.env.BASE_URL+"vetting.html","_blank","noopener");}}/>
                       <UserMenuItem icon="📇" label="My council contact" onClick={()=>{setShowUserMenu(false);setShowContactModal(true);}}/>
                       <UserMenuItem icon="↪" label="Sign out" onClick={()=>{setShowUserMenu(false);handleLogout();}} danger/>
                     </div>
