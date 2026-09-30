@@ -753,14 +753,34 @@ function renderBookBar(p) {
     <div class="bb-row">${workflowHtml(wf)}</div>
     <div class="bb-row muted">Council fee: $10 per field per application, pending until AMUA sends it, then split between the bookers sharing each field.</div>`;
 }
+// The booker's council contact (booker_contacts): they're the key holder on AMUA's council
+// application, and council fields can't be booked until it's filled in. undefined = unknown.
+const contactCache = {};
+async function loadContact(who) {
+  if (!supabase || !session || who in contactCache) return;
+  contactCache[who] = undefined;
+  const { data, error } = await supabase.from("booker_contacts").select("*").eq("email", who).maybeSingle();
+  contactCache[who] = error ? "n/a" : data || null;
+  if (view === "book") renderBook();
+}
+function contactNote(who) {
+  const c = contactCache[who];
+  if (c === undefined || c === "n/a") return "";
+  const ok = c && c.full_name && c.phone;
+  return ok ? `<p class="muted">📇 Key holder on council applications: <b>${esc(c.full_name)}</b> · ${esc(c.phone)} <a href="./?contact=1">edit</a></p>`
+    : `<p class="warn-note">📇 <b>Add ${who === (session?.user?.email || "").toLowerCase() ? "your" : "the booker's"} council contact</b> (name and phone) before booking these fields — the booker is the key holder on AMUA's council application.
+       <a href="./?contact=1">Add it in Facility Booking ↗</a></p>`;
+}
 // The Cart tab: fields being chosen (cart), then the booker's active bookings.
 function renderBook() {
   const who = whoBooks(), known = Object.keys(bookLocs).filter(e => e !== who), cart = cartOf(), act = activeOf();
+  loadContact(who);
   const tag = x => `<span class="tag${x.kind === "council_private" ? " priv" : ""}">${x.kind === "council_private" ? "◆ " + esc(x.operator?.short || "operator") + " + council" : "🏛 council"}</span>`;
   const prov = x => x.kind === "council_private" ? "op_" + x.operator.id : "akl_council";
   const parks = xs => new Set(xs.map(x => x.park)).size;
   $("bookPanel").innerHTML = `<div class="bk-who"><h3>📌 Active bookings / 🛒 Cart</h3><label>for ${IS_ADMIN ? `<input id="bookWho" list="bookWhoList" value="${esc(who)}" title="The booker whose cart this is">` : `<b>${esc(who)}</b>`}</label>
       <datalist id="bookWhoList">${known.map(e => `<option value="${esc(e)}">`).join("")}</datalist></div>
+    ${contactNote(who)}
     <p class="muted">1. In <b>📅 Book</b> mode, open a park from the Auckland map and click its field areas to add them here.
       2. <b>Save them as active bookings</b>. 3. Book dates and times for them in Facility Booking (Provider → Location → Facility).</p>
     <section class="bk-sec"><h4>🛒 In the cart <span class="muted">${cart.length} field${cart.length === 1 ? "" : "s"}${cart.length ? ` at ${parks(cart)} park${parks(cart) === 1 ? "" : "s"}` : ""} · not booked yet</span></h4>

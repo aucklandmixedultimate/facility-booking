@@ -431,3 +431,15 @@ tabs.
 - **Default map:** a park opens on the map for the current season. That's winter from two
   weeks before the winter season starts until it ends, and summer otherwise. The
   Summer/Winter buttons still switch between them.
+
+## Booker contacts (key holder)
+
+AMUA applies to the council as the organisation. The booker of each council field is its
+**key holder**, and the application's descriptive fields name the bookers and teams, with
+their player numbers.
+- Bookers add their full name and phone, plus a contact email if different, under the
+  booking site's User menu → **📇 My council contact**. Admins can enter them for any booker.
+- Council fields can't be booked until the booker's details are on file. The booking form
+  says so, and the Council fields cart shows a reminder.
+- The details are stored in `booker_contacts` (`supabase-migration-booker-contacts.sql`).
+  RLS lets a booker see and edit only their own row, and admins all rows.
