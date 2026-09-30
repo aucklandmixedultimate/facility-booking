@@ -977,7 +977,9 @@
         "https://auckland.ultimatecentral.com/e/2025-summer-ultim4tes-east",
         "https://auckland.ultimatecentral.com/clubs"
       ],
-      "notes": "Confirmed by AMUA. No direct club contact found online; reach them through Auckland Ultimate's clubs list. Book the fields through Ellerslie AFC."
+      "notes": "BOOKING ONLY AVAILABLE THROUGH Ellerslie Ultimate Club (confirmed by AMUA). Ellerslie AFC manages the fields, but requests go through the ultimate club. No direct contact found online yet; reach them via Auckland Ultimate's clubs list.",
+      "booking_only": true,
+      "primary": true
     },
     {
       "id": "tepapapa-rfc-fergusson",
@@ -1009,8 +1011,8 @@
       "park": "Fergusson Domain",
       "lat": -36.9121,
       "lon": 174.7985,
-      "operator": "Te Papapa Ultimate",
-      "short": "Te Papapa Ultimate",
+      "operator": "Te Papapa Ultimate (TPU)",
+      "short": "TPU",
       "type": "club",
       "code": "ultimate",
       "manages": "Ultimate club (est. 2024, grew out of MDC Kudos), part of the Te Papapa Rugby Football & Squash Club at Fergusson Domain",
@@ -1025,8 +1027,10 @@
         "https://www.tepapapasportsclub.nz/contact-us.html",
         "https://sidelinebandit.substack.com/p/the-current-state-of-new-zealand"
       ],
-      "notes": "Confirmed by AMUA. The contact is the host sports club's; the ultimate team also posts on Instagram."
+      "notes": "BOOKING ONLY AVAILABLE THROUGH TPU (confirmed by AMUA). The contact is the host Te Papapa sports club's; the ultimate team also posts on Instagram.",
+      "booking_only": true,
+      "primary": true
     }
   ],
-  "_contact_rule": "Where several clubs operate at one ground, contact the operator marked primary; if none is marked, the rugby or football club comes first."
+  "_contact_rule": "Where several clubs operate at one ground, contact the operator marked booking_only (the only booking channel), then primary, then the rugby or football club."
 }
