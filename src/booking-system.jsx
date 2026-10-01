@@ -536,6 +536,83 @@ function bookableVenues(keepId) {
   return [...byKey.values()].sort((a, b) => rank(a.key) - rank(b.key));
 }
 const providerLabel = pid => PROVIDERS[pid]?.label || PROVIDERS[pid]?.name || pid;
+// Provider groups for the pickers: Auckland Council (council-run fields and each private
+// operator of council fields, e.g. Mt Albert-Ponsonby AFC) and Community / Schools fold
+// their providers into one top-level entry; GTEC, St Cuthbert's (beside CPSA) and any
+// other provider stand alone.
+const PROVIDER_GROUPS = {
+  council:   { label: "🏛 Auckland Council", hint: "Council-run fields, or a club or trust that operates council fields" },
+  community: { label: "🏫 Community / Schools", hint: "Schools and trusts that hire their fields to AMUA" },
+};
+function providerGroupOf(pid) {
+  const k = PROVIDERS[pid]?.kind;
+  if (k === "council" || k === "council_private") return "council";
+  if (pid !== "stcuthberts" && (k === "community" || pid === "ani")) return "community";
+  return pid;
+}
+const providerMemberLabel = pid => pid === "akl_council" ? "Council-operated" : PROVIDERS[pid]?.kind === "council_private" ? `◆ ${providerLabel(pid)}` : providerLabel(pid);
+// A cascading provider menu: groups first; hovering (or clicking) a group shows its
+// providers, each with the venues it runs (all of them in the tooltip). `sites(pid)` lists a
+// provider's venues; `extra` adds rows at the end (e.g. All providers).
+function ProviderMenu({ pids, value, onPick, sites, style, extra = [] }) {
+  const [open, setOpen] = useState(null), [hover, setHover] = useState(null), ref = useRef(null), btnRef = useRef(null);
+  useEffect(() => { if (!open) return;
+    const off = e => { if (ref.current && !ref.current.contains(e.target)) { setOpen(null); setHover(null); } };
+    document.addEventListener("mousedown", off); document.addEventListener("touchstart", off);
+    return () => { document.removeEventListener("mousedown", off); document.removeEventListener("touchstart", off); }; }, [open]);
+  const groups = [];
+  pids.forEach(pid => { const g = providerGroupOf(pid); let e = groups.find(x => x.id === g);
+    if (!e) groups.push(e = { id: g, pids: [] }); e.pids.push(pid); });
+  // GTEC first with St Cuthbert's (its neighbour at Cornwall Park) beside it, then the
+  // council and community groups, then anything else.
+  const grank = g => ({ gtec: 0, stcuthberts: 1, council: 2, community: 3 })[g.id] ?? 4;
+  groups.sort((a, b) => grank(a) - grank(b));
+  const isGroup = g => !!PROVIDER_GROUPS[g.id];
+  const order = pid => pid === "akl_council" ? 0 : 1;
+  groups.forEach(g => g.pids.sort((a, b) => order(a) - order(b) || providerLabel(a).localeCompare(providerLabel(b))));
+  const curExtra = extra.find(x => x.value === value), curGroup = PROVIDER_GROUPS[providerGroupOf(value)];
+  const shown = curExtra ? curExtra.label : curGroup ? `${curGroup.label} › ${providerMemberLabel(value)}` : providerLabel(value);
+  const pick = v => { setOpen(null); setHover(null); onPick(v); };
+  // Fixed to the button so a scrolling row can't clip it; on a narrow screen the providers
+  // of a group open beneath it instead of beside it.
+  const toggleOpen = () => { if (open) { setOpen(null); setHover(null); return; }
+    const r = btnRef.current.getBoundingClientRect(); setOpen({ top: r.bottom + 4, left: Math.max(8, Math.min(r.left, window.innerWidth - 240)), narrow: window.innerWidth < 640 }); };
+  const siteLine = pid => { const ss = sites(pid); return ss.length ? `${ss.slice(0, 3).join(" · ")}${ss.length > 3 ? ` +${ss.length - 3}` : ""}` : ""; };
+  const row = (active) => ({ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 1, width: "100%", textAlign: "left", padding: "7px 12px", border: "none",
+    background: active ? "#f1f5f9" : "#fff", cursor: "pointer", fontFamily: "inherit", fontSize: 13, color: "#0f172a", whiteSpace: "nowrap" });
+  const menu = { position: "absolute", zIndex: 1200, background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, boxShadow: "0 10px 30px rgba(15,23,42,.15)", padding: "4px 0", minWidth: 220 };
+  return (
+    <div ref={ref} style={{ position: "relative", flexShrink: 0 }}>
+      <button ref={btnRef} type="button" aria-haspopup="menu" aria-expanded={!!open} title="Provider" onClick={toggleOpen}
+        style={{ ...style, display: "inline-flex", alignItems: "center", gap: 6, textAlign: "left", cursor: "pointer" }}>
+        <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{shown}</span><span aria-hidden>▾</span>
+      </button>
+      {open && <div role="menu" style={{ ...menu, position: "fixed", top: open.top, left: open.left, maxHeight: `calc(100vh - ${open.top + 8}px)`, overflowY: open.narrow ? "auto" : "visible" }}>
+        {groups.map(g => isGroup(g) ? (
+          <div key={g.id} style={{ position: "relative" }} onMouseEnter={() => setHover(g.id)}>
+            <button type="button" role="menuitem" aria-haspopup="menu" aria-expanded={hover === g.id} title={`${PROVIDER_GROUPS[g.id].hint}: ${g.pids.map(providerMemberLabel).join(", ")}`}
+              onClick={() => setHover(g.id)} style={row(hover === g.id || providerGroupOf(value) === g.id)}>
+              <span style={{ display: "flex", width: "100%", gap: 8 }}><b style={{ flex: 1 }}>{PROVIDER_GROUPS[g.id].label}</b><span style={{ color: "#94a3b8" }}>{g.pids.length} ▸</span></span>
+              <span style={{ fontSize: 11, color: "#64748b" }}>{g.pids.map(providerMemberLabel).slice(0, 3).join(" · ")}{g.pids.length > 3 ? ` +${g.pids.length - 3}` : ""}</span>
+            </button>
+            {hover === g.id && <div role="menu" style={open.narrow ? { borderLeft: "3px solid #e2e8f0", marginLeft: 12 } : { ...menu, top: -4, left: "100%", maxHeight: 360, overflowY: "auto" }}>
+              {g.pids.map(pid => (
+                <button key={pid} type="button" role="menuitem" title={`${providerLabel(pid)} — venues: ${sites(pid).join(", ") || "none yet"}`} onClick={() => pick(pid)} style={row(pid === value)}>
+                  <b>{providerMemberLabel(pid)}{pid === value ? " ✓" : ""}</b>
+                  {siteLine(pid) && <span style={{ fontSize: 11, color: "#64748b" }}>📍 {siteLine(pid)}</span>}
+                </button>))}
+            </div>}
+          </div>
+        ) : (
+          <button key={g.id} type="button" role="menuitem" onMouseEnter={() => setHover(null)} title={`${providerLabel(g.pids[0])} — venues: ${sites(g.pids[0]).join(", ")}`} onClick={() => pick(g.pids[0])} style={row(g.pids[0] === value)}>
+            <b>{providerLabel(g.pids[0])}{g.pids[0] === value ? " ✓" : ""}</b>
+            {siteLine(g.pids[0]) && <span style={{ fontSize: 11, color: "#64748b" }}>📍 {siteLine(g.pids[0])}</span>}
+          </button>))}
+        {extra.map(x => <button key={x.value} type="button" role="menuitem" onMouseEnter={() => setHover(null)} onClick={() => pick(x.value)} style={{ ...row(x.value === value), borderTop: "1px solid #f1f5f9" }}><b>{x.label}</b></button>)}
+      </div>}
+    </div>
+  );
+}
 function ProviderVenuePicker({ facilityId, onPick, small }) {
   const venues = bookableVenues(facilityId);
   if (venues.length <= 1) return null;
@@ -547,9 +624,8 @@ function ProviderVenuePicker({ facilityId, onPick, small }) {
     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
       <div>
         <label style={S.lbl}>Provider</label>
-        <select style={st} value={curPid} onChange={e => pickVenue(venues.find(v => v.pid === e.target.value)?.key)}>
-          {pids.map(pid => <option key={pid} value={pid}>{providerLabel(pid)}</option>)}
-        </select>
+        <ProviderMenu pids={pids} value={curPid} onPick={pid => pickVenue(venues.find(v => v.pid === pid)?.key)}
+          sites={pid => venues.filter(v => v.pid === pid).map(v => v.site)} style={{ ...st, width: "100%" }}/>
       </div>
       <div>
         <label style={S.lbl}>Location</label>
@@ -12811,10 +12887,8 @@ export default function App() {
           const site=cur===ALL_VENUES?"":cur.split("|")[1], vs=venues.filter(v=>v.providerId===pid);
           go((vs.find(v=>v.site===site)||vs.find(v=>v.key===`${pid}|${PROVIDERS[pid]?.defaultSite||""}`)||vs[0]).key); };
         return <>
-          <select value={curPid} onChange={e=>pickProvider(e.target.value)} title="Provider" aria-label="Provider" style={sel}>
-            {pids.map(pid=><option key={pid} value={pid}>{providerLabel(pid)}</option>)}
-            {isAdmin&&<option value={ALL_VENUES}>All providers &amp; locations</option>}
-          </select>
+          <ProviderMenu pids={pids} value={curPid} onPick={pickProvider} sites={pid=>venues.filter(v=>v.providerId===pid).map(v=>v.site)}
+            style={{...sel,maxWidth:280}} extra={isAdmin?[{value:ALL_VENUES,label:"All providers & locations"}]:[]}/>
           {cur!==ALL_VENUES&&(
             <select value={cur} onChange={e=>go(e.target.value)} title="Location" aria-label="Location" style={sel}>
               {venues.filter(v=>v.providerId===curPid).map(v=><option key={v.key} value={v.key}>📍 {v.site}</option>)}
