@@ -426,3 +426,11 @@ body.viewer .handle .hint,body.viewer .rail .help,body.viewer #fieldBtn,body.vie
 .card .rail{border:0;border-top:1px solid var(--line);border-radius:0;overflow:visible;flex:none}
 .card .rail .list{max-height:240px;overflow:auto}
 .card .rail[hidden]{display:none}
+/* Decision summary rows: the park, then its Cart / Active stage toggle */
+.list .pick{display:flex;gap:6px;align-items:stretch}
+.list .pick>button{flex:1;min-width:0}
+.list .stage{display:flex;flex:none;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.list .stage button{display:block;border:0;border-radius:0;padding:4px 8px;font-size:11px;font-weight:600;color:var(--muted);background:var(--surface);white-space:nowrap}
+.list .stage button+button{border-left:1px solid var(--line)}
+.list .stage button.on[data-stage=cart]{background:#fef3c7;color:#92400e}
+.list .stage button.on[data-stage=active]{background:#dcfce7;color:#166534}

@@ -1189,8 +1189,9 @@ function renderRail() {
   $("nYes").textContent = all.filter(([, r]) => r.decision === "yes").length;
   $("nNo").textContent = all.filter(([, r]) => r.decision === "no").length;
   const picks = all.filter(([, r]) => r.decision !== "no" && r.decision !== "rating").sort((a, b) => suitScore(b[1]) - suitScore(a[1]) || BYID[a[0]].name.localeCompare(BYID[b[0]].name));
-  $("list").innerHTML = picks.length ? picks.map(([id, r]) => { const pp = BYID[id];
-    return `<button data-open="${id}"><span class="dot" style="background:${suitColor(r)}"></span><span style="min-width:0"><span class="n">${r.decision === "top" ? "★ " : ""}${esc(pp.name)}</span><span class="m">${esc(pp.region)} · ${suitWord(r).toLowerCase()} · ${esc(FIT_LABEL[r.fit] || r.fit)}${r.quality ? " · " + r.quality + "/5" : ""}${r.lights === "full" || r.lights === "training" ? " · 💡" : ""}</span></span></button>`; }).join("")
+  $("list").innerHTML = picks.length ? picks.map(([id, r]) => { const pp = BYID[id], st = parkStage(id);
+    return `<div class="pick"><button data-open="${id}"><span class="dot" style="background:${suitColor(r)}"></span><span style="min-width:0"><span class="n">${r.decision === "top" ? "★ " : ""}${esc(pp.name)}</span><span class="m">${esc(pp.region)} · ${suitWord(r).toLowerCase()} · ${esc(FIT_LABEL[r.fit] || r.fit)}${r.quality ? " · " + r.quality + "/5" : ""}${r.lights === "full" || r.lights === "training" ? " · 💡" : ""}</span></span></button>`
+      + `<span class="stage" role="group" aria-label="Stage for ${esc(pp.name)}">${["cart", "active"].map(k => `<button data-stage="${k}" data-park="${id}" class="${st === k ? "on" : ""}" aria-pressed="${st === k}" title="${k === "active" ? "Active: bookable in Facility Booking" : "Cart: chosen, not bookable yet"}${st === k ? " · click again to remove" : ""}">${k === "active" ? "✓ Active" : "🛒 Cart"}</button>`).join("")}</span></div>`; }).join("")
     : `<p class="help">Shortlisted and top-pick parks collect here, best first.</p>`;
   return { scope, done };
 }
@@ -1304,6 +1305,33 @@ async function decide(decision) {
   busy = false;
   if (ok && fromCity) { focusId = null; setView("city"); setStatus(`Saved ${p.name} — ${suitWord(reviews[p.id]).toLowerCase()}.`); return; }
   render();
+}
+// A decided park's stage among the booker's fields: "active" when any of its fields are
+// active, "cart" when they're only in the cart, null when none are listed.
+function parkStage(id) {
+  const xs = myLocs().filter(x => x.park_id === id);
+  return !xs.length ? null : xs.some(isActive) ? "active" : "cart";
+}
+// The summary's Cart / Active toggle: move a park's fields to that stage (adding its rated
+// fields when none are listed); pressing the current stage again removes them.
+async function setParkStage(p, stage) {
+  if (!p) return;
+  const who = whoBooks(), before = [...(bookLocs[who] || [])], cur = parkStage(p.id), at = new Date().toISOString();
+  let list;
+  if (cur === stage) list = before.filter(x => x.park_id !== p.id);
+  else if (cur) list = before.map(x => x.park_id !== p.id ? x : stage === "active" ? { ...x, status: "active", activated_at: x.activated_at || at } : { ...x, status: "cart" });
+  else {
+    const rated = Object.values(tagsFor(p).fr).filter(x => x.fit && x.fit !== "unknown").map(x => x.name), wf = parkWorkflow(p);
+    list = [...before, ...(rated.length ? rated : ["Whole park"]).map(key => {
+      const f = fieldKeys(p).find(x => x.key === key)?.f, c = f?.c || [p.lat, p.lon];
+      return { id: cartId(p, key), park_id: p.id, park: p.name, region: p.region, field: key, lat: c[0], lon: c[1], kind: wf.kind, operator: wf.operator,
+        status: stage, added_at: at, ...(stage === "active" ? { activated_at: at } : {}), added_by: session?.user?.email || "", decision: reviews[p.id]?.decision };
+    })];
+  }
+  bookLocs[who] = list;
+  if (!(await saveBookLocs())) { bookLocs[who] = before; return; }
+  setStatus(cur === stage ? `Removed ${p.name} from ${who}'s fields.` : stage === "active" ? `${p.name} is active for ${who}: bookable in Facility Booking.` : `${p.name} moved to ${who}'s cart (not bookable yet).`);
+  renderRail(); renderTabs(); if (view === "book") renderBook(); if (view !== "city" && current()?.id === p.id) drawParkFields(p);
 }
 // A decision is the one way a field becomes bookable: Top pick or Shortlist adds the park's
 // rated fields (or the whole park, when it has none rated) to the booker's active fields;
@@ -1454,7 +1482,9 @@ function bind() {
     if (view === "city" && id === "region") return setView("city", { refit: true });
     if (view === "park" && !focusId) shownPark = null;
     render(); }));
-  $("list").addEventListener("click", e => { const b = e.target.closest("[data-open]"); if (b) openPark(b.dataset.open); });
+  $("list").addEventListener("click", e => {
+    const sb = e.target.closest("[data-stage]"); if (sb) { if (!busy) setParkStage(BYID[sb.dataset.park], sb.dataset.stage); return; }
+    const b = e.target.closest("[data-open]"); if (b) openPark(b.dataset.open); });
   $("exportBtn").onclick = exportCsv;
   window.addEventListener("focus", async () => { if (mode === "shared" && !busy) { await loadShared(); if (view === "city") render(); else renderRail(); } });
   // Any click on the opaque plan (except the open-in-new-tab link) puts it away again.
