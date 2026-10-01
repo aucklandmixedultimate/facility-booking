@@ -1079,6 +1079,18 @@ function setGroupRef(sysNotes, id) {
   const marker=`[GRP] ${id}`;
   return base?`${base}\n${marker}`:marker;
 }
+// Council application details a booker gives with a council booking, stored in
+// system_notes as [COUNCIL_INFO] {"players":14,"use":"training","grade":"…","notes":"…"}.
+// The council widget reads them for player numbers, training/competition and the
+// participant details.
+const CINFO_RE = /\[COUNCIL_INFO\][^\n]*/g;
+function parseCouncilInfo(sysNotes) { const m=(sysNotes||"").match(/\[COUNCIL_INFO\]\s*(\{.*\})/); if(!m) return null; try{ return JSON.parse(m[1]); }catch{ return null; } }
+function setCouncilInfo(sysNotes, info) {
+  const base=(sysNotes||"").replace(CINFO_RE,"").trim();
+  if(!info) return base;
+  const marker=`[COUNCIL_INFO] ${JSON.stringify(info)}`;
+  return base?`${base}\n${marker}`:marker;
+}
 function newGroupRef() { return "G"+Date.now().toString(36)+Math.random().toString(36).slice(2,5); }
 
 // Compare the billed snapshot to a booking's current dimensions. Returns the
@@ -3070,7 +3082,7 @@ function MultiEditForm({ bookings: srcBookings, onAddToCart, onClose, allBooking
 }
 
 
-function BookingForm({ booking, allBookings, onAddToCart, onClose, isAdmin, loggedInEmail, bookers=[] }) {
+function BookingForm({ booking, allBookings, onAddToCart, onClose, isAdmin, loggedInEmail, bookers=[], onEditContact }) {
   const isMobile = useMobile();
   const isEditing  = !!booking?.id && !booking?._multiEdit;
   const isMultiEdit = !!booking?._multiEdit;
@@ -3097,6 +3109,13 @@ function BookingForm({ booking, allBookings, onAddToCart, onClose, isAdmin, logg
   const [recurWeeks, setRecurWeeks] = useState(4);
   const [recurUntil, setRecurUntil] = useState("");
   const [slots, setSlots] = useState(initSlots);
+  // Council application details (council fields only): see parseCouncilInfo.
+  const ci0 = parseCouncilInfo(booking?.system_notes) || {};
+  const [cPlayers, setCPlayers] = useState(ci0.players ? String(ci0.players) : "");
+  const [cUse, setCUse]         = useState(ci0.use || "training");
+  const [cGrade, setCGrade]     = useState(ci0.grade || "");
+  const [cNotes, setCNotes]     = useState(ci0.notes || "");
+  const hasCouncil = slots.some(sl => { const f = FACILITIES.find(x => x.id === sl.facility_id); return f?.council && f.council.kind !== "community"; });
   const [pickDate, setPickDate] = useState(initSlots[0]?.date || todayKey());
   const [showPicker, setShowPicker] = useState(false);
   const [error, setError] = useState("");
@@ -3140,6 +3159,10 @@ function BookingForm({ booking, allBookings, onAddToCart, onClose, isAdmin, logg
       const base = { facility_id:slot.facility_id, date:slot.date, start_hour:slot.start_hour, duration:slot.duration,
         purpose, notes, status:isEditing?status:"pending_amua", name, email,
         id:newId(), created_at:new Date().toISOString(), updated_at:new Date().toISOString() };
+      const fc = FACILITIES.find(f => f.id === slot.facility_id)?.council;
+      if (fc && fc.kind !== "community")
+        base.system_notes = setCouncilInfo(isEditing ? booking.system_notes : base.system_notes,
+          { players: parseInt(cPlayers, 10) || null, use: cUse, ...(cGrade.trim() ? { grade: cGrade.trim() } : {}), ...(cNotes.trim() ? { notes: cNotes.trim() } : {}) });
       drafts.push(base);
       if (!isEditing && recurMode!=="none") {
         const maxAdditional = recurMode==="weeks" ? recurWeeks-1 : 103; // 103 = safety cap for "until"
@@ -3174,9 +3197,10 @@ function BookingForm({ booking, allBookings, onAddToCart, onClose, isAdmin, logg
     // Council fields: the booker is the key holder on AMUA's council application, so their
     // name and phone must be on file first.
     if (slots.some(sl => FACILITIES.find(f => f.id === sl.facility_id)?.council) && !councilContactOk(email)) {
-      setError(`Council fields need the booker's contact details — they're listed as the key holder on the council application. ${isAdmin && email.toLowerCase() !== (loggedInEmail||"").toLowerCase() ? `Add them for ${email} under` : "Add yours under"} User menu → 📇 My council contact.`);
+      setError(`Council fields need the booker's contact details — they're listed as the key holder on the council application. Use "📇 Fill in council contact" below (or User menu → 📇 My council contact).`);
       return false;
     }
+    if (hasCouncil && !(parseInt(cPlayers, 10) > 0)) { setError("Council application details: enter how many players you expect (the council asks for participant numbers)."); return false; }
     return true;
   }
 
@@ -3294,6 +3318,32 @@ function BookingForm({ booking, allBookings, onAddToCart, onClose, isAdmin, logg
         <label style={S.lbl}>Notes</label>
         <textarea style={{...S.inp,resize:"vertical",minHeight:48}} value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Any requirements… (applies to all slots)"/>
       </div>
+
+      {/* Council fields: what AMUA's council application needs from the booker. */}
+      {hasCouncil && (() => {
+        const okC = councilContactOk(email);
+        const half = { flex:"1 1 200px", minWidth:0 };
+        return (
+          <div style={{border:"1.5px solid #99f6e4",background:"#f0fdfa",borderRadius:10,padding:"10px 12px",display:"flex",flexDirection:"column",gap:8}}>
+            <div style={{fontWeight:700,fontSize:13,color:"#115e59"}}>🏛 Council application details</div>
+            <div style={{fontSize:12,color:"#475569"}}>AMUA applies to the council for this field and names you and your team on the application. Fields marked * are required.</div>
+            <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",fontSize:13}}>
+              <span>📇 Key holder (your council contact) *: {okC ? <b style={{color:"#15803d"}}>✓ on file</b> : <b style={{color:"#b91c1c"}}>missing — name and phone needed</b>}</span>
+              {onEditContact && <button type="button" onClick={()=>onEditContact(email)} style={S.btn({padding:"4px 10px",fontSize:12,background:okC?"#fff":"#0d9488",color:okC?"#0f766e":"#fff",border:"1.5px solid #0d9488"})}>{okC ? "Edit council contact" : "📇 Fill in council contact"}</button>}
+            </div>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+              <label style={{...S.lbl,...half}}>Players expected *
+                <input style={S.inp} type="number" min="1" max="200" value={cPlayers} onChange={e=>setCPlayers(e.target.value)} placeholder="e.g. 14"/></label>
+              <label style={{...S.lbl,...half}}>Use *
+                <select style={{...S.inp,background:"#fff"}} value={cUse} onChange={e=>setCUse(e.target.value)}>
+                  <option value="training">Training</option><option value="competition">Competition / games</option></select></label>
+            </div>
+            <label style={S.lbl}>Grade / level <span style={{textTransform:"none",fontWeight:400}}>(optional)</span>
+              <input style={S.inp} value={cGrade} onChange={e=>setCGrade(e.target.value)} placeholder="e.g. Social mixed, open grade"/></label>
+            <label style={S.lbl}>Notes for the council <span style={{textTransform:"none",fontWeight:400}}>(optional)</span>
+              <input style={S.inp} value={cNotes} onChange={e=>setCNotes(e.target.value)} placeholder="e.g. lights needed after 6pm"/></label>
+          </div>);
+      })()}
 
       {/* Admin status (edit only) */}
       {isAdmin && isEditing && (
@@ -4473,7 +4523,8 @@ function AboutTab() {
           <h3 style={{margin:"12px 0 8px",fontSize:14,fontWeight:700,color:"#0f172a"}}>Approval Process</h3>
           <p style={{margin:"0 0 12px",fontSize:13,color:"#475569"}}>
             AMUA applies as the organisation, and each application names the bookers and teams using the fields, with their player numbers. <b>You're the key holder</b> for
-            the fields you book, so add your name and phone under User menu → 📇 My council contact first — council fields can't be booked without them.
+            the fields you book, so your name and phone must be on file (📇 Fill in council contact on the booking form, or User menu → 📇 My council contact).
+            The booking form also asks for the players you expect and whether it's training or competition; grade and notes for the council are optional.
           </p>
           <AboutStep n="1/4" col="#6366f1" title="Submit booking request">Book the dates and times on your active council field. Status <Badge status="pending_amua" wf="council"/>.</AboutStep>
           <div style={arrow}>↓</div>
@@ -10817,6 +10868,7 @@ export default function App() {
   });
   const [showAmuaModal, setShowAmuaModal] = useState(false);
   const [showContactModal, setShowContactModal] = useState(()=>{ try{ return new URLSearchParams(window.location.search).get("contact")==="1"; }catch{ return false; } });
+  const [contactFor, setContactFor] = useState("");   // booker whose council contact is being edited (admins booking for someone)
   const [bookerContacts, setBookerContacts] = useState(null);
   async function loadBookerContacts() {
     if (!configured) return;
@@ -12970,12 +13022,6 @@ export default function App() {
         </Modal>
       )}
 
-      {showContactModal&&session&&(
-        <CouncilContactModal email={loggedInEmail} isAdmin={isAdmin} contacts={bookerContacts||{}} tableReady={bookerContacts!==null}
-          onClose={()=>setShowContactModal(false)}
-          onSave={async row=>{ try{ await sb.upsert("booker_contacts", { ...row, updated_at:new Date().toISOString() }, "email"); await loadBookerContacts(); setShowContactModal(false); showToast("Council contact saved."); }
-            catch(e){ showToast("Couldn't save: "+(e.message||e).slice(0,140),"error"); } }}/>
-      )}
       {showActivityLog&&isAdmin&&(
         <ActivityLogModal onClose={()=>setShowActivityLog(false)} bookers={knownBookers}/>
       )}
@@ -13106,8 +13152,16 @@ export default function App() {
             isAdmin={isAdmin}
             loggedInEmail={loggedInEmail}
             bookers={knownBookers}
+            onEditContact={session ? (em)=>{ setContactFor((em||"").toLowerCase()); setShowContactModal(true); } : undefined}
           />
         </Modal>
+      )}
+      {/* After the booking form so it opens on top of it. */}
+      {showContactModal&&session&&(
+        <CouncilContactModal key={contactFor||loggedInEmail} email={contactFor||loggedInEmail} isAdmin={isAdmin} contacts={bookerContacts||{}} tableReady={bookerContacts!==null}
+          onClose={()=>{setShowContactModal(false);setContactFor("");}}
+          onSave={async row=>{ try{ await sb.upsert("booker_contacts", { ...row, updated_at:new Date().toISOString() }, "email"); await loadBookerContacts(); setShowContactModal(false); setContactFor(""); showToast("Council contact saved."); }
+            catch(e){ showToast("Couldn't save: "+(e.message||e).slice(0,140),"error"); } }}/>
       )}
 
       {showCart&&(
