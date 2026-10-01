@@ -434,3 +434,15 @@ body.viewer .handle .hint,body.viewer .rail .help,body.viewer #fieldBtn,body.vie
 .list .stage button+button{border-left:1px solid var(--line)}
 .list .stage button.on[data-stage=cart]{background:#fef3c7;color:#92400e}
 .list .stage button.on[data-stage=active]{background:#dcfce7;color:#166534}
+/* Book view: the active fields / cart and the decisions summary side by side, split by a
+   vertical divider (stacked on narrow screens). Elsewhere the wrapper is transparent. */
+.booksplit{display:contents}
+.card.book .booksplit{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);flex:1;min-height:0}
+.card.book .booksplit>.bookpanel{min-height:0;overflow:auto}
+.card.book .booksplit>.rail{border-top:0;border-left:1px solid var(--line);overflow:auto;min-height:0}
+.card.book .booksplit>.rail .list{max-height:none;overflow:visible}
+@media (max-width:760px){
+  .card.book .booksplit{display:flex;flex-direction:column;overflow:auto}
+  .card.book .booksplit>.rail{border-left:0;border-top:1px solid var(--line);overflow:visible}
+  .card.book .booksplit>.bookpanel{overflow:visible;flex:none}
+}
