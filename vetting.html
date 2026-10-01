@@ -6,10 +6,10 @@
     <title>Council / Community Fields</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap">
-    <script type="module" crossorigin src="/facility-booking/assets/vetting-D9FYpLEY.js"></script>
+    <script type="module" crossorigin src="/facility-booking/assets/vetting-D4Gh_rkZ.js"></script>
     <link rel="modulepreload" crossorigin href="/facility-booking/assets/index-VH2SDcMh.js">
     <link rel="modulepreload" crossorigin href="/facility-booking/assets/_commonjsHelpers-Cpj98o6Y.js">
-    <link rel="stylesheet" crossorigin href="/facility-booking/assets/vetting-CLnEmZ3z.css">
+    <link rel="stylesheet" crossorigin href="/facility-booking/assets/vetting-C-igz9Fn.css">
   </head>
   <body>
     <div class="wrap">
@@ -122,11 +122,9 @@
                 </div>
               </div>
               <div class="info" id="info">
-                <div class="privbox" id="privBox" hidden></div>
-                <div class="infopanel" id="infoPanel" hidden></div>
                 <div class="tags">
                   <button class="undobtn" id="editUndoBtn" title="Undo the last change to this park's ratings (Z)" disabled>↶ Undo</button>
-                  <span class="k">Quality</span><div class="seg stars" id="segQuality"></div>
+                  <span class="k">Quality</span><div class="seg stars" id="segQuality"></div><span class="qavg" id="qAvg"></span>
                   <span class="k">Fit</span><span class="val" id="fitVal"></span>
                   <span class="k">Lights</span><span class="val" id="lightsVal"></span>
                   <button class="flagbtn" id="clubFlagBtn" aria-pressed="false">✎ Provider?</button>
@@ -148,6 +146,8 @@
                   <label class="k" for="fieldsIn">Fields</label><input id="fieldsIn" placeholder="Fields">
                   <label class="k" for="notesIn">Notes</label><input id="notesIn" placeholder="Notes">
                 </div>
+                <div class="privbox" id="privBox" hidden></div>
+                <div class="infopanel" id="infoPanel" hidden></div>
                 <div class="links"><a id="gmaps" target="_blank" rel="noopener">Google Maps ↗</a><span id="scaleNote" hidden></span><span id="fieldList"></span></div>
               </div>
               <div class="info bookbar" id="bookBar" hidden></div>
