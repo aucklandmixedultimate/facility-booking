@@ -263,7 +263,13 @@
           "bg": "#7f1d1d",
           "img": "logos/stcuthberts.png"
         }
-      ]
+      ],
+      "refs": [
+        0
+      ],
+      "tenure": {
+        "kind": "none"
+      }
     },
     {
       "id": "sacred-heart-glen-innes",
@@ -283,7 +289,9 @@
       "status": "likely",
       "notes": "Community (school) facility.; booking arrangements to confirm.",
       "sources": [
-        "https://www.sacredheart.school.nz/"
+        "https://www.sacredheart.school.nz/",
+        "https://en.wikipedia.org/wiki/Glendowie,_New_Zealand",
+        "https://www.ero.govt.nz/institution/59/sacred-heart-college-auckland"
       ],
       "icons": [
         {
@@ -291,7 +299,15 @@
           "bg": "#1e3a8a",
           "img": "logos/sacred-heart.png"
         }
-      ]
+      ],
+      "refs": [
+        1,
+        2
+      ],
+      "local_board": "orakei",
+      "tenure": {
+        "kind": "none"
+      }
     },
     {
       "id": "arl-cornwall-lower",
@@ -369,13 +385,18 @@
       "status": "confirmed",
       "sources": [
         "https://www.aucklandstadiums.co.nz/our-venues/north-harbour-stadium",
-        "https://ourauckland.aucklandcouncil.govt.nz/news/2025/07/north-harbour-stadium-retains-operators-in-eoi-decision/"
+        "https://ourauckland.aucklandcouncil.govt.nz/news/2025/07/north-harbour-stadium-retains-operators-in-eoi-decision/",
+        "https://akhaveyoursay.aucklandcouncil.govt.nz/north-harbour-stadium-precinct"
       ],
       "notes": "Owned by Auckland Council, operated by its CCO Tātaki Auckland Unlimited.",
       "local_board": "upper-harbour",
       "tenure": {
-        "kind": "unknown"
-      }
+        "kind": "none"
+      },
+      "refs": [
+        2
+      ],
+      "influence": "high"
     },
     {
       "id": "aurfc-colin-maiden",
@@ -396,13 +417,22 @@
       "sources": [
         "https://www.aurfc.co.nz/about-us-1/venue-hire",
         "https://aucc.bookanet.co.nz/terms",
-        "https://akhockey.org.nz/colin-maiden-park-project-overview-and-faqs/"
+        "https://akhockey.org.nz/colin-maiden-park-project-overview-and-faqs/",
+        "https://ourauckland.aucklandcouncil.govt.nz/news/2025/06/a-game-changer-for-colin-maiden-park/",
+        "https://www.scoop.co.nz/stories/AK1312/S00566/colin-maiden-park-to-stay-in-public-ownership.htm"
       ],
       "notes": "Council-managed park with several club-run areas; ask the club that runs the part you want.",
       "local_board": "orakei",
       "tenure": {
         "kind": "unknown"
-      }
+      },
+      "refs": [
+        3,
+        4
+      ],
+      "board_links": [
+        "landowner_approval"
+      ]
     },
     {
       "id": "aufc-keith-hay",
@@ -449,13 +479,24 @@
       },
       "status": "to-verify",
       "sources": [
-        "https://easternsuburbs.org.nz/about-us/our-grounds/"
+        "https://easternsuburbs.org.nz/about-us/our-grounds/",
+        "https://infocouncil.aucklandcouncil.govt.nz/Open/2023/03/20230316_OR_MIN_11628.PDF",
+        "https://www.aucklandcouncil.govt.nz/content/dam/ac/docs/about-council/local-boards/orakei/eastern-parks-masterplan-proposals-implementation.pdf"
       ],
       "notes": "Club office in the clubrooms, weekdays 10am–3pm. Alternate contact dani@esafc.org.nz.",
       "local_board": "orakei",
       "tenure": {
-        "kind": "unknown"
-      }
+        "kind": "building_lease",
+        "until": "2028-03-16"
+      },
+      "refs": [
+        1,
+        2
+      ],
+      "board_links": [
+        "lease",
+        "plan"
+      ]
     },
     {
       "id": "nsu-devonport",
@@ -626,7 +667,13 @@
       "local_board": "albert-eden",
       "tenure": {
         "kind": "unknown"
-      }
+      },
+      "refs": [
+        1
+      ],
+      "board_links": [
+        "facility_partnership"
+      ]
     },
     {
       "id": "bruce-pulman",
@@ -649,13 +696,22 @@
       "status": "confirmed",
       "sources": [
         "https://www.brucepulmanpark.com/CONTACT/Contact-1",
-        "https://www.sporty.co.nz/brucepulmanpark/CONTACT/Sports-Facility-Hire-Enquiry"
+        "https://www.sporty.co.nz/brucepulmanpark/CONTACT/Sports-Facility-Hire-Enquiry",
+        "https://www.brucepulmanpark.com/ABOUT/Who-We-Are",
+        "https://ourauckland.aucklandcouncil.govt.nz/news/2025/05/bruce-pullman-park-upgrade/"
       ],
       "notes": "Not in the council field maps; council step may not apply — ask the trust.",
       "local_board": "papakura",
       "tenure": {
-        "kind": "unknown"
-      }
+        "kind": "ground_lease"
+      },
+      "refs": [
+        2,
+        3
+      ],
+      "board_links": [
+        "facility_partnership"
+      ]
     },
     {
       "id": "suburbs-shabolt",
@@ -788,13 +844,22 @@
       "status": "to-verify",
       "sources": [
         "http://www.richmondroversrugbyleague.com/contact-us.html",
-        "https://en.wikipedia.org/wiki/Richmond_Rovers"
+        "https://en.wikipedia.org/wiki/Richmond_Rovers",
+        "https://ourauckland.aucklandcouncil.govt.nz/news/2020/11/new-changing-rooms-at-grey-lynn-park-celebrated/",
+        "https://www.sporty.co.nz/Richmond/HISTORY-1/grey-lynn-park"
       ],
       "notes": "Club secretary handles enquiries and clubroom hire.",
       "local_board": "waitemata",
       "tenure": {
         "kind": "unknown"
-      }
+      },
+      "refs": [
+        2,
+        3
+      ],
+      "board_links": [
+        "lease"
+      ]
     },
     {
       "id": "mtalbert-lions-fowlds",
@@ -816,13 +881,20 @@
       "status": "to-verify",
       "sources": [
         "https://www.sporty.co.nz/MtAlbertLions/Contact-us",
-        "https://en.wikipedia.org/wiki/Fowlds_Park"
+        "https://en.wikipedia.org/wiki/Fowlds_Park",
+        "https://infocouncil.aucklandcouncil.govt.nz/Open/2023/05/20230525_AE_MAT_11657.htm"
       ],
       "notes": "",
       "local_board": "albert-eden",
       "tenure": {
         "kind": "unknown"
-      }
+      },
+      "refs": [
+        2
+      ],
+      "board_links": [
+        "lease"
+      ]
     },
     {
       "id": "ptchev-walker",
@@ -900,13 +972,20 @@
       "status": "to-verify",
       "sources": [
         "https://www.edenrugby.co.nz/ABOUT-1/VENUE-HIRE-1",
-        "https://en.wikipedia.org/wiki/Eden_RFC"
+        "https://en.wikipedia.org/wiki/Eden_RFC",
+        "https://infocouncil.aucklandcouncil.govt.nz/Open/2018/09/AE_20180926_AGN_8223_AT.htm"
       ],
       "notes": "Operations manager (opsmanager@edenrugby.co.nz) handles venue hire.",
       "local_board": "albert-eden",
       "tenure": {
-        "kind": "unknown"
-      }
+        "kind": "ground_lease"
+      },
+      "refs": [
+        2
+      ],
+      "board_links": [
+        "lease"
+      ]
     },
     {
       "id": "ponsonby-springs",
@@ -928,13 +1007,19 @@
       "status": "likely",
       "sources": [
         "http://www.ponsonbyrugby.co.nz/About-1/Facilities-1",
-        "http://www.ponsonbyrugby.co.nz/About-1/Field-Layout"
+        "http://www.ponsonbyrugby.co.nz/About-1/Field-Layout",
+        "https://ourauckland.aucklandcouncil.govt.nz/media-centre/2026/march/western-springs-stadium-nears-a-final-decision/?v=mc"
       ],
       "notes": "",
       "local_board": "waitemata",
       "tenure": {
-        "kind": "unknown"
-      }
+        "kind": "unknown",
+        "until": "2027"
+      },
+      "refs": [
+        2
+      ],
+      "influence": "high"
     },
     {
       "id": "ponsonby-coxs",
@@ -1070,13 +1155,20 @@
       "status": "to-verify",
       "sources": [
         "https://en.wikipedia.org/wiki/Marist_Saints",
-        "https://www.nzherald.co.nz/nz/marist-saints-rugby-league-clubrooms-in-auckland-destroyed-in-fire-police-investigating/C4IHCT6H3ZGFLJOVI4R23TAD2I/"
+        "https://www.nzherald.co.nz/nz/marist-saints-rugby-league-clubrooms-in-auckland-destroyed-in-fire-police-investigating/C4IHCT6H3ZGFLJOVI4R23TAD2I/",
+        "https://infocouncil.aucklandcouncil.govt.nz/Open/2023/05/20230525_AE_AGN_11657_AT.htm"
       ],
       "notes": "",
       "local_board": "albert-eden",
       "tenure": {
         "kind": "unknown"
-      }
+      },
+      "refs": [
+        2
+      ],
+      "board_links": [
+        "lease"
+      ]
     },
     {
       "id": "mtwgtn-rfc-hamlin",
@@ -1260,13 +1352,22 @@
       },
       "status": "to-verify",
       "sources": [
-        "https://parnellcricket.co.nz/history-1"
+        "https://parnellcricket.co.nz/history-1",
+        "https://infocouncil.aucklandcouncil.govt.nz/Open/2019/02/OR_20190221_AGN_7722_AT.HTM",
+        "https://www.parnellcricket.co.nz/about/our-story"
       ],
       "notes": "",
       "local_board": "orakei",
       "tenure": {
-        "kind": "unknown"
-      }
+        "kind": "ground_lease"
+      },
+      "refs": [
+        1,
+        2
+      ],
+      "board_links": [
+        "lease"
+      ]
     },
     {
       "id": "parnell-bloodworth",
@@ -1284,13 +1385,22 @@
       },
       "status": "to-verify",
       "sources": [
-        "https://parnellcricket.co.nz/history-1"
+        "https://parnellcricket.co.nz/history-1",
+        "https://infocouncil.aucklandcouncil.govt.nz/Open/2019/12/OR_20191205_AGN_9494_AT.htm",
+        "https://www.parnellcricket.co.nz/about/our-story"
       ],
       "notes": "",
       "local_board": "orakei",
       "tenure": {
         "kind": "unknown"
-      }
+      },
+      "refs": [
+        1,
+        2
+      ],
+      "board_links": [
+        "lease"
+      ]
     },
     {
       "id": "ofc-ngahue",
@@ -1308,13 +1418,22 @@
       },
       "status": "likely",
       "sources": [
-        "https://en.wikipedia.org/wiki/Ngahue_Reserve"
+        "https://en.wikipedia.org/wiki/Ngahue_Reserve",
+        "https://infocouncil.aucklandcouncil.govt.nz/Open/2017/03/OR_20170316_AGN_7211_AT.htm",
+        "https://www.oceaniafootball.com/ofc-and-orakei-local-board-strengthen-commitment/"
       ],
       "notes": "",
       "local_board": "orakei",
       "tenure": {
         "kind": "unknown"
-      }
+      },
+      "refs": [
+        1,
+        2
+      ],
+      "board_links": [
+        "lease"
+      ]
     },
     {
       "id": "roskill-rfc-fearon",
@@ -1432,13 +1551,20 @@
       },
       "status": "to-verify",
       "sources": [
-        "https://easternsuburbs.org.nz/about-us/our-grounds/"
+        "https://easternsuburbs.org.nz/about-us/our-grounds/",
+        "https://www.aucklandcouncil.govt.nz/content/dam/ac/docs/about-council/local-boards/orakei/eastern-parks-masterplan-proposals-implementation.pdf"
       ],
       "notes": "",
       "local_board": "orakei",
       "tenure": {
         "kind": "unknown"
-      }
+      },
+      "refs": [
+        1
+      ],
+      "board_links": [
+        "plan"
+      ]
     },
     {
       "id": "esafc-crossfield",
@@ -1458,13 +1584,20 @@
       },
       "status": "to-verify",
       "sources": [
-        "https://easternsuburbs.org.nz/about-us/our-grounds/"
+        "https://easternsuburbs.org.nz/about-us/our-grounds/",
+        "https://www.aucklandcouncil.govt.nz/about-auckland-council/how-auckland-council-works/local-boards/all-local-boards/orakei-local-board/docseasternparksmasterplan/eastern-parks-masterplan-crossfield.pdf"
       ],
       "notes": "",
       "local_board": "orakei",
       "tenure": {
         "kind": "unknown"
-      }
+      },
+      "refs": [
+        1
+      ],
+      "board_links": [
+        "plan"
+      ]
     },
     {
       "id": "ellerslie-ultimate-michaels",
