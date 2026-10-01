@@ -205,7 +205,7 @@ function activeLights(t) {
 function ratedCount(t) { return [t.lights !== "unknown", t.fit !== "unknown", t.quality > 0, !!t.fields.trim()].filter(Boolean).length; }
 
 // ── Map ──────────────────────────────────────────────────────────────────────
-let map, overlay = null, overlayFoot = null, baseZoom = null, shownPark = null;
+let map, overlay = null, overlayPanel = null, baseZoom = null, shownPark = null;
 let lightLayer, parkFieldsLayer, cityLayer, cityFieldsLayer, cityHome = null;
 function initMap() {
   map = L.map("map", { zoomSnap: 0.25, zoomDelta: 0.5, wheelPxPerZoomLevel: 150, maxZoom: 21, zoomControl: true });
@@ -220,12 +220,14 @@ function initMap() {
   map.on("zoomend", () => { $("field").classList.remove("zooming"); updateLayer(); sizeField(); syncCityFields(); });
   map.on("move", () => sizeField());
   map.on("moveend", () => { if (view === "park" && fieldOn && !rotating && !pin) afterMove(); });
-  map.on("click", e => {
-    if (view !== "park") return;
-    if (rotating) return lockField();
-    // A click inside the council sketch plan's footprint shows the plan itself, opaque.
-    if (overlay && overlay.getBounds().contains(e.latlng)) openCouncilImage();
-  });
+  map.on("click", () => { if (view === "park" && rotating) lockField(); });
+}
+// Every council map is the same 1100 × 778 template; its base panel (disclaimer, park name,
+// date, logo) spans y 655–770 and x 15–1085. That band, in map coordinates, is the click
+// target for the opaque view, so it's the same size on every plan and never covers fields.
+function panelBounds(b) {
+  const n = b.getNorth(), s = b.getSouth(), w = b.getWest(), e = b.getEast(), dy = n - s, dx = e - w;
+  return L.latLngBounds([n - dy * 770 / 778, w + dx * 15 / 1100], [n - dy * 655 / 778, e - dx * 15 / 1100]);
 }
 function openCouncilImage() {
   const p = current(); if (!p || !overlay) return;
@@ -240,13 +242,16 @@ function closeCouncilImage() { $("cimgBox").hidden = true; }
 function showMap(p) {
   const i = Math.min(mapIndex(p), Math.max(0, p.maps.length - 1)), m = p.maps[i];
   if (overlay) { overlay.remove(); overlay = null; }
-  if (overlayFoot) { overlayFoot.remove(); overlayFoot = null; }
+  if (overlayPanel) { overlayPanel.remove(); overlayPanel = null; }
   map.invalidateSize();
   if (m) {
     const b = L.latLngBounds([m.bounds[0], m.bounds[1]], [m.bounds[2], m.bounds[3]]);
     overlay = L.imageOverlay(BASE + "council-maps/" + m.file, b, { className: "council-overlay", interactive: false }).addTo(map);
-    // Dashed outline of the plan's footprint, shown once the plan has dissolved to satellite.
-    overlayFoot = L.rectangle(b, { pane: "fieldsPane", className: "council-foot", color: "#ffffff", weight: 1.5, opacity: 0.8, dashArray: "6 5", fill: false, interactive: false });
+    // The plan's base panel opens the plan opaque; once the plan has dissolved it's a dashed outline.
+    overlayPanel = L.rectangle(panelBounds(b), { pane: "fieldsPane", className: "council-panel", color: "#ffffff", weight: 1.5,
+      opacity: 0, fill: true, fillColor: "#ffffff", fillOpacity: 0, bubblingMouseEvents: false })
+      .bindTooltip("Show the council map", { className: "parktip", sticky: true })
+      .on("click", () => { if (rotating) return lockField(); openCouncilImage(); }).addTo(map);
     map.fitBounds(b, { animate: false });
     baseZoom = map.getZoom();
   } else {
@@ -263,7 +268,7 @@ function councilVisible() {
 function updateLayer() {
   const on = councilVisible();
   if (overlay) overlay.setOpacity(on ? 1 : 0);
-  if (overlayFoot) { if (on || view !== "park") overlayFoot.remove(); else if (!map.hasLayer(overlayFoot)) overlayFoot.addTo(map); }
+  if (overlayPanel) overlayPanel.setStyle(on ? { opacity: 0, dashArray: null } : { opacity: 0.8, dashArray: "6 5" });
   $("layerBadge").textContent = on ? "Council map" : "Satellite";
 }
 // Council fields traced from the map PDFs: [{n: name, c: [lat, lon], p: [[lat, lon], …]}].
@@ -650,7 +655,7 @@ function setView(v, { refit } = {}) {
     $("fitPop").hidden = true;
     if (was === "park" && shownPark) { /* remember nothing: the city view keeps its own position */ }
     if (overlay) { overlay.remove(); overlay = null; }
-    if (overlayFoot) { overlayFoot.remove(); overlayFoot = null; }
+    if (overlayPanel) { overlayPanel.remove(); overlayPanel = null; }
     shownPark = null;
     lightLayer.remove(); parkFieldsLayer.remove();
     cityLayer.addTo(map);
