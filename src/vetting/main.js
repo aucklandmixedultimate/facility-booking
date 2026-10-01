@@ -282,8 +282,6 @@ function activeLights(t) {
   t.fr[t.sel] ||= { name: t.sel, fit: "unknown", lights: [] };
   return (t.fr[t.sel].lights ||= []);
 }
-// "Majority configured": at least three of lights, fit, quality and fields are set.
-function ratedCount(t) { return [t.lights !== "unknown", t.fit !== "unknown", t.quality > 0, !!t.fields.trim()].filter(Boolean).length; }
 
 // ── Map ──────────────────────────────────────────────────────────────────────
 let map, overlay = null, overlayPanel = null, baseZoom = null, shownPark = null;
@@ -391,7 +389,7 @@ function drawParkFields(p) {
   });
 }
 function selectField(p, key) {
-  const t = tagsFor(p); t.sel = key; fitOpen = false;
+  const t = tagsFor(p); t.sel = key;
   if (key) {
     const hit = fieldKeys(p).find(x => x.key === key), rt = t.fr[key];
     if (rt?.lat != null) { angle = rt.angle; pin = L.latLng(rt.lat, rt.lon); }
@@ -409,7 +407,7 @@ function restorePlacement(p) {
   if (rotating) setRotating(false);
   angle = (f ? f.angle : sp.angle) || 0; pin = L.latLng(f ? f.lat : sp.lat, f ? f.lon : sp.lon);
   map.setView(pin, map.getZoom(), { animate: false });
-  t.sel = f ? f.name : null; fitOpen = false; $("fitPop").hidden = !t.sel;
+  t.sel = f ? f.name : null; $("fitPop").hidden = !t.sel;
   sizeField(); renderCentre(); drawParkFields(p); drawLights(p); previewFields(p); renderTags(p);
 }
 // Screen angle of a polygon's longest edge, so a new field lines up with the council field.
@@ -492,7 +490,7 @@ function bindDispenser() {
 // ── Frisbee field overlay: frame-centred, true scale, centre button locks/unlocks rotation ─
 // The field is frame-centred until it's locked; locking pins it to that spot on the map
 // (pin), so panning afterwards moves the map under it. Unlocking recentres on it.
-let angle = 0, rotating = false, pin = null, fitOpen = false;
+let angle = 0, rotating = false, pin = null;
 // Fit mode: after the field is locked in place (🔒) or put on a council field area, the
 // decision buttons become the fit buttons (Reduced size / 2+ fields / 1 full field) until
 // a fit is chosen. hintFrom tracks the unlocked field so the how-to hint can go once it
@@ -568,7 +566,7 @@ function lockField() {
   Object.assign(cur, { name: key, lat: +pin.lat.toFixed(6), lon: +pin.lng.toFixed(6), angle: Math.round(angle) });
   if (cur.fit && cur.fit !== "unknown" && cur.lightsAuto !== false) placeLights(p, cur);
   syncFromFields(t);
-  t.sel = key; fitOpen = false; fitArmed = true;
+  t.sel = key; fitArmed = true;
   $("fitPop").hidden = false; drawParkFields(p); drawLights(p); previewFields(p); renderTags(p); renderCentre();
 }
 function nearestFields(p) {
@@ -593,7 +591,7 @@ function previewFields(p) {
   $("fitMsg").textContent = moved ? `${target} · moved — rate again` : target;
   $("fitMsg").title = moved ? "Rate the fit again to save this spot" : t.sel && t.fr[t.sel]?.fit && t.fr[t.sel].fit !== "unknown" ? "Click a fit to change it, or the same one to clear it" : "Pan to fine-tune, then rate the fit";
   $("fitMsg").classList.toggle("warn", moved);
-  // A chosen fit collapses to one button; clicking it reopens the options (fitOpen).
+  // The chosen fit shows pressed on its button in fit mode.
   const chosen = !moved && t.sel && t.fr[t.sel]?.fit && t.fr[t.sel].fit !== "unknown" ? t.fr[t.sel].fit : null;
   $("actions").querySelectorAll("[data-fit]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.fit === chosen)));
   updateActions();
