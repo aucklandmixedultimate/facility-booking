@@ -460,6 +460,10 @@ short categorical fields rather than prose.
   - `influence` (high / medium / low; rugby and league default to low);
   - `refs` (indexes into `sources`);
   - `category` (`community` for schools and trusts).
+
+  Filled on 2026-10-01 from local-board agendas and minutes (infocouncil), board plans,
+  OurAuckland news and club or trust pages. Each fact has a source in `refs`. Anything that
+  couldn't be sourced stays `unknown`.
 - **Relationship history** (the settings key `operator_relations`, readable by signed-in
   users, written by admins in the ⓘ panel):
   - `rating`;
