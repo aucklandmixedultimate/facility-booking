@@ -6,10 +6,10 @@
     <title>Council / Community Fields</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap">
-    <script type="module" crossorigin src="/facility-booking/assets/vetting-DJ0dbG-7.js"></script>
+    <script type="module" crossorigin src="/facility-booking/assets/vetting-dTa51F5l.js"></script>
     <link rel="modulepreload" crossorigin href="/facility-booking/assets/index-VH2SDcMh.js">
     <link rel="modulepreload" crossorigin href="/facility-booking/assets/_commonjsHelpers-Cpj98o6Y.js">
-    <link rel="stylesheet" crossorigin href="/facility-booking/assets/vetting-Ce8SK6so.css">
+    <link rel="stylesheet" crossorigin href="/facility-booking/assets/vetting-3sqJ43qG.css">
   </head>
   <body>
     <div class="wrap">
@@ -112,6 +112,7 @@
                 <div class="privbox" id="privBox" hidden></div>
                 <div class="infopanel" id="infoPanel" hidden></div>
                 <div class="tags">
+                  <button class="undobtn" id="editUndoBtn" title="Undo the last change to this park's ratings (Z)" disabled>↶ Undo</button>
                   <span class="k">Quality</span><div class="seg stars" id="segQuality"></div>
                   <span class="k">Fit</span><span class="val" id="fitVal"></span>
                   <span class="k">Lights</span><span class="val" id="lightsVal"></span>
@@ -143,7 +144,7 @@
             <div class="empty" id="emptyState" hidden></div>
           </div>
           <div class="actions" id="actions">
-            <button class="act small" id="undoBtn" title="Undo last decision (Z)"><span class="b">↺</span>Undo</button>
+            <button class="act small" id="backBtn" title="Back to the previous park"><span class="b">←</span>Back</button>
             <button class="act no" id="noBtn" title="Not suitable (←)"><span class="b">✕</span>Reject <kbd>←</kbd></button>
             <button class="act top" id="topBtn" title="Top pick (↑)"><span class="b">★</span>Top pick <kbd>↑</kbd></button>
             <button class="act yes" id="yesBtn" title="Shortlist (→)"><span class="b">✓</span>Shortlist <kbd>→</kbd></button>
@@ -159,7 +160,7 @@
           </div>
           <div class="list" id="list"></div>
           <div class="railtools"><button id="exportBtn">Download CSV</button></div>
-          <details class="help"><summary>Help &amp; keys</summary>Scroll zooms the map; a few clicks out swaps the council map for satellite. Drag bulbs from the 💡 dispenser onto light poles (drag one back to remove it). Click a council field area to rate it (or edit its rating); its lights go with it. Or unlock the centre button, turn and move the field, lock it, and rate the closest field. ◆ parks are privately managed. Keys: <kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd>, <kbd>S</kbd> later, <kbd>Z</kbd> undo, <kbd>1</kbd>–<kbd>5</kbd> quality, <kbd>Enter</kbd> lock/unlock, <kbd>C</kbd> Auckland, <kbd>T</kbd> field, <kbd>M</kbd> next map.</details>
+          <details class="help"><summary>Help &amp; keys</summary>Scroll zooms the map; a few clicks out swaps the council map for satellite. Drag bulbs from the 💡 dispenser onto light poles (drag one back to remove it). Click a council field area to rate it (or edit its rating); its lights go with it. Or unlock the centre button, turn and move the field, lock it, and rate the closest field. ◆ parks are privately managed. Keys: <kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd>, <kbd>S</kbd> later, <kbd>Z</kbd> undo a rating change, <kbd>1</kbd>–<kbd>5</kbd> quality, <kbd>Enter</kbd> lock/unlock, <kbd>C</kbd> Auckland, <kbd>T</kbd> field, <kbd>M</kbd> next map.</details>
         </aside>
       </div>
     </div>
