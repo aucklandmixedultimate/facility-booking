@@ -170,7 +170,7 @@ main{display:flex;flex-direction:column;min-height:0;min-width:0}
 .tags2{display:grid;grid-template-columns:auto minmax(0,1fr) auto minmax(0,1fr);gap:6px 10px;align-items:center}
 @media (max-width:640px){
   .wrap{padding:6px 8px calc(6px + env(safe-area-inset-bottom,0px))}
-  .top{flex-wrap:nowrap;gap:6px}.brand p,.filters .chk,.filters .progress,.filters .bar,.links,.hint{display:none}
+  header.top{flex-wrap:nowrap;gap:6px}.brand p,.filters .chk,.filters .progress,.filters .bar,.links,.hint{display:none}
   .brand h1{font-size:17px;white-space:nowrap}.filters{flex-wrap:nowrap;gap:4px;min-width:0}
   .filters select{padding:3px 4px;font-size:12px;max-width:92px}.viewtabs button{padding:4px 7px;font-size:12px}
   .status{margin:2px 0;font-size:11px}.status:empty{display:none}
@@ -178,7 +178,7 @@ main{display:flex;flex-direction:column;min-height:0;min-width:0}
   .info{padding:5px 8px;gap:4px}.tags{gap:2px 6px}.tags .val{font-size:12px}.stars button{font-size:15px;padding:1px 4px}
   .tags2{grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:4px}.tags2 .k{display:none}.tags2 input{padding:4px 7px;font-size:13px}
   .privbox{padding:3px 7px;font-size:11px}.modetabs button{padding:4px 7px;font-size:12px}.bookbar input{min-width:0;width:100%}.flagbtn{padding:2px 6px;font-size:11px}.clubin{width:120px;font-size:11px}.privbox .pb-full{display:none}.privbox .pb-short{display:inline}
-  .brand{display:none}.top{justify-content:flex-start}.viewtabs button{padding:4px 9px}
+  .brand{display:none}header.top{justify-content:flex-start}.viewtabs button{padding:4px 9px}
   .centrelbl{display:none}.centre.unlocked .centrelbl{display:block;left:-50px;top:26px}
   .toolbar button{padding:3px 6px}.thumbs button{font-size:11px}
   .toolbar{top:6px;left:6px;right:6px;gap:4px}.toolbar button{padding:3px 7px;font-size:12px}
@@ -189,7 +189,7 @@ main{display:flex;flex-direction:column;min-height:0;min-width:0}
   .rotatehint{top:72px;font-size:11px;white-space:normal;width:max-content;max-width:62%;text-align:center}
   .layerbadge{display:none}.leaflet-control-attribution{font-size:9px;line-height:1.3}
   /* Header: views on one full-width row; mode + filters on the next, nothing squeezed. */
-  .top{display:block}
+  header.top{display:block}
   .filters{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr) minmax(0,1fr);gap:5px;width:100%}
   .filters>.viewtabs{grid-column:1/-1}
   .filters>div:last-child{display:none}
@@ -402,11 +402,6 @@ body.viewer .handle .hint,body.viewer .rail .help,body.viewer #fieldBtn,body.vie
 .fitbar .fb-cart[aria-pressed="true"]{background:#0f766e;border-color:#0f766e}
 @media (max-width:640px){.fitbar{flex-wrap:wrap;white-space:normal}}
 
-/* Collecting field data: the fit bar sits where the decision buttons were. */
-.actions.collect .act:not(.small){display:none}
-.actions .fitbar{position:static;transform:none;display:flex!important;box-shadow:none;max-width:none}
-.actions .fitbar[hidden]{display:flex!important}
-
 /* Undo for this park's rating changes (quality row). */
 .undobtn{border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:8px;padding:2px 8px;font-size:12px;font-weight:600;cursor:pointer}
 .undobtn:disabled{opacity:.4;cursor:default}
@@ -455,3 +450,62 @@ body.viewer .handle .hint,body.viewer .rail .help,body.viewer #fieldBtn,body.vie
 #interestBtn[aria-pressed=true]{background:#fef3c7;border-color:#d97706;color:#92400e}
 #interestBtn[aria-expanded=true]{box-shadow:inset 0 0 0 2px #d97706}
 .thumbs .seasononly{padding:0 4px;opacity:.7}
+
+/* Fit mode: once the field is locked, the fit buttons take the decision buttons' places
+   (Reduced size ← Reject, 2+ fields ← Top pick, 1 full field ← Shortlist). */
+.actions:not(.fitmode) .act.fit{display:none}
+.actions.fitmode .act.no,.actions.fitmode .act.top,.actions.fitmode .act.yes{display:none}
+.act.fit .b{width:auto;min-width:50px;padding:0 14px;border-radius:999px;font-size:14px;font-weight:800;font-family:var(--font-body)}
+.act.fno .b{color:var(--reject);border-color:var(--reject)}
+.act.fyes .b{color:var(--turf);border-color:var(--turf)}
+.act.ftop .b{color:#fff;border:2px solid #b7791f;background:radial-gradient(circle at 30% 25%,#fde68a 0%,#f6c453 35%,#d69e2e 70%,#b7791f 100%);text-shadow:0 1px 2px rgba(120,70,0,.6);height:58px;font-size:18px}
+.act.fit[aria-pressed=true] .b{box-shadow:0 0 0 4px rgba(15,118,110,.35)}
+.act.fit{animation:fitin .18s ease-out}
+@keyframes fitin{from{transform:scale(.85);opacity:0}to{transform:none;opacity:1}}
+.fitbar .fb-msg{max-width:none}
+
+/* ? how-to, inset in the map toolbar beside ⤢ */
+.helpbtn{font-weight:800;min-width:30px}
+.helpbtn[aria-expanded=true]{background:var(--ink);color:var(--surface)}
+.helppanel{left:10px;right:auto;max-width:340px;max-height:70%;overflow:auto;font-size:13px;line-height:1.45}
+.helppanel ol{margin:4px 0;padding-left:18px;display:grid;gap:5px}
+.helppanel .keys{margin:4px 0 0;font-size:12px;color:var(--muted)}
+
+/* Season chips: one rolling line on phones */
+.seasonbar .sb-tick{display:contents}.seasonbar .sb-track{display:contents}.seasonbar .sb-copy{display:none}
+.tags .val:empty{display:none}.tags .k:has(+ .val:empty){display:none}
+
+@media (max-width:640px){
+  /* Header: ← back, the three views and the profile on one row; filters on the next. */
+  .wrap{padding:4px 6px calc(4px + env(safe-area-inset-bottom,0px))}
+  header.top{display:grid;grid-template-columns:auto repeat(3,minmax(0,1fr)) auto;gap:4px;align-items:center}
+  .acct{display:contents}
+  .backbtn{grid-column:1;grid-row:1;padding:5px 9px;font-size:14px}.backbtn .bl{display:none}
+  .profile{grid-column:5;grid-row:1}
+  #profileBtn{padding:2px}#profileBtn .caret{display:none}
+  .filters{display:contents}
+  .filters>.viewtabs{grid-column:2/5;grid-row:1}
+  .viewtabs button{padding:5px 4px;font-size:12px}
+  #region{grid-column:1/3;grid-row:2}#mode{grid-column:3;grid-row:2}#order{grid-column:4/6;grid-row:2}
+  .filters select{padding:3px 4px;font-size:12px;height:28px}
+  /* Season: one line that rolls */
+  .seasonbar{margin:3px 0 0;overflow:hidden}
+  .seasonbar details>summary{flex-wrap:nowrap;overflow:hidden;white-space:nowrap}
+  .seasonbar .sb-k{display:none}
+  .seasonbar .sb-tick{display:block;overflow:hidden;flex:1;min-width:0;mask-image:linear-gradient(90deg,#000 92%,transparent)}
+  .seasonbar .sb-track{display:inline-flex;gap:8px;white-space:nowrap;animation:sbroll 14s linear infinite}
+  .seasonbar .sb-copy{display:inline-flex;gap:8px;padding-left:24px}
+  .seasonbar .sb-p{padding:1px 8px;font-size:11px}
+  /* Below the map: one compact block */
+  .handle{padding:3px 8px}.title h2{font-size:17px}
+  .info{padding:4px 8px;gap:3px}
+  .tags{gap:2px 6px}.tags .k{font-size:10px}
+  .tags2 input{padding:3px 7px;font-size:12px}
+  .actions{margin-top:2px;gap:8px}
+  .act.fit .b{min-width:44px;height:42px;padding:0 11px;font-size:13px}.act.ftop .b{height:48px;font-size:16px}
+  .helppanel{left:6px;right:6px;max-width:none;top:40px}
+}
+@keyframes sbroll{0%,12%{transform:translateX(0)}100%{transform:translateX(-50%)}}
+@media (prefers-reduced-motion:reduce){.seasonbar .sb-track{animation:none}}
+.act.fit{font-size:0}
+@media (max-width:640px){.tags .lx{display:none}}

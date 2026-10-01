@@ -15,7 +15,7 @@
           <p>AMUA · Auckland Council parks for ultimate</p>
         </div>
         <div class="acct">
-          <a class="backbtn" href="./" title="Back to the Facility Booking site">← Facility Booking</a>
+          <a class="backbtn" href="./" title="Back to the Facility Booking site">←<span class="bl"> Facility Booking</span></a>
           <div class="profile">
             <button id="profileBtn" aria-haspopup="menu" aria-expanded="false" hidden><span class="av" id="profileAv">?</span><span class="pn" id="profileName"></span><span class="caret">▾</span></button>
             <div class="pmenu" id="profileMenu" role="menu" hidden></div>
@@ -80,11 +80,23 @@
                 <div class="toolbar" role="toolbar" aria-label="Map tools">
                   <button id="fieldBtn" aria-pressed="true" title="Show or hide the frisbee field (T)">⬚ Field</button>
                   <button id="fitBtn" title="Zoom back to the council map (0)">⤢</button>
+                  <button id="helpBtn" class="helpbtn" aria-expanded="false" aria-controls="helpPanel" title="How to use this page">?</button>
                   <span id="thumbs" class="thumbs"></span>
                   <button id="interestBtn" aria-pressed="false" aria-expanded="false" title="Interests: which parks are served (area, council or private)">🎯 Interests</button>
                   <span class="interestrow" id="interestRow" hidden></span>
                   <button id="sizeBtn" title="Field dimensions">⚙</button>
 
+                </div>
+                <div class="sizepanel helppanel" id="helpPanel" hidden>
+                  <b>How it works</b>
+                  <ol>
+                    <li><b>Place the field:</b> tap 🔒 to unlock, then twist (or move the mouse) to turn it and drag the map to move it. Tap 🔓 to lock it there: that records its spot and angle.</li>
+                    <li><b>Rate the fit:</b> once it's locked, the decision buttons become <b>Reduced size</b>, <b>1 full field</b> and <b>2+ fields</b>. The rating goes to the nearest council field. Tapping a council field area also places the field there, ready to rate.</li>
+                    <li><b>Lights:</b> rated fields get poles along their long sides (− / + by two). Or drag 💡 bulbs onto poles, and drag one back to remove it.</li>
+                    <li><b>Decide:</b> ✕ Reject, ★ Top pick or ✓ Shortlist. A top pick or shortlist makes the park's rated fields active (bookable); Later skips it for now.</li>
+                    <li>◆ parks are run by a club or trust; 🎯 Interests chooses which parks are served; ☀/❄ flips the season's maps.</li>
+                  </ol>
+                  <p class="keys">Keys: <kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> decide (or rate the fit once locked), <kbd>S</kbd> later, <kbd>Z</kbd> undo, <kbd>1</kbd>–<kbd>5</kbd> quality, <kbd>Enter</kbd> lock/unlock, <kbd>C</kbd> Auckland, <kbd>T</kbd> field, <kbd>M</kbd> next map, <kbd>0</kbd> zoom to the council map.</p>
                 </div>
                 <div class="sizepanel" id="sizePanel" hidden>
                   <label>Length (m) <input type="number" id="fLen" min="40" max="130" step="1"></label>
@@ -94,11 +106,6 @@
                 </div>
                 <div class="fitbar" id="fitPop" hidden role="group" aria-label="Rate the fit at this spot">
                   <span class="fb-msg" id="fitMsg">Pan to fine-tune, then rate the fit here</span>
-                  <span class="fb-btns">
-                    <button data-fit="reduced">Reduced size</button>
-                    <button data-fit="full">1 full field</button>
-                    <button data-fit="multi">2+ fields</button>
-                  </span>
                   <span class="fb-lights" id="lightStep" hidden title="Light poles for this field: placed along its long sides until you move one">💡<button type="button" data-lstep="-2" aria-label="Two fewer lights">−</button><b id="lightN">4</b><button type="button" data-lstep="2" aria-label="Two more lights">+</button></span>
                   <button class="fb-next" id="saveNextBtn" hidden title="Save this park's field ratings and move on to its next unrated council field">💾 Next field</button>
                 </div>
@@ -134,8 +141,8 @@
                   <button type="button" id="amendClear" title="Remove this amendment">Clear</button>
                 </div>
                 <div class="tags2">
-                  <label class="k" for="fieldsIn">Fields</label><input id="fieldsIn" placeholder="Lock the field to pick the nearest council field">
-                  <label class="k" for="notesIn">Notes</label><input id="notesIn" placeholder="Anything worth knowing">
+                  <label class="k" for="fieldsIn">Fields</label><input id="fieldsIn" placeholder="Fields">
+                  <label class="k" for="notesIn">Notes</label><input id="notesIn" placeholder="Notes">
                 </div>
                 <div class="links"><a id="gmaps" target="_blank" rel="noopener">Google Maps ↗</a><span id="scaleNote" hidden></span><span id="fieldList"></span></div>
               </div>
@@ -152,7 +159,6 @@
                 </div>
                 <div class="list" id="list"></div>
                 <div class="railtools"><button id="exportBtn">Download CSV</button></div>
-                <details class="help"><summary>Help &amp; keys</summary>Scroll zooms the map; a few clicks out swaps the council map for satellite. Drag bulbs from the 💡 dispenser onto light poles (drag one back to remove it). Click a council field area to rate it (or edit its rating); its lights go with it. Or unlock the centre button, turn and move the field, lock it, and rate the closest field. ◆ parks are privately managed. Keys: <kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd>, <kbd>S</kbd> later, <kbd>Z</kbd> undo a rating change, <kbd>1</kbd>–<kbd>5</kbd> quality, <kbd>Enter</kbd> lock/unlock, <kbd>C</kbd> Auckland, <kbd>T</kbd> field, <kbd>M</kbd> next map.</details>
               </section>
               </div>
             </article>
@@ -161,8 +167,11 @@
           <div class="actions" id="actions">
             <button class="act small" id="backBtn" title="Back to the previous park"><span class="b">←</span>Back</button>
             <button class="act no" id="noBtn" title="Not suitable (←)"><span class="b">✕</span>Reject <kbd>←</kbd></button>
+            <button class="act fit fno" data-fit="reduced" title="Reduced size: only a smaller field fits here (←)"><span class="b">Reduced</span>Reduced size</button>
             <button class="act top" id="topBtn" title="Top pick (↑): its rated fields become active, bookable fields"><span class="b">★</span>Top pick <kbd>↑</kbd></button>
+            <button class="act fit ftop" data-fit="multi" title="2+ fields fit here (↑)"><span class="b">2+</span>2+ fields</button>
             <button class="act yes" id="yesBtn" title="Shortlist (→): its rated fields become active, bookable fields"><span class="b">✓</span>Shortlist <kbd>→</kbd></button>
+            <button class="act fit fyes" data-fit="full" title="1 full field fits here (→)"><span class="b">1 full</span>1 full field</button>
             <button class="act small" id="skipBtn" title="Decide later (S)"><span class="b">⤳</span>Later <kbd>S</kbd></button>
           </div>
         </main>
