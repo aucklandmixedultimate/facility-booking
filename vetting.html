@@ -6,10 +6,10 @@
     <title>Council / Community Fields</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap">
-    <script type="module" crossorigin src="/facility-booking/assets/vetting-CHBLTnx7.js"></script>
+    <script type="module" crossorigin src="/facility-booking/assets/vetting-DP8SlBCD.js"></script>
     <link rel="modulepreload" crossorigin href="/facility-booking/assets/index-VH2SDcMh.js">
     <link rel="modulepreload" crossorigin href="/facility-booking/assets/_commonjsHelpers-Cpj98o6Y.js">
-    <link rel="stylesheet" crossorigin href="/facility-booking/assets/vetting-BDeou9Da.css">
+    <link rel="stylesheet" crossorigin href="/facility-booking/assets/vetting-CQM9fOqg.css">
   </head>
   <body>
     <div class="wrap">
@@ -83,8 +83,8 @@
                 </div>
                 <div class="toolbar" role="toolbar" aria-label="Map tools">
                   <button id="fieldBtn" aria-pressed="true" title="Show or hide the frisbee field (T)">Field</button>
-                  <button id="sizeBtn" title="Field dimensions">⚙</button>
-                  <button id="fitBtn" title="Zoom to the park; press again for all of Auckland (0)">⤢</button>
+                  <button id="sizeBtn" title="Field dimensions">📏</button>
+                  <button id="fitBtn" title="Zoom to the park; press again for all of Auckland (0)">🔍</button>
                   <button id="helpBtn" class="helpbtn" aria-expanded="false" aria-controls="helpPanel" title="How to use this page">?</button>
                   <span id="thumbs" class="thumbs"></span>
                   <button id="fullBtn" class="fullbtn" aria-pressed="false" title="Full-screen map">⛶</button>
@@ -99,7 +99,7 @@
                   <ol>
                     <li><b>Place the field:</b> tap 🔒 to unlock, then twist (or move the mouse) to turn it and drag the map to move it. Tap 🔓 to lock it there: that records its spot and angle.</li>
                     <li><b>Rate the fit:</b> once it's locked, the decision buttons become <b>Reduced size</b>, <b>1 full field</b> and <b>2+ fields</b>. The rating goes to the nearest council field. Tapping a council field area also places the field there, ready to rate.</li>
-                    <li><b>Lights:</b> rated fields get poles along their long sides (− / + by two). Or drag 💡 bulbs onto poles, and drag one back to remove it.</li>
+                    <li><b>Lights:</b> the lights button starts at ❓ (unknown). Tap it for 🚫 no lights, then again for 💡 lights. In 💡, each tap adds two poles along the field's long sides, up to 8; the next tap goes back to 0. Drag a bulb from the button (in any state) onto a pole to place it by hand, and drag one back to remove it. The small ? underneath resets the lights to unknown.</li>
                     <li><b>Decide:</b> ✕ Reject, ★ Top pick or ✓ Shortlist. A top pick or shortlist makes the park's rated fields active (bookable); Later skips it for now.</li>
                     <li>◆ parks are run by a club or trust; 🎯 Interests chooses which parks are served; ☀/❄ flips the season's maps.</li>
                   </ol>
@@ -113,15 +113,14 @@
                 </div>
                 <div class="fitbar" id="fitPop" hidden role="group" aria-label="Rate the fit at this spot">
                   <span class="fb-msg" id="fitMsg">Pan to fine-tune, then rate the fit here</span>
-                  <span class="fb-lights" id="lightStep" hidden title="Light poles for this field: placed along its long sides until you move one">💡<button type="button" data-lstep="-2" aria-label="Two fewer lights">−</button><b id="lightN">4</b><button type="button" data-lstep="2" aria-label="Two more lights">+</button></span>
                   <button class="fb-next" id="saveNextBtn" hidden title="Save this park's field ratings and move on to its next unrated council field">💾 Next field</button>
                 </div>
                 <div class="legend" id="legend" hidden></div>
                 <div class="rotatehint" id="rotateHint" hidden>Mouse turns · drag moves · click locks</div>
-                <div class="dispenser" id="dispenser" title="Drag a bulb onto each light pole. Drag a bulb back here to remove it.">
-                  <div class="bulbsrc" id="bulbSrc" role="button" aria-label="Drag a light bulb onto a light pole">💡</div>
-                  <span class="dcount" id="bulbCount">0</span>
-                  <button id="noLightsBtn" aria-pressed="false" title="Checked: there are no lights">No lights</button>
+                <div class="dispenser" id="dispenser">
+                  <div class="bulbsrc" id="bulbSrc" role="button" tabindex="0" aria-label="Lights: unknown. Tap to change, or drag a bulb onto a light pole">❓</div>
+                  <span class="dcount" id="bulbCount" hidden>0</span>
+                  <button class="lreset" id="lightsReset" hidden title="Reset the lights to unknown">?</button>
                 </div>
               </div>
               <div class="info" id="info">
