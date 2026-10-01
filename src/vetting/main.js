@@ -1193,19 +1193,28 @@ async function syncCartWorkflows() {
 const AMEND_KIND = { private: "Privately operated by", change: "Operator changed to", other: "Provider change" };
 let amendFor = null;
 const amendText = fl => `${AMEND_KIND[fl.kind || "private"]}${fl.club ? " " + fl.club : ""}${fl.contact ? " · contact " + fl.contact : ""}`;   // the park whose amendment row is open
+// What's already on record for a park's provider: its private operator (and the first
+// contact AMUA has for them), or the council for a council-only park.
+function knownProvider(p) {
+  if (councilOnly(p) && (PRIV_BY_PARK[p.id] || []).length) return { club: "Auckland Council (council only)", kind: "other", contact: "", known: true };
+  const ops = PRIV_BY_PARK[p.id] || [], op = ops.find(o => o.code !== "ultimate") || ops[0];
+  if (!op) return null;
+  return { club: op.short || op.operator, kind: "private", contact: shortName(relations[op.id]?.contacts?.[0]?.name || ""), known: true };
+}
 function renderFlag(p) {
-  const fl = flags[p.id];
+  const fl = flags[p.id], known = knownProvider(p), d = fl || known || {};
   $("clubFlagBtn").setAttribute("aria-pressed", String(!!fl));
-  $("clubFlagBtn").textContent = fl ? "✎ " + amendText(fl) : "✎ Provider?";
+  $("clubFlagBtn").textContent = fl ? "✎ " + amendText(fl) : known ? "✎ " + amendText(known) : "✎ Provider?";
   $("clubFlagBtn").title = fl ? `Provider amendment${fl.by ? " by " + fl.by.split("@")[0] : ""}. Click to edit.`
+    : known ? "Provider on record. Click to amend it (the fields start from what's on record)."
     : "Tag this park's provider for amendment, e.g. privately operated by a club that isn't listed yet";
   $("amendRow").hidden = amendFor !== p.id;
-  $("amendContact").hidden = !fl;
+  $("amendContact").hidden = !fl && !known;
   $("amendClear").hidden = !fl;
   const ae = document.activeElement;
-  if (ae !== $("clubIn")) $("clubIn").value = fl?.club || "";
-  if (ae !== $("amendKind")) $("amendKind").value = fl?.kind || "private";
-  if (ae !== $("amendContact")) $("amendContact").value = fl?.contact || "";
+  if (ae !== $("clubIn")) $("clubIn").value = d.club || "";
+  if (ae !== $("amendKind")) $("amendKind").value = d.kind || "private";
+  if (ae !== $("amendContact")) $("amendContact").value = d.contact || "";
   if (!$("providerList").options.length)
     $("providerList").innerHTML = [...new Set(PRIV.operators.map(o => o.short || o.operator))].sort().map(n => `<option value="${esc(n)}">`).join("");
 }
