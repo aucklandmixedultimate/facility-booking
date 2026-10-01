@@ -6,10 +6,10 @@
     <title>Council / Community Fields</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap">
-    <script type="module" crossorigin src="/facility-booking/assets/vetting-DHx4I_lA.js"></script>
+    <script type="module" crossorigin src="/facility-booking/assets/vetting-C7PabDRA.js"></script>
     <link rel="modulepreload" crossorigin href="/facility-booking/assets/index-VH2SDcMh.js">
     <link rel="modulepreload" crossorigin href="/facility-booking/assets/_commonjsHelpers-Cpj98o6Y.js">
-    <link rel="stylesheet" crossorigin href="/facility-booking/assets/vetting-V_uR_jfP.css">
+    <link rel="stylesheet" crossorigin href="/facility-booking/assets/vetting-ChOqXOKa.css">
   </head>
   <body>
     <div class="wrap">
@@ -161,5 +161,10 @@
         </div>
       </form>
     </dialog>
-  </body>
+    <!-- Council sketch plan shown opaque: click its footprint in park view; any click closes it. -->
+  <div class="cimg-box" id="cimgBox" hidden role="dialog" aria-label="Council field map">
+    <div class="cimg-bar"><span id="cimgTitle"></span><a id="cimgOpen" target="_blank" rel="noopener" title="Open image in a new tab">⤢</a><button type="button" title="Close">✕</button></div>
+    <img id="cimgImg" alt="Council field map">
+  </div>
+</body>
 </html>
