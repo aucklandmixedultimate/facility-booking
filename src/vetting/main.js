@@ -88,7 +88,7 @@ async function loadShared() {
     return;
   }
   mode = "shared"; reviews = Object.fromEntries(data.map(r => [r.park_id, fromRow(r)]));
-  setStatus(`Shared with all admins · ${data.length} decisions so far`);
+  setStatus(`Shared · ${data.length} decisions`);
   await loadFlags();
 }
 // Club-run flags live in their own table (field_flags) so a park can be flagged without a
@@ -316,7 +316,7 @@ function drawParkFields(p) {
   });
 }
 function selectField(p, key) {
-  const t = tagsFor(p); t.sel = key;
+  const t = tagsFor(p); t.sel = key; fitOpen = false;
   if (key) {
     const hit = fieldKeys(p).find(x => x.key === key), rt = t.fr[key];
     if (rt?.lat != null) { angle = rt.angle; pin = L.latLng(rt.lat, rt.lon); }
@@ -351,6 +351,7 @@ function drawLights(p) {
       $("dispenser").classList.remove("target");
       if (lastPointer && overDispenser(lastPointer)) return removeLight(p, k);
       const l = mk.getLatLng(); arr[k] = [+l.lat.toFixed(6), +l.lng.toFixed(6)];
+      if (t.sel && t.fr[t.sel]) { t.fr[t.sel].lightsAuto = false; renderLightStep(p); }
     });
     mk.addTo(lightLayer);
   });
@@ -367,10 +368,12 @@ function overDispenser(ev) {
 function addLight(p, latlng) {
   const t = tagsFor(p);
   activeLights(t).push([+latlng.lat.toFixed(6), +latlng.lng.toFixed(6)]);
+  if (t.sel && t.fr[t.sel]) t.fr[t.sel].lightsAuto = false;
   syncFromFields(t); drawLights(p); drawParkFields(p); renderTags(p);
 }
 function removeLight(p, k) {
   const t = tagsFor(p); activeLights(t).splice(k, 1);
+  if (t.sel && t.fr[t.sel]) t.fr[t.sel].lightsAuto = false;
   syncFromFields(t); drawLights(p); drawParkFields(p); renderTags(p);
 }
 // Drag a bulb out of the dispenser: a ghost follows the pointer and drops where released.
@@ -401,7 +404,7 @@ function bindDispenser() {
 // ── Frisbee field overlay: frame-centred, true scale, centre button locks/unlocks rotation ─
 // The field is frame-centred until it's locked; locking pins it to that spot on the map
 // (pin), so panning afterwards moves the map under it. Unlocking recentres on it.
-let angle = 0, rotating = false, pin = null;
+let angle = 0, rotating = false, pin = null, fitOpen = false;
 const fieldCentre = () => pin || map.getCenter();
 function drawField() {
   const { len: Lm, wid: Wm, ez } = dims, x0 = -Lm / 2, y0 = -Wm / 2, gl = Lm / 2 - ez, bx = gl - BRICK;
@@ -438,8 +441,8 @@ function setRotating(on) {
   if (on && pin) { map.setView(pin, map.getZoom(), { animate: false }); pin = null; }
   rotating = on; $("field").classList.toggle("live", on); $("rotateHint").hidden = !on;
   $("rotateHint").textContent = matchMedia("(hover: none)").matches
-    ? "Twist with two fingers to turn · drag to move · tap the button to lock it there"
-    : "Move the mouse to turn · drag the map to move · click to lock it there";
+    ? "Twist to turn · drag to move · tap 🔒 to lock"
+    : "Mouse turns · drag moves · click locks";
   if (on) $("fitPop").hidden = true;
   sizeField(); renderCentre();
 }
@@ -456,7 +459,7 @@ function lockField() {
   pin = map.getCenter(); sizeField();
   const p = current(); if (!p) return;
   // The rating applies to the single council field closest to where the field was locked.
-  const n = nearestFields(p); tagsFor(p).sel = n ? n.key : null;
+  const n = nearestFields(p); tagsFor(p).sel = n ? n.key : null; fitOpen = false;
   $("fitPop").hidden = false; drawParkFields(p); drawLights(p); previewFields(p); renderTags(p);
 }
 function nearestFields(p) {
@@ -477,10 +480,23 @@ function spotMoved(t) {
 function previewFields(p) {
   const t = tagsFor(p), moved = spotMoved(t);
   const target = t.sel ? `Rating ${t.sel}` : (() => { const n = nearestFields(p); return n ? `Nearest: ${n.key} (${Math.round(n.m)} m)` : "Rate the fit here"; })();
-  $("fitMsg").textContent = moved ? `${target} — moved, rate it again to save this spot` : `${target}${t.sel && t.fr[t.sel]?.fit && t.fr[t.sel].fit !== "unknown" ? " · click a fit to change it, or the same one to clear it" : pin ? "" : " · pan to fine-tune"}`;
+  // Short label; the how-to lives in the tooltip.
+  $("fitMsg").textContent = moved ? `${target} · moved — rate again` : target;
+  $("fitMsg").title = moved ? "Rate the fit again to save this spot" : t.sel && t.fr[t.sel]?.fit && t.fr[t.sel].fit !== "unknown" ? "Click a fit to change it, or the same one to clear it" : "Pan to fine-tune, then rate the fit";
   $("fitMsg").classList.toggle("warn", moved);
-  $("fitPop").querySelectorAll("[data-fit]").forEach(b => b.setAttribute("aria-pressed", String(!!t.sel && t.fr[t.sel]?.fit === b.dataset.fit && !moved)));
+  // A chosen fit collapses to one button; clicking it reopens the options (fitOpen).
+  const chosen = !moved && t.sel && t.fr[t.sel]?.fit && t.fr[t.sel].fit !== "unknown" ? t.fr[t.sel].fit : null;
+  $("fitPop").querySelectorAll("[data-fit]").forEach(b => { b.setAttribute("aria-pressed", String(b.dataset.fit === chosen));
+    b.hidden = !!chosen && !fitOpen && b.dataset.fit !== chosen;
+    b.title = chosen && !fitOpen && b.dataset.fit === chosen ? "Change the fit" : ""; });
+  // Add to cart (the booker's cart, as in Book mode) for a rated field.
+  const st = t.sel && curRating(t) && !moved ? locState(cartId(p, t.sel)) : undefined;
+  $("fitCartBtn").hidden = st === undefined || !IS_ADMIN;
+  if (st !== undefined) { $("fitCartBtn").textContent = st === "active" ? "📌 Active" : st === "cart" ? "🛒 In cart" : "🛒 Add to cart";
+    $("fitCartBtn").setAttribute("aria-pressed", String(!!st)); $("fitCartBtn").disabled = st === "active";
+    $("fitCartBtn").title = st === "active" ? "Already an active booking" : st === "cart" ? `In ${whoBooks()}'s cart — click to remove` : `Add to ${whoBooks()}'s cart`; }
   $("saveNextBtn").hidden = !IS_ADMIN || !curRating(t) || moved;
+  renderLightStep(p);
 }
 function afterMove() {
   const p = current(); if (!p) return;
@@ -498,9 +514,55 @@ function confirmSpot(p, fit) {
   if (cur.fit === fit && !spotMoved(t)) { cur.fit = "unknown"; delete cur.lat; delete cur.lon; delete cur.angle; }
   else Object.assign(cur, { name: t.sel, fit, lat: +c.lat.toFixed(6), lon: +c.lng.toFixed(6), angle: Math.round(angle) });
   t.fr[t.sel] = cur;
+  // Rated fields get light poles placed along their long sides (4 to start) until a pole
+  // is moved by hand; cleared ratings keep whatever lights they had.
+  if (cur.fit !== "unknown" && cur.lightsAuto !== false) { cur.lightCount ??= 4; placeLights(p, cur); }
   syncFromFields(t);
   // The bar stays open so the rating can go straight to "Save · next field".
   drawParkFields(p); drawLights(p); renderTags(p); previewFields(p); renderCentre();
+}
+// Auto-placed light poles: n poles (always even) split evenly between the field's two long
+// sides, a few metres outside the sideline. The first pair goes on the long side nearer the
+// council field's own edge (the sideline most likely to have poles), the next pair opposite,
+// then one more each side per +2, spaced evenly along the length.
+const POLE_OFFSET = 3;   // metres outside the sideline
+function placeLights(p, fr) {
+  const n = Math.max(0, fr.lightCount || 0), per = n / 2;
+  const lat0 = fr.lat, lon0 = fr.lon, th = (fr.angle || 0) * Math.PI / 180;
+  const kx = 111320 * Math.cos(lat0 * Math.PI / 180), ky = 110540;
+  // Field-local (u along the length, v across) → lat/lon; the field is drawn rotated
+  // clockwise on screen, so screen-x = u·cos − v·sin, screen-y (down) = u·sin + v·cos.
+  const at = (u, v) => { const ex = u * Math.cos(th) - v * Math.sin(th), sy = u * Math.sin(th) + v * Math.cos(th);
+    return [+(lat0 - sy / ky).toFixed(6), +(lon0 + ex / kx).toFixed(6)]; };
+  const half = dims.wid / 2 + POLE_OFFSET;
+  // Which long side is nearer the council field's boundary?
+  const poly = councilFields(p).find(f => (f.n || "") === fr.name)?.p;
+  const distToPoly = pt => { if (!poly?.length) return Infinity; let best = Infinity;
+    for (let i = 0; i < poly.length; i++) { const a = poly[i], b = poly[(i + 1) % poly.length];
+      const ax = (a[1] - pt[1]) * kx, ay = (a[0] - pt[0]) * ky, bx = (b[1] - pt[1]) * kx, by = (b[0] - pt[0]) * ky;
+      const dx = bx - ax, dy = by - ay, L2 = dx * dx + dy * dy || 1, tt = Math.max(0, Math.min(1, -(ax * dx + ay * dy) / L2));
+      best = Math.min(best, Math.hypot(ax + tt * dx, ay + tt * dy)); }
+    return best; };
+  const first = distToPoly(at(0, -half)) <= distToPoly(at(0, half)) ? -half : half;
+  const along = i => -dims.len / 2 + dims.len * (i + 0.5) / per;
+  const out = [];
+  for (let i = 0; i < per; i++) out.push(at(along(i), first));
+  for (let i = 0; i < per; i++) out.push(at(along(i), -first));
+  fr.lights = out;
+}
+function renderLightStep(p) {
+  const t = p && tagsFor(p), fr = t?.sel && t.fr[t.sel], on = !!(fr && fr.fit && fr.fit !== "unknown" && fr.lat != null);
+  $("lightStep").hidden = !on || !IS_ADMIN;
+  if (!on) return;
+  $("lightN").textContent = fr.lightsAuto === false ? (fr.lights || []).length : (fr.lightCount ?? 4);
+  $("lightStep").classList.toggle("manual", fr.lightsAuto === false);
+  $("lightStep").title = fr.lightsAuto === false ? "Lights placed by hand — drag bulbs to change them" : "Light poles for this field: placed along its long sides until you move one";
+}
+function stepLights(d) {
+  const p = current(); if (!p) return; const t = tagsFor(p), fr = t.sel && t.fr[t.sel];
+  if (!fr || fr.lat == null || fr.lightsAuto === false) return;
+  fr.lightCount = Math.max(0, (fr.lightCount ?? 4) + d);
+  placeLights(p, fr); syncFromFields(t); drawLights(p); drawParkFields(p); renderTags(p); renderLightStep(p);
 }
 function renderCentre() {
   const p = current(), t = p ? tagsFor(p) : null, moved = !!t && spotMoved(t);
@@ -1101,7 +1163,7 @@ function renderCity() {
   const reg = $("region").value;
   $("parkName").textContent = reg ? reg + " parks" : "Auckland";
   $("parkRegion").textContent = `${scope.length} parks`; $("decChip").innerHTML = "";
-  $("handleHint").textContent = "Click a park to rate it · colours show overall suitability · zoom in to see its fields";
+  $("handle").title = "Click a park to rate it · colours show overall suitability · zoom in to see its fields";
   const rated = scope.filter(x => reviews[x.id]);
   const unplaced = scope.filter(x => !parkLatLng(x)).length;
   const nextUp = queue()[0];
@@ -1119,7 +1181,7 @@ function renderParkHeader() {
   $("parkName").textContent = "Cart";
   $("emptyState").hidden = true; $("card").hidden = false; $("behind").hidden = true;
   $("parkName").textContent = "🛒 Cart"; $("parkRegion").textContent = p ? "last park: " + p.name : "";
-  $("decChip").innerHTML = ""; $("handleHint").textContent = "Council fields in the booker's cart, ready for the booking site";
+  $("decChip").innerHTML = ""; $("handle").title = "Council fields in the booker's cart, ready for the booking site";
 }
 function render() {
   if (view === "book") { renderParkHeader(); renderBook(); renderTabs(); renderRail(); return; }
@@ -1128,7 +1190,7 @@ function render() {
   const q = queue(), p = current(), next = focusId ? null : (q[cursor + 1] || (q.length > 1 ? q[0] : null));
   const card = $("card");
   $("emptyState").hidden = !!p; card.hidden = !p; $("behind").hidden = !p || !next || next.id === p?.id || !next.maps.length;
-  $("handleHint").textContent = focusId ? "Opened from the Auckland map · decide to go back to it · ← reject · → shortlist · ↑ top pick" : "Drag here to decide · ← reject · → shortlist · ↑ top pick";
+  $("handle").title = focusId ? "Opened from the Auckland map: decide to go back to it (drag ← reject · → shortlist · ↑ top pick)" : "Drag ← reject · → shortlist · ↑ top pick";
   if (!p) {
     const m = $("mode").value;
     $("emptyState").innerHTML = `<h2>${m === "todo" ? "All caught up" : "Nothing here yet"}</h2>${m === "todo" ? "Every park in this view has a decision. Open the Auckland map to look back over them." : "Parks you decide on will appear here."}`;
@@ -1295,7 +1357,12 @@ function bind() {
   let swallowClick = false;   // a twist ends in a click on the button; don't let it lock
   $("centreBtn").addEventListener("pointerup", () => { if (twist?.moved) swallowClick = true; twist = null; });
   $("centreBtn").onclick = e => { e.stopPropagation(); if (swallowClick) { swallowClick = false; return; } if (rotating) lockField(); else setRotating(true); };
+  $("lightStep").addEventListener("click", e => { const b = e.target.closest("[data-lstep]"); if (b) { e.stopPropagation(); stepLights(+b.dataset.lstep); } });
+  $("fitCartBtn").onclick = async e => { e.stopPropagation(); const p = current(), t = p && tagsFor(p); if (!t?.sel) return; await toggleCart(p, t.sel); previewFields(p); };
   $("fitPop").addEventListener("click", e => { const b = e.target.closest("[data-fit]"), p = current(); if (!b || !p) return;
+    const t = tagsFor(p), cur = t.sel && t.fr[t.sel];
+    if (!fitOpen && cur?.fit === b.dataset.fit && !spotMoved(t)) { fitOpen = true; previewFields(p); return; }   // collapsed: reopen the options
+    fitOpen = false;
     confirmSpot(p, b.dataset.fit); });
   $("fieldBtn").onclick = () => showField(!fieldOn);
   bindDispenser();
@@ -1389,7 +1456,7 @@ function renderSeasonBar() {
   const chip = p => `<span class="sb-p ${p.season}" title="${p.approx ? "Estimated from last year's dates" : "Published dates"}"><b>${p.label}</b> ${fmtRange(p)}</span>`;
   el.innerHTML = `<details><summary><span class="sb-k">Council bookings now</span>
       ${now.length ? now.map(chip).join("") : `<span class="sb-p">Between phases</span>`}
-      <span class="sb-map">${mapSeason === "winter" ? "❄ Winter" : "☀ Summer"} maps shown</span></summary>
+      <span class="sb-map" title="Council field maps shown for this season">${mapSeason === "winter" ? "❄ Winter" : "☀ Summer"} maps</span></summary>
     <div class="sb-more"><div><span class="sb-k">Next</span> ${next.map(p => `<span class="sb-p ${p.season}"><b>${p.label}</b> from ${p.approx ? "≈ " : ""}${fmtDay(p.from)}</span>`).join("")}</div>
       <div class="muted">≈ = estimated from this year's published dates (same week of the year). Confirm on the council's
         <a href="${COUNCIL_LINKS[0].url}" target="_blank" rel="noopener">How to book our sports facilities</a> page ·

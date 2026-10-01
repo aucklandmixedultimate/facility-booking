@@ -58,7 +58,6 @@
             <article class="card" id="card">
               <div class="handle" id="handle" title="Drag this bar left, right or up to decide">
                 <div class="title"><h2 id="parkName">—</h2><span class="chip plain" id="parkRegion"></span><span id="decChip"></span></div>
-                <div class="hint" id="handleHint">Drag here to decide · ← reject · → shortlist · ↑ top pick</div>
                 <div class="stamp yes" id="stYes">SHORTLIST</div><div class="stamp no" id="stNo">REJECT</div><div class="stamp top" id="stTop">TOP PICK</div>
               </div>
               <div class="mapbox">
@@ -93,10 +92,12 @@
                     <button data-fit="full">1 full field</button>
                     <button data-fit="multi">2+ fields</button>
                   </span>
-                  <button class="fb-next" id="saveNextBtn" hidden title="Save this park's field ratings and move on to its next unrated council field">💾 Save · next field</button>
+                  <span class="fb-lights" id="lightStep" hidden title="Light poles for this field: placed along its long sides until you move one">💡<button type="button" data-lstep="-2" aria-label="Two fewer lights">−</button><b id="lightN">4</b><button type="button" data-lstep="2" aria-label="Two more lights">+</button></span>
+                  <button class="fb-cart" id="fitCartBtn" hidden title="Add this field to the booker's cart">🛒 Add to cart</button>
+                  <button class="fb-next" id="saveNextBtn" hidden title="Save this park's field ratings and move on to its next unrated council field">💾 Next field</button>
                 </div>
                 <div class="legend" id="legend" hidden></div>
-                <div class="rotatehint" id="rotateHint" hidden>Move the mouse to turn · drag the map to move · click to lock it there</div>
+                <div class="rotatehint" id="rotateHint" hidden>Mouse turns · drag moves · click locks</div>
                 <div class="dispenser" id="dispenser" title="Drag a bulb onto each light pole. Drag a bulb back here to remove it.">
                   <div class="bulbsrc" id="bulbSrc" role="button" aria-label="Drag a light bulb onto a light pole">💡</div>
                   <span class="dcount" id="bulbCount">0</span>
@@ -129,7 +130,7 @@
                   <label class="k" for="fieldsIn">Fields</label><input id="fieldsIn" placeholder="Lock the field to pick the nearest council field">
                   <label class="k" for="notesIn">Notes</label><input id="notesIn" placeholder="Anything worth knowing">
                 </div>
-                <div class="links"><a id="gmaps" target="_blank" rel="noopener">Google Maps ↗</a><span id="scaleNote"></span><span id="fieldList"></span></div>
+                <div class="links"><a id="gmaps" target="_blank" rel="noopener">Google Maps ↗</a><span id="scaleNote" hidden></span><span id="fieldList"></span></div>
               </div>
               <div class="info bookbar" id="bookBar" hidden></div>
               <div class="info cityinfo" id="cityInfo" hidden></div>
@@ -154,7 +155,7 @@
           </div>
           <div class="list" id="list"></div>
           <div class="railtools"><button id="exportBtn">Download CSV</button></div>
-          <p class="help">Scroll zooms the map; a few clicks out swaps the council map for satellite. Drag bulbs from the 💡 dispenser onto light poles (drag one back to remove it). Click a council field area to rate it (or edit its rating); its lights go with it. Or unlock the centre button, turn and move the field, lock it, and rate the closest field. ◆ parks are privately managed. Keys: <kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd>, <kbd>S</kbd> later, <kbd>Z</kbd> undo, <kbd>1</kbd>–<kbd>5</kbd> quality, <kbd>Enter</kbd> lock/unlock, <kbd>C</kbd> Auckland, <kbd>T</kbd> field, <kbd>M</kbd> next map.</p>
+          <details class="help"><summary>Help &amp; keys</summary>Scroll zooms the map; a few clicks out swaps the council map for satellite. Drag bulbs from the 💡 dispenser onto light poles (drag one back to remove it). Click a council field area to rate it (or edit its rating); its lights go with it. Or unlock the centre button, turn and move the field, lock it, and rate the closest field. ◆ parks are privately managed. Keys: <kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd>, <kbd>S</kbd> later, <kbd>Z</kbd> undo, <kbd>1</kbd>–<kbd>5</kbd> quality, <kbd>Enter</kbd> lock/unlock, <kbd>C</kbd> Auckland, <kbd>T</kbd> field, <kbd>M</kbd> next map.</details>
         </aside>
       </div>
     </div>
