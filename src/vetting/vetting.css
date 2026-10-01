@@ -544,3 +544,10 @@ body.gated .backbtn .bl{display:inline!important}
   body.mapfull .handle{padding:2px 8px}body.mapfull .title h2{font-size:15px}
 }
 @media (prefers-reduced-motion:reduce){.wherepin{animation:none}}
+
+/* Lights button: ❓ unknown → 🚫 none → 💡 lights (tap adds poles); a small ? resets */
+.bulbsrc.unknown{background:rgba(255,255,255,.18);border-color:#cbd5e1;font-size:20px}
+.bulbsrc.dark{background:rgba(179,55,45,.35);border-color:#f87171;font-size:19px}
+.bulbsrc.lit{background:rgba(255,212,0,.35);border-color:var(--field)}
+.dispenser .lreset{width:22px;height:22px;border-radius:50%;padding:0;font-size:12px;font-weight:800;line-height:1;max-width:none;background:rgba(255,255,255,.12)}
+.dispenser .lreset[hidden],.dcount[hidden]{display:none}

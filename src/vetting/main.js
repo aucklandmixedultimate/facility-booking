@@ -69,10 +69,11 @@ let seasonPick = COUNCIL_NOW.mapSeason;
 const mapIndex = p => mapIdx[p.id] ?? Math.max(0, p.maps.findIndex(m => m.season === seasonPick));
 // Interests: which parks are served. Areas (regions; none ticked = all) and provider
 // (council-run and/or privately operated).
-let interests = store.get("vet-interests", { regions: [], council: true, priv: true });
+let interests = { regions: [], council: true, priv: true, lit: true, dark: true, ...store.get("vet-interests", {}) };
 const interestOk = p => (!interests.regions.length || interests.regions.includes(p.region))
-  && (privOps(p).length ? interests.priv : interests.council);
-const interestsSet = () => interests.regions.length > 0 || !interests.council || !interests.priv;
+  && (privOps(p).length ? interests.priv : interests.council)
+  && (reviews[p.id]?.lights === "none" ? interests.dark : interests.lit);
+const interestsSet = () => interests.regions.length > 0 || !interests.council || !interests.priv || !interests.lit || !interests.dark;
 let cursor = 0, busy = false;
 let dims = store.get("vet-field-dims", WFDF);
 let fieldOn = store.get("vet-field-on", true);
@@ -207,6 +208,7 @@ function renderInterests() {
   const btn = (k, v, label, on, title) => `<button data-int="${k}"${v ? ` data-val="${esc(v)}"` : ""} aria-pressed="${on}" title="${title}">${label}</button>`;
   $("interestRow").innerHTML = allRegions().map(r => btn("region", r, esc(r), inc.includes(r), `${esc(r)} parks`)).join("")
     + `<i class="sep"></i>` + btn("council", "", "🏛 Council", interests.council, "Council-run parks") + btn("priv", "", "◆ Private", interests.priv, "Privately operated parks")
+    + `<i class="sep"></i>` + btn("lit", "", "💡 Lights / ?", interests.lit, "Parks with lights, or not known yet") + btn("dark", "", "🚫 No lights", interests.dark, "Parks known to have no lights")
     + (interestsSet() ? `<button data-int="reset" title="Serve every park again">↺ All</button>` : "");
   $("interestBtn").setAttribute("aria-pressed", String(interestsSet()));
 }
@@ -305,7 +307,6 @@ function syncFromFields(t) {
   if (!t.fieldsManual || !t.fields.trim()) { t.fields = rated.map(x => x.name).join(", "); t.fieldsManual = false; }
   const n = allLights(t).length;
   if (n && t.lights !== "full" && t.lights !== "training") t.lights = "full";
-  if (!n && (t.lights === "full")) t.lights = "unknown";
 }
 const allLights = t => t.lightPts.concat(...Object.values(t.fr).map(x => x.lights || []));
 // Bulbs go to the selected field; with no field selected they're park-wide.
@@ -492,13 +493,11 @@ function drawLights(p) {
       $("dispenser").classList.remove("target");
       if (lastPointer && overDispenser(lastPointer)) return removeLight(p, k);
       snap(p); const l = mk.getLatLng(); arr[k] = [+l.lat.toFixed(6), +l.lng.toFixed(6)];
-      if (t.sel && t.fr[t.sel]) { t.fr[t.sel].lightsAuto = false; renderLightStep(p); }
+      if (t.sel && t.fr[t.sel]) t.fr[t.sel].lightsAuto = false;
     });
     mk.addTo(lightLayer);
   });
-  $("bulbCount").textContent = arr.length;
-  $("dispenser").title = t.sel ? `Lights for ${t.sel}: drag a bulb onto each pole, drag one back to remove it` : "Park-wide lights: drag a bulb onto each pole (select a field to give it its own lights)";
-  $("noLightsBtn").setAttribute("aria-pressed", String(t.lights === "none"));
+  renderDispenser(p);
 }
 let lastPointer = null;
 function overDispenser(ev) {
@@ -521,27 +520,33 @@ function removeLight(p, k) {
 }
 // Drag a bulb out of the dispenser: a ghost follows the pointer and drops where released.
 function bindDispenser() {
-  const src = $("bulbSrc"); let ghost = null;
+  const src = $("bulbSrc"); let ghost = null, start = null;
   document.addEventListener("pointermove", e => { lastPointer = e; }, { passive: true });
   document.addEventListener("pointerup", e => { lastPointer = e; }, { passive: true, capture: true });
+  // A tap cycles the state; moving more than a few pixels drags out a bulb instead.
   src.addEventListener("pointerdown", e => {
     if (!current() || view !== "park") return;
-    e.preventDefault(); src.setPointerCapture(e.pointerId);
-    ghost = document.createElement("div"); ghost.className = "bulbghost"; ghost.textContent = "💡";
-    ghost.style.left = e.clientX + "px"; ghost.style.top = e.clientY + "px"; document.body.appendChild(ghost);
+    e.preventDefault(); src.setPointerCapture(e.pointerId); start = { x: e.clientX, y: e.clientY };
   });
-  src.addEventListener("pointermove", e => { if (ghost) { ghost.style.left = e.clientX + "px"; ghost.style.top = e.clientY + "px"; } });
-  const drop = e => {
-    if (!ghost) return; ghost.remove(); ghost = null;
-    const p = current(), r = $("map").getBoundingClientRect();
+  src.addEventListener("pointermove", e => {
+    if (!start) return;
+    if (!ghost && Math.hypot(e.clientX - start.x, e.clientY - start.y) > 6) {
+      ghost = document.createElement("div"); ghost.className = "bulbghost"; ghost.textContent = "💡"; document.body.appendChild(ghost);
+    }
+    if (ghost) { ghost.style.left = e.clientX + "px"; ghost.style.top = e.clientY + "px"; }
+  });
+  src.addEventListener("pointerup", e => {
+    const p = current(); if (!start) return; start = null;
+    if (!ghost) { if (p) tapLights(p); return; }
+    ghost.remove(); ghost = null;
+    const r = $("map").getBoundingClientRect();
     if (!p || overDispenser(e) || e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) return;
+    const t = tagsFor(p); if (!hasLights(t)) t.lights = "full";   // dragging a bulb out answers "lights"
     addLight(p, map.containerPointToLatLng([e.clientX - r.left, e.clientY - r.top]));
-  };
-  src.addEventListener("pointerup", drop);
-  src.addEventListener("pointercancel", () => { if (ghost) { ghost.remove(); ghost = null; } });
-  $("noLightsBtn").onclick = () => { const p = current(); if (!p) return; snap(p); const t = tagsFor(p);
-    if (t.lights === "none") t.lights = "unknown"; else { t.lights = "none"; t.lightPts = []; Object.values(t.fr).forEach(x => { x.lights = []; }); }
-    drawLights(p); renderTags(p); };
+  });
+  src.addEventListener("pointercancel", () => { start = null; if (ghost) { ghost.remove(); ghost = null; } });
+  src.addEventListener("keydown", e => { if ((e.key === "Enter" || e.key === " ") && current()) { e.preventDefault(); tapLights(current()); } });
+  $("lightsReset").onclick = e => { e.stopPropagation(); const p = current(); if (p) resetLights(p); };
 }
 
 // ── Frisbee field overlay: frame-centred, true scale, centre button locks/unlocks rotation ─
@@ -621,7 +626,7 @@ function lockField() {
   const t = tagsFor(p), n = nearestFields(p), key = n ? n.key : "This spot";
   const cur = t.fr[key] ||= { name: key, fit: "unknown", lights: [] };
   Object.assign(cur, { name: key, lat: +pin.lat.toFixed(6), lon: +pin.lng.toFixed(6), angle: Math.round(angle) });
-  if (cur.fit && cur.fit !== "unknown" && cur.lightsAuto !== false) placeLights(p, cur);
+  if (cur.fit && cur.fit !== "unknown" && hasLights(t) && cur.lightsAuto !== false && cur.lightCount) placeLights(p, cur);
   syncFromFields(t);
   t.sel = key; fitArmed = true;
   $("fitPop").hidden = false; drawParkFields(p); drawLights(p); previewFields(p); renderTags(p); renderCentre();
@@ -654,7 +659,6 @@ function previewFields(p) {
   updateActions();
 
   $("saveNextBtn").hidden = !IS_ADMIN || !(curRating(t)?.fit && curRating(t).fit !== "unknown") || moved;
-  renderLightStep(p);
 }
 function afterMove() {
   const p = current(); if (!p) return;
@@ -675,7 +679,7 @@ function confirmSpot(p, fit) {
   t.fr[t.sel] = cur;
   // Rated fields get light poles placed along their long sides (4 to start) until a pole
   // is moved by hand; cleared ratings keep whatever lights they had.
-  if (cur.fit !== "unknown" && cur.lightsAuto !== false) { cur.lightCount ??= 4; placeLights(p, cur); }
+  if (cur.fit !== "unknown" && hasLights(t) && cur.lightsAuto !== false && cur.lightCount) placeLights(p, cur);
   syncFromFields(t);
   // Rated: the decision buttons come back; the bar stays for lights and "Next field".
   fitArmed = false;
@@ -710,19 +714,43 @@ function placeLights(p, fr) {
   for (let i = 0; i < per; i++) out.push(at(along(i), -first));
   fr.lights = out;
 }
-function renderLightStep(p) {
-  const t = p && tagsFor(p), fr = t?.sel && t.fr[t.sel], on = !!(fr && fr.fit && fr.fit !== "unknown" && fr.lat != null);
-  $("lightStep").hidden = !on || !IS_ADMIN;
-  if (!on) return;
-  $("lightN").textContent = fr.lightsAuto === false ? (fr.lights || []).length : (fr.lightCount ?? 4);
-  $("lightStep").classList.toggle("manual", fr.lightsAuto === false);
-  $("lightStep").title = fr.lightsAuto === false ? "Lights placed by hand — drag bulbs to change them" : "Light poles for this field: placed along its long sides until you move one";
+// The lights button cycles ❓ unknown → 🚫 no lights → 💡 lights. In 💡 each tap adds two
+// poles along the selected field's long sides, up to 8, then the next tap goes back to 0.
+// A bulb can be dragged out in any state (that also answers "lights"). The small ? resets
+// the park's lights to unknown.
+const LIGHTS_MAX = 8;
+const hasLights = t => t.lights === "full" || t.lights === "training";
+function renderDispenser(p) {
+  const t = tagsFor(p), arr = activeLights(t), lit = hasLights(t), fr = t.sel && t.fr[t.sel];
+  const src = $("bulbSrc");
+  src.textContent = lit ? "💡" : t.lights === "none" ? "🚫" : "❓";
+  src.className = "bulbsrc " + (lit ? "lit" : t.lights === "none" ? "dark" : "unknown");
+  src.setAttribute("aria-label", lit ? `Lights: ${arr.length} pole${arr.length === 1 ? "" : "s"}. Tap to add two (up to ${LIGHTS_MAX}), or drag a bulb onto a pole`
+    : t.lights === "none" ? "No lights. Tap for lights, or drag a bulb onto a pole" : "Lights unknown. Tap for no lights, or drag a bulb onto a pole");
+  $("dispenser").title = lit ? (fr?.lat != null ? `${t.sel}: tap to add two poles (up to ${LIGHTS_MAX}, then back to 0); drag bulbs to place them by hand` : "Lights: drag a bulb onto each pole (lock the field on a council field to place poles by tapping)")
+    : t.lights === "none" ? "No lights — tap if there are lights" : "Lights unknown — tap for no lights, tap again for lights";
+  $("bulbCount").hidden = !lit; $("bulbCount").textContent = arr.length;
+  $("lightsReset").hidden = !(t.lights !== "unknown" || allLights(t).length);
 }
-function stepLights(d) {
-  const p = current(); if (!p) return; const t = tagsFor(p), fr = t.sel && t.fr[t.sel];
-  if (!fr || fr.lat == null || fr.lightsAuto === false) return;
-  snap(p); fr.lightCount = Math.max(0, (fr.lightCount ?? 4) + d);
-  placeLights(p, fr); syncFromFields(t); drawLights(p); drawParkFields(p); renderTags(p); renderLightStep(p);
+function tapLights(p) {
+  const t = tagsFor(p); snap(p);
+  if (t.lights === "unknown") { t.lights = "none"; t.lightPts = []; Object.values(t.fr).forEach(x => { x.lights = []; delete x.lightCount; }); }
+  else if (t.lights === "none") t.lights = "full";
+  else {
+    const fr = t.sel && t.fr[t.sel];
+    if (!fr || fr.lat == null) { setStatus("Lock the field on a council field to place its poles by tapping, or drag bulbs onto the poles."); renderDispenser(p); return; }
+    const cur = fr.lightsAuto === false ? (fr.lights || []).length : (fr.lightCount || 0);
+    fr.lightCount = cur >= LIGHTS_MAX ? 0 : Math.min(LIGHTS_MAX, (cur % 2 ? cur + 1 : cur + 2));
+    fr.lightsAuto = true; placeLights(p, fr);
+  }
+  syncFromFields(t); drawLights(p); drawParkFields(p); renderTags(p);
+}
+function resetLights(p) {
+  const t = tagsFor(p); snap(p);
+  t.lights = "unknown"; t.lightPts = [];
+  Object.values(t.fr).forEach(x => { x.lights = []; delete x.lightCount; delete x.lightsAuto; });
+  syncFromFields(t); drawLights(p); drawParkFields(p); renderTags(p);
+  setStatus(`${p.name}: lights reset to unknown.`);
 }
 function renderCentre() {
   const p = current(), t = p ? tagsFor(p) : null, moved = !!t && spotMoved(t);
@@ -1597,7 +1625,6 @@ function bind() {
   let swallowClick = false;   // a twist ends in a click on the button; don't let it lock
   $("centreBtn").addEventListener("pointerup", () => { if (twist?.moved) swallowClick = true; twist = null; });
   $("centreBtn").onclick = e => { e.stopPropagation(); if (swallowClick) { swallowClick = false; return; } if (rotating) lockField(); else setRotating(true); };
-  $("lightStep").addEventListener("click", e => { const b = e.target.closest("[data-lstep]"); if (b) { e.stopPropagation(); stepLights(+b.dataset.lstep); } });
   $("actions").addEventListener("click", e => { const b = e.target.closest("[data-fit]"), p = current(); if (!b || !p) return;
     confirmSpot(p, b.dataset.fit); });
   $("helpBtn").onclick = () => { const el = $("helpPanel"); el.hidden = !el.hidden; $("helpBtn").setAttribute("aria-expanded", String(!el.hidden)); };
@@ -1638,12 +1665,14 @@ function bind() {
   $("interestRow").addEventListener("click", e => {
     const b = e.target.closest("[data-int]"); if (!b) return;
     const k = b.dataset.int;
-    if (k === "reset") interests = { regions: [], council: true, priv: true };
+    if (k === "reset") interests = { regions: [], council: true, priv: true, lit: true, dark: true };
     else if (k === "region") {
       const all = allRegions(), inc = new Set(interests.regions.length ? interests.regions : all);
       inc.has(b.dataset.val) ? inc.delete(b.dataset.val) : inc.add(b.dataset.val);
       interests.regions = !inc.size || inc.size === all.length ? [] : all.filter(r => inc.has(r));
-    } else { interests[k] = !interests[k]; if (!interests.council && !interests.priv) interests[k === "council" ? "priv" : "council"] = true; }
+    } else { interests[k] = !interests[k];
+      if (!interests.council && !interests.priv) interests[k === "council" ? "priv" : "council"] = true;
+      if (!interests.lit && !interests.dark) interests[k === "lit" ? "dark" : "lit"] = true; }
     store.set("vet-interests", interests); cursor = 0; if (view === "park" && !focusId) shownPark = null;
     renderInterests(); render(); });
   ["region", "mode", "mapsOnly", "order"].forEach(id => $(id).addEventListener("change", () => {
