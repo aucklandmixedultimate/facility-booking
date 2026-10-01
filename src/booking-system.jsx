@@ -386,7 +386,7 @@ function buildCouncilPayload(bkgs, approxPlayers = {}) {
     purpose: "training", sport: "Other",
     activityName: `Training - ${AMUA_INFO.name}`,
     org: { name: AMUA_INFO.name, orgType: AMUA_INFO.council?.orgType || "Club/Team", rso: AMUA_INFO.council?.rso || "",
-      postalAddressSearch: (AMUA_INFO.council?.postalAddressSearch || "").trim() || String(AMUA_INFO.address || "").split(/\n+/).map(x => x.trim()).filter(Boolean).join(" "), keyCodes: AMUA_INFO.council?.keyCodes || "",
+      postalAddressSearch: (AMUA_INFO.council?.postalAddressSearch || "").trim() || String(AMUA_INFO.address || "").split(/\n+/).map(x => x.trim()).filter(Boolean).join(" "), keyCodes: (AMUA_INFO.council?.keyCodes || "").trim() || "N/A",
       primary: ct.operations || {}, secondary: ct.secondary || {}, keyHolder: ct.keyHolder || {} },
     parks: list };
 }
@@ -2212,7 +2212,7 @@ function AmuaDetailsModal({ value, onSave, onClose }) {
         ))}
         {row("Address search", <input style={si} value={d.council.postalAddressSearch||""} onChange={e=>setCouncil("postalAddressSearch", e.target.value)} placeholder={d.address ? `Blank = postal address: ${d.address.split(/\n+/).join(" ")}` : "Text to type into the council's address lookup"}/>)}
         {d.council.postalAddressSearch && <div style={{fontSize:11,color:"#b45309",margin:"-4px 0 6px"}}>The council widget types this, not the postal address above. Clear it to use the postal address.</div>}
-        {row("Key / access codes", <input style={si} value={d.council.keyCodes||""} onChange={e=>setCouncil("keyCodes", e.target.value)} placeholder="Council keys or codes held, e.g. None yet"/>)}
+        {row("Key / access codes", <input style={si} value={d.council.keyCodes||""} onChange={e=>setCouncil("keyCodes", e.target.value)} placeholder="Council keys or codes held (blank = N/A)"/>)}
         {row("Players per team", <input style={si} type="number" min="1" value={d.council.playersPerTeam||""} onChange={e=>setCouncil("playersPerTeam", e.target.value)} placeholder="Used when a booker has no player count"/>)}
       </div>
       <div style={{display:"flex",justifyContent:"flex-end",gap:8}}>
