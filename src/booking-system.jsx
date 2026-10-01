@@ -386,7 +386,7 @@ function buildCouncilPayload(bkgs, approxPlayers = {}) {
     purpose: "training", sport: "Other",
     activityName: `Training - ${AMUA_INFO.name}`,
     org: { name: AMUA_INFO.name, orgType: AMUA_INFO.council?.orgType || "Club/Team", rso: AMUA_INFO.council?.rso || "",
-      postalAddressSearch: AMUA_INFO.council?.postalAddressSearch || AMUA_INFO.address || "", keyCodes: AMUA_INFO.council?.keyCodes || "",
+      postalAddressSearch: (AMUA_INFO.council?.postalAddressSearch || "").trim() || String(AMUA_INFO.address || "").split(/\n+/).map(x => x.trim()).filter(Boolean).join(" "), keyCodes: AMUA_INFO.council?.keyCodes || "",
       primary: ct.operations || {}, secondary: ct.secondary || {}, keyHolder: ct.keyHolder || {} },
     parks: list };
 }
@@ -2210,7 +2210,8 @@ function AmuaDetailsModal({ value, onSave, onClose }) {
             {["Club/Team","Regional sports organisation","School","Social","Other"].map(o=><option key={o} value={o}>{o}</option>)}
           </select>
         ))}
-        {row("Address search", <input style={si} value={d.council.postalAddressSearch||""} onChange={e=>setCouncil("postalAddressSearch", e.target.value)} placeholder="Text to type into the council's address lookup"/>)}
+        {row("Address search", <input style={si} value={d.council.postalAddressSearch||""} onChange={e=>setCouncil("postalAddressSearch", e.target.value)} placeholder={d.address ? `Blank = postal address: ${d.address.split(/\n+/).join(" ")}` : "Text to type into the council's address lookup"}/>)}
+        {d.council.postalAddressSearch && <div style={{fontSize:11,color:"#b45309",margin:"-4px 0 6px"}}>The council widget types this, not the postal address above. Clear it to use the postal address.</div>}
         {row("Key / access codes", <input style={si} value={d.council.keyCodes||""} onChange={e=>setCouncil("keyCodes", e.target.value)} placeholder="Council keys or codes held, e.g. None yet"/>)}
         {row("Players per team", <input style={si} type="number" min="1" value={d.council.playersPerTeam||""} onChange={e=>setCouncil("playersPerTeam", e.target.value)} placeholder="Used when a booker has no player count"/>)}
       </div>
@@ -11061,9 +11062,9 @@ export default function App() {
   }
 
   async function persistSetting(key, value) {
-    if(!configured) return;
-    try { await sb.upsert("settings", { key, value, updated_at: new Date().toISOString() }, "key"); }
-    catch(e) { console.warn("persistSetting "+key+":", e.message); }
+    if(!configured) return true;
+    try { await sb.upsert("settings", { key, value, updated_at: new Date().toISOString() }, "key"); return true; }
+    catch(e) { console.warn("persistSetting "+key+":", e.message); return false; }
   }
 
   async function handleSyncMonth(year, month) {
@@ -11824,7 +11825,8 @@ export default function App() {
   function saveAmuaOrg(next) {
     applyAmuaOrg(next); setAmuaOrg(next);
     try{localStorage.setItem("fb_amua_org",JSON.stringify(next));}catch{ /* ignore */ }
-    persistSetting("amua_org", next);
+    // Other devices and the council widget read the shared setting, so say if it didn't save.
+    persistSetting("amua_org", next).then(ok => { if (!ok) alert("AMUA details were saved in this browser only — the shared copy (used by the council widget) couldn't be updated. Check you're signed in as an admin and try again."); });
     logActivity("settings_change", { key:"amua_org" });
   }
 
