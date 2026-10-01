@@ -269,7 +269,7 @@ const AMUA_INFO = {
   gstNumber: "",
   bank:      "",
   contacts:  {},   // { operations|secondary|keyHolder: { name, position, email, phone } }
-  council:   {},   // { rso, orgType, postalAddressSearch } — council application answers
+  council:   {},   // { rso, orgType, postalAddressSearch, keyCodes, playersPerTeam } — council application answers
 };
 const AMUA_CONTACT_ROLES = [
   { key:"operations", label:"Operations contact", hint:"Main contact for facility providers, printed on invoices, and AMUA's point of contact in the CPSA and council extensions." },
@@ -374,7 +374,7 @@ function buildCouncilPayload(bkgs, approxPlayers = {}) {
   });
   const list = Object.values(parks).map(p => {
     p.dates.sort();
-    const players = [...p.bookers].reduce((n, e) => n + (parseInt(approxPlayers[e], 10) || 0), 0);
+    const players = [...p.bookers].reduce((n, e) => n + (parseInt(approxPlayers[e], 10) || parseInt(AMUA_INFO.council?.playersPerTeam, 10) || 0), 0);
     return { region: p.region, park: p.park, fields: p.fields, firstDate: p.dates[0], lastDate: p.dates[p.dates.length - 1], dates: p.dates,
       days: Object.fromEntries(Object.entries(p.days).map(([d, t]) => [d, { start: hh(t.start), end: hh(t.end) }])),
       teams: p.bookers.size, players: players || null, bookingIds: p.bookingIds };
@@ -386,7 +386,7 @@ function buildCouncilPayload(bkgs, approxPlayers = {}) {
     purpose: "training", sport: "Other",
     activityName: `Training - ${AMUA_INFO.name}`,
     org: { name: AMUA_INFO.name, orgType: AMUA_INFO.council?.orgType || "Club/Team", rso: AMUA_INFO.council?.rso || "",
-      postalAddressSearch: AMUA_INFO.council?.postalAddressSearch || AMUA_INFO.address || "",
+      postalAddressSearch: AMUA_INFO.council?.postalAddressSearch || AMUA_INFO.address || "", keyCodes: AMUA_INFO.council?.keyCodes || "",
       primary: ct.operations || {}, secondary: ct.secondary || {}, keyHolder: ct.keyHolder || {} },
     parks: list };
 }
@@ -2211,6 +2211,8 @@ function AmuaDetailsModal({ value, onSave, onClose }) {
           </select>
         ))}
         {row("Address search", <input style={si} value={d.council.postalAddressSearch||""} onChange={e=>setCouncil("postalAddressSearch", e.target.value)} placeholder="Text to type into the council's address lookup"/>)}
+        {row("Key / access codes", <input style={si} value={d.council.keyCodes||""} onChange={e=>setCouncil("keyCodes", e.target.value)} placeholder="Council keys or codes held, e.g. None yet"/>)}
+        {row("Players per team", <input style={si} type="number" min="1" value={d.council.playersPerTeam||""} onChange={e=>setCouncil("playersPerTeam", e.target.value)} placeholder="Used when a booker has no player count"/>)}
       </div>
       <div style={{display:"flex",justifyContent:"flex-end",gap:8}}>
         <button onClick={onClose} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#64748b"})}>Cancel</button>
