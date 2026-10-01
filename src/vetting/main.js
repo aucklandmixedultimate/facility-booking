@@ -493,12 +493,7 @@ function previewFields(p) {
   $("fitPop").querySelectorAll("[data-fit]").forEach(b => { b.setAttribute("aria-pressed", String(b.dataset.fit === chosen));
     b.hidden = !!chosen && !fitOpen && b.dataset.fit !== chosen;
     b.title = chosen && !fitOpen && b.dataset.fit === chosen ? "Change the fit" : ""; });
-  // Add to cart (the booker's cart, as in Book mode) for a rated field.
-  const st = t.sel && curRating(t) && !moved ? locState(cartId(p, t.sel)) : undefined;
-  $("fitCartBtn").hidden = st === undefined || !IS_ADMIN;
-  if (st !== undefined) { $("fitCartBtn").textContent = st === "active" ? "📌 Active" : st === "cart" ? "🛒 In cart" : "🛒 Add to cart";
-    $("fitCartBtn").setAttribute("aria-pressed", String(!!st)); $("fitCartBtn").disabled = st === "active";
-    $("fitCartBtn").title = st === "active" ? "Already an active booking" : st === "cart" ? `In ${whoBooks()}'s cart — click to remove` : `Add to ${whoBooks()}'s cart`; }
+
   $("saveNextBtn").hidden = !IS_ADMIN || !curRating(t) || moved;
   renderLightStep(p);
 }
@@ -727,6 +722,7 @@ function setView(v, { refit } = {}) {
   $("card").classList.toggle("city", v === "city"); $("card").classList.toggle("book", v === "book");
   $("cityInfo").hidden = v !== "city"; $("legend").hidden = v !== "city";
   $("bookPanel").hidden = v !== "book";
+  $("railBox").hidden = v !== "book";
   applyModeUi();
   if (v === "book" && rotating) setRotating(false);
   if (v === "city") {
@@ -927,8 +923,8 @@ function renderBook() {
   $("bookPanel").innerHTML = `<div class="bk-who"><h3>📌 Active bookings / 🛒 Cart</h3><label>for ${IS_ADMIN ? `<input id="bookWho" list="bookWhoList" value="${esc(who)}" title="The booker whose cart this is">` : `<b>${esc(who)}</b>`}</label>
       <datalist id="bookWhoList">${known.map(e => `<option value="${esc(e)}">`).join("")}</datalist></div>
     ${contactNote(who)}
-    <p class="muted">1. In <b>📅 Book</b> mode, open a park from the Auckland map and click its field areas to add them here.
-      2. <b>Save them as active bookings</b>. 3. Book dates and times for them in Facility Booking (Provider → Location → Facility).</p>
+    <p class="muted">${IS_ADMIN ? `<b>★ Top pick</b> or <b>✓ Shortlist</b> a park and its rated fields become active here (Reject removes them). Then book dates and times in Facility Booking (Provider → Location → Facility).`
+      : `1. In <b>📅 Book</b> mode, open a park from the Auckland map and click its field areas to add them here. 2. <b>Save them as active bookings</b>. 3. Book dates and times for them in Facility Booking (Provider → Location → Facility).`}</p>
     <section class="bk-sec"><h4>🛒 In the cart <span class="muted">${cart.length} field${cart.length === 1 ? "" : "s"}${cart.length ? ` at ${parks(cart)} park${parks(cart) === 1 ? "" : "s"}` : ""} · not booked yet</span></h4>
       <div class="bk-list">${cart.length ? cart.map(x => `<div class="bk-row"><span class="n">${esc(x.park)} – ${esc(x.field)}</span>${tag(x)}
         ${x.kind === "community" ? "" : `<button data-bkopen="${esc(x.park_id)}" title="Open this park in Book mode">open</button>`}
@@ -945,6 +941,7 @@ function renderTabs() { const c = cartOf().length, a = activeOf().length;
 function applyModeUi() {
   const book = workMode === "book";
   $("modeRate").setAttribute("aria-checked", String(!book)); $("modeBook").setAttribute("aria-checked", String(book));
+  document.querySelector(".modetabs").hidden = true;
   $("card").classList.toggle("bookmode", book);
   $("info").hidden = view !== "park" || book; $("bookBar").hidden = view !== "park" || !book;
   $("actions").hidden = view !== "park" || book;
@@ -952,7 +949,9 @@ function applyModeUi() {
   if (book) $("fitPop").hidden = true;
 }
 function setMode(m) {
-  if (!IS_ADMIN) m = "book";
+  // One way into the active fields: admins decide (top pick / shortlist adds the park's
+  // rated fields); bookers, who don't rate, pick fields in Book mode.
+  m = IS_ADMIN ? "rate" : "book";
   workMode = m; store.set("vet-work-mode", m); applyModeUi();
   const p = current(); if (p && view === "park") { drawParkFields(p); drawLights(p); }
   render();
@@ -1294,6 +1293,7 @@ async function decide(decision) {
   const rev = buildReview(p, t, decision, withField);
   await new Promise(r => setTimeout(r, matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 220));
   const ok = await save(p.id, rev);
+  if (ok) await decisionToActive(p, t, decision);
   const fromCity = !!focusId && focusFrom === "city";
   if (ok && focusFrom === "back") { focusId = null; focusFrom = null; }
   if (ok) { delete draft[p.id]; delete edits[p.id]; later.delete(p.id); if (!fromCity && $("mode").value !== "todo") cursor++; }
@@ -1304,6 +1304,29 @@ async function decide(decision) {
   busy = false;
   if (ok && fromCity) { focusId = null; setView("city"); setStatus(`Saved ${p.name} — ${suitWord(reviews[p.id]).toLowerCase()}.`); return; }
   render();
+}
+// A decision is the one way a field becomes bookable: Top pick or Shortlist adds the park's
+// rated fields (or the whole park, when it has none rated) to the booker's active fields;
+// Reject takes the park's fields off them.
+async function decisionToActive(p, t, decision) {
+  const who = whoBooks(), before = [...(bookLocs[who] || [])], list = before.filter(x => x.park_id !== p.id || decision !== "no");
+  if (decision !== "no") {
+    const rated = Object.values(t.fr).filter(x => x.fit && x.fit !== "unknown").map(x => x.name);
+    const keys = rated.length ? rated : ["Whole park"], wf = parkWorkflow(p), at = new Date().toISOString();
+    keys.forEach(key => {
+      const id = cartId(p, key), i = list.findIndex(x => x.id === id);
+      if (i >= 0) { list[i] = { ...list[i], status: "active", activated_at: list[i].activated_at || at }; return; }
+      const f = fieldKeys(p).find(x => x.key === key)?.f, c = f?.c || [p.lat, p.lon];
+      list.push({ id, park_id: p.id, park: p.name, region: p.region, field: key, lat: c[0], lon: c[1], kind: wf.kind, operator: wf.operator,
+        status: "active", added_at: at, activated_at: at, added_by: session?.user?.email || "", decision });
+    });
+  }
+  if (JSON.stringify(list) === JSON.stringify(before)) return;
+  bookLocs[who] = list;
+  if (!(await saveBookLocs())) { bookLocs[who] = before; return; }
+  const n = list.filter(x => x.park_id === p.id).length;
+  setStatus(decision === "no" ? `Rejected ${p.name}: removed from ${who}'s active fields.` : `${p.name}: ${n} field${n === 1 ? "" : "s"} now active for ${who} — bookable in Facility Booking.`);
+  renderTabs();
 }
 function buildReview(p, t, decision, withField) {
   const prevPl = reviews[p.id]?.placement;
@@ -1389,7 +1412,6 @@ function bind() {
   $("centreBtn").addEventListener("pointerup", () => { if (twist?.moved) swallowClick = true; twist = null; });
   $("centreBtn").onclick = e => { e.stopPropagation(); if (swallowClick) { swallowClick = false; return; } if (rotating) lockField(); else setRotating(true); };
   $("lightStep").addEventListener("click", e => { const b = e.target.closest("[data-lstep]"); if (b) { e.stopPropagation(); stepLights(+b.dataset.lstep); } });
-  $("fitCartBtn").onclick = async e => { e.stopPropagation(); const p = current(), t = p && tagsFor(p); if (!t?.sel) return; await toggleCart(p, t.sel); previewFields(p); };
   $("fitPop").addEventListener("click", e => { const b = e.target.closest("[data-fit]"), p = current(); if (!b || !p) return;
     const t = tagsFor(p), cur = t.sel && t.fr[t.sel];
     if (!fitOpen && cur?.fit === b.dataset.fit && !spotMoved(t)) { fitOpen = true; previewFields(p); return; }   // collapsed: reopen the options
