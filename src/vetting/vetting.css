@@ -393,3 +393,11 @@ body.viewer .handle .hint,body.viewer .rail .help,body.viewer #fieldBtn,body.vie
 .rail details.help summary::-webkit-details-marker{display:none}
 .rail details.help[open] summary{margin-bottom:4px}
 .rail{gap:8px}
+
+/* Fit bar on one row: the chosen fit collapses to one button (click it for the options). */
+.fitbar{flex-wrap:nowrap;white-space:nowrap}
+.fitbar .fb-msg{overflow:hidden;text-overflow:ellipsis;min-width:0;max-width:160px}
+.fitbar .fb-btns button[hidden]{display:none}
+.fitbar .fb-cart{background:#14b8a6;color:#fff;border-color:#14b8a6}
+.fitbar .fb-cart[aria-pressed="true"]{background:#0f766e;border-color:#0f766e}
+@media (max-width:640px){.fitbar{flex-wrap:wrap;white-space:normal}}

@@ -316,7 +316,7 @@ function drawParkFields(p) {
   });
 }
 function selectField(p, key) {
-  const t = tagsFor(p); t.sel = key;
+  const t = tagsFor(p); t.sel = key; fitOpen = false;
   if (key) {
     const hit = fieldKeys(p).find(x => x.key === key), rt = t.fr[key];
     if (rt?.lat != null) { angle = rt.angle; pin = L.latLng(rt.lat, rt.lon); }
@@ -404,7 +404,7 @@ function bindDispenser() {
 // ── Frisbee field overlay: frame-centred, true scale, centre button locks/unlocks rotation ─
 // The field is frame-centred until it's locked; locking pins it to that spot on the map
 // (pin), so panning afterwards moves the map under it. Unlocking recentres on it.
-let angle = 0, rotating = false, pin = null;
+let angle = 0, rotating = false, pin = null, fitOpen = false;
 const fieldCentre = () => pin || map.getCenter();
 function drawField() {
   const { len: Lm, wid: Wm, ez } = dims, x0 = -Lm / 2, y0 = -Wm / 2, gl = Lm / 2 - ez, bx = gl - BRICK;
@@ -459,7 +459,7 @@ function lockField() {
   pin = map.getCenter(); sizeField();
   const p = current(); if (!p) return;
   // The rating applies to the single council field closest to where the field was locked.
-  const n = nearestFields(p); tagsFor(p).sel = n ? n.key : null;
+  const n = nearestFields(p); tagsFor(p).sel = n ? n.key : null; fitOpen = false;
   $("fitPop").hidden = false; drawParkFields(p); drawLights(p); previewFields(p); renderTags(p);
 }
 function nearestFields(p) {
@@ -484,7 +484,17 @@ function previewFields(p) {
   $("fitMsg").textContent = moved ? `${target} · moved — rate again` : target;
   $("fitMsg").title = moved ? "Rate the fit again to save this spot" : t.sel && t.fr[t.sel]?.fit && t.fr[t.sel].fit !== "unknown" ? "Click a fit to change it, or the same one to clear it" : "Pan to fine-tune, then rate the fit";
   $("fitMsg").classList.toggle("warn", moved);
-  $("fitPop").querySelectorAll("[data-fit]").forEach(b => b.setAttribute("aria-pressed", String(!!t.sel && t.fr[t.sel]?.fit === b.dataset.fit && !moved)));
+  // A chosen fit collapses to one button; clicking it reopens the options (fitOpen).
+  const chosen = !moved && t.sel && t.fr[t.sel]?.fit && t.fr[t.sel].fit !== "unknown" ? t.fr[t.sel].fit : null;
+  $("fitPop").querySelectorAll("[data-fit]").forEach(b => { b.setAttribute("aria-pressed", String(b.dataset.fit === chosen));
+    b.hidden = !!chosen && !fitOpen && b.dataset.fit !== chosen;
+    b.title = chosen && !fitOpen && b.dataset.fit === chosen ? "Change the fit" : ""; });
+  // Add to cart (the booker's cart, as in Book mode) for a rated field.
+  const st = t.sel && curRating(t) && !moved ? locState(cartId(p, t.sel)) : undefined;
+  $("fitCartBtn").hidden = st === undefined || !IS_ADMIN;
+  if (st !== undefined) { $("fitCartBtn").textContent = st === "active" ? "📌 Active" : st === "cart" ? "🛒 In cart" : "🛒 Add to cart";
+    $("fitCartBtn").setAttribute("aria-pressed", String(!!st)); $("fitCartBtn").disabled = st === "active";
+    $("fitCartBtn").title = st === "active" ? "Already an active booking" : st === "cart" ? `In ${whoBooks()}'s cart — click to remove` : `Add to ${whoBooks()}'s cart`; }
   $("saveNextBtn").hidden = !IS_ADMIN || !curRating(t) || moved;
   renderLightStep(p);
 }
@@ -1348,7 +1358,11 @@ function bind() {
   $("centreBtn").addEventListener("pointerup", () => { if (twist?.moved) swallowClick = true; twist = null; });
   $("centreBtn").onclick = e => { e.stopPropagation(); if (swallowClick) { swallowClick = false; return; } if (rotating) lockField(); else setRotating(true); };
   $("lightStep").addEventListener("click", e => { const b = e.target.closest("[data-lstep]"); if (b) { e.stopPropagation(); stepLights(+b.dataset.lstep); } });
+  $("fitCartBtn").onclick = async e => { e.stopPropagation(); const p = current(), t = p && tagsFor(p); if (!t?.sel) return; await toggleCart(p, t.sel); previewFields(p); };
   $("fitPop").addEventListener("click", e => { const b = e.target.closest("[data-fit]"), p = current(); if (!b || !p) return;
+    const t = tagsFor(p), cur = t.sel && t.fr[t.sel];
+    if (!fitOpen && cur?.fit === b.dataset.fit && !spotMoved(t)) { fitOpen = true; previewFields(p); return; }   // collapsed: reopen the options
+    fitOpen = false;
     confirmSpot(p, b.dataset.fit); });
   $("fieldBtn").onclick = () => showField(!fieldOn);
   bindDispenser();
