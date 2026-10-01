@@ -401,3 +401,8 @@ body.viewer .handle .hint,body.viewer .rail .help,body.viewer #fieldBtn,body.vie
 .fitbar .fb-cart{background:#14b8a6;color:#fff;border-color:#14b8a6}
 .fitbar .fb-cart[aria-pressed="true"]{background:#0f766e;border-color:#0f766e}
 @media (max-width:640px){.fitbar{flex-wrap:wrap;white-space:normal}}
+
+/* Collecting field data: the fit bar sits where the decision buttons were. */
+.actions.collect .act:not(.small){display:none}
+.actions .fitbar{position:static;transform:none;display:flex!important;box-shadow:none;max-width:none}
+.actions .fitbar[hidden]{display:flex!important}
