@@ -9,7 +9,7 @@ create table if not exists public.field_reviews (
   park_id      text primary key,                 -- slug of region + council park name (public/council-maps/parks.json)
   region       text not null,
   park         text not null,
-  decision     text not null check (decision in ('top','yes','no')),  -- top pick / shortlist / reject
+  decision     text not null check (decision in ('top','yes','no','rating')),  -- top pick / shortlist / reject / still rating (fields saved, no decision yet)
   lights       text not null default 'unknown' check (lights in ('unknown','none','training','full')),
   fit          text not null default 'unknown',           -- reduced / full (one field) / multi (2+ fields); check below
   quality      smallint check (quality between 1 and 5),
@@ -22,6 +22,11 @@ create table if not exists public.field_reviews (
 );
 
 -- Fit ratings: reduced size, one full field, or two or more fields.
+-- 'rating': per-field ratings saved with "Save · next field" before a decision is made.
+alter table public.field_reviews drop constraint if exists field_reviews_decision_check;
+alter table public.field_reviews add constraint field_reviews_decision_check
+  check (decision in ('top','yes','no','rating'));
+
 alter table public.field_reviews drop constraint if exists field_reviews_fit_check;
 alter table public.field_reviews add constraint field_reviews_fit_check
   check (fit in ('unknown','reduced','full','multi','no'));
@@ -62,3 +67,10 @@ alter table public.field_flags enable row level security;
 drop policy if exists "field_flags admin all" on public.field_flags;
 create policy "field_flags admin all" on public.field_flags
   for all to authenticated using (public.is_admin()) with check (public.is_admin());
+
+-- Provider amendments: what's wrong with a park's provider listing. kind 'private' = privately
+-- operated by `club` (e.g. Liston Park → Ellerslie AFC); 'change' = the listed operator is wrong
+-- or has changed; 'other' = another provider change. contact = the provider's contact person,
+-- first name and last initial only (e.g. "Rory H.").
+alter table public.field_flags add column if not exists kind text not null default 'private';
+alter table public.field_flags add column if not exists contact text not null default '';
