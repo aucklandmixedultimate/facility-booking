@@ -6,10 +6,10 @@
     <title>Council / Community Fields</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap">
-    <script type="module" crossorigin src="/facility-booking/assets/vetting-dTa51F5l.js"></script>
+    <script type="module" crossorigin src="/facility-booking/assets/vetting-BgNMfYHz.js"></script>
     <link rel="modulepreload" crossorigin href="/facility-booking/assets/index-VH2SDcMh.js">
     <link rel="modulepreload" crossorigin href="/facility-booking/assets/_commonjsHelpers-Cpj98o6Y.js">
-    <link rel="stylesheet" crossorigin href="/facility-booking/assets/vetting-3sqJ43qG.css">
+    <link rel="stylesheet" crossorigin href="/facility-booking/assets/vetting-Ds99qtV4.css">
   </head>
   <body>
     <div class="wrap">
@@ -97,7 +97,6 @@
                     <button data-fit="multi">2+ fields</button>
                   </span>
                   <span class="fb-lights" id="lightStep" hidden title="Light poles for this field: placed along its long sides until you move one">💡<button type="button" data-lstep="-2" aria-label="Two fewer lights">−</button><b id="lightN">4</b><button type="button" data-lstep="2" aria-label="Two more lights">+</button></span>
-                  <button class="fb-cart" id="fitCartBtn" hidden title="Add this field to the booker's cart">🛒 Add to cart</button>
                   <button class="fb-next" id="saveNextBtn" hidden title="Save this park's field ratings and move on to its next unrated council field">💾 Next field</button>
                 </div>
                 <div class="legend" id="legend" hidden></div>
@@ -140,28 +139,29 @@
               <div class="info bookbar" id="bookBar" hidden></div>
               <div class="info cityinfo" id="cityInfo" hidden></div>
               <div class="bookpanel" id="bookPanel" hidden></div>
+              <section class="rail" id="railBox" hidden>
+                <h3>Decisions summary</h3>
+                <div class="counts">
+                  <div class="c-top"><b id="nTop">0</b><span>Top</span></div>
+                  <div class="c-yes"><b id="nYes">0</b><span>Shortlist</span></div>
+                  <div class="c-no"><b id="nNo">0</b><span>Rejected</span></div>
+                </div>
+                <div class="list" id="list"></div>
+                <div class="railtools"><button id="exportBtn">Download CSV</button></div>
+                <details class="help"><summary>Help &amp; keys</summary>Scroll zooms the map; a few clicks out swaps the council map for satellite. Drag bulbs from the 💡 dispenser onto light poles (drag one back to remove it). Click a council field area to rate it (or edit its rating); its lights go with it. Or unlock the centre button, turn and move the field, lock it, and rate the closest field. ◆ parks are privately managed. Keys: <kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd>, <kbd>S</kbd> later, <kbd>Z</kbd> undo a rating change, <kbd>1</kbd>–<kbd>5</kbd> quality, <kbd>Enter</kbd> lock/unlock, <kbd>C</kbd> Auckland, <kbd>T</kbd> field, <kbd>M</kbd> next map.</details>
+              </section>
             </article>
             <div class="empty" id="emptyState" hidden></div>
           </div>
           <div class="actions" id="actions">
             <button class="act small" id="backBtn" title="Back to the previous park"><span class="b">←</span>Back</button>
             <button class="act no" id="noBtn" title="Not suitable (←)"><span class="b">✕</span>Reject <kbd>←</kbd></button>
-            <button class="act top" id="topBtn" title="Top pick (↑)"><span class="b">★</span>Top pick <kbd>↑</kbd></button>
-            <button class="act yes" id="yesBtn" title="Shortlist (→)"><span class="b">✓</span>Shortlist <kbd>→</kbd></button>
+            <button class="act top" id="topBtn" title="Top pick (↑): its rated fields become active, bookable fields"><span class="b">★</span>Top pick <kbd>↑</kbd></button>
+            <button class="act yes" id="yesBtn" title="Shortlist (→): its rated fields become active, bookable fields"><span class="b">✓</span>Shortlist <kbd>→</kbd></button>
             <button class="act small" id="skipBtn" title="Decide later (S)"><span class="b">⤳</span>Later <kbd>S</kbd></button>
           </div>
         </main>
-        <aside class="rail">
-          <h3>Decisions</h3>
-          <div class="counts">
-            <div class="c-top"><b id="nTop">0</b><span>Top</span></div>
-            <div class="c-yes"><b id="nYes">0</b><span>Shortlist</span></div>
-            <div class="c-no"><b id="nNo">0</b><span>Rejected</span></div>
-          </div>
-          <div class="list" id="list"></div>
-          <div class="railtools"><button id="exportBtn">Download CSV</button></div>
-          <details class="help"><summary>Help &amp; keys</summary>Scroll zooms the map; a few clicks out swaps the council map for satellite. Drag bulbs from the 💡 dispenser onto light poles (drag one back to remove it). Click a council field area to rate it (or edit its rating); its lights go with it. Or unlock the centre button, turn and move the field, lock it, and rate the closest field. ◆ parks are privately managed. Keys: <kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd>, <kbd>S</kbd> later, <kbd>Z</kbd> undo a rating change, <kbd>1</kbd>–<kbd>5</kbd> quality, <kbd>Enter</kbd> lock/unlock, <kbd>C</kbd> Auckland, <kbd>T</kbd> field, <kbd>M</kbd> next map.</details>
-        </aside>
+
       </div>
     </div>
     <dialog id="saveDlg" class="dlg">
