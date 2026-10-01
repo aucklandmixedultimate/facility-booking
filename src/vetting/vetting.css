@@ -351,8 +351,21 @@ body.viewer .handle .hint,body.viewer .rail .help,body.viewer #fieldBtn,body.vie
 .infopanel .ip-row input,.infopanel .ip-row select,.infopanel select{font-size:12px;padding:2px 5px;border:1px solid var(--line);border-radius:6px;background:var(--surface);min-width:0}
 .infopanel .ip-row input{flex:1 1 110px}
 .infopanel .ip-row button{font-size:12px;padding:2px 8px;border:1px solid var(--line);border-radius:6px;background:var(--surface)}
+/* Club and venue badges (all but AMUA): 75% size */
+.logopin.md .lp{width:27px;height:27px;border-width:2px}
+.logopin.md .lp+.lp{margin-left:-9px}
+.logopin.md .lp b{font-size:7px}
 /* Community facilities: half-size badges */
 .logopin.sm .lp{width:18px;height:18px;border-width:2px}
 .logopin.sm .lp b{font-size:5px;letter-spacing:0}
 .cm-book{margin-top:6px}.cm-book button{border:1px solid #0d9488;background:#0d9488;color:#fff;border-radius:7px;padding:3px 9px;font-weight:600;cursor:pointer}
 .bookpanel .bk-row .tag.comm{background:#dbeafe;color:#1e3a8a}
+
+/* Council sketch plan, opaque, opened from its footprint in park view; any click closes it. */
+.cimg-box{position:fixed;inset:0;z-index:3000;background:rgba(10,15,13,.88);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:12px 16px;box-sizing:border-box;cursor:zoom-out}
+.cimg-box[hidden]{display:none}
+.cimg-box img{max-width:100%;max-height:calc(100% - 44px);object-fit:contain;background:#fff;border-radius:6px;box-shadow:0 4px 24px rgba(0,0,0,.5)}
+.cimg-bar{display:flex;align-items:center;gap:10px;color:#fff;font-size:14px;max-width:100%}
+.cimg-bar span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cimg-bar a,.cimg-bar button{color:#fff;background:rgba(255,255,255,.15);border:0;border-radius:6px;padding:3px 9px;font-size:15px;text-decoration:none;cursor:pointer}
+.council-foot{pointer-events:none}

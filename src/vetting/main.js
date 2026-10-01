@@ -205,7 +205,7 @@ function activeLights(t) {
 function ratedCount(t) { return [t.lights !== "unknown", t.fit !== "unknown", t.quality > 0, !!t.fields.trim()].filter(Boolean).length; }
 
 // ── Map ──────────────────────────────────────────────────────────────────────
-let map, overlay = null, baseZoom = null, shownPark = null;
+let map, overlay = null, overlayFoot = null, baseZoom = null, shownPark = null;
 let lightLayer, parkFieldsLayer, cityLayer, cityFieldsLayer, cityHome = null;
 function initMap() {
   map = L.map("map", { zoomSnap: 0.25, zoomDelta: 0.5, wheelPxPerZoomLevel: 150, maxZoom: 21, zoomControl: true });
@@ -220,17 +220,33 @@ function initMap() {
   map.on("zoomend", () => { $("field").classList.remove("zooming"); updateLayer(); sizeField(); syncCityFields(); });
   map.on("move", () => sizeField());
   map.on("moveend", () => { if (view === "park" && fieldOn && !rotating && !pin) afterMove(); });
-  map.on("click", () => { if (view === "park" && rotating) lockField(); });
+  map.on("click", e => {
+    if (view !== "park") return;
+    if (rotating) return lockField();
+    // A click inside the council sketch plan's footprint shows the plan itself, opaque.
+    if (overlay && overlay.getBounds().contains(e.latlng)) openCouncilImage();
+  });
 }
+function openCouncilImage() {
+  const p = current(); if (!p || !overlay) return;
+  const i = Math.min(mapIndex(p), Math.max(0, p.maps.length - 1)), m = p.maps[i], url = BASE + "council-maps/" + m.file;
+  $("cimgImg").src = url; $("cimgOpen").href = url;
+  $("cimgTitle").textContent = [p.name, m.title !== p.name && m.title, m.season === "winter" ? "❄ Winter" : "☀ Summer"].filter(Boolean).join(" · ");
+  $("cimgBox").hidden = false;
+}
+function closeCouncilImage() { $("cimgBox").hidden = true; }
 
 // ── Park view: Esri satellite + council overlay that drops away when you zoom off it ─
 function showMap(p) {
   const i = Math.min(mapIndex(p), Math.max(0, p.maps.length - 1)), m = p.maps[i];
   if (overlay) { overlay.remove(); overlay = null; }
+  if (overlayFoot) { overlayFoot.remove(); overlayFoot = null; }
   map.invalidateSize();
   if (m) {
     const b = L.latLngBounds([m.bounds[0], m.bounds[1]], [m.bounds[2], m.bounds[3]]);
     overlay = L.imageOverlay(BASE + "council-maps/" + m.file, b, { className: "council-overlay", interactive: false }).addTo(map);
+    // Dashed outline of the plan's footprint, shown once the plan has dissolved to satellite.
+    overlayFoot = L.rectangle(b, { pane: "fieldsPane", className: "council-foot", color: "#ffffff", weight: 1.5, opacity: 0.8, dashArray: "6 5", fill: false, interactive: false });
     map.fitBounds(b, { animate: false });
     baseZoom = map.getZoom();
   } else {
@@ -247,6 +263,7 @@ function councilVisible() {
 function updateLayer() {
   const on = councilVisible();
   if (overlay) overlay.setOpacity(on ? 1 : 0);
+  if (overlayFoot) { if (on || view !== "park") overlayFoot.remove(); else if (!map.hasLayer(overlayFoot)) overlayFoot.addTo(map); }
   $("layerBadge").textContent = on ? "Council map" : "Satellite";
 }
 // Council fields traced from the map PDFs: [{n: name, c: [lat, lon], p: [[lat, lon], …]}].
@@ -548,12 +565,13 @@ function buildCity() {
 // centre shows the suitability colour.
 // A round badge per logo (several overlap if a ground lists more than one). The
 // image sits over the club's letters; if the logo file isn't there yet it removes itself.
+// Sizes: AMUA's own badge 36px, other clubs and venues 27px, community facilities 18px.
 function logoMarker(ll, icons, ring, isCur, z = 600, small = false) {
   const badge = (ic, i) => `<span class="lp" style="background:${ic.bg || "#334155"};z-index:${9 - i}"><b>${esc(ic.mono || "")}</b>`
     + (ic.img ? `<img src="${BASE}council-maps/${esc(ic.img)}" alt="" onerror="this.remove()">` : "") + `</span>`;
-  const d = small ? 18 : 36, w = d + (icons.length - 1) * (d * 2 / 3);
+  const d = small ? 18 : icons.some(ic => ic.mono === "AMUA") ? 36 : 27, w = d + (icons.length - 1) * (d * 2 / 3);
   return L.marker(ll, { icon: L.divIcon({ className: "", iconSize: [w, d], iconAnchor: [w / 2, d / 2],
-    html: `<div class="logopin${isCur ? " cur" : ""}${small ? " sm" : ""}" style="--ring:${ring}">${icons.map(badge).join("")}</div>` }), keyboard: false, bubblingMouseEvents: false, zIndexOffset: z });
+    html: `<div class="logopin${isCur ? " cur" : ""}${d <= 18 ? " sm" : d < 36 ? " md" : ""}" style="--ring:${ring}">${icons.map(badge).join("")}</div>` }), keyboard: false, bubblingMouseEvents: false, zIndexOffset: z });
 }
 function amuaMarker(ll, fill, isCur) {
   return L.marker(ll, { icon: L.divIcon({ className: "", iconSize: [30, 30], iconAnchor: [15, 15],
@@ -632,6 +650,7 @@ function setView(v, { refit } = {}) {
     $("fitPop").hidden = true;
     if (was === "park" && shownPark) { /* remember nothing: the city view keeps its own position */ }
     if (overlay) { overlay.remove(); overlay = null; }
+    if (overlayFoot) { overlayFoot.remove(); overlayFoot = null; }
     shownPark = null;
     lightLayer.remove(); parkFieldsLayer.remove();
     cityLayer.addTo(map);
@@ -1251,7 +1270,10 @@ function bind() {
   $("list").addEventListener("click", e => { const b = e.target.closest("[data-open]"); if (b) openPark(b.dataset.open); });
   $("exportBtn").onclick = exportCsv;
   window.addEventListener("focus", async () => { if (mode === "shared" && !busy) { await loadShared(); if (view === "city") render(); else renderRail(); } });
+  // Any click on the opaque plan (except the open-in-new-tab link) puts it away again.
+  $("cimgBox").addEventListener("click", e => { if (!e.target.closest("#cimgOpen")) closeCouncilImage(); });
   document.addEventListener("keydown", e => {
+    if (!$("cimgBox").hidden && e.key === "Escape") return closeCouncilImage();
     if ($("saveDlg").open || e.target.matches("input, textarea, select")) return;
     const p = current();
     if (!IS_ADMIN && !/^(Escape|c|C)$/.test(e.key)) return;   // bookers: no rating keys
