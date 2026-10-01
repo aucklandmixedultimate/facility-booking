@@ -531,7 +531,14 @@ function buildCity() {
   // Private grounds that aren't in the council maps: hollow diamonds with the operator's contacts.
   PRIV.operators.filter(o => !o.park_id || !BYID[o.park_id]).forEach(o => {
     const ll = [o.lat, o.lon]; pts.push(ll);
-    (o.icons ? logoMarker(ll, o.icons, o.category === "community" ? COMM_COLOR : o.amua ? "#e0a647" : PRIV_COLOR, false, o.amua ? 700 : 550, o.category === "community") : o.amua ? amuaMarker(ll, "#ffffff", false) : privMarker(ll, "transparent", false, false)).bindPopup(privHtml(o), { className: "parktip", maxWidth: 320 })
+    // Community facilities can be booked like council fields: in Book mode their popup adds
+    // them to the cart, and their badge gets the cart / active ring.
+    const comm = o.category === "community";
+    if (comm && workMode === "book") { const st = locState("cm-" + o.id);
+      if (st === "active") L.circleMarker(ll, { radius: 13, color: "#0f766e", weight: 4, fill: true, fillColor: "#14b8a6", fillOpacity: 0.25, interactive: false }).addTo(cityLayer);
+      else if (st) L.circleMarker(ll, { radius: 12, color: "#14b8a6", weight: 3, dashArray: "4 3", fill: false, interactive: false }).addTo(cityLayer); }
+    (o.icons ? logoMarker(ll, o.icons, comm ? COMM_COLOR : o.amua ? "#e0a647" : PRIV_COLOR, false, o.amua ? 700 : 550, comm) : o.amua ? amuaMarker(ll, "#ffffff", false) : privMarker(ll, "transparent", false, false))
+      .bindPopup(() => privHtml(o) + (comm && workMode === "book" ? communityBookHtml(o) : ""), { className: "parktip", maxWidth: 320 })
       .bindTooltip(`<b>${esc(o.park)}</b><br><b style="color:${PRIV_COLOR}">◆ ${esc(o.operator)}</b><br>Not in the council field maps · click for contacts`, { className: "parktip", direction: "top", offset: [0, -8] })
       .addTo(cityLayer);
   });
@@ -677,6 +684,26 @@ async function saveBookLocs() {
   }
   store.set("vet-booklocs", bookLocs); return true;
 }
+// ── Community facilities (schools, trusts) in the cart: one entry per facility, "cm-<id>" ──
+function communityBookHtml(o) {
+  const st = locState("cm-" + o.id);
+  return `<div class="cm-book">${st === "active" ? "📌 Active booking — book dates in Facility Booking"
+    : `<button data-cmbook="${esc(o.id)}">${st ? "🛒 In the cart · remove" : "📅 Add to cart"}</button>`}</div>`;
+}
+async function toggleCommunity(o) {
+  const who = whoBooks(), before = [...(bookLocs[who] || [])], list = [...before], id = "cm-" + o.id, i = list.findIndex(x => x.id === id);
+  if (i >= 0 && isActive(list[i])) return;
+  if (i >= 0) list.splice(i, 1);
+  else list.push({ id, park_id: o.id, park: o.park, region: "", field: "Main field", lat: o.lat, lon: o.lon, kind: "community", status: "cart",
+    operator: { id: o.id, name: o.operator, short: o.short, email: o.contact?.email || "", phone: o.contact?.phone || "" },
+    added_at: new Date().toISOString(), added_by: session?.user?.email || "" });
+  bookLocs[who] = list;
+  if (!(await saveBookLocs())) { bookLocs[who] = before; return; }
+  setStatus(`${i >= 0 ? "Removed" : "Added"} ${o.short || o.operator} ${i >= 0 ? "from" : "to"} ${who}'s cart.`);
+  map.closePopup(); render(); renderTabs();
+}
+document.addEventListener("click", e => { const b = e.target.closest("[data-cmbook]"); if (!b) return;
+  const o = (PRIV.operators || []).find(x => x.id === b.dataset.cmbook); if (o) toggleCommunity(o); });
 // A privately managed park's booking is filed under the club that manages the fields, but
 // requests go to its booking contact: a booking-only club (e.g. Ellerslie Ultimate Club at
 // Michaels Ave, managed by Ellerslie AFC), else the manager itself.
@@ -777,8 +804,8 @@ function contactNote(who) {
 function renderBook() {
   const who = whoBooks(), known = Object.keys(bookLocs).filter(e => e !== who), cart = cartOf(), act = activeOf();
   loadContact(who);
-  const tag = x => `<span class="tag${x.kind === "council_private" ? " priv" : ""}">${x.kind === "council_private" ? "◆ " + esc(x.operator?.short || "operator") + " + council" : "🏛 council"}</span>`;
-  const prov = x => x.kind === "council_private" ? "op_" + x.operator.id : "akl_council";
+  const tag = x => x.kind === "community" ? `<span class="tag comm">🏫 community</span>` : `<span class="tag${x.kind === "council_private" ? " priv" : ""}">${x.kind === "council_private" ? "◆ " + esc(x.operator?.short || "operator") + " + council" : "🏛 council"}</span>`;
+  const prov = x => x.kind === "community" ? "cm_" + x.operator.id : x.kind === "council_private" ? "op_" + x.operator.id : "akl_council";
   const parks = xs => new Set(xs.map(x => x.park)).size;
   $("bookPanel").innerHTML = `<div class="bk-who"><h3>📌 Active bookings / 🛒 Cart</h3><label>for ${IS_ADMIN ? `<input id="bookWho" list="bookWhoList" value="${esc(who)}" title="The booker whose cart this is">` : `<b>${esc(who)}</b>`}</label>
       <datalist id="bookWhoList">${known.map(e => `<option value="${esc(e)}">`).join("")}</datalist></div>
@@ -787,12 +814,12 @@ function renderBook() {
       2. <b>Save them as active bookings</b>. 3. Book dates and times for them in Facility Booking (Provider → Location → Facility).</p>
     <section class="bk-sec"><h4>🛒 In the cart <span class="muted">${cart.length} field${cart.length === 1 ? "" : "s"}${cart.length ? ` at ${parks(cart)} park${parks(cart) === 1 ? "" : "s"}` : ""} · not booked yet</span></h4>
       <div class="bk-list">${cart.length ? cart.map(x => `<div class="bk-row"><span class="n">${esc(x.park)} – ${esc(x.field)}</span>${tag(x)}
-        <button data-bkopen="${esc(x.park_id)}" title="Open this park in Book mode">open</button>
+        ${x.kind === "community" ? "" : `<button data-bkopen="${esc(x.park_id)}" title="Open this park in Book mode">open</button>`}
         <button data-bkdel="${esc(x.id)}" title="Remove from the cart">✕</button></div>`).join("") : `<p class="muted">Nothing in the cart.</p>`}</div>
       ${cart.length ? `<div class="bk-go"><button class="primary" id="bkSave">✅ Save ${cart.length} field${cart.length === 1 ? "" : "s"} as active bookings</button></div>` : ""}</section>
     <section class="bk-sec act"><h4>📌 Active bookings <span class="muted">${act.length} field${act.length === 1 ? "" : "s"} · in Facility Booking</span></h4>
       <div class="bk-list">${act.length ? act.map(x => `<div class="bk-row"><span class="n">${esc(x.park)} – ${esc(x.field)}</span>${tag(x)}
-        <button data-bkopen="${esc(x.park_id)}" title="Open this park in Book mode">open</button>
+        ${x.kind === "community" ? "" : `<button data-bkopen="${esc(x.park_id)}" title="Open this park in Book mode">open</button>`}
         <a href="${venueLink(prov(x), x.park)}" target="_blank" rel="noopener">book dates ↗</a>
         <button data-bkdel="${esc(x.id)}" data-active="1" title="Remove this active booking field">✕</button></div>`).join("") : `<p class="muted">No active bookings yet. Save cart fields to make them bookable.</p>`}</div></section>`;
 }

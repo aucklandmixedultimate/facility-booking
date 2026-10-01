@@ -354,3 +354,5 @@ body.viewer .handle .hint,body.viewer .rail .help,body.viewer #fieldBtn,body.vie
 /* Community facilities: half-size badges */
 .logopin.sm .lp{width:18px;height:18px;border-width:2px}
 .logopin.sm .lp b{font-size:5px;letter-spacing:0}
+.cm-book{margin-top:6px}.cm-book button{border:1px solid #0d9488;background:#0d9488;color:#fff;border-radius:7px;padding:3px 9px;font-weight:600;cursor:pointer}
+.bookpanel .bk-row .tag.comm{background:#dbeafe;color:#1e3a8a}
