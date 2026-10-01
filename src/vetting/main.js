@@ -159,6 +159,31 @@ function parkLatLng(p) {
   return p.lat ? [p.lat, p.lon] : null;
 }
 
+// ── Activity score: a background ranking metric per park ─────────────────────
+// Starts at 0; each "Later" (skip) takes 1 off. Shared through the settings table for
+// signed-in admins (key vet_park_activity), else kept on this device.
+const ACTIVITY_KEY = "vet_park_activity";
+let activity = {};
+const activityOf = id => activity[id] || 0;
+async function loadActivity() {
+  if (supabase && session) {
+    const { data, error } = await supabase.from("settings").select("value").eq("key", ACTIVITY_KEY).maybeSingle();
+    if (!error) { activity = data?.value || {}; return; }
+  }
+  activity = store.get("vet-activity", {});
+}
+async function bumpActivity(id, delta) {
+  activity[id] = activityOf(id) + delta;
+  if (supabase && session && IS_ADMIN) {
+    // Re-read first so two admins skipping at once both count.
+    const { data } = await supabase.from("settings").select("value").eq("key", ACTIVITY_KEY).maybeSingle();
+    const fresh = data?.value || {}; fresh[id] = (fresh[id] || 0) + delta;
+    const { error } = await supabase.from("settings").upsert({ key: ACTIVITY_KEY, value: fresh, updated_at: new Date().toISOString() });
+    if (!error) { activity = fresh; return; }
+  }
+  store.set("vet-activity", activity);
+}
+
 // ── Queue ────────────────────────────────────────────────────────────────────
 function queue() {
   const reg = $("region").value, m = $("mode").value, mapsOnly = $("mapsOnly").checked;
@@ -166,6 +191,9 @@ function queue() {
   const undecided = p => !reviews[p.id] || reviews[p.id].decision === "rating";
   if (m === "todo") q = q.filter(undecided);
   else if (m !== "all") q = q.filter(p => reviews[p.id]?.decision === m);
+  // Parks still to review rank by their activity score (each skip lowers it), so parks
+  // that keep getting skipped sink; ties keep the usual order.
+  if (m === "todo") q = q.map((p, i) => [p, i]).sort((a, b) => activityOf(b[0].id) - activityOf(a[0].id) || a[1] - b[1]).map(x => x[0]);
   if (m === "todo") q = q.filter(p => !later.has(p.id)).concat(q.filter(p => later.has(p.id)));
   return q;
 }
@@ -1270,6 +1298,7 @@ function render() {
     if (fresh) restorePlacement(p);
   }
   ["noBtn", "yesBtn", "topBtn", "skipBtn"].forEach(b => $(b).disabled = !p);
+  $("skipBtn").title = `Decide later (S)${p ? ` · lowers its activity score (now ${activityOf(p.id)}), so it ranks lower in the queue` : ""}`;
   if (p && visited[visited.length - 1] !== p.id) visited.push(p.id);
   $("backBtn").disabled = !visited.some(id => id !== p?.id);
   renderRail();
@@ -1399,7 +1428,7 @@ function skip() {
   const p = current(); if (!p) return;
   if (focusId && focusFrom === "back") { focusId = null; focusFrom = null; render(); return; }
   if (focusId) { focusId = null; setView("city"); return; }
-  later.add(p.id); cursor = $("mode").value === "todo" ? 0 : cursor + 1; $("fitPop").hidden = true; render();
+  later.add(p.id); bumpActivity(p.id, -1); cursor = $("mode").value === "todo" ? 0 : cursor + 1; $("fitPop").hidden = true; render();
 }
 
 // ── Events ───────────────────────────────────────────────────────────────────
@@ -1531,7 +1560,7 @@ function opCsv(o) {
     ev ? [ev.date, REL.tag[ev.tag] || ev.tag, ev.ref].filter(Boolean).join(" ") : ""];
 }
 function exportCsv() {
-  const rows = [["Region", "Park", "Decision", "Suitability", "Lights", "Light poles", "Fit", "Quality", "Fields", "Notes", "Field placement (lat, lon, angle°)", "Private operator", "Operator contact", "Ultimate club", "Provider amendment", "Reviewer", "Reviewed at",
+  const rows = [["Region", "Park", "Decision", "Suitability", "Lights", "Light poles", "Fit", "Quality", "Fields", "Notes", "Field placement (lat, lon, angle°)", "Private operator", "Operator contact", "Ultimate club", "Provider amendment", "Reviewer", "Reviewed at", "Activity score",
     "Local board", "Tenure", "Tenure until", "Board links", "Council influence", "Relationship", "Last event"]];
   PARKS.forEach(p => { const r = reviews[p.id] || {}, fl = flags[p.id]; if (!reviews[p.id] && !fl && !ultimateOf(p).length) return; const pl = r.placement;
     rows.push([p.region, p.name, r.decision ? (r.decision === "top" ? "top pick" : r.decision === "yes" ? "shortlist" : r.decision === "rating" ? "rating in progress" : "reject") : "", r.decision ? suitWord(r) : "", r.lights || "", pl?.lights?.length || 0,
@@ -1539,7 +1568,7 @@ function exportCsv() {
       privOps(p)[0]?.operator || "",
       [privOps(p)[0]?.contact?.email, privOps(p)[0]?.contact?.phone].filter(Boolean).join(" / "),
       ultimateOf(p).map(o => o.operator + ([o.contact?.email, o.contact?.phone].filter(Boolean).length ? ` (${[o.contact?.email, o.contact?.phone].filter(Boolean).join(" / ")})` : "")).join("; "),
-      fl ? amendText(fl) : "", r.by || "", r.at || "", ...opCsv(PRIV_BY_PARK[p.id]?.[0])]); });
+      fl ? amendText(fl) : "", r.by || "", r.at || "", activityOf(p.id), ...opCsv(PRIV_BY_PARK[p.id]?.[0])]); });
   const csv = rows.map(r => r.map(v => { const s = String(v ?? ""); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }).join(",")).join("\n");
   const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); a.download = "council-field-vetting.csv"; a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
@@ -1620,7 +1649,7 @@ async function start() {
     setStatus("Demo mode (no Supabase configured): decisions are kept in this browser.", true);
   }
   $("app").hidden = false; renderSeasonBar();
-  await loadBookLocs(); await loadCouncilOnly(); await loadRelations(); await syncCartWorkflows();
+  await loadBookLocs(); await loadActivity(); await loadCouncilOnly(); await loadRelations(); await syncCartWorkflows();
   initMap(); drawField(); showField(fieldOn); renderLegend(); bind();
   setView(view === "park" || view === "book" ? view : "city", { refit: true });
   if (mode === "shared") setInterval(async () => { if (!busy && !rotating && document.visibilityState === "visible" && !$("saveDlg").open) { await loadShared(); if (view === "city") render(); else renderRail(); } }, 30000);
