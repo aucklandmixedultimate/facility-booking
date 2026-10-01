@@ -961,8 +961,25 @@ function bindBook() {
 }
 
 // ── Render ───────────────────────────────────────────────────────────────────
+// A park with council fields but nothing rated yet needs its field data first: the
+// decision buttons (reject / top pick / shortlist) give way to the fit bar, docked in their
+// place. Once a field is rated (or the park already has a decision) they come back, and the
+// fit bar returns to the map for editing.
+let fitHome = null;
+function needsData(p) {
+  if (!p || !IS_ADMIN || workMode === "book" || view !== "park" || reviews[p.id] || !councilFields(p).length) return false;
+  return !Object.values(tagsFor(p).fr).some(x => x.fit && x.fit !== "unknown" && x.lat != null);
+}
+function dockFitBar(p) {
+  const dock = needsData(p), bar = $("fitPop"), acts = $("actions");
+  acts.classList.toggle("collect", dock);
+  if (dock && bar.parentElement !== acts) { fitHome ||= bar.parentElement; acts.appendChild(bar); }
+  else if (!dock && fitHome && bar.parentElement === acts) fitHome.appendChild(bar);
+  if (dock) previewFields(p);
+}
 function renderTags(p) {
   const t = tagsFor(p);
+  dockFitBar(p);
   $("segQuality").innerHTML = [1, 2, 3, 4, 5].map(n => `<button data-tag="quality" data-val="${n}" aria-pressed="${t.quality === n}" title="${n}/5">${n <= t.quality ? "★" : "☆"}</button>`).join("");
   // Fit and lights are set on the map (fit bar, bulb dispenser); here they're read-outs.
   const rated = Object.values(t.fr).filter(x => x.fit && x.fit !== "unknown");
