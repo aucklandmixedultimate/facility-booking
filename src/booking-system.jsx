@@ -353,6 +353,26 @@ function parseCouncilApp(sysNotes) {
   const m = COUNCIL_APP_RE.exec(sysNotes || "");
   return m ? { id: m[1], at: m[2], fee: parseFloat(m[3]) } : null;
 }
+// Multi-field areas: council fields the Council fields page grouped because they overlap
+// more than one frisbee field. One booking takes one frisbee field of the area; bookings at
+// overlapping times on the same area share it. Where fewer frisbee fields are booked than
+// the area holds, there's extra occupancy available (CouncilOccupancyNotes).
+const councilCap = b => FACILITIES.find(f => f.id === b.facility_id)?.council?.frisbee || 1;
+function councilOverlaps(bookings) {
+  const live = (bookings || []).filter(b => !["cancelled", "rejected"].includes(b.status) && FACILITIES.find(f => f.id === b.facility_id)?.council);
+  const byKey = {};
+  live.forEach(b => (byKey[b.facility_id + "|" + b.date] ||= []).push(b));
+  const out = [];
+  Object.values(byKey).forEach(list => {
+    list.sort((a, b) => a.start_hour - b.start_hour);
+    let cur = null;
+    list.forEach(b => { const end = b.start_hour + b.duration;
+      if (cur && b.start_hour < cur.end) { cur.bookings.push(b); cur.end = Math.max(cur.end, end); }
+      else { cur = { facility_id: b.facility_id, date: b.date, start: b.start_hour, end, bookings: [b] }; out.push(cur); } });
+  });
+  out.forEach(c => { c.cap = councilCap(c.bookings[0]); c.used = c.bookings.length; });
+  return out;
+}
 function isCouncilBooking(b) { const wf = workflowOf(b.facility_id); return wf === "council" || wf === "council_private"; }
 // Ready to go to the council: a plain council booking once AMUA has it, or a council +
 // operator booking once the operator has given permission (it's then at council_apply).
@@ -371,7 +391,8 @@ function buildCouncilPayload(bkgs, approxPlayers = {}) {
   bkgs.forEach(b => {
     const c = FACILITIES.find(f => f.id === b.facility_id)?.council; if (!c) return;
     const p = parks[c.park_id] ||= { region: c.region || "", park: c.park, fields: [], dates: [], days: {}, bookingIds: [], bookers: new Set() };
-    if (!p.fields.includes(c.field)) p.fields.push(c.field);
+    // A grouped venue field lists each council field it covers.
+    (c.council_fields?.length ? c.council_fields : [c.field]).forEach(fl => { if (!p.fields.includes(fl)) p.fields.push(fl); });
     if (!p.dates.includes(b.date)) p.dates.push(b.date);
     p.bookingIds.push(b.id); p.bookers.add((b.email || "").toLowerCase());
     const d = DAYS[new Date(b.date + "T12:00").getDay()], t = p.days[d] ||= { start: b.start_hour, end: b.start_hour + b.duration };
@@ -440,7 +461,7 @@ function applyCouncilFacilities(map) {
       PROVIDERS.akl_council = { id: "akl_council", name: "Auckland Council", short: "Council", kind: "council", dynamic: true,
         address: "", gstNumber: "", recipientCode: "AKC" };
     }
-    byId.set(e.id, { id: e.id, name: `${e.park} – ${e.field}`, capacity: 50, color: COUNCIL_COLORS[byId.size % COUNCIL_COLORS.length],
+    byId.set(e.id, { id: e.id, name: `${e.park} – ${e.field}${e.frisbee > 1 ? ` (multi-field area ×${e.frisbee})` : ""}`, capacity: 50, color: COUNCIL_COLORS[byId.size % COUNCIL_COLORS.length],
       kind: "field", site: e.park, provider: pid, defaultRate: e.kind === "community" ? (COMMUNITY_RATES[e.operator?.id] || 0) : 0, council: e, owners: active ? [owner] : [], inactive: !active });
   }));
   FACILITIES.push(...byId.values());
@@ -8756,6 +8777,19 @@ function SyncedItemRow({ ab, bookings }) {
   );
 }
 
+// Under a council batch or application: multi-field areas with spare frisbee fields, and
+// fields shared by more than one booker (the first to book is the parent).
+function CouncilOccupancyNotes({ bookings, ids, who = e => e }) {
+  const all = councilOverlaps(bookings).filter(c => c.bookings.some(b => ids.has(b.id)));
+  const spare = all.filter(c => c.cap > c.used), shared = all.filter(c => new Set(c.bookings.map(b => (b.email || "").toLowerCase())).size > 1);
+  if (!spare.length && !shared.length) return null;
+  const when = c => `${fmtDate(c.date)} ${fmtTime(c.start)}–${fmtTime(c.end)}`, fac = c => FACILITIES.find(f => f.id === c.facility_id)?.name || c.facility_id;
+  return <div style={{flexBasis:"100%",display:"flex",flexDirection:"column",gap:3,fontSize:12}}>
+    {spare.map((c,i)=><div key={"x"+i} style={{color:"#166534"}}>🟢 <b>Extra occupancy available</b> — {fac(c)} · {when(c)}: {c.used} of {c.cap} frisbee fields booked</div>)}
+    {shared.map((c,i)=>{ const m=[...c.bookings].sort((a,b)=>(a.created_at||"").localeCompare(b.created_at||""));
+      return <div key={"s"+i} style={{color:"#1e3a8a"}}>👥 Shared field — {fac(c)} · {when(c)}: parent <b>{who((m[0].email||"").toLowerCase())}</b> (booked first){m.slice(1).map(b=>`, child ${who((b.email||"").toLowerCase())}`).join("")}</div>; })}
+  </div>;
+}
 // ─── Council allocation (🏛 Allocation tab) ──────────────────────────────────────
 // Outcomes per council application number, merged from the council's emails (see
 // src/councilMail.js): { id, outcome: "action"|"confirmed"|"declined"|"info", park, fields,
@@ -8878,12 +8912,14 @@ function CouncilAllocationTab({ outcomes = {}, bookings = [], syncing, syncLog =
             {linked.length ? (
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                 <div style={{ ...small, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em" }}>Bookers on this application</div>
-                {linked.map(b => (
+                {linked.map(b => { const sl = parseSlotLink(b.system_notes); return (
                   <label key={b.id} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", fontSize: 13, opacity: live(b) ? 1 : 0.55 }}>
                     <input type="checkbox" disabled={!live(b)} checked={pick.has(b.id)} onChange={() => toggle(setSel, o.id, b.id, pick)}/>
                     <b>{who(b)}</b><span style={{ color: "#475569" }}>{facName(b)} · {fmtDate(b.date)} {fmtTime(b.start_hour)}–{fmtTime(b.start_hour + b.duration)}</span>
                     <Badge status={b.status} wf={workflowOf(b.facility_id)}/>
-                  </label>))}
+                    {sl && sl.role !== "peer" && <span style={{ fontSize: 11, fontWeight: 700, color: "#1e3a8a", background: "#dbeafe", borderRadius: 999, padding: "1px 8px" }}>{sl.role === "parent" ? "👥 parent" : "👥 child"}</span>}
+                  </label>); })}
+                <CouncilOccupancyNotes bookings={bookings} ids={new Set(linked.map(b => b.id))} who={e => aliasNames[e] || e}/>
               </div>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -9603,6 +9639,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                     title="Copy this batch for the AMUA Council Application extension, which fills the council's form" style={S.btn({background:"#fff",color:"#0f766e",border:"1.5px solid #0d9488"})}>📋 Copy for council form</button>
                   <button onClick={()=>onSendToCouncil(ready.map(b=>b.id))} style={S.btn({background:"#0d9488",color:"#fff"})}>🏛 Send {ready.length} to council</button>
                   <span style={{fontSize:12,color:"#115e59"}}>{sp.fields} field{sp.fields!==1?"s":""} · fee ${sp.total.toFixed(2)} ({Object.entries(sp.byBooker).map(([e,v])=>`${adminAlias(e)} $${v.toFixed(2)}`).join(", ")})</span>
+                  <CouncilOccupancyNotes bookings={bookings} ids={new Set(ready.map(b=>b.id))} who={adminAlias}/>
                 </div>; })()}
               <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:12,color:"#64748b"}}>
                 <input type="checkbox" checked={bulkSkipEmail} onChange={e=>setBulkSkipEmail(e.target.checked)} style={{width:14,height:14,accentColor:"#0f172a"}}/>
@@ -11308,10 +11345,22 @@ export default function App() {
     if (!window.confirm(`Send ${bkgs.length} booking${bkgs.length!==1?"s":""} to the council as application ${appId}?\n\n${sp.fields} field${sp.fields!==1?"s":""} × $${COUNCIL_APPLICATION_FEE} = $${sp.total.toFixed(2)}, split:\n${split}`)) return;
     const at = new Date().toISOString();
     try {
+      const notes = {};
       for (const b of bkgs) {
         const sys = (b.system_notes||"").replace(new RegExp(COUNCIL_APP_RE.source,"g"),"").trim();
-        await sb.update("bookings", b.id, { status:"council_pending", system_notes:`${sys}${sys?"\n":""}[COUNCIL_APP ${appId} ${at} fee=${sp.fees[b.id]}]`, updated_at:at });
+        notes[b.id] = `${sys}${sys?"\n":""}[COUNCIL_APP ${appId} ${at} fee=${sp.fees[b.id]}]`;
       }
+      // Different bookers on the same council field (or multi-field area) at overlapping
+      // times share it as a parent–child slot: whoever booked first is the parent.
+      const sentIds = new Set(bkgs.map(b => b.id)), extra = [];
+      councilOverlaps(bookings).filter(c => c.bookings.some(b => sentIds.has(b.id)) && new Set(c.bookings.map(b => canonEmail((b.email||"").toLowerCase()))).size > 1)
+        .forEach(c => { if (c.bookings.some(b => parseSlotLink(b.system_notes))) return;
+          const members = [...c.bookings].sort((a, b) => (a.created_at||"").localeCompare(b.created_at||"")), id = newSlotRef(), shares = evenSlotShares(members.length);
+          members.forEach((b, i) => { const base = notes[b.id] ?? b.system_notes ?? "";
+            notes[b.id] = setSlotLink(base, id, i === 0 ? "parent" : "child", shares[i]); if (!sentIds.has(b.id)) extra.push(b.id); }); });
+      for (const b of bkgs) await sb.update("bookings", b.id, { status:"council_pending", system_notes:notes[b.id], updated_at:at });
+      for (const id of extra) await sb.update("bookings", id, { system_notes:notes[id], updated_at:at });
+      if (extra.length || Object.values(notes).some(n => /\[SLOT\]/.test(n))) logActivity("slot_shared", { appId, ids:Object.keys(notes).filter(k => /\[SLOT\]/.test(notes[k])) });
       logActivity("council_application_sent", { appId, ids: bkgs.map(b=>b.id), fields: sp.fields, total: sp.total, split: sp.byBooker });
       await loadBookings();
       showToast(`Sent to council as ${appId} · fee $${sp.total.toFixed(2)} split across ${Object.keys(sp.byBooker).length} booker${Object.keys(sp.byBooker).length!==1?"s":""}.`);

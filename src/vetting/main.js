@@ -421,37 +421,143 @@ function fieldKeys(p) {
     if (seen[key]) key += ` (${++seen[key]})`; else seen[key] = 1;
     return { f, key }; });
 }
+// ── Frisbee fields → council fields (worked out on venue save) ────────────────
+// While adding fields, each locked frisbee field stands on its own ("Frisbee 1", …). Saving
+// the venue maps them back to the council's field areas:
+//   1. a council area overlapping a frisbee field (by more than OVERLAP_TOL of the smaller
+//      of the two) goes with that frisbee field;
+//   2. if what's left uncovered is under SPARE_RULE of the council area, each leftover
+//      council area joins the nearest frisbee field (by centroid);
+//   3. frisbee fields sharing a council area merge into one bookable multi-field area.
+const OVERLAP_TOL = 0.10, SPARE_RULE = 0.25;
+const newFrisbeeName = t => { let n = 1; while (t.fr["Frisbee " + n]) n++; return "Frisbee " + n; };
+const rated = x => x && x.fit && x.fit !== "unknown" && x.lat != null;
+function metric(lat0) { const kx = 111320 * Math.cos(lat0 * Math.PI / 180), ky = 110540; return { kx, ky }; }
+// A frisbee field's rectangle as [lat, lon] corners (same convention as placeLights).
+function frisbeeCorners(fr) {
+  const { kx, ky } = metric(fr.lat), th = (fr.angle || 0) * Math.PI / 180, L2 = (fr.len || dims.len) / 2, W2 = (fr.wid || dims.wid) / 2;
+  return [[-L2, -W2], [L2, -W2], [L2, W2], [-L2, W2]].map(([u, v]) => { const ex = u * Math.cos(th) - v * Math.sin(th), sy = u * Math.sin(th) + v * Math.cos(th);
+    return [+(fr.lat - sy / ky).toFixed(7), +(fr.lon + ex / kx).toFixed(7)]; });
+}
+const toXY = (pts, lat0, lon0) => { const { kx, ky } = metric(lat0); return pts.map(([la, lo]) => [(lo - lon0) * kx, (la - lat0) * ky]); };
+const areaXY = pts => Math.abs(pts.reduce((s, [x, y], i) => { const [x2, y2] = pts[(i + 1) % pts.length]; return s + x * y2 - x2 * y; }, 0)) / 2;
+// Sutherland–Hodgman: clip any polygon by a convex one; the result's area is the overlap.
+function clipXY(subject, clip) {
+  const orient = Math.sign(clip.reduce((s, [x, y], i) => { const [x2, y2] = clip[(i + 1) % clip.length]; return s + x * y2 - x2 * y; }, 0)) || 1;
+  let out = subject;
+  for (let i = 0; i < clip.length && out.length; i++) {
+    const [ax, ay] = clip[i], [bx, by] = clip[(i + 1) % clip.length];
+    const inside = ([x, y]) => orient * ((bx - ax) * (y - ay) - (by - ay) * (x - ax)) >= 0;
+    const cut = ([px, py], [qx, qy]) => { const d1 = (bx - ax) * (py - ay) - (by - ay) * (px - ax), d2 = (bx - ax) * (qy - ay) - (by - ay) * (qx - ax), k = d1 / (d1 - d2);
+      return [px + (qx - px) * k, py + (qy - py) * k]; };
+    const inp = out; out = [];
+    inp.forEach((P, j) => { const Q = inp[(j + 1) % inp.length], pin = inside(P), qin = inside(Q);
+      if (pin) out.push(P); if (pin !== qin) out.push(cut(P, Q)); });
+  }
+  return out;
+}
+const insideXY = ([x, y], poly) => { let inn = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const [xi, yi] = poly[i], [xj, yj] = poly[j];
+    if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inn = !inn; }
+  return inn; };
+function coverageXY(council, frisbee) {
+  if (!council.length) return { total: 0, covered: 0 };
+  const xs = council.flat().map(q => q[0]), ys = council.flat().map(q => q[1]);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  const step = Math.max(2.5, Math.sqrt((x1 - x0) * (y1 - y0) / 60000));   // at most ~60k samples
+  let total = 0, covered = 0;
+  for (let x = x0 + step / 2; x < x1; x += step) for (let y = y0 + step / 2; y < y1; y += step) {
+    if (!council.some(c => insideXY([x, y], c))) continue;
+    total++; if (frisbee.some(f => insideXY([x, y], f))) covered++;
+  }
+  return { total: total * step * step, covered: covered * step * step };
+}
+// The venue's mapping: { groups: [{key, name, council[], frisbee[], fit, cap, c}], covered, total }.
+function councilGroups(p, t) {
+  const cf = fieldKeys(p), fs = Object.values(t.fr).filter(rated);
+  if (!fs.length) return { groups: [], covered: 0, total: 0 };
+  const lat0 = fs[0].lat, lon0 = fs[0].lon;
+  const cpoly = cf.map(({ f, key }) => ({ key, xy: toXY(f.p, lat0, lon0), c: f.c })), fpoly = fs.map(fr => ({ fr, xy: toXY(frisbeeCorners(fr), lat0, lon0) }));
+  cpoly.forEach(c => { c.area = areaXY(c.xy); });
+  fpoly.forEach(f => { f.area = areaXY(f.xy); });
+  const assign = {};   // council key → Set of frisbee names
+  cpoly.forEach(c => fpoly.forEach(f => { const ov = areaXY(clipXY(c.xy, f.xy));
+    if (ov > OVERLAP_TOL * Math.min(c.area, f.area)) (assign[c.key] ||= new Set()).add(f.fr.name); }));
+  // Coverage by sampling a 2.5 m grid: council areas often overlap one another (touch fields
+  // inside a cricket oval), so the union is measured, not the sum.
+  const { total, covered } = coverageXY(cpoly.map(c => c.xy), fpoly.map(f => f.xy));
+  // Under the spare-space rule, leftover council areas join the nearest frisbee field.
+  if (total && (total - covered) / total < SPARE_RULE)
+    cpoly.filter(c => !assign[c.key]).forEach(c => { const near = fs.map(fr => ({ fr, d: Math.hypot((fr.lat - c.c[0]) * 110540, (fr.lon - c.c[1]) * metric(fr.lat).kx) })).sort((a, b) => a.d - b.d)[0];
+      if (near) assign[c.key] = new Set([near.fr.name]); });
+  // Union frisbee fields that share a council area.
+  const parent = Object.fromEntries(fs.map(fr => [fr.name, fr.name])), find = x => parent[x] === x ? x : (parent[x] = find(parent[x]));
+  Object.values(assign).forEach(set => { const [a, ...rest] = [...set]; rest.forEach(b => { parent[find(b)] = find(a); }); });
+  const byRoot = {};
+  fs.forEach(fr => { (byRoot[find(fr.name)] ||= { frisbee: [], council: [] }).frisbee.push(fr.name); });
+  Object.entries(assign).forEach(([ck, set]) => { const g = byRoot[find([...set][0])]; if (!g.council.includes(ck)) g.council.push(ck); });
+  const order = Object.fromEntries(cf.map((x, i) => [x.key, i]));
+  const groups = Object.values(byRoot).map(g => {
+    g.council.sort((a, b) => order[a] - order[b]);
+    const members = g.frisbee.map(n => t.fr[n]), cap = members.reduce((s, x) => s + (x.fit === "multi" ? 2 : 1), 0);
+    const name = g.council.length ? g.council.join(" + ") : g.frisbee.join(" + ");
+    const c = [members.reduce((s, x) => s + x.lat, 0) / members.length, members.reduce((s, x) => s + x.lon, 0) / members.length];
+    return { key: name, name, council: g.council, frisbee: g.frisbee, cap, fit: cap > 1 ? "multi" : members[0].fit, c: [+c[0].toFixed(6), +c[1].toFixed(6)] };
+  });
+  return { groups, covered, total };
+}
+const spareShare = m => m.total ? Math.max(0, (m.total - m.covered) / m.total) : 0;
 const FIT_COLOR = { multi: "#1f7a4d", full: "#46b37b", reduced: "#e0a647" };
 function drawParkFields(p) {
   parkFieldsLayer.clearLayers();
   const t = tagsFor(p);
   if (workMode === "book") {   // Book mode: field areas go in and out of the booker's cart
+    const groups = reviews[p.id]?.placement?.groups || [];
     fieldKeys(p).forEach(({ f, key }) => {
-      const st = locState(cartId(p, key));   // "active" | "cart" | null
+      const g = groups.find(x => x.council?.includes(key)), st = locState(cartId(p, g ? g.key : key));   // "active" | "cart" | null
       L.polygon(f.p, { pane: "fieldsPane", fill: true, fillColor: st === "active" ? "#0f766e" : "#14b8a6",
         fillOpacity: st === "active" ? 0.55 : st ? 0.3 : 0.04, color: st === "active" ? "#0f766e" : st ? "#14b8a6" : "#ffffff",
         weight: st ? 3 : 1.4, dashArray: st === "cart" ? "7 4" : st ? null : "4 4", opacity: 0.95, bubblingMouseEvents: false })
-        .bindTooltip(`${esc(key)} — ${st === "active" ? "📌 active booking" : st ? "🛒 in the cart (not booked yet) · click to remove" : "click to add to the cart"}`, { className: "parktip", sticky: true })
+        .bindTooltip(`${esc(g ? g.name : key)}${g?.cap > 1 ? ` (multi-field area ×${g.cap})` : ""} — ${st === "active" ? "📌 active booking" : st ? "🛒 in the cart (not booked yet) · click to remove" : "click to add to the cart"}`, { className: "parktip", sticky: true })
         .on("click", () => toggleCart(p, key))
         .addTo(parkFieldsLayer);
     });
     return;
   }
+  // Council areas stay neutral while fields are added (the mapping happens on venue save);
+  // once saved, each is tinted by the frisbee group it belongs to.
+  const groups = reviews[p.id]?.placement?.groups || [];
   fieldKeys(p).forEach(({ f, key }) => {
-    const rt = t.fr[key], sel = t.sel === key, fc = rt?.fit && FIT_COLOR[rt.fit];
-    L.polygon(f.p, { pane: "fieldsPane", fill: true, fillColor: fc || "#ffd400", fillOpacity: fc ? 0.3 : sel ? 0.12 : 0.02,
-      color: sel ? "#ffd400" : fc || "#ffffff", weight: sel ? 3.5 : fc ? 2.5 : 1.2, dashArray: sel || fc ? null : "4 4", opacity: 0.95, bubblingMouseEvents: false })
-      .bindTooltip(`${esc(key)}${rt?.fit && rt.fit !== "unknown" ? " · " + FIT_LABEL[rt.fit] : ""}${rt?.lights?.length ? " · 💡" + rt.lights.length : ""} — click to ${rt?.fit && rt.fit !== "unknown" ? "edit" : "rate"}`, { className: "parktip", sticky: true })
-      .on("click", () => { if (rotating) return lockField(); selectField(p, key === t.sel ? null : key); })
+    const g = groups.find(x => x.council?.includes(key)), fc = g && FIT_COLOR[g.fit];
+    L.polygon(f.p, { pane: "fieldsPane", fill: true, fillColor: fc || "#ffffff", fillOpacity: fc ? 0.18 : 0.02,
+      color: fc || "#ffffff", weight: 1.2, dashArray: "4 4", opacity: 0.85, bubblingMouseEvents: false })
+      .bindTooltip(`${esc(key)}${g ? ` · in ${esc(g.frisbee.join(" + "))}${g.cap > 1 ? ` (multi-field area ×${g.cap})` : ""}` : ""} — click to place a frisbee field here`, { className: "parktip", sticky: true })
+      .on("click", () => { if (rotating) return lockField(); placeOnCouncil(p, f); })
       .addTo(parkFieldsLayer);
   });
+  // Saved frisbee fields: their outlines, coloured by fit; click one to edit it.
+  Object.values(t.fr).filter(x => x.lat != null).forEach(fr => {
+    const sel = t.sel === fr.name, fc = rated(fr) && FIT_COLOR[fr.fit];
+    if (sel && !rotating) return;   // the live field is drawn on top
+    L.polygon(frisbeeCorners(fr), { pane: "fieldsPane", fill: true, fillColor: fc || "#ffd400", fillOpacity: fc ? 0.28 : 0.1,
+      color: fc || "#ffd400", weight: sel ? 3 : 2.5, opacity: 0.95, bubblingMouseEvents: false })
+      .bindTooltip(`${esc(fr.name)}${rated(fr) ? " · " + FIT_LABEL[fr.fit] : " · not rated"}${fr.lights?.length ? " · 💡" + fr.lights.length : ""} — click to edit`, { className: "parktip", sticky: true })
+      .on("click", () => { if (rotating) return lockField(); selectField(p, fr.name === t.sel ? null : fr.name); })
+      .addTo(parkFieldsLayer);
+  });
+}
+// Clicking a council area drops a new frisbee field on it, lined up with its long side.
+function placeOnCouncil(p, f) {
+  const t = tagsFor(p); t.sel = null;
+  // Lock reads the map centre, so move there at once (not animated).
+  angle = longAxis(f.p); map.setView(f.c, map.getZoom(), { animate: false });
+  lockField();
 }
 function selectField(p, key) {
   const t = tagsFor(p); t.sel = key;
   if (key) {
-    const hit = fieldKeys(p).find(x => x.key === key), rt = t.fr[key];
+    const rt = t.fr[key];
     if (rt?.lat != null) { angle = rt.angle; pin = L.latLng(rt.lat, rt.lon); }
-    else if (hit) { pin = L.latLng(hit.f.c[0], hit.f.c[1]); angle = longAxis(hit.f.p); }
     if (pin) map.panTo(pin, { animate: true });
     $("fitPop").hidden = false; fitArmed = true;
   } else { $("fitPop").hidden = true; fitArmed = false; }
@@ -623,19 +729,14 @@ function lockField() {
   pin = map.getCenter(); sizeField();
   const p = current(); if (!p) return;
   snap(p);
-  const t = tagsFor(p), n = nearestFields(p), key = n ? n.key : "This spot";
+  // Re-locking moves the selected frisbee field; otherwise this is a new one.
+  const t = tagsFor(p), key = t.sel && t.fr[t.sel] ? t.sel : newFrisbeeName(t);
   const cur = t.fr[key] ||= { name: key, fit: "unknown", lights: [] };
-  Object.assign(cur, { name: key, lat: +pin.lat.toFixed(6), lon: +pin.lng.toFixed(6), angle: Math.round(angle) });
+  Object.assign(cur, { name: key, lat: +pin.lat.toFixed(6), lon: +pin.lng.toFixed(6), angle: Math.round(angle), len: dims.len, wid: dims.wid, ez: dims.ez });
   if (cur.fit && cur.fit !== "unknown" && hasLights(t) && cur.lightsAuto !== false && cur.lightCount) placeLights(p, cur);
   syncFromFields(t);
   t.sel = key; fitArmed = true;
   $("fitPop").hidden = false; drawParkFields(p); drawLights(p); previewFields(p); renderTags(p); renderCentre();
-}
-function nearestFields(p) {
-  const fs = fieldKeys(p); if (!fs.length) return null;
-  const c = fieldCentre(), kx = 111320 * Math.cos(c.lat * Math.PI / 180), ky = 110540;
-  const byDist = fs.map(x => ({ ...x, m: Math.hypot((x.f.c[1] - c.lng) * kx, (x.f.c[0] - c.lat) * ky) })).sort((a, b) => a.m - b.m);
-  return byDist[0];
 }
 // The rating being edited: the selected field's, if it has a spot.
 const curRating = t => t.sel && t.fr[t.sel]?.lat != null ? t.fr[t.sel] : null;
@@ -648,7 +749,7 @@ function spotMoved(t) {
 }
 function previewFields(p) {
   const t = tagsFor(p), moved = spotMoved(t);
-  const target = t.sel ? `Rating ${t.sel}` : (() => { const n = nearestFields(p); return n ? `Nearest: ${n.key} (${Math.round(n.m)} m)` : "Rate the fit here"; })();
+  const target = t.sel ? `Rating ${t.sel}` : "Lock the field to add a frisbee field";
   // Short label; the how-to lives in the tooltip.
   $("fitMsg").textContent = moved ? `${target} · moved — rate again` : target;
   $("fitMsg").title = moved ? "Rate the fit again to save this spot" : t.sel && t.fr[t.sel]?.fit && t.fr[t.sel].fit !== "unknown" ? "Click a fit to change it, or the same one to clear it" : "Pan to fine-tune, then rate the fit";
@@ -672,10 +773,10 @@ function afterMove() {
 function confirmSpot(p, fit) {
   snap(p);
   const t = tagsFor(p), c = fieldCentre();
-  if (!t.sel) { const n = nearestFields(p); t.sel = n ? n.key : "This spot"; }
+  if (!t.sel) t.sel = newFrisbeeName(t);
   const cur = t.fr[t.sel] || { name: t.sel, lights: [] };
   if (cur.fit === fit && !spotMoved(t)) { cur.fit = "unknown"; delete cur.lat; delete cur.lon; delete cur.angle; }
-  else Object.assign(cur, { name: t.sel, fit, lat: +c.lat.toFixed(6), lon: +c.lng.toFixed(6), angle: Math.round(angle) });
+  else Object.assign(cur, { name: t.sel, fit, lat: +c.lat.toFixed(6), lon: +c.lng.toFixed(6), angle: Math.round(angle), len: dims.len, wid: dims.wid, ez: dims.ez });
   t.fr[t.sel] = cur;
   // Rated fields get light poles placed along their long sides (4 to start) until a pole
   // is moved by hand; cleared ratings keep whatever lights they had.
@@ -1018,30 +1119,38 @@ const whoBooks = () => (bookFor = (bookFor || session?.user?.email || "demo@loca
 // "active" bookings, which the booking site offers as Provider → Location → Facility.
 const isActive = x => x.status === "active";
 const myLocs = () => bookLocs[whoBooks()] || [];
-const cartOf = () => myLocs().filter(x => !isActive(x));
+// "retired": a field replaced when the venue's fields were regrouped; kept so bookings on it
+// keep their name, but neither active nor in the cart.
+const isRetired = x => x.status === "retired";
+const cartOf = () => myLocs().filter(x => x.status === "cart" || (!isActive(x) && !isRetired(x)));
 const activeOf = () => myLocs().filter(isActive);
-const locState = id => { const x = myLocs().find(y => y.id === id); return !x ? null : isActive(x) ? "active" : "cart"; };
+const locState = id => { const x = myLocs().find(y => y.id === id); return !x || isRetired(x) ? null : isActive(x) ? "active" : "cart"; };
 // Save every cart field as an active booking.
 async function saveCartActive() {
   const who = whoBooks(), before = myLocs().map(x => ({ ...x })), n = cartOf().length;
   if (!n) return;
   const at = new Date().toISOString();
-  bookLocs[who] = before.map(x => isActive(x) ? x : { ...x, status: "active", activated_at: at });
+  bookLocs[who] = before.map(x => isActive(x) || isRetired(x) ? x : { ...x, status: "active", activated_at: at });
   if (!(await saveBookLocs())) { bookLocs[who] = before; return; }
   setStatus(`Saved ${n} field${n > 1 ? "s" : ""} as active bookings. They're now in the booking site under Provider → Location.`);
   render(); renderTabs(); if (view === "book") renderBook();
 }
 // Add or remove one field (or "Whole park") of a park in the booker's cart; saves at once.
 async function toggleCart(p, key) {
-  const who = whoBooks(), before = [...(bookLocs[who] || [])], list = [...before], id = cartId(p, key), i = list.findIndex(x => x.id === id);
+  // A council area that's part of a saved frisbee group books the whole group.
+  const grp = (reviews[p.id]?.placement?.groups || []).find(g => g.council?.includes(key));
+  if (grp) key = grp.key;
+  const who = whoBooks(), before = [...(bookLocs[who] || [])], list = [...before], id = cartId(p, key);
+  let i = list.findIndex(x => x.id === id);
+  if (i >= 0 && isRetired(list[i])) { list.splice(i, 1); i = -1; }
   if (i >= 0 && isActive(list[i])) {
     setStatus(`${p.name} – ${key} is an active booking. Remove it under 🛒 Cart → Active bookings.`); return;
   }
   if (i >= 0) list.splice(i, 1);
   else {
-    const wf = parkWorkflow(p), f = fieldKeys(p).find(x => x.key === key)?.f, c = f?.c || [p.lat, p.lon];
-    list.push({ id, park_id: p.id, park: p.name, region: p.region, field: key, lat: c[0], lon: c[1], kind: wf.kind, operator: wf.operator, status: "cart",
-      added_at: new Date().toISOString(), added_by: session?.user?.email || "" });
+    const wf = parkWorkflow(p), f = fieldKeys(p).find(x => x.key === key)?.f, c = grp ? grp.c : f?.c || [p.lat, p.lon];
+    list.push({ id, park_id: p.id, park: p.name, region: p.region, field: grp ? grp.name : key, lat: c[0], lon: c[1], kind: wf.kind, operator: wf.operator, status: "cart",
+      ...(grp ? { council_fields: grp.council, frisbee: grp.cap, fit: grp.fit } : {}), added_at: new Date().toISOString(), added_by: session?.user?.email || "" });
   }
   bookLocs[who] = list;
   const saved = await saveBookLocs();
@@ -1462,9 +1571,38 @@ function render() {
 }
 
 // ── Decisions ────────────────────────────────────────────────────────────────
+function askSpare(p, share) {
+  const dlg = $("saveDlg");
+  $("dlgTitle").textContent = `Add another frisbee field at ${p.name}?`;
+  $("dlgBody").textContent = `About ${Math.round(share * 100)}% of the council field area has no frisbee field on it yet. Would you like to add another frisbee field to the space? `
+    + `If you save as it is, that space stays separate rather than being grouped with the nearest field.`;
+  return new Promise(res => { dlg.returnValue = ""; dlg.addEventListener("close", () => res(dlg.returnValue || "cancel"), { once: true }); dlg.showModal(); });
+}
+// Ready the next frisbee field: unlocked over the largest council area with no frisbee
+// field yet (or where the view is), with nothing selected.
+function startNextField(p) {
+  const t = tagsFor(p); t.sel = null; fitArmed = false; $("fitPop").hidden = true;
+  const fs = Object.values(t.fr).filter(x => x.lat != null), cf = fieldKeys(p);
+  const free = cf.map(({ f }) => f).filter(f => !fs.some(fr => areaXY(clipXY(toXY(f.p, fr.lat, fr.lon), toXY(frisbeeCorners(fr), fr.lat, fr.lon))) > OVERLAP_TOL * areaXY(toXY(f.p, fr.lat, fr.lon))))
+    .sort((a, b) => areaXY(toXY(b.p, b.c[0], b.c[1])) - areaXY(toXY(a.p, a.c[0], a.c[1])))[0];
+  if (free) { map.setView(free.c, map.getZoom(), { animate: false }); angle = longAxis(free.p); }
+  pin = null; if (!rotating) setRotating(true);
+  drawParkFields(p); drawLights(p); renderTags(p); renderCentre();
+  setStatus(free ? `Place the next frisbee field (unrated council area: ${free.n || "unnamed"}); lock it, then rate the fit.` : "Place the next frisbee field, lock it, then rate the fit.");
+}
 async function decide(decision) {
   const p = current(); if (!p || busy || view !== "park" || workMode === "book") return;
   const t = tagsFor(p);
+  // Spare council space: if a quarter or more of the council field area has no frisbee
+  // field, ask whether to add another before saving the venue.
+  if (decision !== "no" && Object.values(t.fr).some(rated)) {
+    const share = spareShare(councilGroups(p, t));
+    if (share >= SPARE_RULE) {
+      const a = await askSpare(p, share);
+      if (a === "cancel") return;
+      if (a === "add") { startNextField(p); return; }
+    }
+  }
   // The spots were fixed when each field was locked, so they're saved with the decision.
   const withField = !!t.spot;
   fitArmed = false;
@@ -1490,24 +1628,31 @@ async function decide(decision) {
 // A decided park's stage among the booker's fields: "active" when any of its fields are
 // active, "cart" when they're only in the cart, null when none are listed.
 function parkStage(id) {
-  const xs = myLocs().filter(x => x.park_id === id);
+  const xs = myLocs().filter(x => x.park_id === id && !isRetired(x));
   return !xs.length ? null : xs.some(isActive) ? "active" : "cart";
 }
 // The summary's Cart / Active toggle: move a park's fields to that stage (adding its rated
 // fields when none are listed); pressing the current stage again removes them.
+// The venue's bookable fields: its saved frisbee groups (council fields grouped on save,
+// multi-field areas included), else its rated fields, else the whole park.
+function venueEntries(p, status, extra = {}) {
+  const t = tagsFor(p), wf = parkWorkflow(p), at = new Date().toISOString(), base = { park_id: p.id, park: p.name, region: p.region, kind: wf.kind, operator: wf.operator,
+    status, added_at: at, ...(status === "active" ? { activated_at: at } : {}), added_by: session?.user?.email || "", ...extra };
+  const groups = reviews[p.id]?.placement?.groups || [];
+  if (groups.length) return groups.map(g => ({ ...base, id: cartId(p, g.key), field: g.name, council_fields: g.council, frisbee: g.cap, fit: g.fit, lat: g.c[0], lon: g.c[1] }));
+  const keys = Object.values(t.fr).filter(rated).map(x => x.name);
+  return (keys.length ? keys : ["Whole park"]).map(key => { const fr = t.fr[key], f = fieldKeys(p).find(x => x.key === key)?.f, c = fr?.lat != null ? [fr.lat, fr.lon] : f?.c || [p.lat, p.lon];
+    return { ...base, id: cartId(p, key), field: key, lat: c[0], lon: c[1] }; });
+}
 async function setParkStage(p, stage) {
   if (!p) return;
   const who = whoBooks(), before = [...(bookLocs[who] || [])], cur = parkStage(p.id), at = new Date().toISOString();
   let list;
-  if (cur === stage) list = before.filter(x => x.park_id !== p.id);
-  else if (cur) list = before.map(x => x.park_id !== p.id ? x : stage === "active" ? { ...x, status: "active", activated_at: x.activated_at || at } : { ...x, status: "cart" });
+  if (cur === stage) list = before.filter(x => x.park_id !== p.id || isRetired(x));
+  else if (cur) list = before.map(x => x.park_id !== p.id || isRetired(x) ? x : stage === "active" ? { ...x, status: "active", activated_at: x.activated_at || at } : { ...x, status: "cart" });
   else {
-    const rated = Object.values(tagsFor(p).fr).filter(x => x.fit && x.fit !== "unknown").map(x => x.name), wf = parkWorkflow(p);
-    list = [...before, ...(rated.length ? rated : ["Whole park"]).map(key => {
-      const f = fieldKeys(p).find(x => x.key === key)?.f, c = f?.c || [p.lat, p.lon];
-      return { id: cartId(p, key), park_id: p.id, park: p.name, region: p.region, field: key, lat: c[0], lon: c[1], kind: wf.kind, operator: wf.operator,
-        status: stage, added_at: at, ...(stage === "active" ? { activated_at: at } : {}), added_by: session?.user?.email || "", decision: reviews[p.id]?.decision };
-    })];
+    const add = venueEntries(p, stage, { decision: reviews[p.id]?.decision }), ids = new Set(add.map(x => x.id));
+    list = [...before.filter(x => !ids.has(x.id)), ...add];
   }
   bookLocs[who] = list;
   if (!(await saveBookLocs())) { bookLocs[who] = before; return; }
@@ -1518,22 +1663,21 @@ async function setParkStage(p, stage) {
 // rated fields (or the whole park, when it has none rated) to the booker's active fields;
 // Reject takes the park's fields off them.
 async function decisionToActive(p, t, decision) {
-  const who = whoBooks(), before = [...(bookLocs[who] || [])], list = before.filter(x => x.park_id !== p.id || decision !== "no");
+  const who = whoBooks(), before = [...(bookLocs[who] || [])];
+  let list = before.filter(x => x.park_id !== p.id || decision !== "no");
   if (decision !== "no") {
-    const rated = Object.values(t.fr).filter(x => x.fit && x.fit !== "unknown").map(x => x.name);
-    const keys = rated.length ? rated : ["Whole park"], wf = parkWorkflow(p), at = new Date().toISOString();
-    keys.forEach(key => {
-      const id = cartId(p, key), i = list.findIndex(x => x.id === id);
-      if (i >= 0) { list[i] = { ...list[i], status: "active", activated_at: list[i].activated_at || at }; return; }
-      const f = fieldKeys(p).find(x => x.key === key)?.f, c = f?.c || [p.lat, p.lon];
-      list.push({ id, park_id: p.id, park: p.name, region: p.region, field: key, lat: c[0], lon: c[1], kind: wf.kind, operator: wf.operator,
-        status: "active", added_at: at, activated_at: at, added_by: session?.user?.email || "", decision });
-    });
+    // The venue's groups become its active fields; the park's earlier fields that aren't
+    // among them are retired (kept for the bookings already on them).
+    const add = venueEntries(p, "active", { decision }), ids = new Set(add.map(x => x.id)), at = new Date().toISOString();
+    list = list.map(x => x.park_id !== p.id || ids.has(x.id) || isRetired(x) ? x : { ...x, status: "retired", retired_at: at });
+    add.forEach(e => { const i = list.findIndex(x => x.id === e.id);
+      if (i >= 0) list[i] = { ...list[i], ...e, status: "active", added_at: list[i].added_at || e.added_at, activated_at: list[i].activated_at || e.activated_at };
+      else list.push(e); });
   }
   if (JSON.stringify(list) === JSON.stringify(before)) return;
   bookLocs[who] = list;
   if (!(await saveBookLocs())) { bookLocs[who] = before; return; }
-  const n = list.filter(x => x.park_id === p.id).length;
+  const n = list.filter(x => x.park_id === p.id && isActive(x)).length;
   setStatus(decision === "no" ? `Rejected ${p.name}: removed from ${who}'s active fields.` : `${p.name}: ${n} field${n === 1 ? "" : "s"} now active for ${who} — bookable in Facility Booking.`);
   renderTabs();
 }
@@ -1543,7 +1687,14 @@ function buildReview(p, t, decision, withField) {
     : prevPl?.lat != null ? { lat: prevPl.lat, lon: prevPl.lon, angle: prevPl.angle, len: prevPl.len, wid: prevPl.wid, ez: prevPl.ez } : { lat: null, lon: null };
   // Per-field ratings and their lights are kept either way; "without" only skips the park's pin.
   const fr = Object.fromEntries(Object.entries(t.fr).filter(([, x]) => (x.fit && x.fit !== "unknown") || x.lights?.length));
-  const placement = (pos.lat != null || t.lightPts.length || Object.keys(fr).length) ? { ...pos, lights: t.lightPts, fields: fr } : null;
+  // On venue save (a decision) the frisbee fields are mapped back to council fields.
+  let groups = prevPl?.groups;
+  if (decision !== "rating") {
+    const m = councilGroups(p, t); groups = m.groups;
+    m.groups.forEach(g => g.frisbee.forEach(n => { if (fr[n]) fr[n] = { ...fr[n], council: g.council, group: g.key }; }));
+    if (!t.fieldsManual && m.groups.length) t.fields = m.groups.map(g => g.name).join("; ");
+  }
+  const placement = (pos.lat != null || t.lightPts.length || Object.keys(fr).length) ? { ...pos, lights: t.lightPts, fields: fr, ...(groups ? { groups } : {}) } : null;
   return { decision, lights: t.lights, fit: t.fit, quality: t.quality || null, fields: t.fields.trim(), notes: t.notes.trim(), placement };
 }
 // Save the park's field ratings so far without deciding (an existing decision is kept), stay
@@ -1555,14 +1706,12 @@ async function saveAndNext() {
   const ok = await save(p.id, buildReview(p, t, reviews[p.id]?.decision || "rating", false));
   busy = false;
   if (!ok) return;
-  const next = fieldKeys(p).find(x => x.key !== done && !(t.fr[x.key]?.fit && t.fr[x.key].fit !== "unknown"));
   renderRail();
-  if (!next) { $("fitPop").hidden = true; t.sel = null; drawParkFields(p); drawLights(p); renderTags(p); renderCentre();
-    setStatus(`Saved ${done}. Every council field at ${p.name} is rated — top pick, shortlist or reject it when you're ready.`); return; }
-  if (rotating) setRotating(false);
-  map.setView(next.f.c, map.getZoom(), { animate: false });
-  lockField();
-  setStatus(`Saved ${done}. Now rating ${next.key} — turn the field if needed, then rate the fit.`);
+  const share = spareShare(councilGroups(p, t));
+  if (share < SPARE_RULE) { $("fitPop").hidden = true; t.sel = null; fitArmed = false; drawParkFields(p); drawLights(p); renderTags(p); renderCentre();
+    setStatus(`Saved ${done}. The frisbee fields cover ${Math.round((1 - share) * 100)}% of the council area — top pick, shortlist or reject ${p.name} when you're ready (the rest joins the nearest field).`); return; }
+  startNextField(p);
+  setStatus(`Saved ${done}. About ${Math.round(share * 100)}% of the council area is still free — would you like to add another frisbee field? Lock this one to add it.`);
 }
 function skip() {
   const p = current(); if (!p) return;
