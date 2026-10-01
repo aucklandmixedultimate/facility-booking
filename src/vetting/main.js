@@ -64,7 +64,15 @@ const draft = {};              // park_id -> tags being edited before deciding
 const mapIdx = {};
 // Council booking state (season phases) and the season whose field maps show by default.
 const COUNCIL_NOW = councilState();
-const mapIndex = p => mapIdx[p.id] ?? Math.max(0, p.maps.findIndex(m => m.season === COUNCIL_NOW.mapSeason));
+// The season's maps shown everywhere: the current season until the ☀/❄ toggle flips it.
+let seasonPick = COUNCIL_NOW.mapSeason;
+const mapIndex = p => mapIdx[p.id] ?? Math.max(0, p.maps.findIndex(m => m.season === seasonPick));
+// Interests: which parks are served. Areas (regions; none ticked = all) and provider
+// (council-run and/or privately operated).
+let interests = store.get("vet-interests", { regions: [], council: true, priv: true });
+const interestOk = p => (!interests.regions.length || interests.regions.includes(p.region))
+  && (privOps(p).length ? interests.priv : interests.council);
+const interestsSet = () => interests.regions.length > 0 || !interests.council || !interests.priv;
 let cursor = 0, busy = false;
 let dims = store.get("vet-field-dims", WFDF);
 let fieldOn = store.get("vet-field-on", true);
@@ -159,6 +167,14 @@ function parkLatLng(p) {
   return p.lat ? [p.lat, p.lon] : null;
 }
 
+function renderInterests() {
+  const regions = [...new Set(PARKS.map(p => p.region))].sort();
+  $("interestPanel").innerHTML = `<b>Interests</b><span class="ip-k">Area</span>`
+    + regions.map(r => `<label><input type="checkbox" data-int="region" value="${esc(r)}"${interests.regions.includes(r) ? " checked" : ""}> ${esc(r)}</label>`).join("")
+    + `<span class="ip-k">Provider</span><label><input type="checkbox" data-int="council"${interests.council ? " checked" : ""}> 🏛 Council-run</label>`
+    + `<label><input type="checkbox" data-int="priv"${interests.priv ? " checked" : ""}> ◆ Privately operated</label>`
+    + `<small>No area ticked = all areas. Only parks matching these are served.</small>`;
+}
 // ── Activity score: a background ranking metric per park ─────────────────────
 // Starts at 0; each "Later" (skip) takes 1 off. Shared through the settings table for
 // signed-in admins (key vet_park_activity), else kept on this device.
@@ -172,6 +188,28 @@ async function loadActivity() {
   }
   activity = store.get("vet-activity", {});
 }
+// Views: how many times each park has been served (counted when you move on from it).
+const VIEWS_KEY = "vet_park_views";
+let views = {};
+const viewsOf = id => views[id] || 0;
+async function loadViews() {
+  if (supabase && session) {
+    const { data, error } = await supabase.from("settings").select("value").eq("key", VIEWS_KEY).maybeSingle();
+    if (!error) { views = data?.value || {}; return; }
+  }
+  views = store.get("vet-views", {});
+}
+async function bumpViews(id) {
+  views[id] = viewsOf(id) + 1;
+  if (supabase && session && IS_ADMIN) {
+    const { data } = await supabase.from("settings").select("value").eq("key", VIEWS_KEY).maybeSingle();
+    const fresh = data?.value || {}; fresh[id] = (fresh[id] || 0) + 1;
+    const { error } = await supabase.from("settings").upsert({ key: VIEWS_KEY, value: fresh, updated_at: new Date().toISOString() });
+    if (!error) { views = fresh; return; }
+  }
+  store.set("vet-views", views);
+}
+let servedPark = null;   // the park on screen; its view counts once you move on to another
 async function bumpActivity(id, delta) {
   activity[id] = activityOf(id) + delta;
   if (supabase && session && IS_ADMIN) {
@@ -187,13 +225,17 @@ async function bumpActivity(id, delta) {
 // ── Queue ────────────────────────────────────────────────────────────────────
 function queue() {
   const reg = $("region").value, m = $("mode").value, mapsOnly = $("mapsOnly").checked;
-  let q = PARKS.filter(p => (!reg || p.region === reg) && (!mapsOnly || p.maps.length));
+  let q = PARKS.filter(p => (!reg || p.region === reg) && (!mapsOnly || p.maps.length) && interestOk(p));
   const undecided = p => !reviews[p.id] || reviews[p.id].decision === "rating";
   if (m === "todo") q = q.filter(undecided);
   else if (m !== "all") q = q.filter(p => reviews[p.id]?.decision === m);
   // Parks still to review rank by their activity score (each skip lowers it), so parks
   // that keep getting skipped sink; ties keep the usual order.
-  if (m === "todo") q = q.map((p, i) => [p, i]).sort((a, b) => activityOf(b[0].id) - activityOf(a[0].id) || a[1] - b[1]).map(x => x[0]);
+  // The serving order: least viewed first (the default), the default order, or A–Z.
+  const ord = $("order").value;
+  if (ord === "alpha") q = [...q].sort((a, b) => a.name.localeCompare(b.name));
+  else if (m === "todo") q = q.map((p, i) => [p, i]).sort((a, b) => (ord === "least" ? viewsOf(a[0].id) - viewsOf(b[0].id) : 0)
+    || activityOf(b[0].id) - activityOf(a[0].id) || a[1] - b[1]).map(x => x[0]);
   if (m === "todo") q = q.filter(p => !later.has(p.id)).concat(q.filter(p => later.has(p.id)));
   return q;
 }
@@ -619,7 +661,7 @@ function buildCity() {
   const reg = $("region").value, cur = current();
   const pts = [];
   PARKS.forEach(p => {
-    if (reg && p.region !== reg) return;
+    if ((reg && p.region !== reg) || !interestOk(p)) return;
     const ll = parkLatLng(p); if (!ll) return;
     const r = reviews[p.id], col = suitColor(r), top = r?.decision === "top", isCur = view === "city" && cur?.id === p.id && !!focusId;
     pts.push(ll);
@@ -1228,7 +1270,7 @@ function maskContact(v) {
 const contactValue = v => { const s = maskContact(v).trim(); return /\s\p{L}$/u.test(s) ? s + "." : s; };
 function renderRail() {
   const reg = $("region").value, mapsOnly = $("mapsOnly").checked;
-  const scope = PARKS.filter(x => (!reg || x.region === reg) && (!mapsOnly || x.maps.length));
+  const scope = PARKS.filter(x => (!reg || x.region === reg) && (!mapsOnly || x.maps.length) && interestOk(x));
   const done = scope.filter(x => reviews[x.id] && reviews[x.id].decision !== "rating").length;
   $("progress").textContent = `${done} / ${scope.length} reviewed`;
   $("barFill").style.width = scope.length ? (100 * done / scope.length) + "%" : "0";
@@ -1293,7 +1335,13 @@ function render() {
     $("decChip").innerHTML = (lead ? `<span class="chip priv" title="Ask ${esc(lead.operator)} before applying to council">◆ ${esc(lead.short)}</span> ` : "")
       + ult.map(o => `<span class="chip ult" title="Home of ${esc(o.operator)}"${o.colors ? ` style="background:${o.colors.pattern || o.colors.fill};color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.8);box-shadow:inset 0 0 0 2px ${o.colors.edge || "#fff"}"` : ""}>🥏 ${esc(o.short)}</span> `).join("") + (r ? `<span class="chip ${r.decision === "no" ? "no" : r.decision === "top" ? "top" : ""}">${r.decision === "top" ? "Top pick" : r.decision === "yes" ? "Shortlisted" : "Rejected"}${r.by ? " · " + esc(r.by.split("@")[0]) : ""}</span>` : "");
     const i = Math.min(mapIndex(p), Math.max(0, p.maps.length - 1));
-    $("thumbs").innerHTML = p.maps.length > 1 ? p.maps.map((m, k) => `<button data-map="${k}" aria-pressed="${k === i}" title="${esc(m.title)}">${m.season === "winter" ? "❄ Winter" : "☀ Summer"}${/area/i.test(m.title) ? " area" : ""}</button>`).join("") : "";
+    // One ☀/❄ toggle flips the season for every park; extra maps in a season (e.g. an
+    // area plan) get a small cycle button.
+    const seasons = new Set(p.maps.map(m => m.season)), same = p.maps.map((m, k) => k).filter(k => p.maps[k].season === p.maps[i]?.season);
+    $("thumbs").innerHTML = (seasons.size > 1 ? `<button data-season title="Showing ${p.maps[i].season} council maps (current season: ${COUNCIL_NOW.mapSeason}). Click for ${p.maps[i].season === "winter" ? "summer" : "winter"}.">${p.maps[i].season === "winter" ? "❄ Winter" : "☀ Summer"}</button>`
+      : p.maps.length ? `<span class="seasononly" title="This park has ${p.maps[i]?.season || ""} maps only">${p.maps[i]?.season === "winter" ? "❄" : "☀"}</span>` : "")
+      + (same.length > 1 ? `<button data-map="${same[(same.indexOf(i) + 1) % same.length]}" title="Next ${p.maps[i].season} map: ${esc(p.maps[same[(same.indexOf(i) + 1) % same.length]].title)}">▦ ${same.indexOf(i) + 1}/${same.length}</button>` : "");
+    if (servedPark !== p.id) { if (servedPark) bumpViews(servedPark); servedPark = p.id; }
     const cf = councilFields(p).map(f => f.n).filter(Boolean);
     $("fieldList").textContent = cf.length ? "Council fields: " + [...new Set(cf)].join(" · ") : p.fields.length ? "Council fields: " + p.fields.join(" · ") : (p.maps.length ? "" : "No council map for this park (often a school or stadium ground). Satellite only.");
     const c = p.lat ? `${p.lat},${p.lon}` : encodeURIComponent(p.name + " Auckland");
@@ -1307,6 +1355,7 @@ function render() {
     if (fresh) restorePlacement(p);
   }
   ["noBtn", "yesBtn", "topBtn", "skipBtn"].forEach(b => $(b).disabled = !p);
+  $("interestBtn").setAttribute("aria-pressed", String(interestsSet()));
   $("skipBtn").title = `Decide later (S)${p ? ` · lowers its activity score (now ${activityOf(p.id)}), so it ranks lower in the queue` : ""}`;
   if (p && visited[visited.length - 1] !== p.id) visited.push(p.id);
   $("backBtn").disabled = !visited.some(id => id !== p?.id);
@@ -1445,6 +1494,9 @@ function bind() {
   $("card").addEventListener("click", e => {
     const t = e.target.closest("[data-tag]"), mp = e.target.closest("[data-map]"), p = current(); if (!p || view === "city") return;
     if (mp) { mapIdx[p.id] = +mp.dataset.map; render(); return; }
+    if (e.target.closest("[data-season]")) { seasonPick = (p.maps[mapIndex(p)]?.season || seasonPick) === "winter" ? "summer" : "winter";
+      Object.keys(mapIdx).forEach(k => delete mapIdx[k]); render();
+      const sm = document.querySelector(".sb-map"); if (sm) sm.textContent = (seasonPick === "winter" ? "❄ Winter" : "☀ Summer") + " maps"; setStatus(`Showing ${seasonPick} council maps${seasonPick === COUNCIL_NOW.mapSeason ? " (the current season)" : ""}.`); return; }
     if (t && t.tagName === "BUTTON") { snap(p); const d = tagsFor(p), k = t.dataset.tag, v = k === "quality" ? +t.dataset.val : t.dataset.val;
       if (k === "quality") d.quality = d.quality === v ? 0 : v;
       renderTags(p); }
@@ -1527,7 +1579,15 @@ function bind() {
   syncDims();
   $("noBtn").onclick = () => decide("no"); $("yesBtn").onclick = () => decide("yes"); $("topBtn").onclick = () => decide("top");
   $("skipBtn").onclick = skip; $("backBtn").onclick = goBack; $("editUndoBtn").onclick = editUndo;
-  ["region", "mode", "mapsOnly"].forEach(id => $(id).addEventListener("change", () => {
+  $("interestBtn").onclick = () => { const el = $("interestPanel"); el.hidden = !el.hidden; if (!el.hidden) renderInterests(); };
+  $("interestPanel").addEventListener("change", e => {
+    const c = e.target; if (!c.dataset.int) return;
+    if (c.dataset.int === "region") interests.regions = [...$("interestPanel").querySelectorAll("[data-int=region]:checked")].map(x => x.value);
+    else interests[c.dataset.int] = c.checked;
+    if (!interests.council && !interests.priv) { interests[c.dataset.int === "council" ? "priv" : "council"] = true; }
+    store.set("vet-interests", interests); cursor = 0; if (view === "park" && !focusId) shownPark = null;
+    renderInterests(); render(); });
+  ["region", "mode", "mapsOnly", "order"].forEach(id => $(id).addEventListener("change", () => {
     cursor = 0; store.set("vet-" + id, id === "mapsOnly" ? $(id).checked : $(id).value);
     if (view === "city" && id === "region") return setView("city", { refit: true });
     if (view === "park" && !focusId) shownPark = null;
@@ -1544,7 +1604,7 @@ function bind() {
     if ($("saveDlg").open || e.target.matches("input, textarea, select")) return;
     const p = current();
     if (!IS_ADMIN && !/^(Escape|c|C)$/.test(e.key)) return;   // bookers: no rating keys
-    if (e.key === "Escape") { if (infoOpenFor) { infoOpenFor = null; render(); return; } if (rotating) setRotating(false); $("sizePanel").hidden = true; $("fitPop").hidden = true; if (p && tagsFor(p).sel) selectField(p, null); return; }
+    if (e.key === "Escape") { if (infoOpenFor) { infoOpenFor = null; render(); return; } if (rotating) setRotating(false); $("sizePanel").hidden = true; $("interestPanel").hidden = true; $("fitPop").hidden = true; if (p && tagsFor(p).sel) selectField(p, null); return; }
     if (/^[cC]$/.test(e.key)) { focusId = null; setView(view === "city" ? "park" : "city"); return; }
     if (/^[bB]$/.test(e.key)) { setMode(workMode === "book" ? "rate" : "book"); return; }
     if (view === "city") return;
@@ -1634,7 +1694,7 @@ async function start() {
   Object.values(PRIV_BY_PARK).forEach(ops => ops.sort((a, b) => rank(a) - rank(b)));
   const regions = [...new Set(PARKS.map(p => p.region))];
   $("region").insertAdjacentHTML("beforeend", regions.map(r => `<option>${esc(r)}</option>`).join(""));
-  $("region").value = store.get("vet-region", ""); $("mode").value = store.get("vet-mode", "todo"); $("mapsOnly").checked = store.get("vet-mapsOnly", true);
+  $("region").value = store.get("vet-region", ""); $("mode").value = store.get("vet-mode", "todo"); $("mapsOnly").checked = store.get("vet-mapsOnly", true); $("order").value = store.get("vet-order", "least");
 
   if (supabase) {
     const { data } = await supabase.auth.getSession(); session = data.session;
@@ -1658,7 +1718,7 @@ async function start() {
     setStatus("Demo mode (no Supabase configured): decisions are kept in this browser.", true);
   }
   $("app").hidden = false; renderSeasonBar();
-  await loadBookLocs(); await loadActivity(); await loadCouncilOnly(); await loadRelations(); await syncCartWorkflows();
+  await loadBookLocs(); await loadActivity(); await loadViews(); await loadCouncilOnly(); await loadRelations(); await syncCartWorkflows();
   initMap(); drawField(); showField(fieldOn); renderLegend(); bind();
   setView(view === "park" || view === "book" ? view : "city", { refit: true });
   if (mode === "shared") setInterval(async () => { if (!busy && !rotating && document.visibilityState === "visible" && !$("saveDlg").open) { await loadShared(); if (view === "city") render(); else renderRail(); } }, 30000);

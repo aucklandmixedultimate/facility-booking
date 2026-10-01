@@ -446,3 +446,11 @@ body.viewer .handle .hint,body.viewer .rail .help,body.viewer #fieldBtn,body.vie
   .card.book .booksplit>.rail{border-left:0;border-top:1px solid var(--line);overflow:visible}
   .card.book .booksplit>.bookpanel{overflow:visible;flex:none}
 }
+/* Interests panel (in-map toolbar) and the season toggle */
+.interestpanel{right:52px;max-height:60vh;overflow:auto;min-width:200px}
+.interestpanel label{display:flex;gap:6px;align-items:center}
+.interestpanel .ip-k{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin-top:4px}
+.interestpanel small{color:var(--muted);max-width:200px}
+#interestBtn[aria-pressed=true]{background:#fef3c7;border-color:#d97706;color:#92400e}
+.thumbs .seasononly{padding:0 4px;opacity:.7}
+.interestpanel input{width:auto;margin:0}
