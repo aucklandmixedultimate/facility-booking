@@ -59,7 +59,6 @@ let flags = {};                // park_id -> {club, by, at}: flagged as probably
 let flagsShared = false;
 let mode = "local";            // "shared" (Supabase) | "local" (this browser)
 let session = null;
-const undoStack = [];
 const later = new Set();
 const draft = {};              // park_id -> tags being edited before deciding
 const mapIdx = {};
@@ -74,6 +73,9 @@ let view = store.get("vet-view", "city");   // "city" | "park" | "book" (the car
 let IS_ADMIN = true;
 let workMode = store.get("vet-work-mode", "rate");   // "rate" | "book": what clicking a park's field areas does
 let focusId = null;                          // park opened from the Auckland map (overrides the queue)
+let focusFrom = null;                        // "city" (opened from the map) or "back" (the Back button)
+const visited = [];                          // parks shown in park view, for Back
+const edits = {};                            // per-park undo stack of rating snapshots
 
 // ── Data ─────────────────────────────────────────────────────────────────────
 function fromRow(r) { return { decision: r.decision, lights: r.lights, fit: r.fit, quality: r.quality, fields: r.fields || "", notes: r.notes || "",
@@ -350,7 +352,7 @@ function drawLights(p) {
     mk.on("dragend", () => {
       $("dispenser").classList.remove("target");
       if (lastPointer && overDispenser(lastPointer)) return removeLight(p, k);
-      const l = mk.getLatLng(); arr[k] = [+l.lat.toFixed(6), +l.lng.toFixed(6)];
+      snap(p); const l = mk.getLatLng(); arr[k] = [+l.lat.toFixed(6), +l.lng.toFixed(6)];
       if (t.sel && t.fr[t.sel]) { t.fr[t.sel].lightsAuto = false; renderLightStep(p); }
     });
     mk.addTo(lightLayer);
@@ -366,12 +368,14 @@ function overDispenser(ev) {
   return pt.clientX >= r.left - 6 && pt.clientX <= r.right + 6 && pt.clientY >= r.top - 6 && pt.clientY <= r.bottom + 6;
 }
 function addLight(p, latlng) {
+  snap(p);
   const t = tagsFor(p);
   activeLights(t).push([+latlng.lat.toFixed(6), +latlng.lng.toFixed(6)]);
   if (t.sel && t.fr[t.sel]) t.fr[t.sel].lightsAuto = false;
   syncFromFields(t); drawLights(p); drawParkFields(p); renderTags(p);
 }
 function removeLight(p, k) {
+  snap(p);
   const t = tagsFor(p); activeLights(t).splice(k, 1);
   if (t.sel && t.fr[t.sel]) t.fr[t.sel].lightsAuto = false;
   syncFromFields(t); drawLights(p); drawParkFields(p); renderTags(p);
@@ -396,7 +400,7 @@ function bindDispenser() {
   };
   src.addEventListener("pointerup", drop);
   src.addEventListener("pointercancel", () => { if (ghost) { ghost.remove(); ghost = null; } });
-  $("noLightsBtn").onclick = () => { const p = current(); if (!p) return; const t = tagsFor(p);
+  $("noLightsBtn").onclick = () => { const p = current(); if (!p) return; snap(p); const t = tagsFor(p);
     if (t.lights === "none") t.lights = "unknown"; else { t.lights = "none"; t.lightPts = []; Object.values(t.fr).forEach(x => { x.lights = []; }); }
     drawLights(p); renderTags(p); };
 }
@@ -508,6 +512,7 @@ function afterMove() {
 // Rate the targeted field (the selected one, else the single closest). Rating the same fit
 // again clears that field's rating; its lights stay.
 function confirmSpot(p, fit) {
+  snap(p);
   const t = tagsFor(p), c = fieldCentre();
   if (!t.sel) { const n = nearestFields(p); t.sel = n ? n.key : "This spot"; }
   const cur = t.fr[t.sel] || { name: t.sel, lights: [] };
@@ -561,7 +566,7 @@ function renderLightStep(p) {
 function stepLights(d) {
   const p = current(); if (!p) return; const t = tagsFor(p), fr = t.sel && t.fr[t.sel];
   if (!fr || fr.lat == null || fr.lightsAuto === false) return;
-  fr.lightCount = Math.max(0, (fr.lightCount ?? 4) + d);
+  snap(p); fr.lightCount = Math.max(0, (fr.lightCount ?? 4) + d);
   placeLights(p, fr); syncFromFields(t); drawLights(p); drawParkFields(p); renderTags(p); renderLightStep(p);
 }
 function renderCentre() {
@@ -746,7 +751,21 @@ function setView(v, { refit } = {}) {
   }
   render();
 }
-function openPark(id) { focusId = id; setView("park"); }
+function openPark(id) { focusId = id; focusFrom = "city"; setView("park"); }
+// Back: the park shown before this one (a decided park opens for changing its decision).
+function goBack() {
+  const cur = current()?.id;
+  while (visited.length && visited[visited.length - 1] === cur) visited.pop();
+  const prev = visited.pop(); if (!prev || !BYID[prev]) return;
+  focusId = prev; focusFrom = "back"; shownPark = null; $("fitPop").hidden = true; if (rotating) setRotating(false); render();
+}
+// Rating undo: snapshot a park's draft before each change; Undo restores the last one.
+function snap(p) { if (!p) return; (edits[p.id] ||= []).push(JSON.stringify(tagsFor(p))); if (edits[p.id].length > 50) edits[p.id].shift(); }
+function editUndo() {
+  const p = current(); const st = p && edits[p.id]; if (!st?.length) return;
+  const sel = tagsFor(p).sel; draft[p.id] = JSON.parse(st.pop()); draft[p.id].sel = sel;
+  syncFromFields(draft[p.id]); drawParkFields(p); drawLights(p); renderTags(p); if (!$("fitPop").hidden) previewFields(p); renderCentre();
+}
 
 // ── Book: add council fields to a booker's booking locations ─────────────────
 // Stored in the shared settings table under "council_facilities" as
@@ -980,6 +999,7 @@ function dockFitBar(p) {
 function renderTags(p) {
   const t = tagsFor(p);
   dockFitBar(p);
+  $("editUndoBtn").disabled = !edits[p.id]?.length;
   $("segQuality").innerHTML = [1, 2, 3, 4, 5].map(n => `<button data-tag="quality" data-val="${n}" aria-pressed="${t.quality === n}" title="${n}/5">${n <= t.quality ? "★" : "☆"}</button>`).join("");
   // Fit and lights are set on the map (fit bar, bulb dispenser); here they're read-outs.
   const rated = Object.values(t.fr).filter(x => x.fit && x.fit !== "unknown");
@@ -1238,7 +1258,8 @@ function render() {
     if (fresh && tagsFor(p).spot && !tagsFor(p)._placed) { const sp = tagsFor(p).spot; angle = sp.angle || 0; map.setView([sp.lat, sp.lon], map.getZoom(), { animate: false }); pin = L.latLng(sp.lat, sp.lon); tagsFor(p)._placed = true; sizeField(); renderCentre(); }
   }
   ["noBtn", "yesBtn", "topBtn", "skipBtn"].forEach(b => $(b).disabled = !p);
-  $("undoBtn").disabled = !undoStack.length;
+  if (p && visited[visited.length - 1] !== p.id) visited.push(p.id);
+  $("backBtn").disabled = !visited.some(id => id !== p?.id);
   renderRail();
 }
 
@@ -1271,11 +1292,11 @@ async function decide(decision) {
   const x = decision === "yes" ? 800 : decision === "no" ? -800 : 0, y = decision === "top" ? -600 : 40;
   card.style.transform = `translate(${x}px, ${y}px) rotate(${x / 25}deg)`; card.style.opacity = "0";
   const rev = buildReview(p, t, decision, withField);
-  const prev = reviews[p.id] ? { ...reviews[p.id] } : null;
   await new Promise(r => setTimeout(r, matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 220));
   const ok = await save(p.id, rev);
-  const fromCity = !!focusId;
-  if (ok) { undoStack.push({ id: p.id, prev }); delete draft[p.id]; later.delete(p.id); if (!fromCity && $("mode").value !== "todo") cursor++; }
+  const fromCity = !!focusId && focusFrom === "city";
+  if (ok && focusFrom === "back") { focusId = null; focusFrom = null; }
+  if (ok) { delete draft[p.id]; delete edits[p.id]; later.delete(p.id); if (!fromCity && $("mode").value !== "todo") cursor++; }
   card.classList.remove("fly"); card.style.transform = ""; card.style.opacity = "";
   void card.offsetWidth; card.classList.add("deal");
   if (rotating) setRotating(false);
@@ -1313,16 +1334,9 @@ async function saveAndNext() {
 }
 function skip() {
   const p = current(); if (!p) return;
+  if (focusId && focusFrom === "back") { focusId = null; focusFrom = null; render(); return; }
   if (focusId) { focusId = null; setView("city"); return; }
   later.add(p.id); cursor = $("mode").value === "todo" ? 0 : cursor + 1; $("fitPop").hidden = true; render();
-}
-async function undo() {
-  const last = undoStack.pop(); if (!last) return render();
-  if (await save(last.id, last.prev)) { delete draft[last.id]; shownPark = null;
-    setStatus("Undid the decision on " + BYID[last.id].name + ".");
-    if (view === "city") return render();
-    const i = queue().findIndex(p => p.id === last.id); if (i >= 0 && !focusId) cursor = i; else focusId = last.id; }
-  render();
 }
 
 // ── Events ───────────────────────────────────────────────────────────────────
@@ -1330,7 +1344,7 @@ function bind() {
   $("card").addEventListener("click", e => {
     const t = e.target.closest("[data-tag]"), mp = e.target.closest("[data-map]"), p = current(); if (!p || view === "city") return;
     if (mp) { mapIdx[p.id] = +mp.dataset.map; render(); return; }
-    if (t && t.tagName === "BUTTON") { const d = tagsFor(p), k = t.dataset.tag, v = k === "quality" ? +t.dataset.val : t.dataset.val;
+    if (t && t.tagName === "BUTTON") { snap(p); const d = tagsFor(p), k = t.dataset.tag, v = k === "quality" ? +t.dataset.val : t.dataset.val;
       if (k === "quality") d.quality = d.quality === v ? 0 : v;
       renderTags(p); }
   });
@@ -1412,7 +1426,7 @@ function bind() {
   $("fReset").onclick = () => { dims = { ...WFDF }; store.set("vet-field-dims", dims); syncDims(); drawField(); sizeField(); };
   syncDims();
   $("noBtn").onclick = () => decide("no"); $("yesBtn").onclick = () => decide("yes"); $("topBtn").onclick = () => decide("top");
-  $("skipBtn").onclick = skip; $("undoBtn").onclick = undo;
+  $("skipBtn").onclick = skip; $("backBtn").onclick = goBack; $("editUndoBtn").onclick = editUndo;
   ["region", "mode", "mapsOnly"].forEach(id => $(id).addEventListener("change", () => {
     cursor = 0; store.set("vet-" + id, id === "mapsOnly" ? $(id).checked : $(id).value);
     if (view === "city" && id === "region") return setView("city", { refit: true });
@@ -1437,7 +1451,7 @@ function bind() {
     else if (e.key === "ArrowUp") { e.preventDefault(); decide("top"); }
     else if (e.key === "Enter" && fieldOn && !e.target.closest("button")) { e.preventDefault(); $("centreBtn").click(); }
     else if (/^[sS]$/.test(e.key)) skip();
-    else if (/^[zZ]$/.test(e.key)) undo();
+    else if (/^[zZ]$/.test(e.key)) editUndo();
     else if (/^[tT]$/.test(e.key)) showField(!fieldOn);
     else if (e.key === "0") $("fitBtn").click();
     else if (/^[rR]$/.test(e.key)) { angle = (angle + 15) % 360; sizeField(); afterMove(); }
