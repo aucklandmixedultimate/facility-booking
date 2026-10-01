@@ -96,16 +96,21 @@ async function loadShared() {
 async function loadFlags() {
   if (mode === "shared") {
     const { data, error } = await supabase.from("field_flags").select("*");
-    if (!error) { flagsShared = true; flags = Object.fromEntries(data.map(r => [r.park_id, { club: r.club || "", by: r.flagged_by_email || "", at: r.updated_at }])); return; }
+    if (!error) { flagsShared = true; flags = Object.fromEntries(data.map(r => [r.park_id, { club: r.club || "", kind: r.kind || "private", contact: r.contact || "",
+      by: r.flagged_by_email || "", at: r.updated_at }])); return; }
   }
   flagsShared = false; flags = store.get("vet-flags", {});
 }
 async function saveFlag(id, flag) {
   if (flagsShared) {
-    const q = flag ? supabase.from("field_flags").upsert({ park_id: id, club: flag.club || "", flagged_by: session?.user?.id || null,
-        flagged_by_email: session?.user?.email || null, updated_at: new Date().toISOString() })
-      : supabase.from("field_flags").delete().eq("park_id", id);
-    const { error } = await q;
+    const row = flag && { park_id: id, club: flag.club || "", kind: flag.kind || "private", contact: flag.contact || "",
+      flagged_by: session?.user?.id || null, flagged_by_email: session?.user?.email || null, updated_at: new Date().toISOString() };
+    let { error } = flag ? await supabase.from("field_flags").upsert(row) : await supabase.from("field_flags").delete().eq("park_id", id);
+    // Before the kind/contact columns exist (supabase-migration-field-reviews.sql), keep the provider only.
+    if (error && flag && /kind|contact|column/i.test(error.message || "")) {
+      const { kind, contact, ...old } = row; ({ error } = await supabase.from("field_flags").upsert(old));
+      if (!error) setStatus("Saved the provider; its kind and contact person need the updated supabase-migration-field-reviews.sql.", true);
+    }
     if (error) { setStatus("Couldn't save the club flag (" + error.message + ").", true); return false; }
   }
   if (flag) flags[id] = { ...flag, by: session?.user?.email || "", at: new Date().toISOString() }; else delete flags[id];
@@ -122,8 +127,8 @@ async function save(id, rev) {
       : supabase.from("field_reviews").delete().eq("park_id", id);
     const { error } = await q;
     if (error) {
-      const old = /fit_check/i.test(error.message || "");
-      setStatus(old ? "Saving \"2+ fields\" needs the updated supabase-migration-field-reviews.sql — re-run it in the Supabase SQL editor."
+      const old = /fit_check/i.test(error.message || ""), dec = /decision_check/i.test(error.message || "");
+      setStatus(old || dec ? `Saving ${dec ? "field ratings before a decision" : "\"2+ fields\""} needs the updated supabase-migration-field-reviews.sql — re-run it in the Supabase SQL editor.`
                     : "Couldn't save that decision (" + error.message + "). Try again.", true);
       return false;
     }
@@ -135,7 +140,7 @@ async function save(id, rev) {
 
 // Overall suitability, 0 (rejected) … 1 (ideal); null when not rated yet.
 function suitScore(r) {
-  if (!r) return null;
+  if (!r || r.decision === "rating") return null;
   if (r.decision === "no") return 0;
   let s = r.quality ? r.quality / 5 : 0.5;
   s += { multi: 0.2, full: 0.1, reduced: -0.15 }[r.fit] || 0;
@@ -145,7 +150,7 @@ function suitScore(r) {
 }
 const suitHue = s => Math.round(15 + s * 115);
 function suitColor(r) { const s = suitScore(r); return s === null ? "#8a958f" : s === 0 ? "#b3372d" : `hsl(${suitHue(s)} 72% 42%)`; }
-function suitWord(r) { const s = suitScore(r); return s === null ? "Not rated" : s === 0 ? "Rejected" : s >= 0.85 ? "Excellent" : s >= 0.65 ? "Good" : s >= 0.45 ? "Fair" : "Poor"; }
+function suitWord(r) { const s = suitScore(r); return s === null ? (r?.decision === "rating" ? "Rating in progress" : "Not rated") : s === 0 ? "Rejected" : s >= 0.85 ? "Excellent" : s >= 0.65 ? "Good" : s >= 0.45 ? "Fair" : "Poor"; }
 function parkLatLng(p) {
   const pl = reviews[p.id]?.placement;
   if (pl?.lat != null) return [pl.lat, pl.lon];
@@ -156,7 +161,8 @@ function parkLatLng(p) {
 function queue() {
   const reg = $("region").value, m = $("mode").value, mapsOnly = $("mapsOnly").checked;
   let q = PARKS.filter(p => (!reg || p.region === reg) && (!mapsOnly || p.maps.length));
-  if (m === "todo") q = q.filter(p => !reviews[p.id]);
+  const undecided = p => !reviews[p.id] || reviews[p.id].decision === "rating";
+  if (m === "todo") q = q.filter(undecided);
   else if (m !== "all") q = q.filter(p => reviews[p.id]?.decision === m);
   if (m === "todo") q = q.filter(p => !later.has(p.id)).concat(q.filter(p => later.has(p.id)));
   return q;
@@ -474,6 +480,7 @@ function previewFields(p) {
   $("fitMsg").textContent = moved ? `${target} — moved, rate it again to save this spot` : `${target}${t.sel && t.fr[t.sel]?.fit && t.fr[t.sel].fit !== "unknown" ? " · click a fit to change it, or the same one to clear it" : pin ? "" : " · pan to fine-tune"}`;
   $("fitMsg").classList.toggle("warn", moved);
   $("fitPop").querySelectorAll("[data-fit]").forEach(b => b.setAttribute("aria-pressed", String(!!t.sel && t.fr[t.sel]?.fit === b.dataset.fit && !moved)));
+  $("saveNextBtn").hidden = !IS_ADMIN || !curRating(t) || moved;
 }
 function afterMove() {
   const p = current(); if (!p) return;
@@ -492,7 +499,8 @@ function confirmSpot(p, fit) {
   else Object.assign(cur, { name: t.sel, fit, lat: +c.lat.toFixed(6), lon: +c.lng.toFixed(6), angle: Math.round(angle) });
   t.fr[t.sel] = cur;
   syncFromFields(t);
-  $("fitPop").hidden = true; drawParkFields(p); drawLights(p); renderTags(p);
+  // The bar stays open so the rating can go straight to "Save · next field".
+  drawParkFields(p); drawLights(p); renderTags(p); previewFields(p); renderCentre();
 }
 function renderCentre() {
   const p = current(), t = p ? tagsFor(p) : null, moved = !!t && spotMoved(t);
@@ -531,14 +539,14 @@ function buildCity() {
       : isAmua ? amuaMarker(ll, col, isCur) : pv?.length ? privMarker(ll, col, isCur, top, clubCol) : L.circleMarker(ll, { radius: r ? 8 : 6,
       color: top ? "#e0a647" : isCur ? "#15211c" : fl ? PRIV_COLOR : "#ffffff", weight: top || isCur || fl ? 3 : 1.5, dashArray: fl ? "3 3" : null,
       fillColor: col, fillOpacity: r ? 0.95 : 0.7, bubblingMouseEvents: false });
-    const tags = r ? [r.decision === "top" ? "★ Top pick" : r.decision === "yes" ? "Shortlisted" : "Rejected",
+    const tags = r ? [r.decision === "top" ? "★ Top pick" : r.decision === "yes" ? "Shortlisted" : r.decision === "rating" ? "Rating in progress" : "Rejected",
       r.quality ? r.quality + "/5" : "", r.fit && r.fit !== "unknown" ? FIT_LABEL[r.fit] : "",
       r.lights === "full" || r.lights === "training" ? "💡 lights" : r.lights === "none" ? "no lights" : ""].filter(Boolean).join(" · ") : "Not rated yet";
     mk.bindTooltip(`<b>${esc(p.name)}</b><br>${esc(p.region)} · <b style="color:${col}">${suitWord(r)}</b><br>${esc(tags)}${r?.fields ? "<br>Fields: " + esc(r.fields) : ""}`
       + (isAmua ? `<br><b style="color:#b7791f">★ Book only through: AMUA</b>`
         : pv?.length ? `<br><b style="color:${PRIV_COLOR}">◆ Privately managed: contact ${esc(pv[0].short)}</b> first` : "")
       + (ult.length ? `<br><b style="color:${ULT_COLOR}">🥏 ${ult.some(o => o.booking_only) ? "Book only through" : "Ultimate club"}: ${esc(ult.map(o => o.operator).join(", "))}</b>` : "")
-      + (fl ? `<br><b style="color:${PRIV_COLOR}">◇ Flagged: probably club-run${fl.club ? " (" + esc(fl.club) + ")" : ""}</b>` : "")
+      + (flags[p.id] ? `<br><b style="color:${PRIV_COLOR}">✎ ${esc(amendText(flags[p.id]))}</b>` : "")
       + (workMode === "book" ? `<br>${nAct ? `📌 ${nAct} active booking field${nAct > 1 ? "s" : ""} · ` : ""}${inCart ? `🛒 ${inCart} in the cart · ` : ""}<i>Click to book fields</i>` : `<br><i>Click to rate</i>`),
       { className: "parktip", direction: "top", offset: [0, -6] });
     mk.on("click", () => openPark(p.id));
@@ -1038,27 +1046,47 @@ async function syncCartWorkflows() {
   if (supabase && session) await supabase.from("settings").upsert({ key: BOOK_KEY, value: bookLocs, updated_at: new Date().toISOString() });
   else store.set("vet-booklocs", bookLocs);
 }
-// The club-run flag only applies to parks not already in the private-operator list.
+// Provider amendments: tag a park whose provider listing needs changing, e.g. Liston Park is
+// privately operated by Ellerslie AFC. Once tagged, the row asks for the provider's contact
+// person (first name and last initial only).
+const AMEND_KIND = { private: "Privately operated by", change: "Operator changed to", other: "Provider change" };
+let amendFor = null;
+const amendText = fl => `${AMEND_KIND[fl.kind || "private"]}${fl.club ? " " + fl.club : ""}${fl.contact ? " · contact " + fl.contact : ""}`;   // the park whose amendment row is open
 function renderFlag(p) {
-  const known = !!PRIV_BY_PARK[p.id]?.length, fl = flags[p.id];
-  $("clubFlagBtn").hidden = known; $("clubIn").hidden = known || !fl;
+  const fl = flags[p.id];
   $("clubFlagBtn").setAttribute("aria-pressed", String(!!fl));
-  $("clubFlagBtn").textContent = fl ? "◆ Flagged: club-run" : "◇ Club-run?";
-  $("clubFlagBtn").title = fl ? `Flagged${fl.by ? " by " + fl.by.split("@")[0] : ""} as probably club-run. Click to clear.`
-    : "Flag this park as probably run by a club, even though it isn't in the private-operator list yet";
-  if (document.activeElement !== $("clubIn")) $("clubIn").value = fl?.club || "";
+  $("clubFlagBtn").textContent = fl ? "✎ " + amendText(fl) : "✎ Provider?";
+  $("clubFlagBtn").title = fl ? `Provider amendment${fl.by ? " by " + fl.by.split("@")[0] : ""}. Click to edit.`
+    : "Tag this park's provider for amendment, e.g. privately operated by a club that isn't listed yet";
+  $("amendRow").hidden = amendFor !== p.id;
+  $("amendContact").hidden = !fl;
+  $("amendClear").hidden = !fl;
+  const ae = document.activeElement;
+  if (ae !== $("clubIn")) $("clubIn").value = fl?.club || "";
+  if (ae !== $("amendKind")) $("amendKind").value = fl?.kind || "private";
+  if (ae !== $("amendContact")) $("amendContact").value = fl?.contact || "";
+  if (!$("providerList").options.length)
+    $("providerList").innerHTML = [...new Set(PRIV.operators.map(o => o.short || o.operator))].sort().map(n => `<option value="${esc(n)}">`).join("");
 }
+// Contact person as typed: the first space ends the first name, then one letter (the last
+// initial) is all that's allowed. "rory hughes" → "Rory H".
+function maskContact(v) {
+  const m = String(v).replace(/^\s+/, "").match(/^(\S*)(\s?)(\S?)/);
+  const first = m[1] ? m[1][0].toUpperCase() + m[1].slice(1) : "";
+  return first + (m[2] && first ? " " + m[3].replace(/[^\p{L}]/gu, "").toUpperCase() : "");
+}
+const contactValue = v => { const s = maskContact(v).trim(); return /\s\p{L}$/u.test(s) ? s + "." : s; };
 function renderRail() {
   const reg = $("region").value, mapsOnly = $("mapsOnly").checked;
   const scope = PARKS.filter(x => (!reg || x.region === reg) && (!mapsOnly || x.maps.length));
-  const done = scope.filter(x => reviews[x.id]).length;
+  const done = scope.filter(x => reviews[x.id] && reviews[x.id].decision !== "rating").length;
   $("progress").textContent = `${done} / ${scope.length} reviewed`;
   $("barFill").style.width = scope.length ? (100 * done / scope.length) + "%" : "0";
   const all = Object.entries(reviews).filter(([id]) => BYID[id]);
   $("nTop").textContent = all.filter(([, r]) => r.decision === "top").length;
   $("nYes").textContent = all.filter(([, r]) => r.decision === "yes").length;
   $("nNo").textContent = all.filter(([, r]) => r.decision === "no").length;
-  const picks = all.filter(([, r]) => r.decision !== "no").sort((a, b) => suitScore(b[1]) - suitScore(a[1]) || BYID[a[0]].name.localeCompare(BYID[b[0]].name));
+  const picks = all.filter(([, r]) => r.decision !== "no" && r.decision !== "rating").sort((a, b) => suitScore(b[1]) - suitScore(a[1]) || BYID[a[0]].name.localeCompare(BYID[b[0]].name));
   $("list").innerHTML = picks.length ? picks.map(([id, r]) => { const pp = BYID[id];
     return `<button data-open="${id}"><span class="dot" style="background:${suitColor(r)}"></span><span style="min-width:0"><span class="n">${r.decision === "top" ? "★ " : ""}${esc(pp.name)}</span><span class="m">${esc(pp.region)} · ${suitWord(r).toLowerCase()} · ${esc(FIT_LABEL[r.fit] || r.fit)}${r.quality ? " · " + r.quality + "/5" : ""}${r.lights === "full" || r.lights === "training" ? " · 💡" : ""}</span></span></button>`; }).join("")
     : `<p class="help">Shortlisted and top-pick parks collect here, best first.</p>`;
@@ -1150,7 +1178,6 @@ async function decide(decision) {
   const p = current(); if (!p || busy || view !== "park" || workMode === "book") return;
   const t = tagsFor(p);
   let withField = false;
-  const prevPl = reviews[p.id]?.placement;
   if (t.spot && ratedCount(t) >= 3) {
     const a = await askPlacement(p, t, decision);
     if (a === "cancel") return;
@@ -1160,12 +1187,7 @@ async function decide(decision) {
   const card = $("card"); card.classList.remove("snap", "deal"); card.classList.add("fly");
   const x = decision === "yes" ? 800 : decision === "no" ? -800 : 0, y = decision === "top" ? -600 : 40;
   card.style.transform = `translate(${x}px, ${y}px) rotate(${x / 25}deg)`; card.style.opacity = "0";
-  const pos = withField ? { ...t.spot, ...dims }
-    : prevPl?.lat != null ? { lat: prevPl.lat, lon: prevPl.lon, angle: prevPl.angle, len: prevPl.len, wid: prevPl.wid, ez: prevPl.ez } : { lat: null, lon: null };
-  // Per-field ratings and their lights are kept either way; "without" only skips the park's pin.
-  const fr = Object.fromEntries(Object.entries(t.fr).filter(([, x]) => (x.fit && x.fit !== "unknown") || x.lights?.length));
-  const placement = (pos.lat != null || t.lightPts.length || Object.keys(fr).length) ? { ...pos, lights: t.lightPts, fields: fr } : null;
-  const rev = { decision, lights: t.lights, fit: t.fit, quality: t.quality || null, fields: t.fields.trim(), notes: t.notes.trim(), placement };
+  const rev = buildReview(p, t, decision, withField);
   const prev = reviews[p.id] ? { ...reviews[p.id] } : null;
   await new Promise(r => setTimeout(r, matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 220));
   const ok = await save(p.id, rev);
@@ -1178,6 +1200,33 @@ async function decide(decision) {
   busy = false;
   if (ok && fromCity) { focusId = null; setView("city"); setStatus(`Saved ${p.name} — ${suitWord(reviews[p.id]).toLowerCase()}.`); return; }
   render();
+}
+function buildReview(p, t, decision, withField) {
+  const prevPl = reviews[p.id]?.placement;
+  const pos = withField ? { ...t.spot, ...dims }
+    : prevPl?.lat != null ? { lat: prevPl.lat, lon: prevPl.lon, angle: prevPl.angle, len: prevPl.len, wid: prevPl.wid, ez: prevPl.ez } : { lat: null, lon: null };
+  // Per-field ratings and their lights are kept either way; "without" only skips the park's pin.
+  const fr = Object.fromEntries(Object.entries(t.fr).filter(([, x]) => (x.fit && x.fit !== "unknown") || x.lights?.length));
+  const placement = (pos.lat != null || t.lightPts.length || Object.keys(fr).length) ? { ...pos, lights: t.lightPts, fields: fr } : null;
+  return { decision, lights: t.lights, fit: t.fit, quality: t.quality || null, fields: t.fields.trim(), notes: t.notes.trim(), placement };
+}
+// Save the park's field ratings so far without deciding (an existing decision is kept), stay
+// on the park and move the field to its next unrated council field, ready to rate.
+async function saveAndNext() {
+  const p = current(); if (!p || busy || view !== "park") return;
+  const t = tagsFor(p), done = t.sel;
+  busy = true;
+  const ok = await save(p.id, buildReview(p, t, reviews[p.id]?.decision || "rating", false));
+  busy = false;
+  if (!ok) return;
+  const next = fieldKeys(p).find(x => x.key !== done && !(t.fr[x.key]?.fit && t.fr[x.key].fit !== "unknown"));
+  renderRail();
+  if (!next) { $("fitPop").hidden = true; t.sel = null; drawParkFields(p); drawLights(p); renderTags(p); renderCentre();
+    setStatus(`Saved ${done}. Every council field at ${p.name} is rated — top pick, shortlist or reject it when you're ready.`); return; }
+  if (rotating) setRotating(false);
+  map.setView(next.f.c, map.getZoom(), { animate: false });
+  lockField();
+  setStatus(`Saved ${done}. Now rating ${next.key} — turn the field if needed, then rate the fit.`);
 }
 function skip() {
   const p = current(); if (!p) return;
@@ -1246,13 +1295,22 @@ function bind() {
     confirmSpot(p, b.dataset.fit); });
   $("fieldBtn").onclick = () => showField(!fieldOn);
   bindDispenser();
-  $("clubFlagBtn").onclick = async () => { const p = current(); if (!p) return;
-    if (await saveFlag(p.id, flags[p.id] ? null : { club: "" })) { renderFlag(p); if (flags[p.id]) $("clubIn").focus(); } };
+  $("clubFlagBtn").onclick = () => { const p = current(); if (!p) return;
+    amendFor = amendFor === p.id ? null : p.id; renderFlag(p); if (amendFor) $("clubIn").focus(); };
+  const amendSave = async () => { const p = current(); if (!p) return;
+    const fl = { club: $("clubIn").value.trim(), kind: $("amendKind").value, contact: contactValue($("amendContact").value) };
+    const isNew = !flags[p.id];
+    if (!fl.club && fl.kind !== "other") { $("clubIn").focus(); return; }
+    if (await saveFlag(p.id, fl)) { renderFlag(p); if (isNew) $("amendContact").focus(); renderRail(); } };
+  $("amendSave").onclick = amendSave;
+  $("amendClear").onclick = async () => { const p = current(); if (!p) return;
+    if (await saveFlag(p.id, null)) { amendFor = null; renderFlag(p); renderRail(); } };
+  $("amendContact").addEventListener("input", e => { const el = e.target, v = maskContact(el.value); if (v !== el.value) el.value = v; });
+  $("amendRow").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); amendSave(); } });
+  $("saveNextBtn").onclick = e => { e.stopPropagation(); saveAndNext(); };
   bindInfo();
   $("councilOnlyBtn").onclick = async () => { const p = current(); if (!p) return;
     if (await setCouncilOnly(p, !councilOnly(p))) render(); };
-  $("clubIn").addEventListener("change", async () => { const p = current(); if (!p || !flags[p.id]) return;
-    await saveFlag(p.id, { club: $("clubIn").value.trim() }); renderFlag(p); });
   $("fitBtn").onclick = () => { const p = current(); if (p) showMap(p); };
   $("cityTab").onclick = () => { if (view !== "city") { focusId = null; setView("city"); } else setView("city", { refit: true }); };
   $("parkTab").onclick = () => { if (view !== "park") { if (view === "city") focusId = null; setView("park"); } };
@@ -1307,15 +1365,15 @@ function opCsv(o) {
     ev ? [ev.date, REL.tag[ev.tag] || ev.tag, ev.ref].filter(Boolean).join(" ") : ""];
 }
 function exportCsv() {
-  const rows = [["Region", "Park", "Decision", "Suitability", "Lights", "Light poles", "Fit", "Quality", "Fields", "Notes", "Field placement (lat, lon, angle°)", "Private operator", "Operator contact", "Ultimate club", "Flagged club-run", "Reviewer", "Reviewed at",
+  const rows = [["Region", "Park", "Decision", "Suitability", "Lights", "Light poles", "Fit", "Quality", "Fields", "Notes", "Field placement (lat, lon, angle°)", "Private operator", "Operator contact", "Ultimate club", "Provider amendment", "Reviewer", "Reviewed at",
     "Local board", "Tenure", "Tenure until", "Board links", "Council influence", "Relationship", "Last event"]];
   PARKS.forEach(p => { const r = reviews[p.id] || {}, fl = flags[p.id]; if (!reviews[p.id] && !fl && !ultimateOf(p).length) return; const pl = r.placement;
-    rows.push([p.region, p.name, r.decision ? (r.decision === "top" ? "top pick" : r.decision === "yes" ? "shortlist" : "reject") : "", r.decision ? suitWord(r) : "", r.lights || "", pl?.lights?.length || 0,
+    rows.push([p.region, p.name, r.decision ? (r.decision === "top" ? "top pick" : r.decision === "yes" ? "shortlist" : r.decision === "rating" ? "rating in progress" : "reject") : "", r.decision ? suitWord(r) : "", r.lights || "", pl?.lights?.length || 0,
       r.fit ? FIT_LABEL[r.fit] || r.fit : "", r.quality || "", r.fields || "", r.notes || "", pl?.lat != null ? `${pl.lat}, ${pl.lon}, ${pl.angle}` : "",
       privOps(p)[0]?.operator || "",
       [privOps(p)[0]?.contact?.email, privOps(p)[0]?.contact?.phone].filter(Boolean).join(" / "),
       ultimateOf(p).map(o => o.operator + ([o.contact?.email, o.contact?.phone].filter(Boolean).length ? ` (${[o.contact?.email, o.contact?.phone].filter(Boolean).join(" / ")})` : "")).join("; "),
-      fl ? "yes" + (fl.club ? ": " + fl.club : "") : "", r.by || "", r.at || "", ...opCsv(PRIV_BY_PARK[p.id]?.[0])]); });
+      fl ? amendText(fl) : "", r.by || "", r.at || "", ...opCsv(PRIV_BY_PARK[p.id]?.[0])]); });
   const csv = rows.map(r => r.map(v => { const s = String(v ?? ""); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }).join(",")).join("\n");
   const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); a.download = "council-field-vetting.csv"; a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);

@@ -349,12 +349,28 @@ The page always fits one screen: nothing scrolls except the map, where the wheel
   under the club that manages the fields, but requests go to its booking contact. For
   example, Michaels Ave is managed by Ellerslie AFC and booked only through Ellerslie
   Ultimate Club; Fergusson Domain is managed by Te Papapa RFC and booked through TPU.
-- **Flag as club-run (◇).** For a park that isn't in the private list but looks club-run
-  (clubrooms, a resident club), press **◇ Club-run?** on the card and optionally name the
-  club. The flag saves straight away, with no decision needed, to `field_flags` (in
-  `supabase-migration-field-reviews.sql`; until it's run, flags stay in the browser). On
-  the Auckland map the park gets a dashed purple ring, and the CSV has a "Flagged club-run"
-  column. Promote confirmed flags into `private-managed.json`.
+- **Provider amendment (✎).** When a park's provider listing needs changing, press
+  **✎ Provider?** on the card. For example, Liston Park is listed as council but is
+  privately operated by Ellerslie AFC.
+  - Pick what's wrong: "Privately operated by", "Operator changed to" or "Other provider
+    change". Then name the provider (known providers are suggested) and press Save.
+  - Once it's tagged, the row asks for the provider's **contact person**. Typing a space ends
+    the first name, and only one more letter is taken as the last initial: "rory hughes"
+    becomes "Rory H.".
+  - It saves straight away, with no decision needed, to `field_flags` (`kind` and `contact`
+    columns in `supabase-migration-field-reviews.sql`; until it's run, amendments stay in the
+    browser).
+  - Unlisted parks with an amendment get a dashed purple ring on the Auckland map. The
+    tooltip and the CSV's "Provider amendment" column show it.
+  - Promote confirmed amendments into `private-managed.json`.
+- **Save · next field (💾).** After rating a field's fit, the fit bar stays open with
+  **💾 Save · next field**.
+  - It saves the park's field ratings without a decision, kept as "rating in progress"
+    (decision `rating`). An existing decision is kept instead.
+  - It stays on the park and moves the field onto the next unrated council field, ready to
+    rate.
+  - In-progress parks stay in "To review" and don't count as reviewed until they get a top
+    pick, shortlist or reject.
 - **Council only (🏛).** Some parks in the private list have a club on site, but bookings go
   straight to the council, with no club permission step (e.g. Thompson Park). Press
   **🏛 Council only?** on the card to drop the private-operator workflow. Press it again to

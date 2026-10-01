@@ -93,6 +93,7 @@
                     <button data-fit="full">1 full field</button>
                     <button data-fit="multi">2+ fields</button>
                   </span>
+                  <button class="fb-next" id="saveNextBtn" hidden title="Save this park's field ratings and move on to its next unrated council field">💾 Save · next field</button>
                 </div>
                 <div class="legend" id="legend" hidden></div>
                 <div class="rotatehint" id="rotateHint" hidden>Move the mouse to turn · drag the map to move · click to lock it there</div>
@@ -109,9 +110,20 @@
                   <span class="k">Quality</span><div class="seg stars" id="segQuality"></div>
                   <span class="k">Fit</span><span class="val" id="fitVal"></span>
                   <span class="k">Lights</span><span class="val" id="lightsVal"></span>
-                  <button class="flagbtn" id="clubFlagBtn" aria-pressed="false" title="Flag this park as probably run by a club, even though it isn't in the private-operator list yet">◇ Club-run?</button>
+                  <button class="flagbtn" id="clubFlagBtn" aria-pressed="false">✎ Provider?</button>
                   <button class="flagbtn cobtn" id="councilOnlyBtn" aria-pressed="false" hidden>🏛 Council only?</button>
-                  <input class="clubin" id="clubIn" placeholder="Which club? (optional)" hidden>
+                </div>
+                <div class="amendrow" id="amendRow" hidden>
+                  <select id="amendKind" aria-label="What needs amending">
+                    <option value="private">Privately operated by</option>
+                    <option value="change">Operator wrong / changed to</option>
+                    <option value="other">Other provider change</option>
+                  </select>
+                  <input id="clubIn" list="providerList" placeholder="Provider, e.g. Ellerslie AFC" aria-label="Provider">
+                  <datalist id="providerList"></datalist>
+                  <input id="amendContact" placeholder="Contact person, e.g. Rory H" aria-label="Contact person (first name and last initial)" autocomplete="off" hidden>
+                  <button type="button" id="amendSave">Save</button>
+                  <button type="button" id="amendClear" title="Remove this amendment">Clear</button>
                 </div>
                 <div class="tags2">
                   <label class="k" for="fieldsIn">Fields</label><input id="fieldsIn" placeholder="Lock the field to pick the nearest council field">
