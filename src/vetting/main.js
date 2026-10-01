@@ -569,7 +569,7 @@ function buildCity() {
       else if (st) L.circleMarker(ll, { radius: 12, color: "#14b8a6", weight: 3, dashArray: "4 3", fill: false, interactive: false }).addTo(cityLayer); }
     (o.icons ? logoMarker(ll, o.icons, comm ? COMM_COLOR : o.amua ? "#e0a647" : PRIV_COLOR, false, o.amua ? 700 : 550, comm) : o.amua ? amuaMarker(ll, "#ffffff", false) : privMarker(ll, "transparent", false, false))
       .bindPopup(() => privHtml(o) + (comm && workMode === "book" ? communityBookHtml(o) : ""), { className: "parktip", maxWidth: 320 })
-      .bindTooltip(`<b>${esc(o.park)}</b><br><b style="color:${PRIV_COLOR}">◆ ${esc(o.operator)}</b><br>Not in the council field maps · click for contacts`, { className: "parktip", direction: "top", offset: [0, -8] })
+      .bindTooltip(amuaOnly(o) ? `<b>${esc(o.park)}</b><br>Click to book in Facility Booking` : `<b>${esc(o.park)}</b><br><b style="color:${PRIV_COLOR}">◆ ${esc(o.operator)}</b><br>Not in the council field maps · click for contacts`, { className: "parktip", direction: "top", offset: [0, -8] })
       .addTo(cityLayer);
   });
   return pts;
@@ -607,7 +607,11 @@ function privContacts(o) {
 const privStatus = o => ({ confirmed: "confirmed", likely: "likely", "to-verify": "to verify" }[o.status] || o.status);
 // The four-step request workflow (PRIV.workflow) belongs to booking, not vetting; see multi-provider design §7.1.
 // Popup for a private ground that isn't a council park.
+// AMUA's own grounds (GTEC / CPSA at Cornwall Park) are booked only through the booking site,
+// so their popup is just the way back there.
+const amuaOnly = o => o.must_book_through === "AMUA" && o.category !== "community";
 function privHtml(o) {
+  if (amuaOnly(o)) return `<b>${esc(o.park)}</b><br><a href="${BASE}">📅 Book in Facility Booking</a>`;
   const c = o.contact || {};
   return `<b>${esc(o.park)}</b>${o.approx ? " (approx. location)" : ""}${o.must_book_through === "AMUA" ? `<br><b style="color:#b7791f">★ BOOKING ONLY AVAILABLE THROUGH AMUA</b>` : ""}<br><b style="color:${PRIV_COLOR}">◆ ${esc(o.operator)}</b> · ${esc(privStatus(o))}<br>${esc(o.manages)}<br>${privContacts(o)}${c.address ? "<br>" + esc(c.address) : ""}${o.notes ? `<br><i>${esc(o.notes)}</i>` : ""}`;
 }
