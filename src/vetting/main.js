@@ -371,6 +371,31 @@ function showMap(p) {
   }
   shownPark = p.id + "#" + i; pin = null; tagsFor(p).sel = null; updateLayer(); sizeField(); drawParkFields(p); drawLights(p);
 }
+// ⤢ alternates: zoom to the park (keeping the placed field), then all of Auckland with the
+// park pinned, then back to the park.
+let aklNext = false, whereMark = null;
+function zoomToggle(p) {
+  if (whereMark) { whereMark.remove(); whereMark = null; }
+  if (aklNext) {
+    // Auckland-wide zoom, centred on the park so its pin sits mid-screen.
+    const ll = parkLatLng(p), z = map.getBoundsZoom(L.latLngBounds(DEFAULT_VIEW));
+    if (ll) map.setView(ll, z); else map.fitBounds(DEFAULT_VIEW, { padding: [16, 16] });
+    if (ll) whereMark = L.marker(ll, { icon: L.divIcon({ className: "", html: `<div class="wherepin">📍</div>`, iconSize: [30, 30], iconAnchor: [15, 28] }), interactive: false })
+      .bindTooltip(esc(p.name), { permanent: true, direction: "top", offset: [0, -26], className: "parktip" }).addTo(map);
+    $("fitBtn").title = "Back to the park (0)"; aklNext = false; return;
+  }
+  const m = p.maps[Math.min(mapIndex(p), Math.max(0, p.maps.length - 1))];
+  if (m) map.fitBounds(L.latLngBounds([m.bounds[0], m.bounds[1]], [m.bounds[2], m.bounds[3]]));
+  else if (p.lat) map.setView([p.lat, p.lon], 16.5);
+  $("fitBtn").title = "All of Auckland, with this park pinned (0)"; aklNext = true;
+}
+// Phones: ⛶ fills the screen with the map and the rating buttons.
+function setFullMap(on) {
+  document.body.classList.toggle("mapfull", on);
+  $("fullBtn").setAttribute("aria-pressed", String(on)); $("fullBtn").textContent = on ? "✕" : "⛶";
+  $("fullBtn").title = on ? "Exit full screen" : "Full-screen map";
+  setTimeout(() => { map.invalidateSize(); sizeField(); }, 50);
+}
 function councilVisible() {
   if (!overlay) return false;
   const z = map.getZoom();
@@ -1393,7 +1418,7 @@ function render() {
     const c = p.lat ? `${p.lat},${p.lon}` : encodeURIComponent(p.name + " Auckland");
     $("gmaps").href = p.lat ? `https://www.google.com/maps/@${c},250m/data=!3m1!1e3` : `https://www.google.com/maps/search/${c}`;
     const fresh = shownPark !== p.id + "#" + i;
-    if (fresh) { fitArmed = false; showMap(p); }
+    if (fresh) { fitArmed = false; aklNext = false; if (whereMark) { whereMark.remove(); whereMark = null; } showMap(p); }
     renderTags(p);
     if (workMode === "book") renderBookBar(p);
     // Coming back to a park with a placed field: lock the field to its saved spot and angle
@@ -1594,7 +1619,8 @@ function bind() {
   bindInfo();
   $("councilOnlyBtn").onclick = async () => { const p = current(); if (!p) return;
     if (await setCouncilOnly(p, !councilOnly(p))) render(); };
-  $("fitBtn").onclick = () => { const p = current(); if (p) showMap(p); };
+  $("fitBtn").onclick = () => { const p = current(); if (p) zoomToggle(p); };
+  $("fullBtn").onclick = () => setFullMap(!document.body.classList.contains("mapfull"));
   $("cityTab").onclick = () => { if (view !== "city") { focusId = null; setView("city"); } else setView("city", { refit: true }); };
   $("parkTab").onclick = () => { if (view !== "park") { if (view === "city") focusId = null; setView("park"); } };
   $("bookTab").onclick = () => { if (view !== "book") setView("book"); };
@@ -1637,7 +1663,7 @@ function bind() {
     if ($("saveDlg").open || e.target.matches("input, textarea, select")) return;
     const p = current();
     if (!IS_ADMIN && !/^(Escape|c|C)$/.test(e.key)) return;   // bookers: no rating keys
-    if (e.key === "Escape") { if (infoOpenFor) { infoOpenFor = null; render(); return; } if (rotating) setRotating(false); $("sizePanel").hidden = true; $("helpPanel").hidden = true; $("fitPop").hidden = true; if (p && tagsFor(p).sel) selectField(p, null); return; }
+    if (e.key === "Escape") { if (document.body.classList.contains("mapfull")) { setFullMap(false); return; } if (infoOpenFor) { infoOpenFor = null; render(); return; } if (rotating) setRotating(false); $("sizePanel").hidden = true; $("helpPanel").hidden = true; $("fitPop").hidden = true; if (p && tagsFor(p).sel) selectField(p, null); return; }
     if (/^[cC]$/.test(e.key)) { focusId = null; setView(view === "city" ? "park" : "city"); return; }
     if (/^[bB]$/.test(e.key)) { setMode(workMode === "book" ? "rate" : "book"); return; }
     if (view === "city") return;

@@ -520,3 +520,27 @@ body.gated .backbtn .bl{display:inline!important}
 .privbox{flex-wrap:nowrap}
 .privbox>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .privbox .pb-info{flex:none}
+
+/* Map toolbar: Field, ⚙, ⤢, ?, season on the left; ⛶ (phones) in the top-right corner.
+   Interests sit at the bottom left and expand along the bottom. */
+.toolbar .fullbtn{display:none;margin-left:auto}
+.interestbar{position:absolute;left:10px;bottom:26px;z-index:600;display:flex;flex-wrap:wrap;gap:4px;align-items:center;max-width:calc(100% - 70px);pointer-events:none}
+.interestbar button{pointer-events:auto;background:rgba(255,255,255,.94);color:#15211c;border:1px solid rgba(0,0,0,.15);border-radius:8px;padding:4px 9px;font-size:13px;font-weight:600;box-shadow:0 1px 4px rgba(0,0,0,.25)}
+.interestbar .interestrow button[aria-pressed=true],#interestBtn[aria-pressed=true]{background:#fef3c7;border-color:#d97706;color:#92400e}
+.card.city .interestbar{display:none}
+.layerbadge{display:none}
+#sizePanel{left:10px;right:auto}
+.wherepin{font-size:26px;filter:drop-shadow(0 2px 3px rgba(0,0,0,.6));animation:wherebob 1.2s ease-in-out infinite}
+@keyframes wherebob{50%{transform:translateY(-4px)}}
+@media (max-width:640px){
+  .toolbar .fullbtn{display:inline-block;font-size:15px;padding:2px 9px}
+  .dispenser{top:44px}
+  .interestbar{left:6px;bottom:22px;max-width:calc(100% - 60px)}.interestbar button{padding:3px 7px;font-size:12px}
+  #sizePanel{left:6px}
+  /* Full-screen map: only the park name, the map and the rating buttons */
+  body.mapfull header.top,body.mapfull .seasonbar,body.mapfull .status,body.mapfull #info,body.mapfull .stamp{display:none!important}
+  body.mapfull .wrap{padding:0 0 calc(4px + env(safe-area-inset-bottom,0px))}
+  body.mapfull .card{border-radius:0;border-left:0;border-right:0}
+  body.mapfull .handle{padding:2px 8px}body.mapfull .title h2{font-size:15px}
+}
+@media (prefers-reduced-motion:reduce){.wherepin{animation:none}}
