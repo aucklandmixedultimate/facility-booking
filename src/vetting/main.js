@@ -1679,7 +1679,8 @@ function renderProfile() {
 }
 
 // ── Start ────────────────────────────────────────────────────────────────────
-function gate(html) { $("gate").innerHTML = html; $("gate").hidden = false; $("app").hidden = true; }
+// Signed out (or no access): only the message shows, not the views, filters or progress.
+function gate(html) { $("gate").innerHTML = html; $("gate").hidden = false; $("app").hidden = true; document.body.classList.add("gated"); }
 async function start() {
   // "no-cache" revalidates with the server, so a data update shows on the next load instead
   // of after GitHub Pages' ~10-minute browser cache expires.
