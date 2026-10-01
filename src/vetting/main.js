@@ -328,6 +328,17 @@ function selectField(p, key) {
   } else $("fitPop").hidden = true;
   sizeField(); drawParkFields(p); drawLights(p); previewFields(p); renderTags(p);
 }
+// The park's best rated field (its saved spot), pinned where and how it was saved.
+function restorePlacement(p) {
+  const t = tagsFor(p), sp = t.spot; if (!sp) return;
+  const rated = Object.values(t.fr).filter(x => x.fit && x.fit !== "unknown" && x.lat != null);
+  const f = rated.find(x => x.lat === sp.lat && x.lon === sp.lon) || rated.sort((a, b) => FIT_RANK[b.fit] - FIT_RANK[a.fit])[0];
+  if (rotating) setRotating(false);
+  angle = (f ? f.angle : sp.angle) || 0; pin = L.latLng(f ? f.lat : sp.lat, f ? f.lon : sp.lon);
+  map.setView(pin, map.getZoom(), { animate: false });
+  t.sel = f ? f.name : null; fitOpen = false; $("fitPop").hidden = !t.sel;
+  sizeField(); renderCentre(); drawParkFields(p); drawLights(p); previewFields(p); renderTags(p);
+}
 // Screen angle of a polygon's longest edge, so a new field lines up with the council field.
 function longAxis(pts) {
   let best = 0, ang = angle;
@@ -1254,8 +1265,9 @@ function render() {
     if (fresh) showMap(p);
     renderTags(p);
     if (workMode === "book") renderBookBar(p);
-    // Restore a saved field placement for a reviewed park.
-    if (fresh && tagsFor(p).spot && !tagsFor(p)._placed) { const sp = tagsFor(p).spot; angle = sp.angle || 0; map.setView([sp.lat, sp.lon], map.getZoom(), { animate: false }); pin = L.latLng(sp.lat, sp.lon); tagsFor(p)._placed = true; sizeField(); renderCentre(); }
+    // Coming back to a park with a placed field: lock the field to its saved spot and angle
+    // (not the screen centre), select that field and redraw its lights.
+    if (fresh) restorePlacement(p);
   }
   ["noBtn", "yesBtn", "topBtn", "skipBtn"].forEach(b => $(b).disabled = !p);
   if (p && visited[visited.length - 1] !== p.id) visited.push(p.id);
