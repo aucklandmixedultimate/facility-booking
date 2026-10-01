@@ -101,6 +101,38 @@ async function loadShared() {
   setStatus(`Shared · ${data.length} decisions`);
   await loadFlags();
 }
+// Crowd-sourced quality: everyone signed in gives a park 1–5 stars (table field_ratings,
+// one per person); the stars show the average. Until the table exists, this browser's own
+// ratings are kept locally. ratings: { park_id: { sum, n, mine } }.
+let ratings = {}, ratingsShared = false;
+async function loadRatings() {
+  if (supabase && session) {
+    const { data, error } = await supabase.from("field_ratings").select("park_id,stars,user_id");
+    if (!error) {
+      ratingsShared = true; ratings = {};
+      data.forEach(r => { const e = ratings[r.park_id] ||= { sum: 0, n: 0, mine: 0 }; e.sum += r.stars; e.n++; if (r.user_id === session.user.id) e.mine = r.stars; });
+      return;
+    }
+  }
+  ratingsShared = false; ratings = {};
+  Object.entries(store.get("vet-ratings", {})).forEach(([id, v]) => { ratings[id] = { sum: v, n: 1, mine: v }; });
+}
+async function setRating(id, stars) {
+  const e = ratings[id] ||= { sum: 0, n: 0, mine: 0 }, before = { ...e };
+  if (e.mine) { e.sum -= e.mine; e.n--; }
+  if (stars) { e.sum += stars; e.n++; }
+  e.mine = stars;
+  if (ratingsShared) {
+    const q = stars ? supabase.from("field_ratings").upsert({ park_id: id, user_id: session.user.id, user_email: session.user.email, stars, updated_at: new Date().toISOString() })
+      : supabase.from("field_ratings").delete().eq("park_id", id).eq("user_id", session.user.id);
+    const { error } = await q;
+    if (error) { Object.assign(e, before); setStatus("Couldn't save your rating (" + error.message + ").", true); return false; }
+  } else {
+    const mine = store.get("vet-ratings", {}); if (stars) mine[id] = stars; else delete mine[id]; store.set("vet-ratings", mine);
+  }
+  return true;
+}
+const crowdAvg = id => ratings[id]?.n ? ratings[id].sum / ratings[id].n : null;
 // Club-run flags live in their own table (field_flags) so a park can be flagged without a
 // decision. Until that table exists they're kept in this browser.
 async function loadFlags() {
@@ -782,23 +814,17 @@ function privHtml(o) {
   return `<b>${esc(o.park)}</b>${o.approx ? " (approx. location)" : ""}${o.must_book_through === "AMUA" ? `<br><b style="color:#b7791f">★ BOOKING ONLY AVAILABLE THROUGH AMUA</b>` : ""}<br><b style="color:${PRIV_COLOR}">◆ ${esc(o.operator)}</b> · ${esc(privStatus(o))}<br>${esc(o.manages)}<br>${privContacts(o)}${c.address ? "<br>" + esc(c.address) : ""}${o.notes ? `<br><i>${esc(o.notes)}</i>` : ""}`;
 }
 // Park card banner: every operator on this ground, then the request steps once.
+// The provider line shows names only; contacts and details open under ⓘ.
 function privBanner(all) {
-  // Ultimate clubs get their own line; the field contact is the managing club.
   const ult = all.filter(o => o.code === "ultimate" && !o.booking_only), ops = all.filter(o => o.code !== "ultimate" || o.booking_only);
-  const ultLine = ult.map(o => `<span class="pb-ult"><b>🥏 ${esc(o.operator)}</b> — ${privContacts(o) || "no contact found"}${o.notes ? ` <i>${esc(o.notes)}</i>` : ""}</span>`).join("");
+  const ultLine = ult.map(o => `<span class="pb-ult"><b>🥏 ${esc(o.short || o.operator)}</b></span>`).join("");
   if (!ops.length) return ultLine;
   const [lead, ...rest] = ops;
-  // AMUA's own provider grounds (GTEC / CPSA): booked through the AMUA booking site.
   const amua = all.find(o => o.must_book_through === "AMUA");
-  if (amua) return `<span class="pb-amua pb-only"><b>★ BOOKING ONLY AVAILABLE THROUGH AMUA</b> — <a href="${BASE}">AMUA booking site ↗</a> <i>GTEC / CPSA workflow; don't book directly with GTEC.</i></span>`
-    + `<span class="pb-full">Fields managed by: ${all.filter(o => o.code !== "ultimate").map(o => `${esc(o.operator)} (${esc(o.code || o.type)})`).join(" · ")}</span>` + ultLine;
-  if (lead.booking_only) return `<span class="pb-ult pb-only"><b>🥏 BOOKING ONLY AVAILABLE THROUGH ${esc(lead.operator)}</b> — ${privContacts(lead) || "no contact found"}${lead.notes ? ` <i>${esc(lead.notes)}</i>` : ""}</span>`
-    + (rest.length ? `<span class="pb-full">Fields managed by: ${rest.map(o => `${esc(o.operator)} (${esc(o.code || o.type)})`).join(" · ")}</span>` : "") + ultLine;
-  return `<span class="pb-full"><b>◆ Contact: ${esc(lead.operator)}</b> (${esc(privStatus(lead))}) — ${esc(lead.manages)} · ${privContacts(lead)}</span>`
-    + `<span class="pb-short"><b>◆ ${esc(lead.short)}</b> · ${privContacts(lead)}${rest.length ? ` · +${rest.length} club${rest.length > 1 ? "s" : ""}` : ""}</span>`
-    + ultLine
-    + (rest.length ? `<span class="pb-full">Also on site: ${rest.map(o => `${esc(o.operator)} (${esc(o.code || o.type)}${o.contact?.url ? `, <a href="${esc(o.contact.url)}" target="_blank" rel="noopener">website ↗</a>` : ""})`).join(" · ")}</span>` : "")
-    ;
+  if (amua) return `<span class="pb-amua pb-only"><b>★ Booking only through AMUA</b> — <a href="${BASE}">booking site ↗</a></span>` + ultLine;
+  const more = rest.length ? ` <span class="pb-more">+ ${rest.map(o => esc(o.short || o.operator)).join(", ")}</span>` : "";
+  if (lead.booking_only) return `<span class="pb-ult pb-only"><b>🥏 Booking only through ${esc(lead.short || lead.operator)}</b>${more}</span>` + ultLine;
+  return `<span><b>◆ ${esc(lead.operator)}</b>${more}</span>` + ultLine;
 }
 function councilOnlyBanner(p) {
   const ops = PRIV_BY_PARK[p.id] || [];
@@ -1093,7 +1119,11 @@ function renderTags(p) {
   const t = tagsFor(p);
   updateActions();
   $("editUndoBtn").disabled = !edits[p.id]?.length;
-  $("segQuality").innerHTML = [1, 2, 3, 4, 5].map(n => `<button data-tag="quality" data-val="${n}" aria-pressed="${t.quality === n}" title="${n}/5">${n <= t.quality ? "★" : "☆"}</button>`).join("");
+  // Stars fill to the crowd average; your own rating is ringed. Click to rate (again to clear).
+  const avg = crowdAvg(p.id), cnt = ratings[p.id]?.n || 0, mine = ratings[p.id]?.mine || (ratingsShared ? 0 : t.quality), shown = Math.round(avg ?? t.quality ?? 0);
+  $("segQuality").innerHTML = [1, 2, 3, 4, 5].map(n => `<button data-tag="quality" data-val="${n}" class="${n === mine ? "mine" : ""}" aria-pressed="${n === mine}" title="Rate ${n}/5${n === mine ? " (your rating — click to clear)" : ""}">${n <= shown ? "★" : "☆"}</button>`).join("");
+  $("qAvg").textContent = cnt ? `${avg.toFixed(1)} · ${cnt} rating${cnt > 1 ? "s" : ""}` : "";
+  $("qAvg").title = cnt ? `Average of ${cnt} rating${cnt > 1 ? "s" : ""}${mine ? `; yours: ${mine}/5` : ""}` : "";
   // Fit and lights are set on the map (fit bar, bulb dispenser); here they're read-outs.
   const rated = Object.values(t.fr).filter(x => x.fit && x.fit !== "unknown");
   $("fitVal").textContent = rated.length ? rated.map(x => `${x.name}: ${FIT_LABEL[x.fit]}`).join(" · ") : "";
@@ -1159,10 +1189,12 @@ async function saveRelation(id, rel) {
 }
 // Rugby and league clubs tend to run their own grounds regardless of council bookings.
 const influenceOf = o => o.influence || (["rugby", "league"].includes(o.code) ? "low" : null);
-const hasInfo = o => !!(o.local_board || o.tenure || o.board_links?.length || influenceOf(o) || relations[o.id]);
+// Contact details (from the operator list) shown first under ⓘ.
+const contactHtml = o => { const c = privContacts(o);
+  return `<div><span class="ip-k">Contact</span> ${esc(o.operator)}${o.status ? ` <span class="muted">(${esc(privStatus(o))})</span>` : ""}${c ? ` · ${c}` : " · no contact found"}${o.manages ? `<br><span class="muted">${esc(o.manages)}</span>` : ""}${o.notes ? `<br><i>${esc(o.notes)}</i>` : ""}</div>`; };
 function infoHtml(ops) {
   const E = PRIV.enums || {}, LBS = PRIV.local_boards || {}, lab = (t, k) => esc(E[t]?.[k] || k);
-  return ops.filter(hasInfo).map(o => {
+  return ops.map(o => {
     const lb = LBS[o.local_board], rel = relations[o.id] || {}, inf = influenceOf(o);
     const facts = [lb ? `<a href="${esc(lb.url)}" target="_blank" rel="noopener">${esc(lb.name)} Local Board</a>` : "",
       o.tenure && o.tenure.kind !== "unknown" ? `${lab("tenure", o.tenure.kind)}${o.tenure.until ? ` → ${esc(o.tenure.until.slice(0, 4))}` : ""}` : "",
@@ -1179,14 +1211,15 @@ function infoHtml(ops) {
       <div class="ip-row"><input data-f="mName" placeholder="Community person (first name + initial)"><select data-f="mLink">${opt(REL.link)}</select><input data-f="mWith" placeholder="whom (optional)"><button data-add="community">Add</button></div>
       <div class="ip-row"><input data-f="eDate" type="date"><select data-f="eTag">${opt(REL.tag)}</select><input data-f="eRef" placeholder="Ref e.g. NZTUC25" maxlength="24"><select data-f="eTone">${opt({ positive: "positive", neutral: "neutral", negative: "negative" })}</select><button data-add="event">Add</button></div></details>` : "";
     return `<div class="ip-op" data-op="${esc(o.id)}"><div class="ip-h">${esc(o.short || o.operator)}</div>
+      ${contactHtml(o)}
       ${facts ? `<div><span class="ip-k">Local board</span> ${facts}</div>` : ""}
       ${rel.rating || people || events ? `<div><span class="ip-k">Relationship</span> ${rel.rating ? esc(REL.rating[rel.rating]) : ""}${people ? " · " + people : ""}${events ? " · " + events : ""}</div>` : ""}
       ${comm ? `<div><span class="ip-k">Community</span> ${comm}</div>` : ""}${editor}</div>`;
   }).join("");
 }
 function renderInfo(p) {
-  const ops = PRIV_BY_PARK[p.id] || [], any = ops.some(hasInfo), box = $("privBox"), panel = $("infoPanel");
-  if (any && !box.hidden) box.insertAdjacentHTML("beforeend", `<button class="pb-info" id="pbInfo" aria-expanded="${infoOpenFor === p.id}" title="Local board, history and community contacts">ⓘ</button>`);
+  const ops = PRIV_BY_PARK[p.id] || [], any = ops.length > 0, box = $("privBox"), panel = $("infoPanel");
+  if (any && !box.hidden) box.insertAdjacentHTML("beforeend", `<button class="pb-info" id="pbInfo" aria-expanded="${infoOpenFor === p.id}" title="Contact details, local board and history">ⓘ</button>`);
   panel.hidden = !(any && infoOpenFor === p.id && !box.hidden);
   panel.innerHTML = panel.hidden ? "" : infoHtml(ops);
 }
@@ -1494,7 +1527,9 @@ function bind() {
       Object.keys(mapIdx).forEach(k => delete mapIdx[k]); render();
       const sm = document.querySelector(".sb-map"); if (sm) sm.textContent = (seasonPick === "winter" ? "❄ Winter" : "☀ Summer") + " maps"; setStatus(`Showing ${seasonPick} council maps${seasonPick === COUNCIL_NOW.mapSeason ? " (the current season)" : ""}.`); return; }
     if (t && t.tagName === "BUTTON") { snap(p); const d = tagsFor(p), k = t.dataset.tag, v = k === "quality" ? +t.dataset.val : t.dataset.val;
-      if (k === "quality") d.quality = d.quality === v ? 0 : v;
+      if (k === "quality") { const nv = (ratings[p.id]?.mine || (ratingsShared ? 0 : d.quality)) === v ? 0 : v;
+        if (IS_ADMIN) d.quality = nv;
+        setRating(p.id, nv).then(() => renderTags(p)); }
       renderTags(p); }
   });
   $("fieldsIn").addEventListener("input", () => { const p = current(); if (p) { const t = tagsFor(p); t.fields = $("fieldsIn").value; t.fieldsManual = !!t.fields.trim(); drawParkFields(p); } });
@@ -1616,7 +1651,7 @@ function bind() {
     else if (/^[tT]$/.test(e.key)) showField(!fieldOn);
     else if (e.key === "0") $("fitBtn").click();
     else if (/^[rR]$/.test(e.key)) { angle = (angle + 15) % 360; sizeField(); afterMove(); }
-    else if (p && /^[1-5]$/.test(e.key)) { tagsFor(p).quality = +e.key; renderTags(p); }
+    else if (p && /^[1-5]$/.test(e.key)) { tagsFor(p).quality = +e.key; setRating(p.id, +e.key).then(() => renderTags(p)); renderTags(p); }
     else if (p && /^[mM]$/.test(e.key) && p.maps.length > 1) { mapIdx[p.id] = ((mapIndex(p)) + 1) % p.maps.length; render(); }
   });
 }
@@ -1721,7 +1756,7 @@ async function start() {
     setStatus("Demo mode (no Supabase configured): decisions are kept in this browser.", true);
   }
   $("app").hidden = false; renderSeasonBar();
-  await loadBookLocs(); await loadActivity(); await loadViews(); await loadCouncilOnly(); await loadRelations(); await syncCartWorkflows();
+  await loadBookLocs(); await loadActivity(); await loadViews(); await loadRatings(); await loadCouncilOnly(); await loadRelations(); await syncCartWorkflows();
   initMap(); drawField(); showField(fieldOn); renderLegend(); bind();
   setView(view === "park" || view === "book" ? view : "city", { refit: true });
   if (mode === "shared") setInterval(async () => { if (!busy && !rotating && document.visibilityState === "visible" && !$("saveDlg").open) { await loadShared(); if (view === "city") render(); else renderRail(); } }, 30000);

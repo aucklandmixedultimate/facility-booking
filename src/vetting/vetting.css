@@ -512,3 +512,11 @@ body.viewer .handle .hint,body.viewer .rail .help,body.viewer #fieldBtn,body.vie
 /* Signed out: no view tabs, filters or progress until there's something to see. */
 body.gated .filters,body.gated .status:empty{display:none}
 body.gated .backbtn .bl{display:inline!important}
+/* Crowd quality: average-filled stars, your own rating ringed, and the count */
+.stars button.mine{box-shadow:inset 0 0 0 2px #d69e2e;border-radius:6px}
+.qavg{font-size:12px;color:var(--muted);margin-right:8px}.qavg:empty{display:none}
+.privbox .pb-more{color:var(--muted);font-weight:400}
+/* Provider line: names, then ⓘ on the same row */
+.privbox{flex-wrap:nowrap}
+.privbox>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.privbox .pb-info{flex:none}
