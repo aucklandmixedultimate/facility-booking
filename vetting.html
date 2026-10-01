@@ -39,6 +39,11 @@
             <option value="no">Rejected</option>
             <option value="all">All parks</option>
           </select>
+          <select id="order" aria-label="Order parks are served in" title="Order the parks are served in">
+            <option value="least">Least viewed first</option>
+            <option value="default">Default order</option>
+            <option value="alpha">Alphabetical</option>
+          </select>
           <label class="chk"><input type="checkbox" id="mapsOnly" checked> With map only</label>
           <div>
             <div class="progress" id="progress">0 / 0 reviewed</div>
@@ -76,9 +81,11 @@
                   <button id="fieldBtn" aria-pressed="true" title="Show or hide the frisbee field (T)">⬚ Field</button>
                   <button id="fitBtn" title="Zoom back to the council map (0)">⤢</button>
                   <span id="thumbs" class="thumbs"></span>
+                  <button id="interestBtn" aria-pressed="false" title="Interests: which parks are served (area, council or private)">🎯 Interests</button>
                   <button id="sizeBtn" title="Field dimensions">⚙</button>
 
                 </div>
+                <div class="sizepanel interestpanel" id="interestPanel" hidden></div>
                 <div class="sizepanel" id="sizePanel" hidden>
                   <label>Length (m) <input type="number" id="fLen" min="40" max="130" step="1"></label>
                   <label>Width (m) <input type="number" id="fWid" min="20" max="60" step="1"></label>
