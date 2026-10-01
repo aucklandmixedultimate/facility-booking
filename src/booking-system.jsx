@@ -220,15 +220,26 @@ const STATUS_META = {
   council_apply:  {bg:"#e0f2f1",border:"#14b8a6",text:"#115e59",dot:"#14b8a6",label:"🏛 Applying to council"},
   council_pending:{bg:"#ccfbf1",border:"#0d9488",text:"#134e4a",dot:"#0d9488",label:"⏳ Awaiting council decision"},
   op_confirm:     {bg:"#ede9fe",border:"#7c3aed",text:"#4c1d95",dot:"#7c3aed",label:"🤝 Confirming with operator"},
+  // Community facilities (schools, trusts): AMUA review → [review the contact, first time
+  // only] → request drafted to AMUA's inbox (sent by AMUA from Gmail) → approved.
+  contact_review:    {bg:"#fef9c3",border:"#ca8a04",text:"#713f12",dot:"#ca8a04",label:"🔎 Reviewing facility contact"},
+  community_request: {bg:"#dbeafe",border:"#2563eb",text:"#1e3a8a",dot:"#2563eb",label:"✉ Requested from facility"},
 };
 // Each provider kind walks its own steps. Stored statuses stay provider-neutral keys.
-const COUNCIL_STAGE_STATUSES = ["op_permission","council_apply","council_pending","op_confirm"];
+const COUNCIL_STAGE_STATUSES = ["op_permission","council_apply","council_pending","op_confirm","contact_review","community_request"];
 const WORKFLOW_STEPS = {
   gtec:            ["pending_amua","queued_cpsa","pending_cpsa","approved"],
   council:         ["pending_amua","council_apply","council_pending","approved"],
   council_private: ["pending_amua","op_permission","council_apply","council_pending","op_confirm","approved"],
   direct:          ["pending_amua","approved"],
+  community:       ["pending_amua","contact_review","community_request","approved"],
 };
+// Community facility rates ($/hr) by operator id; the rest are set in Facility Rates.
+const COMMUNITY_RATES = { "ani-epsom": 20, "ani-lower": 20 };
+// Contact details AMUA has reviewed before its first request to a community facility
+// (settings "provider_contact_reviews": { providerId: {email, phone, contact_name, by, at} }).
+let _contactReviews = {};
+const isContactReviewed = pid => !!_contactReviews[pid];
 // invoiced is an orthogonal billing flag (booking.invoiced boolean), not a workflow status.
 const INVOICED_META = {bg:"#f5f3ff",border:"#7c3aed",text:"#5b21b6",dot:"#7c3aed",label:"🧾 Invoiced"};
 const REVIEW_STATUSES = new Set(["pending_amua","queued_cpsa","amua_submit","pending_cpsa","pending","cpsa_review_needed",...COUNCIL_STAGE_STATUSES]);
@@ -238,6 +249,7 @@ const REVIEW_STATUSES = new Set(["pending_amua","queued_cpsa","amua_submit","pen
 const STATUS_CAL_COLOR = {
   pending_amua:"#f59e0b", queued_cpsa:"#3b82f6", amua_submit:"#3b82f6",
   op_permission:"#a855f7", council_apply:"#14b8a6", council_pending:"#0d9488", op_confirm:"#7c3aed",
+  contact_review:"#ca8a04", community_request:"#2563eb",
   pending_cpsa:"#0ea5e9", pending:"#f59e0b",     approved:"#22c55e",
   cpsa_confirmed:"#0891b2", cpsa_review_needed:"#fef9c3",
   clash:"#d97706", rejected:"#f43f5e", cancelled:"#94a3b8",
@@ -409,7 +421,12 @@ function applyCouncilFacilities(map) {
     const owner = email.toLowerCase(), have = byId.get(e.id), active = e.status === "active";
     if (have) { if (active) { have.inactive = false; if (!have.owners.includes(owner)) have.owners.push(owner); } return; }
     let pid = "akl_council";
-    if (e.kind === "council_private" && e.operator?.id) {
+    if (e.kind === "community" && e.operator?.id) {
+      pid = "cm_" + e.operator.id;
+      if (!PROVIDERS[pid]) PROVIDERS[pid] = { id: pid, name: e.operator.name, short: e.operator.short || e.operator.name, kind: "community",
+        dynamic: true, contact: e.operator, address: "", gstNumber: "",
+        recipientCode: deriveRecipientCode(e.operator.short || e.operator.name, Object.values(PROVIDERS).map(p => p.recipientCode)) };
+    } else if (e.kind === "council_private" && e.operator?.id) {
       pid = "op_" + e.operator.id;
       if (!PROVIDERS[pid]) PROVIDERS[pid] = { id: pid, name: e.operator.name, short: e.operator.short || e.operator.name, kind: "council_private",
         dynamic: true, contact: e.operator, address: "", gstNumber: "",
@@ -419,7 +436,7 @@ function applyCouncilFacilities(map) {
         address: "", gstNumber: "", recipientCode: "AKC" };
     }
     byId.set(e.id, { id: e.id, name: `${e.park} – ${e.field}`, capacity: 50, color: COUNCIL_COLORS[byId.size % COUNCIL_COLORS.length],
-      kind: "field", site: e.park, provider: pid, defaultRate: 0, council: e, owners: active ? [owner] : [], inactive: !active });
+      kind: "field", site: e.park, provider: pid, defaultRate: e.kind === "community" ? (COMMUNITY_RATES[e.operator?.id] || 0) : 0, council: e, owners: active ? [owner] : [], inactive: !active });
   }));
   FACILITIES.push(...byId.values());
 }
@@ -430,11 +447,13 @@ function workflowOf(facilityId) {
 function nextWorkflowStatus(b) {
   const steps = WORKFLOW_STEPS[workflowOf(b.facility_id)] || WORKFLOW_STEPS.direct;
   const i = steps.indexOf(b.status === "pending" ? "pending_amua" : b.status);
-  return i >= 0 && i < steps.length - 1 ? steps[i + 1] : null;
+  const nxt = i >= 0 && i < steps.length - 1 ? steps[i + 1] : null;
+  // The contact review only happens before the first request to that facility.
+  return nxt === "contact_review" && isContactReviewed(providerOfFacility(b.facility_id)) ? "community_request" : nxt;
 }
 // "Step 2 of 6" for council workflows, shown beside the status.
 function workflowStep(b) {
-  const wf = workflowOf(b.facility_id); if (wf !== "council" && wf !== "council_private") return "";
+  const wf = workflowOf(b.facility_id); if (wf !== "council" && wf !== "council_private" && wf !== "community") return "";
   const steps = WORKFLOW_STEPS[wf], i = steps.indexOf(b.status === "pending" ? "pending_amua" : b.status);
   return i >= 0 ? `${i + 1}/${steps.length}` : "";
 }
@@ -1150,8 +1169,37 @@ function cleanEmailSubject(subject) {
     .trim();
 }
 
+// ─── Hard rule: the app emails bookers only ──────────────────────────────────
+// Never email vendors, private operators or the council directly. Anything addressed to
+// someone who isn't a booker is turned into a draft sent to AMUA's own inbox, with the
+// intended recipients listed above the draft, and AMUA follows it up from Gmail. The
+// send-email Edge Function applies the same rule server-side as a backstop.
+const AMUA_INBOX = "aucklandmixedultimate@gmail.com";
+let _bookerEmails = new Set();   // every booking's email (and its alias primary), kept in sync by the App
+let _vendorEmails = new Set();   // vendor profile emails: never bookers, even if they appear in bookings
+function isBookerAddress(email) {
+  const e = (email || "").trim().toLowerCase(); if (!e) return false;
+  if (e === AMUA_INBOX) return true;
+  if (_vendorEmails.has(e)) return false;
+  return _bookerEmails.has(e) || _bookerEmails.has(_emailAliases[e] || e);
+}
+function toAmuaDraft({ to, cc, subject, html }) {
+  const list = [to, cc].filter(Boolean).join(", ");
+  return { to: AMUA_INBOX, cc: undefined, subject: `[DRAFT for ${list}] ${subject}`,
+    html: `<div style="font-family:sans-serif;border:2px dashed #b45309;background:#fffbeb;padding:10px 14px;margin-bottom:14px;border-radius:8px">
+      <b>Draft — not sent.</b> AMUA doesn't email vendors, operators or the council from the booking app.<br>
+      <b>Intended recipients:</b> ${String(to || "").replace(/</g, "&lt;")}${cc ? `<br><b>Cc:</b> ${String(cc).replace(/</g, "&lt;")}` : ""}<br>
+      Review it, then send it from Gmail.</div><hr>${html}` };
+}
 async function sendEmail({ to, subject: rawSubject, html, kind = "order", cc }) {
-  const subject = cleanEmailSubject(rawSubject);
+  let subject = cleanEmailSubject(rawSubject);
+  // Any non-booker recipient → the whole message becomes a draft to AMUA's inbox.
+  const ccIn = cc ?? primaryEmailFor(to);
+  if (!isBookerAddress(to) || (cc && !isBookerAddress(cc))) {
+    const d = toAmuaDraft({ to, cc, subject, html });
+    logActivity("email_redirected_to_amua", { intended: to, cc: cc || null, subject });
+    ({ to, html } = d); subject = cleanEmailSubject(d.subject); cc = null;
+  } else if (ccIn && !isBookerAddress(ccIn)) cc = null;
   if (!supabase || !_accessToken) {
     console.warn("Email skipped: no Supabase session for", to);
     logActivity("email_failed", { to, subject, error: "no_session" });
@@ -1159,7 +1207,7 @@ async function sendEmail({ to, subject: rawSubject, html, kind = "order", cc }) 
   }
   // When `to` is a linked secondary address, CC the booker's primary email so the
   // main account is kept in the loop. Caller can pass an explicit `cc` to override.
-  const ccResolved = cc ?? primaryEmailFor(to);
+  const ccResolved = cc === null ? undefined : cc ?? primaryEmailFor(to);
   const ccFinal = ccResolved && ccResolved.toLowerCase() !== (to||"").toLowerCase() ? ccResolved : undefined;
   try {
     const res = await fetch(`${SUPABASE_URL}/functions/v1/send-email`, {
@@ -2712,7 +2760,7 @@ function CartModal({ cart, setCart, onClose, onSubmit, openNew, silentMode=false
                       <EmailChip email={item.email}/>
                       <span style={{fontSize:13,fontWeight:600,color:'#0f172a',flex:1}}>{item.name}</span>
                       <span style={{fontSize:11,fontWeight:700,color:item.preview?'#92400e':'#0369a1',background:item.preview?'#fef3c7':'#e0f2fe',border:`1px solid ${item.preview?'#fcd34d':'#7dd3fc'}`,borderRadius:4,padding:'1px 7px'}}>
-                        {item.preview?'📄 Invoice preview':'🧾 Official invoice'}
+                        {item.amuaDraft?'✉ Draft to AMUA inbox':item.preview?'📄 Invoice preview':'🧾 Official invoice'}
                       </span>
                       <button onClick={()=>removeItem(gi)} title="Remove" style={{background:'none',border:'none',cursor:'pointer',color:'#f43f5e',fontSize:15,padding:'2px 4px',lineHeight:1}}>✕</button>
                     </div>
@@ -2803,7 +2851,7 @@ function CartModal({ cart, setCart, onClose, onSubmit, openNew, silentMode=false
                 <span style={{fontSize:18}}>{silentMode?'🔇':'🔔'}</span>
                 <div style={{flex:1,fontSize:12,color:silentMode?'#92400e':'#047857'}}>
                   <div style={{fontWeight:700}}>{silentMode?'Silent mode ON':'Emails will be sent on submit'}</div>
-                  <div>{silentMode?'Submitting applies changes/removals but sends no emails.':'Bookers and vendors are emailed when you submit.'}</div>
+                  <div>{silentMode?'Submitting applies changes/removals but sends no emails.':"Bookers are emailed when you submit; anything for vendors, facilities or the council goes to AMUA's inbox as a draft."}</div>
                 </div>
                 <button onClick={()=>onToggleSilent(!silentMode)} style={S.btn({background:silentMode?'#f59e0b':'#10b981',color:'#fff',fontSize:12,fontWeight:700})}>
                   {silentMode?'Enable emails':'Mute emails'}
@@ -4410,6 +4458,7 @@ function AboutTab() {
           {tabBtn("gtec","CPSA / GTEC · Cornwall Park")}
           {tabBtn("council","🏛 Council fields")}
           {tabBtn("private","◆ Council + private operator")}
+          {tabBtn("community","🏫 Community facilities")}
         </div>
         {howTab==="council"&&(<>
           <p style={{margin:"0 0 12px",fontSize:13,color:"#475569"}}>
@@ -4451,6 +4500,22 @@ function AboutTab() {
           <div style={arrow}>↓</div>
           <AboutStep n="6/6" col="#22c55e" title="Approved">The booking is confirmed: <Badge status="approved" wf="council_private"/> (or <Badge status="rejected"/> if the operator or council declines).</AboutStep>
           {councilTimes}
+        </>)}
+        {howTab==="community"&&(<>
+          <p style={{margin:"0 0 12px",fontSize:13,color:"#475569"}}>
+            Schools and trusts that hire their fields to AMUA, such as Auckland Normal Intermediate ($20/hr), St Cuthbert's College and Sacred Heart College.
+            Add the field on the <a href={import.meta.env.BASE_URL+"vetting.html"} style={link}>Council / Community fields</a> map (📅 Book → save it as a 📌 Active booking),
+            then book dates here under Provider → 📍 Location. These are <b>booked only through AMUA</b>.
+          </p>
+          <h3 style={{margin:"12px 0 8px",fontSize:14,fontWeight:700,color:"#0f172a"}}>Approval Process</h3>
+          <AboutStep n="1/4" col="#6366f1" title="Submit booking request">Book the dates and times on your active community field. Status <Badge status="pending_amua" wf="community"/>.</AboutStep>
+          <div style={arrow}>↓</div>
+          <AboutStep n="2/4" col="#ca8a04" title="AMUA reviews the facility contact">Only before AMUA's first request to a facility: the contact details are checked. Status <Badge status="contact_review" wf="community"/>.</AboutStep>
+          <div style={arrow}>↓</div>
+          <AboutStep n="3/4" col="#2563eb" title="AMUA requests the slot">AMUA asks the facility by email from its own inbox. Status <Badge status="community_request" wf="community"/>.</AboutStep>
+          <div style={arrow}>↓</div>
+          <AboutStep n="4/4" col="#22c55e" title="Facility confirms">Once the facility confirms, the booking is <Badge status="approved" wf="community"/> (or <Badge status="rejected"/>).</AboutStep>
+          <p style={{margin:"8px 0 0",fontSize:12,color:"#94a3b8"}}>The booking app only ever emails bookers. Messages for facilities, operators or the council are drafted to AMUA's inbox and sent by AMUA from Gmail.</p>
         </>)}
         {howTab==="gtec"&&(<>
         <p style={{margin:"0 0 12px",fontSize:13,color:"#475569"}}>
@@ -8548,8 +8613,56 @@ function SyncedItemRow({ ab, bookings }) {
 }
 
 // ─── Admin Panel with action queue, bulk approve, facility rates ──────────────
+// The request to a community facility, drafted for AMUA's inbox (the app never emails
+// facilities: see the email rule at sendEmail). Queued in the email cart as a pre-rendered item.
+function buildCommunityRequestItem(b) {
+  const pid = providerOfFacility(b.facility_id), pr = PROVIDERS[pid] || {}, rv = _contactReviews[pid] || {}, c = pr.contact || {};
+  const f = FACILITIES.find(x => x.id === b.facility_id), to = rv.email || c.email || AMUA_INBOX;
+  const when = `${fmtDate(b.date)} ${fmtTime(b.start_hour)}–${fmtTime(b.start_hour + b.duration)}`;
+  const rate = f?.defaultRate ? `$${f.defaultRate}/hr` : "your usual rate";
+  const ops = AMUA_INFO.contacts?.operations || {};
+  const html = `<p>Kia ora ${rv.contact_name || c.contact_name || pr.name || ""},</p>
+    <p>Auckland Mixed Ultimate Association would like to hire <b>${f?.name || "your field"}</b> for ultimate frisbee training:</p>
+    <ul><li><b>${when}</b> (${fmtDuration(b.duration)})</li><li>Group: ${b.name || ""}${b.purpose ? ` — ${b.purpose}` : ""}</li><li>Rate: ${rate}</li></ul>
+    <p>Could you let us know if that slot is available?</p>
+    <p>Ngā mihi,<br>${ops.name || "AMUA"}${ops.position ? `, ${ops.position}` : ""}<br>${AMUA_INFO.name || "Auckland Mixed Ultimate Association"}${ops.phone ? `<br>${ops.phone}` : ""}<br>${AMUA_INBOX}</p>`;
+  return { notifyOnly: true, invoiceEmail: true, amuaDraft: true, email: to, name: pr.name || pid, drafts: [], count: 1, refs: [b.id.slice(0, 8)], total: 0,
+    subject: `Field hire request — ${pr.short || pr.name || ""} — ${when}`, html };
+}
+// Saves the reviewed contact for a community facility (settings "provider_contact_reviews").
+async function saveContactReview(pid, data) {
+  const entry = { ...data, by: _currentUser?.email || "", at: new Date().toISOString() };
+  let cur = {};
+  try { const r = await fetch(`${SUPABASE_URL}/rest/v1/settings?key=eq.provider_contact_reviews&select=value`, { headers: authHeaders() });
+    if (r.ok) cur = (await r.json())?.[0]?.value || {}; } catch { /* use local */ }
+  const next = { ...cur, [pid]: entry };
+  await sb.upsert("settings", { key: "provider_contact_reviews", value: next, updated_at: entry.at });
+  _contactReviews = next;
+}
+// First request to a community facility: review its contact before anything is drafted.
+function ContactReviewModal({ booking, onClose, onConfirm }) {
+  const pid = providerOfFacility(booking.facility_id), pr = PROVIDERS[pid] || {}, c = pr.contact || {};
+  const [d, setD] = useState({ contact_name: c.contact_name || c.name || "", email: c.email || "", phone: c.phone || "" });
+  const si = { ...S.inp, fontSize: 13 };
+  return (
+    <Modal title={`🔎 Review contact — ${pr.name || pid}`} onClose={onClose} width={460}>
+      <div style={{fontSize:13,color:"#475569",marginBottom:12}}>This is AMUA's first request to this facility. Check the contact before the request is drafted.
+        The draft goes to AMUA's inbox ({AMUA_INBOX}) with these details listed as the recipient — the app never emails the facility.</div>
+      <div style={{display:"flex",flexDirection:"column",gap:10}}>
+        <label style={S.lbl}>Contact person<input style={si} value={d.contact_name} onChange={e=>setD({...d,contact_name:e.target.value})}/></label>
+        <label style={S.lbl}>Email<input style={si} type="email" value={d.email} onChange={e=>setD({...d,email:e.target.value})}/></label>
+        <label style={S.lbl}>Phone<input style={si} type="tel" value={d.phone} onChange={e=>setD({...d,phone:e.target.value})}/></label>
+      </div>
+      <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:14}}>
+        <button onClick={onClose} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#475569"})}>Cancel</button>
+        <button disabled={!d.email.trim()} onClick={()=>onConfirm(pid, { contact_name:d.contact_name.trim(), email:d.email.trim(), phone:d.phone.trim() })}
+          style={S.btn({background:d.email.trim()?"#2563eb":"#94a3b8",color:"#fff"})}>Contact reviewed — draft request</button>
+      </div>
+    </Modal>);
+}
 function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,clashes=[],deleteIds=new Set(),facilityRates={},onClearOldUnapproved,onBulkApply,onSaveMismatch,onInformCpsa,onQueueNotifications,onMarkAdjustmentSettled,onLinkClash,loggedInEmail,syncResults=[],onClearSyncResults,showSyncResults=false,onToggleSyncResults,bookerFilter=new Set(),onToggleBooker,onSetBookerFilter,aliasNames={},emailAliases={},pricingConditions=[],onAddPricingCondition,onUpdatePricingCondition,onRemovePricingCondition,cpsaDeleteLog=[],onClearDeleteLogEntry,onClearDeleteLog,onSendToCouncil,approxPlayers={}}) {
   const [showSchedulePanel, setShowSchedulePanel] = useState(false);
+  const [reviewFor, setReviewFor] = useState(null);   // community booking awaiting a first-request contact review
   const [showActivityPanel, setShowActivityPanel] = useState(false);
   // Which sync-result months are expanded in the grouped dropdown (monthKey set).
   const [expandedSyncMonths, setExpandedSyncMonths] = useState(()=>new Set());
@@ -8760,6 +8873,12 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
     });
   }
 
+  // Community facility: queue "Requested from facility" and add the AMUA-inbox draft to the cart.
+  function requestCommunity(b) {
+    if (actionQueue.some(a => a.id === b.id && a.newStatus === "community_request")) { queueAction(b.id, "community_request"); return; }
+    queueAction(b.id, "community_request");
+    onQueueNotifications?.([buildCommunityRequestItem(b)], "draft request for AMUA's inbox");
+  }
   async function submitActionQueue() {
     if(!actionQueue.length) return;
     setActionSending(true);
@@ -8828,6 +8947,9 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
 
   return (
     <div style={{display:"flex",flexDirection:"column",gap:16}}>
+      {reviewFor&&<ContactReviewModal booking={reviewFor} onClose={()=>setReviewFor(null)}
+        onConfirm={async (pid, data)=>{ try { await saveContactReview(pid, data); } catch(e) { alert("Couldn't save the reviewed contact: "+(e.message||e)); return; }
+          const b=reviewFor; setReviewFor(null); requestCommunity(b); }}/>}
       {/* Top action bar */}
       <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
         {oldUnapproved.length>0&&(
@@ -10026,7 +10148,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                 const isDeleteQueued=deleteIds.has(b.id);
                 const rowBg=isDeleteQueued?"#fff1f2":queued?"#f0fdf4":selected.has(b.id)?"#f5f3ff":"#fff";
                 const queueLabel = queued ? {queued_cpsa:"→ Queue for GTEC",approved:"✓ GTEC Approved",rejected:"✗ Reject"}[queued.newStatus]||("→ "+(STATUS_META[queued.newStatus]?.label||queued.newStatus)) : null;
-                const wf=workflowOf(b.facility_id), isCouncilWf=wf==="council"||wf==="council_private", nxt=nextWorkflowStatus(b);
+                const wf=workflowOf(b.facility_id), isCouncilWf=wf==="council"||wf==="council_private"||wf==="community", nxt=nextWorkflowStatus(b);
                 const opContact=PROVIDERS[providerOfFacility(b.facility_id)]?.contact;
                 const opHint=(opContact&&(nxt==="op_permission"||nxt==="op_confirm")?` — ${[opContact.contact_name||opContact.name,opContact.email,opContact.phone].filter(Boolean).join(" · ")}`:"")
                   +(nxt==="council_apply"?` — council application fee $${COUNCIL_APPLICATION_FEE} per field (pay later)`:"");
@@ -10072,7 +10194,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
                           {(b.status==="queued_cpsa"||b.status==="amua_submit")&&<button onClick={()=>queueAction(b.id,"pending_cpsa")} title="Mark as Pending GTEC Review (no email)"
                             style={S.btn({padding:"3px 7px",fontSize:10,background:queued?.newStatus==="pending_cpsa"?"#0369a1":"#0ea5e9",color:"#fff",outline:queued?.newStatus==="pending_cpsa"?"2px solid #0369a1":"none"})}>⏳</button>}
                           {/* Council workflows step through their stages one at a time. */}
-                          {isCouncilWf&&nxt&&nxt!=="approved"&&<button onClick={()=>queueAction(b.id,nxt)} title={`Next step: ${STATUS_META[nxt]?.label}${opHint}`}
+                          {isCouncilWf&&nxt&&nxt!=="approved"&&<button onClick={()=>nxt==="contact_review"?setReviewFor(b):nxt==="community_request"?requestCommunity(b):queueAction(b.id,nxt)} title={`Next step: ${STATUS_META[nxt]?.label}${opHint}`}
                             style={S.btn({padding:"3px 7px",fontSize:10,background:queued?.newStatus===nxt?"#0f766e":STATUS_META[nxt]?.dot,color:"#fff",outline:queued?.newStatus===nxt?"2px solid #0f766e":"none"})}>{STATUS_META[nxt]?.label.split(" ")[0]} →</button>}
                           {/* Non-GTEC facilities skip the GTEC queue: AMUA approves them directly;
                               council workflows approve only from their last step. */}
@@ -10736,6 +10858,13 @@ export default function App() {
     try{ return JSON.parse(localStorage.getItem("fb_profiles")||"{}"); }catch{ return {}; }
   });
   useEffect(()=>{ try{ localStorage.setItem("fb_profiles", JSON.stringify(profiles)); }catch{ /* ignore */ } }, [profiles]);
+  // Who counts as a booker for the email rule (see isBookerAddress).
+  useEffect(()=>{
+    const b = new Set(); bookings.forEach(x => { const e = (x.email||"").toLowerCase(); if (e) { b.add(e); if (_emailAliases[e]) b.add(_emailAliases[e]); } });
+    Object.entries(profiles||{}).forEach(([e, pr]) => { if (pr?.profileType !== "vendor") b.add(e.toLowerCase()); });
+    _bookerEmails = b;
+    _vendorEmails = new Set(Object.entries(profiles||{}).filter(([, pr]) => pr?.profileType === "vendor").map(([e]) => e.toLowerCase()));
+  }, [bookings, profiles]);
   // fb_billing_records: official invoice history { id, referenceId, date, type, bookerEmails,
   //   amount, gstMode, status, gtecInvoiceNumber, clubPayment, amuaPayment, bookingIds }
   const [billingRecords, setBillingRecords] = useState(()=>{
@@ -10911,6 +11040,7 @@ export default function App() {
         try{localStorage.setItem("fb_alias_colors",JSON.stringify(map.alias_colors));}catch{ /* ignore */ }
       }
       // Council fields added per booker from the Council fields page.
+      if (map.provider_contact_reviews && typeof map.provider_contact_reviews === "object") _contactReviews = map.provider_contact_reviews;
       if (map.council_facilities && typeof map.council_facilities === "object") {
         applyCouncilFacilities(map.council_facilities); setCouncilFacRev(n => n + 1);
         try{localStorage.setItem("fb_council_facilities",JSON.stringify(map.council_facilities));}catch{ /* ignore */ }
@@ -12269,6 +12399,11 @@ export default function App() {
       for (const item of notifyItems) {
         // Invoice emails arrive with their document already rendered, so there is no
         // template to pick — just send what was queued.
+        if (item.amuaDraft) {   // facility request: sendEmail turns it into a draft to AMUA's inbox
+          await sendEmail({ to: item.email, subject: item.subject, html: item.html });
+          logActivity("facility_request_drafted", { intended: item.email, subject: item.subject });
+          continue;
+        }
         if (item.invoiceEmail) {
           await sendEmail({ to: item.email, subject: item.subject, html: item.html,
             kind: item.preview ? "invoice_preview" : "invoice" });

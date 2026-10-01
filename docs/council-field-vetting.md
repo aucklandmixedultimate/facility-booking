@@ -470,3 +470,17 @@ short categorical fields rather than prose.
 - **Community facilities** (schools and trusts: Auckland Normal Intermediate, St Cuthbert's,
   Sacred Heart) have a blue ring on the map. The page is now titled **Council / Community
   Fields**.
+
+## Community facilities in the cart
+
+In 📅 Book mode, a community facility's popup (ANI, ANI (lower), St Cuthbert's, Sacred Heart)
+has **📅 Add to cart**. The entry is `cm-<operator id>` with `kind: "community"`.
+- **Booking site:** once saved as active, the facility appears under Provider →
+  📍 Location as provider `cm_<operator id>`. ANI's rate is $20/hr; set the others in Facility
+  Rates.
+- **Workflow:** AMUA review → 🔎 contact review → ✉ requested from facility → approved. The
+  contact review only happens before the first request to that facility (settings key
+  `provider_contact_reviews`).
+- **The request email:** it's drafted to AMUA's inbox, never sent to the facility.
+- **Setup:** bookers need `supabase-migration-community-cart.sql`, which lets the cart
+  function accept `cm-` ids.

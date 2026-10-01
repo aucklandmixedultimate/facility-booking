@@ -105,3 +105,16 @@ steps in [`supabase/functions/send-email/README.md`](supabase/functions/send-ema
 
 CPSA-confirmed bookings, mismatch review, and invoicing are admin-only flows;
 see the in-app Admin tab and `HANDOFF_SUPABASE_AUTH.md`.
+
+## Hard rule: who the app emails
+
+The booking app (and its `send-email` Edge Function) only ever emails **bookers**: people with
+bookings, or user/admin profiles. It never emails vendors, private operators, community
+facilities or the council.
+- **Redirected to AMUA:** anything addressed to someone else is turned into a **draft sent to
+  AMUA's own inbox** (aucklandmixedultimate@gmail.com). The subject starts with
+  `[DRAFT for <recipients>]`, and the intended recipients are listed above the draft. AMUA
+  reviews it and sends it from Gmail, which is outside this app.
+- **Where it's enforced:** both `sendEmail()` in `src/booking-system.jsx` and the Edge Function,
+  as a server-side backstop. Redeploy the function after changing it
+  (`supabase functions deploy send-email`).
