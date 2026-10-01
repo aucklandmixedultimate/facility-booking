@@ -509,3 +509,6 @@ body.viewer .handle .hint,body.viewer .rail .help,body.viewer #fieldBtn,body.vie
 @media (prefers-reduced-motion:reduce){.seasonbar .sb-track{animation:none}}
 .act.fit{font-size:0}
 @media (max-width:640px){.tags .lx{display:none}}
+/* Signed out: no view tabs, filters or progress until there's something to see. */
+body.gated .filters,body.gated .status:empty{display:none}
+body.gated .backbtn .bl{display:inline!important}
