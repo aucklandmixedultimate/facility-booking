@@ -27,7 +27,7 @@ button{cursor:pointer}
 .top{flex:none;display:flex;flex-wrap:wrap;gap:6px 16px;align-items:center;justify-content:space-between}
 .brand{min-width:0}
 .brand h1{font-family:var(--font-display);font-weight:700;font-size:24px;letter-spacing:.02em;margin:0;line-height:1}
-.brand p{margin:1px 0 0;color:var(--muted);font-size:12px}
+.brand p{display:none}
 .filters{display:flex;flex-wrap:wrap;gap:6px 8px;align-items:center}
 .filters select{padding:5px 8px;border:1px solid var(--line);border-radius:8px;background:var(--surface)}
 .viewtabs{display:flex;border:1px solid var(--line);border-radius:9px;overflow:hidden;background:var(--surface)}
@@ -37,7 +37,7 @@ button{cursor:pointer}
 .progress{font-family:var(--font-mono);font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
 .bar{height:4px;border-radius:2px;background:var(--line);overflow:hidden;margin-top:3px;width:150px;max-width:100%}
 .bar i{display:block;height:100%;background:var(--turf);width:0}
-.status{flex:none;font-size:12px;color:var(--muted);margin:4px 0 6px;min-height:1em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.status{flex:none;font-size:11px;color:var(--muted);margin:2px 0 4px;min-height:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .status.warn{color:var(--reject)}
 
 .grid{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:14px}
@@ -53,7 +53,7 @@ main{display:flex;flex-direction:column;min-height:0;min-width:0}
 .card.deal{animation:deal .22s ease-out}
 @keyframes deal{from{transform:scale(.96);opacity:.4}to{transform:none;opacity:1}}
 
-.handle{flex:none;position:relative;padding:7px 14px 6px;cursor:grab;touch-action:none;user-select:none;border-bottom:1px solid var(--line)}
+.handle{flex:none;position:relative;padding:5px 14px 4px;cursor:grab;touch-action:none;user-select:none;border-bottom:1px solid var(--line)}
 .handle:active{cursor:grabbing}
 .card.city .handle{cursor:default}
 .title{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px}
@@ -216,7 +216,7 @@ main{display:flex;flex-direction:column;min-height:0;min-width:0}
 .cityinfo b{color:var(--ink)}
 kbd{font-family:var(--font-mono);font-size:10px;border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 4px;color:var(--muted)}
 
-.actions{flex:none;display:flex;justify-content:center;align-items:center;gap:14px;margin-top:8px}
+.actions{flex:none;display:flex;justify-content:center;align-items:center;gap:14px;margin-top:4px}
 .act{display:flex;flex-direction:column;align-items:center;gap:2px;background:none;border:0;color:var(--muted);font-size:11px}
 .act .b{width:50px;height:50px;border-radius:50%;display:grid;place-items:center;font-size:22px;background:var(--surface);border:2px solid var(--line);box-shadow:0 4px 12px rgba(21,33,28,.1)}
 .act.no .b{color:var(--reject);border-color:var(--reject)} .act.yes .b{color:var(--turf);border-color:var(--turf)}
@@ -314,7 +314,7 @@ body.viewer .handle .hint,body.viewer .rail .help,body.viewer #fieldBtn,body.vie
 .bookpanel .bk-sec h4{margin:0;font-size:15px}.bookpanel .bk-sec h4 .muted{font-weight:400;font-size:12px}
 
 /* Council booking state bar */
-.seasonbar{flex:none;font-size:12px;margin:4px 0 0}
+.seasonbar{flex:none;font-size:12px;margin:2px 0 0}
 .seasonbar summary{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center;cursor:pointer;list-style:none}
 .seasonbar summary::-webkit-details-marker{display:none}
 .seasonbar .sb-k{font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;font-size:10px}
@@ -380,3 +380,16 @@ body.viewer .handle .hint,body.viewer .rail .help,body.viewer #fieldBtn,body.vie
 .amendrow button{border:1px solid #7c3aed;background:#7c3aed;color:#fff;border-radius:8px;padding:3px 10px;font-size:12px;font-weight:600}
 .amendrow #amendClear{background:transparent;color:#5b21b6}
 .amendrow [hidden]{display:none}
+
+/* Fit bar light stepper: 4 to start, ±2. */
+.fitbar .fb-lights{display:inline-flex;align-items:center;gap:4px;color:#fff;font-size:13px}
+.fitbar .fb-lights button{padding:1px 8px;font-size:14px;line-height:1.2}
+.fitbar .fb-lights b{min-width:16px;text-align:center}
+.fitbar .fb-lights.manual{opacity:.6}
+
+/* Decluttered desktop: status hidden when empty, help folded away, labels as tooltips. */
+.status:empty{display:none}
+.rail details.help summary{cursor:pointer;font-weight:600;color:var(--ink);list-style:none}
+.rail details.help summary::-webkit-details-marker{display:none}
+.rail details.help[open] summary{margin-bottom:4px}
+.rail{gap:8px}
