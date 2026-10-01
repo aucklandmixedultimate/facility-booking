@@ -406,3 +406,7 @@ body.viewer .handle .hint,body.viewer .rail .help,body.viewer #fieldBtn,body.vie
 .actions.collect .act:not(.small){display:none}
 .actions .fitbar{position:static;transform:none;display:flex!important;box-shadow:none;max-width:none}
 .actions .fitbar[hidden]{display:flex!important}
+
+/* Undo for this park's rating changes (quality row). */
+.undobtn{border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:8px;padding:2px 8px;font-size:12px;font-weight:600;cursor:pointer}
+.undobtn:disabled{opacity:.4;cursor:default}
