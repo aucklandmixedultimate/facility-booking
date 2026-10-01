@@ -267,7 +267,9 @@ The page always fits one screen: nothing scrolls except the map, where the wheel
   two or three wheel clicks in or out from the fitted map drops the council map to show
   the satellite, and **⤢** zooms back to it. The council's field outlines are traced from
   the PDF vectors and their names read by OCR (`maps[].fields` in `parks.json`), so they
-  stay visible as dashed outlines over the satellite.
+  stay visible as dashed outlines over the satellite. Clicking anywhere inside the council
+  map's footprint (a dashed white rectangle once it has dissolved) shows the council map
+  opaque, full screen; any click on it, or Esc, puts it away again.
 - **Ultimate field to scale.** The field is WFDF standard: 100 × 37 m, 18 m end zones,
   brick marks 20 m in. It's editable under ⚙. It stays centred in the frame and scales
   with zoom, so you pan the map underneath it to test a spot.

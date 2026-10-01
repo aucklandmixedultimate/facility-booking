@@ -158,5 +158,10 @@
       </form>
     </dialog>
     <script type="module" src="/src/vetting/main.js"></script>
-  </body>
+    <!-- Council sketch plan shown opaque: click its footprint in park view; any click closes it. -->
+  <div class="cimg-box" id="cimgBox" hidden role="dialog" aria-label="Council field map">
+    <div class="cimg-bar"><span id="cimgTitle"></span><a id="cimgOpen" target="_blank" rel="noopener" title="Open image in a new tab">⤢</a><button type="button" title="Close">✕</button></div>
+    <img id="cimgImg" alt="Council field map">
+  </div>
+</body>
 </html>
