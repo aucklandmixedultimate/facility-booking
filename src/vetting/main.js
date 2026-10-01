@@ -167,13 +167,16 @@ function parkLatLng(p) {
   return p.lat ? [p.lat, p.lon] : null;
 }
 
+// Interests open inline in the map toolbar as toggle buttons: pressed = served. Every area
+// and both providers start pressed (no filter).
+const allRegions = () => [...new Set(PARKS.map(p => p.region))].sort();
 function renderInterests() {
-  const regions = [...new Set(PARKS.map(p => p.region))].sort();
-  $("interestPanel").innerHTML = `<b>Interests</b><span class="ip-k">Area</span>`
-    + regions.map(r => `<label><input type="checkbox" data-int="region" value="${esc(r)}"${interests.regions.includes(r) ? " checked" : ""}> ${esc(r)}</label>`).join("")
-    + `<span class="ip-k">Provider</span><label><input type="checkbox" data-int="council"${interests.council ? " checked" : ""}> 🏛 Council-run</label>`
-    + `<label><input type="checkbox" data-int="priv"${interests.priv ? " checked" : ""}> ◆ Privately operated</label>`
-    + `<small>No area ticked = all areas. Only parks matching these are served.</small>`;
+  const inc = interests.regions.length ? interests.regions : allRegions();
+  const btn = (k, v, label, on, title) => `<button data-int="${k}"${v ? ` data-val="${esc(v)}"` : ""} aria-pressed="${on}" title="${title}">${label}</button>`;
+  $("interestRow").innerHTML = allRegions().map(r => btn("region", r, esc(r), inc.includes(r), `${esc(r)} parks`)).join("")
+    + `<i class="sep"></i>` + btn("council", "", "🏛 Council", interests.council, "Council-run parks") + btn("priv", "", "◆ Private", interests.priv, "Privately operated parks")
+    + (interestsSet() ? `<button data-int="reset" title="Serve every park again">↺ All</button>` : "");
+  $("interestBtn").setAttribute("aria-pressed", String(interestsSet()));
 }
 // ── Activity score: a background ranking metric per park ─────────────────────
 // Starts at 0; each "Later" (skip) takes 1 off. Shared through the settings table for
@@ -1579,12 +1582,16 @@ function bind() {
   syncDims();
   $("noBtn").onclick = () => decide("no"); $("yesBtn").onclick = () => decide("yes"); $("topBtn").onclick = () => decide("top");
   $("skipBtn").onclick = skip; $("backBtn").onclick = goBack; $("editUndoBtn").onclick = editUndo;
-  $("interestBtn").onclick = () => { const el = $("interestPanel"); el.hidden = !el.hidden; if (!el.hidden) renderInterests(); };
-  $("interestPanel").addEventListener("change", e => {
-    const c = e.target; if (!c.dataset.int) return;
-    if (c.dataset.int === "region") interests.regions = [...$("interestPanel").querySelectorAll("[data-int=region]:checked")].map(x => x.value);
-    else interests[c.dataset.int] = c.checked;
-    if (!interests.council && !interests.priv) { interests[c.dataset.int === "council" ? "priv" : "council"] = true; }
+  $("interestBtn").onclick = () => { const el = $("interestRow"); el.hidden = !el.hidden; $("interestBtn").setAttribute("aria-expanded", String(!el.hidden)); if (!el.hidden) renderInterests(); };
+  $("interestRow").addEventListener("click", e => {
+    const b = e.target.closest("[data-int]"); if (!b) return;
+    const k = b.dataset.int;
+    if (k === "reset") interests = { regions: [], council: true, priv: true };
+    else if (k === "region") {
+      const all = allRegions(), inc = new Set(interests.regions.length ? interests.regions : all);
+      inc.has(b.dataset.val) ? inc.delete(b.dataset.val) : inc.add(b.dataset.val);
+      interests.regions = !inc.size || inc.size === all.length ? [] : all.filter(r => inc.has(r));
+    } else { interests[k] = !interests[k]; if (!interests.council && !interests.priv) interests[k === "council" ? "priv" : "council"] = true; }
     store.set("vet-interests", interests); cursor = 0; if (view === "park" && !focusId) shownPark = null;
     renderInterests(); render(); });
   ["region", "mode", "mapsOnly", "order"].forEach(id => $(id).addEventListener("change", () => {
@@ -1604,7 +1611,7 @@ function bind() {
     if ($("saveDlg").open || e.target.matches("input, textarea, select")) return;
     const p = current();
     if (!IS_ADMIN && !/^(Escape|c|C)$/.test(e.key)) return;   // bookers: no rating keys
-    if (e.key === "Escape") { if (infoOpenFor) { infoOpenFor = null; render(); return; } if (rotating) setRotating(false); $("sizePanel").hidden = true; $("interestPanel").hidden = true; $("fitPop").hidden = true; if (p && tagsFor(p).sel) selectField(p, null); return; }
+    if (e.key === "Escape") { if (infoOpenFor) { infoOpenFor = null; render(); return; } if (rotating) setRotating(false); $("sizePanel").hidden = true; $("fitPop").hidden = true; if (p && tagsFor(p).sel) selectField(p, null); return; }
     if (/^[cC]$/.test(e.key)) { focusId = null; setView(view === "city" ? "park" : "city"); return; }
     if (/^[bB]$/.test(e.key)) { setMode(workMode === "book" ? "rate" : "book"); return; }
     if (view === "city") return;
