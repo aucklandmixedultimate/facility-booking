@@ -4,6 +4,7 @@ import { createClient } from "@supabase/supabase-js";
 import logoUrl from "./assets/logo.jpg";
 import { driveConfigured, getDriveToken, ensureFolderPath, ensureFolder, uploadFile, renameFile, findChildFile, keepLatestRevisionForever, testDriveConnection, downloadDriveFile, disconnectDrive, DRIVE_ROOT_FOLDER } from "./drive-client.js";
 import { htmlToPdfBlob } from "./pdf-utils.js";
+import { gmailToken, fetchCouncilEmails, parseCouncilEmail } from "./councilMail.js";
 
 // ─── LOGO ─────────────────────────────────────────────────────────────────────
 const LOGO_SRC = logoUrl;
@@ -219,6 +220,10 @@ const STATUS_META = {
   op_permission:  {bg:"#f3e8ff",border:"#a855f7",text:"#6b21a8",dot:"#a855f7",label:"🤝 Asking operator permission"},
   council_apply:  {bg:"#e0f2f1",border:"#14b8a6",text:"#115e59",dot:"#14b8a6",label:"🏛 Applying to council"},
   council_pending:{bg:"#ccfbf1",border:"#0d9488",text:"#134e4a",dot:"#0d9488",label:"⏳ Awaiting council decision"},
+  // From the council's emails (🏛 Allocation tab): an offer AMUA must confirm, then the
+  // council's confirmation, after which AMUA allocates the fields to the bookers.
+  council_action: {bg:"#ffedd5",border:"#ea580c",text:"#7c2d12",dot:"#ea580c",label:"📨 Council offer — AMUA confirming"},
+  council_granted:{bg:"#ecfccb",border:"#65a30d",text:"#365314",dot:"#65a30d",label:"🏛 Council granted — allocating"},
   op_confirm:     {bg:"#ede9fe",border:"#7c3aed",text:"#4c1d95",dot:"#7c3aed",label:"🤝 Confirming with operator"},
   // Community facilities (schools, trusts): AMUA review → [review the contact, first time
   // only] → request drafted to AMUA's inbox (sent by AMUA from Gmail) → approved.
@@ -226,11 +231,11 @@ const STATUS_META = {
   community_request: {bg:"#dbeafe",border:"#2563eb",text:"#1e3a8a",dot:"#2563eb",label:"✉ Requested from facility"},
 };
 // Each provider kind walks its own steps. Stored statuses stay provider-neutral keys.
-const COUNCIL_STAGE_STATUSES = ["op_permission","council_apply","council_pending","op_confirm","contact_review","community_request"];
+const COUNCIL_STAGE_STATUSES = ["op_permission","council_apply","council_pending","council_action","council_granted","op_confirm","contact_review","community_request"];
 const WORKFLOW_STEPS = {
   gtec:            ["pending_amua","queued_cpsa","pending_cpsa","approved"],
-  council:         ["pending_amua","council_apply","council_pending","approved"],
-  council_private: ["pending_amua","op_permission","council_apply","council_pending","op_confirm","approved"],
+  council:         ["pending_amua","council_apply","council_pending","council_action","council_granted","approved"],
+  council_private: ["pending_amua","op_permission","council_apply","council_pending","council_action","council_granted","op_confirm","approved"],
   direct:          ["pending_amua","approved"],
   community:       ["pending_amua","contact_review","community_request","approved"],
 };
@@ -248,7 +253,7 @@ const REVIEW_STATUSES = new Set(["pending_amua","queued_cpsa","amua_submit","pen
 // Matches STATUS_META.dot exactly so calendar chips and status badges use the same palette.
 const STATUS_CAL_COLOR = {
   pending_amua:"#f59e0b", queued_cpsa:"#3b82f6", amua_submit:"#3b82f6",
-  op_permission:"#a855f7", council_apply:"#14b8a6", council_pending:"#0d9488", op_confirm:"#7c3aed",
+  op_permission:"#a855f7", council_apply:"#14b8a6", council_pending:"#0d9488", council_action:"#ea580c", council_granted:"#65a30d", op_confirm:"#7c3aed",
   contact_review:"#ca8a04", community_request:"#2563eb",
   pending_cpsa:"#0ea5e9", pending:"#f59e0b",     approved:"#22c55e",
   cpsa_confirmed:"#0891b2", cpsa_review_needed:"#fef9c3",
@@ -1549,11 +1554,12 @@ const ACTIVITY_ADMIN_ACTIONS = new Set([
   "cpsa_admin_booking_add","cpsa_admin_booking_remove","cpsa_admin_convert","mismatch_resolution",
   "mismatch_billing_settled","status_change","invoiced","official_invoice_created",
   "invoice_preview_emailed","official_invoice_emailed","slot_shared","slot_merged","slot_unlinked","drive_upload","drive_attach",
-  "settings_change",
+  "settings_change","council_mail_sync","council_application_linked",
 ]);
 const ACTIVITY_LABELS = {
   booking_create:"Booking created", booking_edit:"Booking edited", booking_delete:"Booking deleted",
   status_change:"Status changed", cpsa_sync_start:"Sync started", cpsa_sync_complete:"Sync completed",
+  council_mail_sync:"Council emails synced", council_application_linked:"Council application linked",
   cpsa_confirm:"GTEC confirmed", cpsa_review_flag:"Mismatch flagged",
   cpsa_admin_booking_add:"GTEC block added", cpsa_admin_booking_remove:"GTEC block removed",
   cpsa_admin_convert:"GTEC block converted",
@@ -4526,13 +4532,17 @@ function AboutTab() {
             the fields you book, so your name and phone must be on file (📇 Fill in council contact on the booking form, or User menu → 📇 My council contact).
             The booking form also asks for the players you expect and whether it's training or competition; grade and notes for the council are optional.
           </p>
-          <AboutStep n="1/4" col="#6366f1" title="Submit booking request">Book the dates and times on your active council field. Status <Badge status="pending_amua" wf="council"/>.</AboutStep>
+          <AboutStep n="1/6" col="#6366f1" title="Submit booking request">Book the dates and times on your active council field. Status <Badge status="pending_amua" wf="council"/>.</AboutStep>
           <div style={arrow}>↓</div>
-          <AboutStep n="2/4" col="#14b8a6" title="AMUA applies to the council">AMUA reviews it and adds it to the next council application (with other bookers' fields at that park). Status <Badge status="council_apply" wf="council"/>.</AboutStep>
+          <AboutStep n="2/6" col="#14b8a6" title="AMUA applies to the council">AMUA reviews it and adds it to the next council application (with other bookers' fields at that park). Status <Badge status="council_apply" wf="council"/>.</AboutStep>
           <div style={arrow}>↓</div>
-          <AboutStep n="3/4" col="#0d9488" title="Awaiting the council's decision">Once AMUA submits, the application number and your share of the fee are recorded. Status <Badge status="council_pending" wf="council"/>.</AboutStep>
+          <AboutStep n="3/6" col="#0d9488" title="Awaiting the council's decision">Once AMUA submits, the application number and your share of the fee are recorded. Status <Badge status="council_pending" wf="council"/>.</AboutStep>
           <div style={arrow}>↓</div>
-          <AboutStep n="4/4" col="#22c55e" title="Council decision">The council's parks booking coordinator confirms (<Badge status="approved" wf="council"/>) or declines (<Badge status="rejected" wf="council"/>). Seasonal applications are allocated after the application window closes; casual applications are processed once seasonal ones are settled.</AboutStep>
+          <AboutStep n="4/6" col="#ea580c" title="Council offer">The council's parks booking coordinator offers the fields; AMUA confirms (or withdraws) with the council. Status <Badge status="council_action" wf="council"/>.</AboutStep>
+          <div style={arrow}>↓</div>
+          <AboutStep n="5/6" col="#65a30d" title="Council grants it">The council confirms the booking and AMUA allocates the granted fields to the bookers who applied. Status <Badge status="council_granted" wf="council"/>.</AboutStep>
+          <div style={arrow}>↓</div>
+          <AboutStep n="6/6" col="#22c55e" title="Allocated">You're emailed when your field is allocated (<Badge status="approved" wf="council"/>), or why not (<Badge status="rejected" wf="council"/>) if the council declines or the fields went to other bookings. Seasonal applications are allocated after the application window closes; casual applications are processed once seasonal ones are settled.</AboutStep>
           {councilTimes}
         </>)}
         {howTab==="private"&&(<>
@@ -4542,17 +4552,21 @@ function AboutTab() {
             GTEC's grounds (Cornwall Park, Orakei, Shore Road) are <b>BOOKING ONLY AVAILABLE THROUGH AMUA</b> — use the CPSA / GTEC process.
           </p>
           <h3 style={{margin:"12px 0 8px",fontSize:14,fontWeight:700,color:"#0f172a"}}>Approval Process</h3>
-          <AboutStep n="1/6" col="#6366f1" title="Submit booking request">Book on your active field at that park. Status <Badge status="pending_amua" wf="council_private"/>.</AboutStep>
+          <AboutStep n="1/8" col="#6366f1" title="Submit booking request">Book on your active field at that park. Status <Badge status="pending_amua" wf="council_private"/>.</AboutStep>
           <div style={arrow}>↓</div>
-          <AboutStep n="2/6" col="#a855f7" title="AMUA asks the operator">AMUA contacts the club or operator (their contact is on the Council fields page) for permission. Status <Badge status="op_permission" wf="council_private"/>.</AboutStep>
+          <AboutStep n="2/8" col="#a855f7" title="AMUA asks the operator">AMUA contacts the club or operator (their contact is on the Council fields page) for permission. Status <Badge status="op_permission" wf="council_private"/>.</AboutStep>
           <div style={arrow}>↓</div>
-          <AboutStep n="3/6" col="#14b8a6" title="AMUA applies to the council">With the operator's agreement, the field goes into the next council application. Status <Badge status="council_apply" wf="council_private"/>.</AboutStep>
+          <AboutStep n="3/8" col="#14b8a6" title="AMUA applies to the council">With the operator's agreement, the field goes into the next council application. Status <Badge status="council_apply" wf="council_private"/>.</AboutStep>
           <div style={arrow}>↓</div>
-          <AboutStep n="4/6" col="#0d9488" title="Awaiting the council's decision">The application number and your share of the $10-per-field fee are recorded. Status <Badge status="council_pending" wf="council_private"/>.</AboutStep>
+          <AboutStep n="4/8" col="#0d9488" title="Awaiting the council's decision">The application number and your share of the $10-per-field fee are recorded. Status <Badge status="council_pending" wf="council_private"/>.</AboutStep>
           <div style={arrow}>↓</div>
-          <AboutStep n="5/6" col="#7c3aed" title="Confirm with the operator">After the council's permit, AMUA confirms the arrangements (keys, lights) with the operator. Status <Badge status="op_confirm" wf="council_private"/>.</AboutStep>
+          <AboutStep n="5/8" col="#ea580c" title="Council offer">The council offers the fields; AMUA confirms (or withdraws) with the council. Status <Badge status="council_action" wf="council_private"/>.</AboutStep>
           <div style={arrow}>↓</div>
-          <AboutStep n="6/6" col="#22c55e" title="Approved">The booking is confirmed: <Badge status="approved" wf="council_private"/> (or <Badge status="rejected"/> if the operator or council declines).</AboutStep>
+          <AboutStep n="6/8" col="#65a30d" title="Council grants it">The council confirms and AMUA allocates the granted fields to the bookers who applied. Status <Badge status="council_granted" wf="council_private"/>.</AboutStep>
+          <div style={arrow}>↓</div>
+          <AboutStep n="7/8" col="#7c3aed" title="Confirm with the operator">After the council's permit, AMUA confirms the arrangements (keys, lights) with the operator. Status <Badge status="op_confirm" wf="council_private"/>.</AboutStep>
+          <div style={arrow}>↓</div>
+          <AboutStep n="8/8" col="#22c55e" title="Approved">The booking is confirmed: <Badge status="approved" wf="council_private"/> (or <Badge status="rejected"/> if the operator or council declines).</AboutStep>
           {councilTimes}
         </>)}
         {howTab==="community"&&(<>
@@ -8666,6 +8680,182 @@ function SyncedItemRow({ ab, bookings }) {
   );
 }
 
+// ─── Council allocation (🏛 Allocation tab) ──────────────────────────────────────
+// Outcomes per council application number, merged from the council's emails (see
+// src/councilMail.js): { id, outcome: "action"|"confirmed"|"declined"|"info", park, fields,
+// start, end, reason, coordinator:{name,email}, threadId, subject, outcomeAt, history[],
+// replied:{kind,at,by}, manual }.
+const COUNCIL_OUTCOME_META = {
+  action:    { label: "Offer — AMUA to confirm", bg: "#ffedd5", border: "#ea580c", text: "#7c2d12", rank: 0 },
+  confirmed: { label: "Granted — allocate",      bg: "#ecfccb", border: "#65a30d", text: "#365314", rank: 1 },
+  declined:  { label: "Declined",                bg: "#fff1f2", border: "#f43f5e", text: "#881337", rank: 2 },
+  info:      { label: "Update",                  bg: "#f1f5f9", border: "#94a3b8", text: "#334155", rank: 3 },
+};
+function mergeCouncilOutcomes(prev, parsed) {
+  const next = JSON.parse(JSON.stringify(prev || {})), changed = new Set();
+  for (const m of parsed) for (const [id, a] of Object.entries(m.apps)) {
+    const o = next[id] ||= { id, outcome: "info", history: [] };
+    if ((o.history ||= []).some(h => h.msgId === m.msgId)) continue;
+    o.history.push({ msgId: m.msgId, date: m.date, outcome: a.outcome, subject: m.subject });
+    ["park", "fields", "start", "end"].forEach(k => { if (a[k]) o[k] = a[k]; });
+    if (m.coordinator?.email) o.coordinator = m.coordinator;
+    o.threadId = m.threadId; o.subject = m.subject; o.date ||= m.date;
+    // The newest real outcome wins (emails arrive oldest first), unless AMUA set it by hand.
+    if (a.outcome !== "info" && !o.manual && (!o.outcomeAt || m.date >= o.outcomeAt)) {
+      o.outcome = a.outcome; o.outcomeAt = m.date;
+      o.reason = a.outcome === "declined" ? (m.reason || o.reason || "") : "";
+    }
+    changed.add(id);
+  }
+  return { next, changed: [...changed] };
+}
+const councilAppBookings = (bookings, id) => bookings.filter(b => (parseCouncilApp(b.system_notes)?.id || "").toLowerCase() === String(id).toLowerCase());
+const escHtml = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+// AMUA's reply to the council about an offer, drafted to AMUA's own inbox (the app never
+// emails the council: see the email rule at sendEmail). AMUA sends it from Gmail, in the thread.
+function buildCouncilReplyItem(o, kind, rationale) {
+  const ops = AMUA_INFO.contacts?.operations || {}, first = (o.coordinator?.name || "").split(/[\s,]+/)[0];
+  const what = [o.park, o.fields, o.start && o.end ? `${o.start} – ${o.end}` : o.start].filter(Boolean).map(escHtml).join(", ");
+  const why = String(rationale || "").trim() ? `<p>${escHtml(rationale.trim()).replace(/\n+/g, "<br>")}</p>` : "";
+  const body = kind === "accept"
+    ? `<p>Thank you for the update on application # ${escHtml(o.id)}. Auckland Mixed Ultimate Association confirms it would like to go ahead with the booking${what ? `: ${what}` : ""}.</p>${why}<p>Please let us know if you need anything else from us to complete it.</p>`
+    : `<p>Thank you for the update on application # ${escHtml(o.id)}. Auckland Mixed Ultimate Association no longer needs this booking${what ? ` (${what})` : ""}, so please withdraw it from our request.</p>${why}`;
+  const html = `${o.threadId ? `<p style="font-size:12px;color:#64748b">AMUA: send this as a reply in the council's thread — <a href="https://mail.google.com/mail/u/0/#all/${o.threadId}">open the thread in Gmail</a>.</p>` : ""}
+    <p>Kia ora${first ? " " + escHtml(first) : ""},</p>${body}
+    <p>Ngā mihi,<br>${escHtml(ops.name || "AMUA")}${ops.position ? `, ${escHtml(ops.position)}` : ""}<br>${escHtml(AMUA_INFO.name || "Auckland Mixed Ultimate Association")}${ops.phone ? `<br>${escHtml(ops.phone)}` : ""}<br>${AMUA_INBOX}</p>`;
+  return { notifyOnly: true, invoiceEmail: true, amuaDraft: true, email: o.coordinator?.email || AMUA_INBOX, name: o.coordinator?.name || "Auckland Council",
+    drafts: [], count: 1, refs: [o.id], total: 0, subject: `Re: Application # ${o.id}${kind === "accept" ? " — AMUA confirms" : " — AMUA withdraws"}`, html };
+}
+function CouncilAllocationTab({ outcomes = {}, bookings = [], syncing, syncLog = [], onSync, onSaveOutcomes, onBulkStatusChange, onQueueNotifications, onLinkApp, aliasNames = {}, loggedInEmail }) {
+  const [filter, setFilter] = useState("open");
+  const [sel, setSel] = useState({});        // appId → Set of booking ids picked for allocation
+  const [notes, setNotes] = useState({});    // appId → rationale for the reply to the council
+  const [linkSel, setLinkSel] = useState({}); // appId → Set of booking ids to link
+  const [showLog, setShowLog] = useState(false);
+  const apps = Object.values(outcomes).sort((a, b) => (COUNCIL_OUTCOME_META[a.outcome]?.rank ?? 9) - (COUNCIL_OUTCOME_META[b.outcome]?.rank ?? 9) || (b.outcomeAt || b.date || "").localeCompare(a.outcomeAt || a.date || ""));
+  const count = k => apps.filter(a => k === "open" ? a.outcome === "action" || a.outcome === "confirmed" : k === "all" || a.outcome === k).length;
+  const shown = apps.filter(a => filter === "all" ? true : filter === "open" ? a.outcome === "action" || a.outcome === "confirmed" : a.outcome === filter);
+  const live = b => !["cancelled", "rejected"].includes(b.status);
+  const who = b => aliasNames[(b.email || "").toLowerCase()] || b.name || b.email;
+  const facName = b => FACILITIES.find(f => f.id === b.facility_id)?.name || b.facility_id;
+  const picked = (o, linked) => sel[o.id] || new Set(linked.filter(live).map(b => b.id));
+  const toggle = (setter, id, bid, base) => setter(s => { const n = new Set(s[id] || base); n.has(bid) ? n.delete(bid) : n.add(bid); return { ...s, [id]: n }; });
+  const mark = (o, patch) => onSaveOutcomes({ ...outcomes, [o.id]: { ...o, ...patch } });
+  const stamp = () => ({ at: new Date().toISOString(), by: loggedInEmail || "" });
+  // Council bookings still waiting on the council that aren't on a council number yet
+  // (no application, or a local CA-… reference), at the same park first.
+  const unlinked = o => bookings.filter(b => isCouncilBooking(b) && ["council_apply", "council_pending", "council_action", "council_granted"].includes(b.status)
+    && (() => { const a = parseCouncilApp(b.system_notes)?.id; return !a || /^CA-/.test(a); })())
+    .sort((a, b) => (o.park && facName(b).toLowerCase().includes(o.park.toLowerCase()) ? 1 : 0) - (o.park && facName(a).toLowerCase().includes(o.park.toLowerCase()) ? 1 : 0) || a.date.localeCompare(b.date));
+  function reply(o, kind, linked) {
+    const ids = [...picked(o, linked)];
+    onQueueNotifications([buildCouncilReplyItem(o, kind, notes[o.id])], "council reply draft");
+    if (kind === "decline" && ids.length) onBulkStatusChange(ids, "rejected", `AMUA withdrew application ${o.id}${o.park ? ` (${o.park})` : ""} with the council.${notes[o.id]?.trim() ? " " + notes[o.id].trim() : ""}`);
+    mark(o, { replied: { kind, ...stamp() }, ...(kind === "decline" ? { outcome: "declined", manual: true, reason: `AMUA withdrew: ${notes[o.id]?.trim() || "not needed"}` } : {}) });
+  }
+  function allocate(o, linked) {
+    const pick = picked(o, linked), open = linked.filter(b => ["council_pending", "council_action", "council_granted"].includes(b.status));
+    const yes = open.filter(b => pick.has(b.id)), no = open.filter(b => !pick.has(b.id));
+    const note = `Auckland Council granted application ${o.id}${o.park ? ` (${o.park}${o.fields ? ", " + o.fields : ""})` : ""}.`;
+    const direct = yes.filter(b => workflowOf(b.facility_id) !== "council_private").map(b => b.id), viaOp = yes.filter(b => workflowOf(b.facility_id) === "council_private").map(b => b.id);
+    if (direct.length) onBulkStatusChange(direct, "approved", note);
+    if (viaOp.length) onBulkStatusChange(viaOp, "op_confirm", note, true);
+    if (no.length) onBulkStatusChange(no.map(b => b.id), "rejected", `Not allocated from council application ${o.id}${o.park ? ` (${o.park})` : ""}: the granted fields went to other bookings.`);
+    mark(o, { allocated: { ...stamp(), ids: yes.map(b => b.id) } });
+  }
+  const box = { border: "1px solid #e2e8f0", borderRadius: 12, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8 };
+  const small = { fontSize: 12, color: "#64748b" };
+  const lastRun = syncLog[0];
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
+        <h2 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: "#0f172a" }}>🏛 Council allocation</h2>
+        <button onClick={onSync} disabled={syncing} style={S.btn({ background: "#0d9488", color: "#fff", opacity: syncing ? 0.6 : 1, cursor: syncing ? "wait" : "pointer" })}>{syncing ? "Reading council emails…" : "🔄 Sync council emails"}</button>
+        <span style={small}>{lastRun ? (lastRun.error ? `Last sync failed: ${lastRun.error}` : `Last sync ${new Date(lastRun.at).toLocaleString("en-NZ")} · ${lastRun.emails} email${lastRun.emails !== 1 ? "s" : ""} read · ${lastRun.queued} booking change${lastRun.queued !== 1 ? "s" : ""} queued`) : "Not synced yet: sign in with the AMUA Google account when asked (read-only Gmail access)."}</span>
+      </div>
+      <p style={{ margin: 0, fontSize: 13, color: "#475569" }}>
+        Reads Auckland Council's replies about AMUA's field applications from the AMUA Gmail. An <b>offer</b> needs AMUA's answer: draft an acceptance or a withdrawal below.
+        Replies are drafted to AMUA's own inbox with the council's address on top (the app never emails the council) — send them from Gmail in the thread.
+        Once the council <b>grants</b> an application, allocate its fields to the bookers who applied: they're approved and emailed; the rest are told it wasn't allocated.
+        Booking changes go to the cart for you to submit.
+      </p>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        {[["open", "Needs AMUA"], ["action", "Offers"], ["confirmed", "Granted"], ["declined", "Declined"], ["info", "Updates"], ["all", "All"]].map(([k, l]) => (
+          <button key={k} onClick={() => setFilter(k)} style={S.btn({ padding: "5px 12px", fontSize: 12, background: filter === k ? "#0f172a" : "#fff", color: filter === k ? "#fff" : "#334155", border: "1px solid #e2e8f0" })}>{l} ({count(k)})</button>))}
+      </div>
+      {!shown.length && <div style={{ ...small, padding: 20, textAlign: "center" }}>{apps.length ? "Nothing here." : "No council applications yet. Press 🔄 Sync council emails."}</div>}
+      {shown.map(o => {
+        const m = COUNCIL_OUTCOME_META[o.outcome] || COUNCIL_OUTCOME_META.info, linked = councilAppBookings(bookings, o.id), pick = picked(o, linked);
+        const cands = linked.length ? [] : unlinked(o), lpick = linkSel[o.id] || new Set();
+        return (
+          <div key={o.id} style={{ ...box, borderLeft: `4px solid ${m.border}` }}>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+              <b style={{ fontSize: 15, color: "#0f172a" }}>Application # {o.id}</b>
+              <span style={{ padding: "2px 10px", borderRadius: 999, background: m.bg, border: `1px solid ${m.border}`, color: m.text, fontSize: 12, fontWeight: 700 }}>{m.label}{o.manual ? " · set by AMUA" : ""}</span>
+              {o.replied && <span style={{ ...small, fontWeight: 600 }}>✉ {o.replied.kind === "accept" ? "Acceptance" : "Withdrawal"} drafted {new Date(o.replied.at).toLocaleDateString("en-NZ")}</span>}
+              {o.allocated && <span style={{ ...small, fontWeight: 600, color: "#166534" }}>✅ Allocated {new Date(o.allocated.at).toLocaleDateString("en-NZ")}</span>}
+              {o.threadId && <a href={`https://mail.google.com/mail/u/0/#all/${o.threadId}`} target="_blank" rel="noreferrer" style={{ marginLeft: "auto", fontSize: 12, color: "#0e7490" }}>Gmail thread ↗</a>}
+            </div>
+            <div style={{ fontSize: 13, color: "#0f172a" }}><b>{o.park || "Park not given"}</b>{o.fields ? ` · ${o.fields}` : ""}{o.start ? ` · ${o.start}${o.end ? " – " + o.end : ""}` : ""}</div>
+            <div style={small}>{o.coordinator?.name || o.coordinator?.email ? `From ${o.coordinator.name || ""}${o.coordinator.email ? ` <${o.coordinator.email}>` : ""} · ` : ""}{(o.outcomeAt || o.date) ? new Date(o.outcomeAt || o.date).toLocaleDateString("en-NZ", { day: "numeric", month: "short", year: "numeric" }) : ""}{o.history?.length > 1 ? ` · ${o.history.length} emails` : ""}</div>
+            {o.reason && <div style={{ fontSize: 13, color: "#881337", background: "#fff1f2", borderRadius: 8, padding: "6px 10px" }}>{o.reason}</div>}
+            {linked.length ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <div style={{ ...small, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em" }}>Bookers on this application</div>
+                {linked.map(b => (
+                  <label key={b.id} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", fontSize: 13, opacity: live(b) ? 1 : 0.55 }}>
+                    <input type="checkbox" disabled={!live(b)} checked={pick.has(b.id)} onChange={() => toggle(setSel, o.id, b.id, pick)}/>
+                    <b>{who(b)}</b><span style={{ color: "#475569" }}>{facName(b)} · {fmtDate(b.date)} {fmtTime(b.start_hour)}–{fmtTime(b.start_hour + b.duration)}</span>
+                    <Badge status={b.status} wf={workflowOf(b.facility_id)}/>
+                  </label>))}
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <div style={small}>No bookings are on this application number{cands.length ? ". Link the bookings it covers:" : " (an older application, or none waiting on the council)."}</div>
+                {cands.slice(0, 12).map(b => (
+                  <label key={b.id} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", fontSize: 13 }}>
+                    <input type="checkbox" checked={lpick.has(b.id)} onChange={() => toggle(setLinkSel, o.id, b.id, lpick)}/>
+                    <b>{who(b)}</b><span style={{ color: "#475569" }}>{facName(b)} · {fmtDate(b.date)}{parseCouncilApp(b.system_notes)?.id ? ` · ${parseCouncilApp(b.system_notes).id}` : ""}</span>
+                    <Badge status={b.status} wf={workflowOf(b.facility_id)}/>
+                  </label>))}
+                {cands.length > 0 && <div><button disabled={!lpick.size} onClick={() => { onLinkApp(o.id, [...lpick]); setLinkSel(s => ({ ...s, [o.id]: new Set() })); }} style={S.btn({ padding: "5px 12px", fontSize: 12, background: lpick.size ? "#0d9488" : "#e2e8f0", color: lpick.size ? "#fff" : "#94a3b8" })}>🔗 Link {lpick.size || ""} to # {o.id}</button></div>}
+              </div>
+            )}
+            {o.outcome === "action" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <textarea value={notes[o.id] || ""} onChange={e => setNotes(n => ({ ...n, [o.id]: e.target.value }))} rows={2} placeholder="Rationale for the council (optional): e.g. which fields or nights AMUA needs, or why it's not needed" style={{ ...S.inp, fontSize: 13 }}/>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button onClick={() => reply(o, "accept", linked)} style={S.btn({ background: "#15803d", color: "#fff" })}>✉ Draft acceptance</button>
+                  <button onClick={() => reply(o, "decline", linked)} style={S.btn({ background: "#fff", color: "#b91c1c", border: "1px solid #fecaca" })}>✉ Draft withdrawal{pick.size ? ` · decline ${pick.size} booking${pick.size !== 1 ? "s" : ""}` : ""}</button>
+                </div>
+              </div>
+            )}
+            {o.outcome === "confirmed" && linked.some(b => ["council_pending", "council_action", "council_granted"].includes(b.status)) && (
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                <button onClick={() => allocate(o, linked)} disabled={!pick.size} style={S.btn({ background: pick.size ? "#15803d" : "#e2e8f0", color: pick.size ? "#fff" : "#94a3b8" })}>✅ Allocate to {pick.size} booking{pick.size !== 1 ? "s" : ""}</button>
+                <span style={small}>Ticked bookings are approved and the bookers emailed (council + operator bookings go to the operator first); unticked ones are declined.</span>
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 6, alignItems: "center", ...small }}>
+              Outcome:
+              <select value={o.outcome} onChange={e => mark(o, { outcome: e.target.value, manual: true, manualAt: new Date().toISOString() })} style={{ fontSize: 12, padding: "2px 6px", borderRadius: 6, border: "1px solid #e2e8f0" }}>
+                {Object.entries(COUNCIL_OUTCOME_META).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+              </select>
+              {o.manual && <button onClick={() => mark(o, { manual: false })} style={{ fontSize: 11, border: "none", background: "none", color: "#0e7490", cursor: "pointer", padding: 0 }}>use the emails' outcome on the next sync</button>}
+            </div>
+          </div>
+        );
+      })}
+      <div>
+        <button onClick={() => setShowLog(v => !v)} style={S.btn({ padding: "5px 12px", fontSize: 12, background: "#fff", color: "#334155", border: "1px solid #e2e8f0" })}>Sync log ({syncLog.length}) {showLog ? "▴" : "▾"}</button>
+        {showLog && <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 4 }}>
+          {syncLog.map((r, i) => <div key={i} style={{ fontSize: 12, color: r.error ? "#b91c1c" : "#475569" }}>{new Date(r.at).toLocaleString("en-NZ")} — {r.error ? r.error : `${r.emails} emails · ${r.changed.length} updated${r.changed.length ? ` (${r.changed.join(", ")})` : ""} · ${r.queued} booking change${r.queued !== 1 ? "s" : ""} queued`}</div>)}
+        </div>}
+      </div>
+    </div>
+  );
+}
+
 // ─── Admin Panel with action queue, bulk approve, facility rates ──────────────
 // The request to a community facility, drafted for AMUA's inbox (the app never emails
 // facilities: see the email rule at sendEmail). Queued in the email cart as a pre-rendered item.
@@ -10826,6 +11016,13 @@ export default function App() {
   // log survives reloads; old entries are purged per the admin retention setting).
   // Each entry: { monthKey, label, added, skipped, removed, cpsaConfirmed,
   //   cpsaReviewNeeded, clashes, notified, syncedAt, lastChangeAt }
+  // Council email sync (🏛 Allocation): outcomes per council application number, from the
+  // council's replies in AMUA's Gmail (settings "council_outcomes"), and a log of sync runs.
+  const [councilOutcomes, setCouncilOutcomes] = useState(()=>{ try{ return JSON.parse(localStorage.getItem("fb_council_outcomes")||"{}"); }catch{ return {}; } });
+  const [councilSyncLog, setCouncilSyncLog] = useState(()=>{ try{ return JSON.parse(localStorage.getItem("fb_council_sync_log")||"[]"); }catch{ return []; } });
+  const [councilSyncing, setCouncilSyncing] = useState(false);
+  const councilOpenCount = Object.values(councilOutcomes).filter(o => o.outcome === "action" || (o.outcome === "confirmed" && !o.allocated)).length;
+  useEffect(()=>{ try{ localStorage.setItem("fb_council_sync_log", JSON.stringify(councilSyncLog.slice(0,30))); }catch{ /* ignore */ } }, [councilSyncLog]);
   const [syncResults, setSyncResults] = useState(()=>{
     try{ return JSON.parse(localStorage.getItem("fb_sync_results")||"[]"); }catch{ return []; }
   });
@@ -11045,6 +11242,68 @@ export default function App() {
     } catch(e) { showToast("Couldn't record the council application: "+e.message, "error"); }
   }
 
+  // ── Council email sync ─────────────────────────────────────────────────────────
+  // Same shape as the GTEC sync: read the source (the council's emails in AMUA's Gmail,
+  // read-only), merge what changed into the stored outcomes, then queue the bookings'
+  // status changes in the cart for the admin to submit. Nothing is ever sent to the council.
+  async function saveCouncilOutcomes(next) {
+    setCouncilOutcomes(next);
+    try{localStorage.setItem("fb_council_outcomes",JSON.stringify(next));}catch{ /* ignore */ }
+    return persistSetting("council_outcomes", next);
+  }
+  async function handleCouncilMailSync() {
+    if (councilSyncing) return;
+    setCouncilSyncing(true);
+    const at = new Date().toISOString();
+    try {
+      const tok = await gmailToken();
+      const mails = await fetchCouncilEmails(tok);
+      const parsed = mails.map(parseCouncilEmail).filter(m => Object.keys(m.apps).length).sort((a,b)=>a.date.localeCompare(b.date));
+      const { next, changed } = mergeCouncilOutcomes(councilOutcomes, parsed);
+      if (changed.length) await saveCouncilOutcomes(next);
+      const queued = queueCouncilOutcomeChanges(next);
+      const entry = { at, emails: mails.length, apps: Object.keys(next).length, changed, queued };
+      setCouncilSyncLog(l => [entry, ...l].slice(0, 30));
+      logActivity("council_mail_sync", { emails: mails.length, changed: changed.length, queued });
+      showToast(`🏛 Council emails: ${mails.length} read · ${changed.length} application update${changed.length!==1?"s":""} · ${queued} booking change${queued!==1?"s":""} queued`);
+    } catch(e) {
+      setCouncilSyncLog(l => [{ at, error: String(e?.message||e) }, ...l].slice(0, 30));
+      showToast("Council email sync: "+(e?.message||e), "error");
+    } finally { setCouncilSyncing(false); }
+  }
+  // Bookings on an application move with its outcome: an offer → council_action, a
+  // confirmation → council_granted (both silent), a decline → rejected (the booker is told
+  // why). Never backwards, and never twice: bookings already queued in the cart are skipped.
+  function queueCouncilOutcomeChanges(outcomes) {
+    const inCart = new Set(cart.filter(i=>i.statusChange).flatMap(i=>i.ids));
+    const from = { action:["council_pending"], confirmed:["council_pending","council_action"], declined:["council_pending","council_action","council_granted"] };
+    let n = 0;
+    for (const o of Object.values(outcomes)) {
+      const ok = from[o.outcome]; if (!ok) continue;
+      const ids = councilAppBookings(bookings, o.id).filter(b => ok.includes(b.status) && !inCart.has(b.id)).map(b => b.id);
+      if (!ids.length) continue;
+      if (o.outcome === "action") handleBulkStatusChange(ids, "council_action", "", true);
+      else if (o.outcome === "confirmed") handleBulkStatusChange(ids, "council_granted", "", true);
+      else handleBulkStatusChange(ids, "rejected", `Auckland Council declined application ${o.id}${o.park ? ` (${o.park})` : ""}.${o.reason ? " " + o.reason : ""}`);
+      ids.forEach(id => inCart.add(id)); n += ids.length;
+    }
+    return n;
+  }
+  // Point bookings at a council application number (e.g. a local CA-… reference once the
+  // council's own number is known), keeping their recorded fee share.
+  async function handleLinkCouncilApp(appId, ids) {
+    const at = new Date().toISOString();
+    try {
+      for (const b of bookings.filter(x => ids.includes(x.id))) {
+        const cur = parseCouncilApp(b.system_notes), sys = (b.system_notes||"").replace(new RegExp(COUNCIL_APP_RE.source,"g"),"").trim();
+        await sb.update("bookings", b.id, { system_notes:`${sys}${sys?"\n":""}[COUNCIL_APP ${appId} ${cur?.at||at} fee=${cur?.fee ?? 0}]`, updated_at:at });
+      }
+      logActivity("council_application_linked", { appId, ids });
+      await loadBookings();
+      showToast(`Linked ${ids.length} booking${ids.length!==1?"s":""} to application ${appId}.`);
+    } catch(e) { showToast("Couldn't link the bookings: "+e.message, "error"); }
+  }
+
   async function loadBookings() {
     if(!configured){setLoading(false);return;}
     try{setBookings(await sb.select("bookings"));setDbError("");}
@@ -11099,6 +11358,10 @@ export default function App() {
       if (map.council_facilities && typeof map.council_facilities === "object") {
         applyCouncilFacilities(map.council_facilities); setCouncilFacRev(n => n + 1);
         try{localStorage.setItem("fb_council_facilities",JSON.stringify(map.council_facilities));}catch{ /* ignore */ }
+      }
+      if (map.council_outcomes && typeof map.council_outcomes === "object") {
+        setCouncilOutcomes(map.council_outcomes);
+        try{localStorage.setItem("fb_council_outcomes",JSON.stringify(map.council_outcomes));}catch{ /* ignore */ }
       }
       if (map.amua_org && typeof map.amua_org === "object") {
         applyAmuaOrg(map.amua_org); setAmuaOrg(map.amua_org);
@@ -12434,7 +12697,7 @@ export default function App() {
     }
 
     if (!silentMode) {
-      const noEmailStatuses = new Set(["pending_cpsa","op_permission","council_apply","op_confirm"]);
+      const noEmailStatuses = new Set(["pending_cpsa","op_permission","council_apply","council_action","op_confirm"]);
       // Status-change emails — grouped into one email per booker + status, so a booker
       // with several bookings moving to the same status gets a single confirmation.
       const statusByKey = {};
@@ -12700,6 +12963,7 @@ export default function App() {
             <TabBtn id="summary"  label={isMobile?"📊":"📊 Summary"}/>
             {(isAdmin||!!loggedInEmail)&&<TabBtn id="billing" label={isMobile?"🧾":"🧾 Billing"}/>}
             {isAdmin&&<TabBtn id="admin" label={isMobile?"⚙ Admin":"⚙ Admin"} badge={pendingCount}/>}
+            {isAdmin&&<TabBtn id="allocation" label={isMobile?"🏛":"🏛 Allocation"} badge={councilOpenCount||undefined}/>}
           </div>
         </div>
       </div>
@@ -12969,6 +13233,7 @@ export default function App() {
         {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<SummaryTab bookings={bookings} loggedInEmail={loggedInEmail} facilityRates={facilityRates} pricingConditions={pricingConditions} onAddPricingCondition={addPricingCondition} onUpdatePricingCondition={updatePricingCondition} onRemovePricingCondition={removePricingCondition} isAdmin={isAdmin} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onUpdateFacilityRate={updateFacilityRate} pricingMode={pricingMode} onSetPricingMode={setPricingMode} onProposeMerge={handleProposeMerge} onBulkApply={handleBulkApply} onMarkInvoiced={handleMarkInvoiced} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} bookerFilter={listBookerFilter} profiles={profiles} emailAliases={emailAliases} aliasNames={aliasNames} onCreateOfficialInvoice={handleCreateOfficialInvoice} onEmailInvoice={handleEmailInvoicePreview} onFilterChange={s=>setListBookerFilter(s)} loadRequest={summaryLoadRequest}/>}</div>}
         {tab==="billing"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<BillingTab billingRecords={billingRecords} onUpdateRecord={handleUpdateBillingRecord} onDeleteRecord={id=>setBillingRecords(prev=>prev.filter(r=>r.id!==id))} onCreateReceipt={handleCreateReceipt} onLoadToSummary={handleLoadBillingToSummary} isAdmin={isAdmin} loggedInEmail={loggedInEmail} emailAliases={emailAliases} aliasNames={aliasNames} profiles={profiles} driveEnabled={driveConfigured()} onDriveSync={handleDriveSync} onRenameBatch={handleRenameBatch} onDriveAttach={handleDriveAttachGtec} onEmailOfficial={handleEmailOfficialInvoices} onQueueInvoiceEmails={handleQueueInvoiceEmails} silentMode={silentMode} onToggleSilent={isAdmin?setSilentMode:undefined}/>}</div>}
         {tab==="about"&&<div style={{padding:"8px 0"}}><AboutTab/></div>}
+        {tab==="allocation"&&isAdmin&&<div style={S.card}><CouncilAllocationTab outcomes={councilOutcomes} bookings={bookings} syncing={councilSyncing} syncLog={councilSyncLog} onSync={handleCouncilMailSync} onSaveOutcomes={saveCouncilOutcomes} onBulkStatusChange={handleBulkStatusChange} onQueueNotifications={queueNotifications} onLinkApp={handleLinkCouncilApp} aliasNames={aliasNames} loggedInEmail={loggedInEmail}/></div>}
         {tab==="admin"&&isAdmin&&<div style={S.card}>
           {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onView={setViewing} onQueueDelete={queueForRemovalSilent} clashes={allClashes} deleteIds={new Set(deleteQueue.map(b=>b.id))} facilityRates={facilityRates} onUpdateFacilityRate={updateFacilityRate} onClearOldUnapproved={handleClearOldUnapproved} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onSyncDB={handleSyncDB} onBulkApply={handleBulkApply} onSaveMismatch={handleSaveMismatch} onInformCpsa={setInformCpsaFor} onQueueNotifications={queueNotifications} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} onLinkClash={handleLinkClashToGtec} loggedInEmail={loggedInEmail} syncResults={syncResults} onClearSyncResults={()=>setSyncResults([])} showSyncResults={showSyncPanel} onToggleSyncResults={()=>setShowSyncPanel(v=>!v)} bookerFilter={listBookerFilter} onToggleBooker={toggleBooker} onSetBookerFilter={setListBookerFilter} aliasNames={aliasNames} emailAliases={emailAliases} pricingConditions={pricingConditions} onAddPricingCondition={addPricingCondition} onUpdatePricingCondition={updatePricingCondition} onRemovePricingCondition={removePricingCondition} cpsaDeleteLog={cpsaDeleteLog} onClearDeleteLogEntry={id=>setCpsaDeleteLog(prev=>prev.filter(e=>e.id!==id))} onClearDeleteLog={()=>setCpsaDeleteLog([])} onSendToCouncil={handleSendToCouncil}/>}
         </div>}
