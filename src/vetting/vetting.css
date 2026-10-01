@@ -410,3 +410,13 @@ body.viewer .handle .hint,body.viewer .rail .help,body.viewer #fieldBtn,body.vie
 /* Undo for this park's rating changes (quality row). */
 .undobtn{border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:8px;padding:2px 8px;font-size:12px;font-weight:600;cursor:pointer}
 .undobtn:disabled{opacity:.4;cursor:default}
+
+/* Top pick: the special one — gold, larger, with a soft glow and a sheen. */
+.act.top .b{width:58px;height:58px;font-size:26px;color:#fff;border:2px solid #b7791f;
+  background:radial-gradient(circle at 30% 25%,#fde68a 0%,#f6c453 35%,#d69e2e 70%,#b7791f 100%);
+  box-shadow:0 0 0 4px rgba(214,158,46,.25),0 6px 16px rgba(183,121,31,.45);text-shadow:0 1px 2px rgba(120,70,0,.6)}
+.act.top{color:#b7791f;font-weight:700}
+.act.top:not(:disabled):hover .b{transform:translateY(-2px) scale(1.04);box-shadow:0 0 0 6px rgba(214,158,46,.3),0 8px 20px rgba(183,121,31,.5)}
+.act.top .b{transition:transform .15s,box-shadow .15s}
+@media (max-height:700px){.act.top .b{width:46px;height:46px;font-size:20px}}
+@media (max-width:640px){.act.top .b{width:46px;height:46px;font-size:20px}}
