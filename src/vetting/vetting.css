@@ -595,3 +595,9 @@ body.gated .backbtn .bl{display:inline!important}
 /* Until start-up knows who's signed in (and their role and mode), the header controls are
    hidden but keep their space, so nothing flashes or jumps. */
 body.booting .filters,body.booting .profile,body.booting .seasonbar,body.booting .status{visibility:hidden}
+
+/* Softball / baseball ground warning (park view) */
+.softwarn{font-size:12px;background:#fff7ed;color:#9a3412;border:1px solid #fdba74;border-radius:8px;padding:5px 9px}
+.softwarn[hidden]{display:none}
+.softwarn .sw-f{color:#c2410c}
+@media (prefers-color-scheme: dark){.softwarn{background:#3a1d0b;color:#fdba74;border-color:#9a3412}.softwarn .sw-f{color:#fb923c}}
