@@ -94,13 +94,13 @@
                   <b>How it works</b>
                   <ol>
                     <li><b>Place the field:</b> tap 🔒 to unlock, then twist (or move the mouse) to turn it and drag the map to move it. Tap 🔓 to lock it there: that records its spot and angle.</li>
-                    <li><b>Rate the fit:</b> once it's locked, the decision buttons become <b>Reduced size</b> (split into <b>Usable</b> and <b>Unusable</b>), <b>1 full field</b> and <b>2+ fields</b>. Unusable fields are kept but never become bookable. Each locked field is its own frisbee field (Frisbee 1, 2, …); tapping a council field area drops a new one there. <b>💾 Next field</b> saves it and readies the next; saved ones show as outlines (tap one to edit it).</li>
+                    <li><b>Rate the fit:</b> once it's locked, the decision buttons become <b>Reduced size</b> (split into <b>Usable</b> and <b>3v3 only</b>), <b>1 full field</b> and <b>2+ fields</b>. 3v3-only fields are kept but don't become bookable venue fields. Each locked field is its own frisbee field (Frisbee 1, 2, …); tapping a council field area drops a new one there. <b>💾 Next field</b> saves it and readies the next; saved ones show as outlines (tap one to edit it).</li>
                     <li><b>Venue save:</b> deciding maps the frisbee fields to the council's field areas. Areas overlapping a frisbee field go with it; if under a quarter of the council area is left, the rest joins the nearest field, otherwise you're asked whether to add another. Frisbee fields sharing a council area become one bookable slot with that many field areas (a property of the slot: booking it books them all).</li>
                     <li><b>Lights:</b> the lights button starts at ❓ (unknown). Tap it for 🚫 no lights, then again for 💡 lights. In 💡, each tap adds two poles along the field's long sides, up to 8; the next tap goes back to 0. Drag a bulb from the button (in any state) onto a pole to place it by hand, and drag one back to remove it. The small ? underneath resets the lights to unknown.</li>
                     <li><b>Decide:</b> ✕ Reject, ★ Top pick or ✓ Shortlist. A top pick or shortlist makes the park's rated fields active (bookable); Later skips it for now.</li>
                     <li>◆ parks are run by a club or trust; 🎯 Interests chooses which parks are served; ☀/❄ flips the season's maps.</li>
                   </ol>
-                  <p class="keys">Keys: <kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> decide (or rate the fit once locked; <kbd>↓</kbd> unusable), <kbd>S</kbd> later, <kbd>Z</kbd> undo, <kbd>1</kbd>–<kbd>5</kbd> quality, <kbd>Enter</kbd> lock/unlock, <kbd>C</kbd> Auckland, <kbd>T</kbd> field, <kbd>M</kbd> next map, <kbd>0</kbd> zoom to the council map.</p>
+                  <p class="keys">Keys: <kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> decide (or rate the fit once locked; <kbd>↓</kbd> 3v3 only), <kbd>S</kbd> later, <kbd>Z</kbd> undo, <kbd>1</kbd>–<kbd>5</kbd> quality, <kbd>Enter</kbd> lock/unlock, <kbd>C</kbd> Auckland, <kbd>T</kbd> field, <kbd>M</kbd> next map, <kbd>0</kbd> zoom to the council map.</p>
                 </div>
                 <div class="sizepanel" id="sizePanel" hidden>
                   <label>Length (m) <input type="number" id="fLen" min="40" max="130" step="1"></label>
@@ -170,7 +170,7 @@
           <div class="actions" id="actions">
             <button class="act small" id="backBtn" title="Back to the previous park"><span class="b">←</span>Back</button>
             <button class="act no" id="noBtn" title="Not suitable (←)"><span class="b">✕</span>Reject <kbd>←</kbd></button>
-            <div class="act fit fno fsplit" role="group" aria-label="Reduced size"><span class="b"><button type="button" data-fit="reduced" title="Reduced size but usable (←)">Usable</button><button type="button" data-fit="no" title="Reduced size — unusable (↓)">Unusable</button></span>Reduced size</div>
+            <div class="act fit fno fsplit" role="group" aria-label="Reduced size"><span class="b"><button type="button" data-fit="reduced" title="Reduced size but usable (←)">Usable</button><button type="button" data-fit="no" title="Reduced size — 3v3 only (↓)">3v3 only</button></span>Reduced size</div>
             <button class="act top" id="topBtn" title="Top pick (↑): its rated fields become active, bookable fields"><span class="b">★</span>Top pick <kbd>↑</kbd></button>
             <button class="act fit ftop" data-fit="multi" title="2+ fields fit here (↑)"><span class="b">2+</span>2+ fields</button>
             <button class="act yes" id="yesBtn" title="Shortlist (→): its rated fields become active, bookable fields"><span class="b">✓</span>Shortlist <kbd>→</kbd></button>
