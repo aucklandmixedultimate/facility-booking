@@ -8,6 +8,7 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
+    "suburbs": "node scripts/build-suburbs.mjs",
     "predeploy": "node scripts/check-deploy-env.js && npm run build",
     "deploy": "gh-pages -d dist"
   },
