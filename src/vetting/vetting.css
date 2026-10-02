@@ -555,8 +555,8 @@ body.gated .backbtn .bl{display:inline!important}
 /* Reduced size, split down the middle: Usable | 3v3 only */
 .act.fsplit .b{padding:0;overflow:hidden;display:flex;gap:0;min-width:0}
 .act.fsplit .b button{border:0;background:transparent;font:inherit;font-weight:800;padding:0 12px;height:100%;cursor:pointer;color:inherit}
-.act.fsplit .b button[data-fit=reduced]{color:#b7791f}
-.act.fsplit .b button[data-fit=no]{color:var(--reject);border-left:2px solid var(--reject)}
+.act.fsplit .b button[data-fit=no]{color:var(--reject)}
+.act.fsplit .b button[data-fit=reduced]{color:#b7791f;border-left:2px solid var(--reject)}
 .act.fsplit .b button[aria-pressed=true]{background:rgba(179,55,45,.12)}
 .act.fsplit .b button[data-fit=reduced][aria-pressed=true]{background:rgba(224,166,71,.2)}
 @media (max-width:640px){.act.fsplit .b button{padding:0 8px;font-size:12px}}
@@ -565,3 +565,15 @@ body.gated .backbtn .bl{display:inline!important}
 /* ⚡ lights badge on park markers (Auckland map) */
 .litbadge{display:grid;place-items:center;width:14px;height:14px;border-radius:50%;background:#facc15;border:1.5px solid #15211c;font-size:9px;line-height:1;box-shadow:0 1px 3px rgba(0,0,0,.5)}
 .legend .litbadge.lg{display:inline-grid;margin-right:6px;vertical-align:middle}
+.act.fit .b{font-size:13px}
+.act.ftop .b{font-size:14px}
+@media (max-width:640px){.act.fit .b{font-size:11px;padding:0 8px}.act.ftop .b{font-size:12px}.act.fsplit .b button{font-size:11px;padding:0 6px}}
+/* Notes only (the field list is filled in from the ratings, not typed) */
+.tags2{grid-template-columns:auto minmax(0,1fr)!important}
+@media (max-width:640px){.tags2{grid-template-columns:minmax(0,1fr)!important}
+  /* Fit mode on phones: two-line labels, and Back / Later step aside */
+  .actions.fitmode .act.small{display:none}
+  .actions.fitmode{gap:6px}
+  .act.fit .b{white-space:normal;line-height:1.1;text-align:center;height:46px;max-width:96px}
+  .act.fsplit .b{max-width:none}.act.fsplit .b button{white-space:normal;line-height:1.1;max-width:84px}
+}

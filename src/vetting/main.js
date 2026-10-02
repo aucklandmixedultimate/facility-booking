@@ -25,7 +25,8 @@ const supabase = SB_URL && SB_ANON
 const M_PER_DEG = 6378137 * Math.PI / 180;
 // Saved coordinates keep 8 decimals (about 1 mm) and angles 0.01°.
 const fx = v => +(+v).toFixed(8), fa = v => +(+v).toFixed(2);
-const FIT_LABEL = { unknown: "not rated", reduced: "reduced size (usable)", full: "1 full field", multi: "2+ fields", no: "reduced size (3v3 only)" };
+// Fit ratings: "no" = unusable (discounted, never bookable), "reduced" = 3v3 only.
+const FIT_LABEL = { unknown: "not rated", reduced: "3v3 only", full: "1 × full 7v7", multi: "2 × full 7v7", no: "unusable (discount)" };
 // WFDF field: 100 × 37 m overall, 18 m end zones, brick marks 20 m in from each goal line.
 const WFDF = { len: 100, wid: 37, ez: 18 };
 const BRICK = 20;
@@ -176,7 +177,7 @@ async function save(id, rev) {
     const { error } = await q;
     if (error) {
       const old = /fit_check/i.test(error.message || ""), dec = /decision_check/i.test(error.message || "");
-      setStatus(old || dec ? `Saving ${dec ? "field ratings before a decision" : "\"2+ fields\""} needs the updated supabase-migration-field-reviews.sql — re-run it in the Supabase SQL editor.`
+      setStatus(old || dec ? `Saving ${dec ? "field ratings before a decision" : "\"2 × full 7v7\""} needs the updated supabase-migration-field-reviews.sql — re-run it in the Supabase SQL editor.`
                     : "Couldn't save that decision (" + error.message + "). Try again.", true);
       return false;
     }
@@ -437,7 +438,7 @@ function fieldKeys(p) {
 const OVERLAP_TOL = 0.10, SPARE_RULE = 0.25;
 const newFrisbeeName = t => { let n = 1; while (t.fr["Frisbee " + n]) n++; return "Frisbee " + n; };
 const rated = x => x && x.fit && x.fit !== "unknown" && x.lat != null;
-// 3v3-only fields (reduced size, fit "no") are kept as ratings but never become bookable.
+// Unusable (discount) fields (fit "no") are kept as ratings but never become bookable.
 const bookable = x => rated(x) && x.fit !== "no";
 function metric(lat0) { const kx = M_PER_DEG * Math.cos(lat0 * Math.PI / 180), ky = M_PER_DEG; return { kx, ky }; }
 // A frisbee field's rectangle as [lat, lon] corners (same convention as placeLights).
@@ -687,7 +688,7 @@ function bindDispenser() {
 // (pin), so panning afterwards moves the map under it. Unlocking recentres on it.
 let angle = 0, rotating = false, pin = null;
 // Fit mode: after the field is locked in place (🔒) or put on a council field area, the
-// decision buttons become the fit buttons (Reduced size / 2+ fields / 1 full field) until
+// decision buttons become the fit buttons (Unusable | 3v3 only / 1 × full 7v7 / 2 × full 7v7) until
 // a fit is chosen. hintFrom tracks the unlocked field so the how-to hint can go once it
 // has been both moved and turned.
 let fitArmed = false, hintFrom = null;
@@ -814,7 +815,7 @@ function confirmSpot(p, fit) {
   fitArmed = false;
   drawParkFields(p); drawLights(p); renderTags(p); previewFields(p); renderCentre();
 }
-// "2+ fields" becomes two single fields side by side: the field as placed plus a twin one
+// "2 × full 7v7" becomes two single fields side by side: the field as placed plus a twin one
 // field-width over, on the long side that overlaps the other set frisbee fields least (then
 // covers the most council area). If that side is already taken by a set field (over a
 // quarter of a field's overlap), that field is the second one: no overlapping copy is made.
@@ -829,11 +830,11 @@ function splitMulti(p, t, F) {
     return { tw, hit, ov: hit?.r || 0, cov }; }).sort((a, b) => a.ov - b.ov || b.cov - a.cov)[0];
   F.fit = "full";
   if (cand.ov > 0.25) { F.pair = cand.hit.o.name; cand.hit.o.pair = F.name;
-    setStatus(`2+ fields: ${F.name} pairs with ${cand.hit.o.name}, already set beside it.`); return; }
+    setStatus(`2 × full 7v7: ${F.name} pairs with ${cand.hit.o.name}, already set beside it.`); return; }
   const name = newFrisbeeName(t);
   t.fr[name] = { name, fit: "full", lat: cand.tw.lat, lon: cand.tw.lon, angle: F.angle, len: F.len, wid: F.wid, ez: F.ez, lights: [], pair: F.name };
   F.pair = name;
-  setStatus(`2+ fields: ${F.name} and ${name} set side by side as two single fields.`);
+  setStatus(`2 × full 7v7: ${F.name} and ${name} set side by side as two single fields.`);
 }
 // Auto-placed light poles: n poles (always even) split evenly between the field's two long
 // sides, a few metres outside the sideline. The first pair goes on the long side nearer the
@@ -1348,7 +1349,6 @@ function renderTags(p) {
   $("lightsVal").innerHTML = nl ? `💡 ${nl}<span class="lx"> pole${nl > 1 ? "s" : ""}${ns !== null ? ` (${ns} on ${esc(t.sel)})` : ""}</span>`
     : t.lights === "none" ? "none" : t.lights === "training" || t.lights === "full" ? "yes" : "";
   $("lightsVal").classList.toggle("unset", t.lights === "unknown");
-  if (document.activeElement !== $("fieldsIn")) $("fieldsIn").value = t.fields;
   if (document.activeElement !== $("notesIn")) $("notesIn").value = t.notes;
   renderCentre();
 }
@@ -1788,7 +1788,6 @@ function bind() {
         setRating(p.id, nv).then(() => renderTags(p)); }
       renderTags(p); }
   });
-  $("fieldsIn").addEventListener("input", () => { const p = current(); if (p) { const t = tagsFor(p); t.fields = $("fieldsIn").value; t.fieldsManual = !!t.fields.trim(); drawParkFields(p); } });
   $("notesIn").addEventListener("input", () => { const p = current(); if (p) tagsFor(p).notes = $("notesIn").value; });
   // Swipe on the title bar (the map itself pans and zooms).
   const h = $("handle"), card = $("card"); let sx = 0, sy = 0, dx = 0, dy = 0, drag = false;
@@ -1900,10 +1899,10 @@ function bind() {
     if (/^[bB]$/.test(e.key)) { setMode(workMode === "book" ? "rate" : "book"); return; }
     if (view === "city") return;
     const fm = $("actions").classList.contains("fitmode") && p;
-    if (e.key === "ArrowRight") { e.preventDefault(); fm ? confirmSpot(p, "full") : decide("yes"); }
-    else if (e.key === "ArrowLeft") { e.preventDefault(); fm ? confirmSpot(p, "reduced") : decide("no"); }
-    else if (e.key === "ArrowDown" && fm) { e.preventDefault(); confirmSpot(p, "no"); }
-    else if (e.key === "ArrowUp") { e.preventDefault(); fm ? confirmSpot(p, "multi") : decide("top"); }
+    if (e.key === "ArrowRight") { e.preventDefault(); fm ? confirmSpot(p, "multi") : decide("yes"); }
+    else if (e.key === "ArrowLeft") { e.preventDefault(); fm ? confirmSpot(p, "no") : decide("no"); }
+    else if (e.key === "ArrowDown" && fm) { e.preventDefault(); confirmSpot(p, "reduced"); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); fm ? confirmSpot(p, "full") : decide("top"); }
     else if (e.key === "Enter" && fieldOn && !e.target.closest("button")) { e.preventDefault(); $("centreBtn").click(); }
     else if (/^[sS]$/.test(e.key)) skip();
     else if (/^[zZ]$/.test(e.key)) editUndo();
