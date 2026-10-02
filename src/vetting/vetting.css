@@ -591,3 +591,7 @@ body.gated .backbtn .bl{display:inline!important}
 /* Suburb outlines in the park view's Auckland zoom */
 .sublbl{display:inline-block;transform:translate(-50%,-50%);white-space:nowrap;font:600 11px var(--font-body);color:#f8fafc;text-shadow:0 1px 3px rgba(0,0,0,.9),0 0 2px rgba(0,0,0,.9);pointer-events:none}
 .sublbl.home{font-size:14px;font-weight:800;color:#fde68a}
+
+/* Until start-up knows who's signed in (and their role and mode), the header controls are
+   hidden but keep their space, so nothing flashes or jumps. */
+body.booting .filters,body.booting .profile,body.booting .seasonbar,body.booting .status{visibility:hidden}

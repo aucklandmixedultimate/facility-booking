@@ -2180,7 +2180,7 @@ function renderProfile() {
 
 // ── Start ────────────────────────────────────────────────────────────────────
 // Signed out (or no access): only the message shows, not the views, filters or progress.
-function gate(html) { $("gate").innerHTML = html; $("gate").hidden = false; $("app").hidden = true; document.body.classList.add("gated"); }
+function gate(html) { $("gate").innerHTML = html; $("gate").hidden = false; $("app").hidden = true; document.body.classList.add("gated"); document.body.classList.remove("booting"); }
 async function start() {
   // "no-cache" revalidates with the server, so a data update shows on the next load instead
   // of after GitHub Pages' ~10-minute browser cache expires.
@@ -2224,6 +2224,9 @@ async function start() {
   await loadBookLocs(); await loadActivity(); await loadViews(); await loadRatings(); await loadOffsets(); await loadCouncilOnly(); await loadRelations(); await syncCartWorkflows();
   initMap(); drawField(); showField(fieldOn); renderLegend(); bind();
   setView(view === "park" || view === "book" ? view : "city", { refit: true });
+  // The header controls stay hidden (body.booting) until sign-in, role and mode are known,
+  // so they appear once, fully set, instead of flashing their defaults first.
+  document.body.classList.remove("booting");
   if (mode === "shared") setInterval(async () => { if (!busy && !rotating && document.visibilityState === "visible" && !$("saveDlg").open) { await loadShared(); if (view === "city") render(); else renderRail(); } }, 30000);
 }
-start().catch(e => setStatus("Couldn't start: " + (e.message || e), true));
+start().catch(e => { document.body.classList.remove("booting"); setStatus("Couldn't start: " + (e.message || e), true); });
