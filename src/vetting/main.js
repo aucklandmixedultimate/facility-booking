@@ -482,29 +482,49 @@ function councilGroups(p, t) {
   const cpoly = cf.map(({ f, key }) => ({ key, xy: toXY(f.p, lat0, lon0), c: f.c })), fpoly = fs.map(fr => ({ fr, xy: toXY(frisbeeCorners(fr), lat0, lon0) }));
   cpoly.forEach(c => { c.area = areaXY(c.xy); });
   fpoly.forEach(f => { f.area = areaXY(f.xy); });
-  const assign = {};   // council key → Set of frisbee names
-  cpoly.forEach(c => fpoly.forEach(f => { const ov = areaXY(clipXY(c.xy, f.xy));
-    if (ov > OVERLAP_TOL * Math.min(c.area, f.area)) (assign[c.key] ||= new Set()).add(f.fr.name); }));
+  // Each frisbee field's council areas (overlap above the tolerance).
+  const C = fpoly.map(f => new Set(cpoly.filter(c => areaXY(clipXY(c.xy, f.xy)) > OVERLAP_TOL * Math.min(c.area, f.area)).map(c => c.key)));
   // Coverage by sampling a 2.5 m grid: council areas often overlap one another (touch fields
   // inside a cricket oval), so the union is measured, not the sum.
   const { total, covered } = coverageXY(cpoly.map(c => c.xy), fpoly.map(f => f.xy));
-  // Under the spare-space rule, leftover council areas join the nearest frisbee field.
-  if (total && (total - covered) / total < SPARE_RULE)
-    cpoly.filter(c => !assign[c.key]).forEach(c => { const near = fs.map(fr => ({ fr, d: Math.hypot((fr.lat - c.c[0]) * 110540, (fr.lon - c.c[1]) * metric(fr.lat).kx) })).sort((a, b) => a.d - b.d)[0];
-      if (near) assign[c.key] = new Set([near.fr.name]); });
-  // Union frisbee fields that share a council area.
-  const parent = Object.fromEntries(fs.map(fr => [fr.name, fr.name])), find = x => parent[x] === x ? x : (parent[x] = find(parent[x]));
-  Object.values(assign).forEach(set => { const [a, ...rest] = [...set]; rest.forEach(b => { parent[find(b)] = find(a); }); });
-  const byRoot = {};
-  fs.forEach(fr => { (byRoot[find(fr.name)] ||= { frisbee: [], council: [] }).frisbee.push(fr.name); });
-  Object.entries(assign).forEach(([ck, set]) => { const g = byRoot[find([...set][0])]; if (!g.council.includes(ck)) g.council.push(ck); });
-  const order = Object.fromEntries(cf.map((x, i) => [x.key, i]));
-  const groups = Object.values(byRoot).map(g => {
-    g.council.sort((a, b) => order[a] - order[b]);
-    const members = g.frisbee.map(n => t.fr[n]), cap = members.reduce((s, x) => s + (x.fit === "multi" ? 2 : 1), 0);
-    const name = g.council.length ? g.council.join(" + ") : g.frisbee.join(" + ");
-    const c = [members.reduce((s, x) => s + x.lat, 0) / members.length, members.reduce((s, x) => s + x.lon, 0) / members.length];
-    return { key: name, name, council: g.council, frisbee: g.frisbee, cap, fit: cap > 1 ? "multi" : members[0].fit, c: [+c[0].toFixed(6), +c[1].toFixed(6)] };
+  // The mosaic: slots of one field, or two neighbouring single fields (only the fields as
+  // placed), chosen to cross as few council boundaries as possible, i.e. to minimise how
+  // many slots each council area is split across: Σ over slots of |council areas it
+  // touches|. Pairing two fields saves the council areas they share; a tie keeps them single.
+  const n = fs.length, single = i => fs[i].fit !== "multi";   // an older 2+ rating is already a two-field slot
+  const near = (i, j) => areaXY(clipXY(toXY(frisbeeCorners({ ...fs[i], len: (fs[i].len || dims.len) + 12, wid: (fs[i].wid || dims.wid) + 12 }), lat0, lon0), fpoly[j].xy)) > 1;
+  const adj = (i, j) => single(i) && single(j) && (fs[i].pair === fs[j].name || fs[j].pair === fs[i].name || near(i, j));
+  const cost = (i, j) => j == null ? C[i].size : new Set([...C[i], ...C[j]]).size;
+  const tiles = [];
+  if (n <= 16) {
+    const memo = new Map();
+    const solve = mask => { if (!mask) return { c: 0, t: [] };
+      if (memo.has(mask)) return memo.get(mask);
+      const i = 31 - Math.clz32(mask & -mask), rest = mask & ~(1 << i);
+      let best = (() => { const r = solve(rest); return { c: r.c + cost(i), t: [[i], ...r.t] }; })();
+      for (let j = 0; j < n; j++) if (rest & (1 << j) && adj(i, j)) { const r = solve(rest & ~(1 << j)), c = r.c + cost(i, j);
+        if (c < best.c) best = { c, t: [[i, j], ...r.t] }; }
+      memo.set(mask, best); return best; };
+    tiles.push(...solve((1 << n) - 1).t);
+  } else {   // many fields: pair greedily by council areas shared
+    const used = new Set();
+    const pairs = []; for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) if (adj(i, j)) pairs.push([i, j, cost(i) + cost(j) - cost(i, j)]);
+    pairs.sort((a, b) => b[2] - a[2]).forEach(([i, j, gain]) => { if (gain > 0 && !used.has(i) && !used.has(j)) { used.add(i); used.add(j); tiles.push([i, j]); } });
+    fs.forEach((_, i) => { if (!used.has(i)) tiles.push([i]); });
+  }
+  // Each council area goes to the slot that overlaps it most; under the spare-space rule the
+  // untouched ones join the nearest slot.
+  const council = tiles.map(() => []);
+  cpoly.forEach(c => { let best = -1, bestOv = 0;
+    tiles.forEach((tile, k) => { if (!tile.some(i => C[i].has(c.key))) return; const ov = tile.reduce((s2, i) => s2 + areaXY(clipXY(c.xy, fpoly[i].xy)), 0); if (ov > bestOv) { bestOv = ov; best = k; } });
+    if (best < 0 && total && (total - covered) / total < SPARE_RULE)
+      best = tiles.map((tile, k) => ({ k, d: Math.min(...tile.map(i => Math.hypot((fs[i].lat - c.c[0]) * 110540, (fs[i].lon - c.c[1]) * metric(fs[i].lat).kx))) })).sort((a, b) => a.d - b.d)[0].k;
+    if (best >= 0) council[best].push(c.key); });
+  const groups = tiles.map((tile, k) => {
+    const members = tile.map(i => fs[i]), cap = members.reduce((s2, x) => s2 + (x.fit === "multi" ? 2 : 1), 0), frisbee = members.map(x => x.name);
+    const name = council[k].length ? council[k].join(" + ") : frisbee.join(" + ");
+    const c = [members.reduce((s2, x) => s2 + x.lat, 0) / members.length, members.reduce((s2, x) => s2 + x.lon, 0) / members.length];
+    return { key: name, name, council: council[k], frisbee, cap, fit: cap > 1 ? "multi" : members[0].fit, crossings: Math.max(0, council[k].length - 1), c: [+c[0].toFixed(6), +c[1].toFixed(6)] };
   });
   return { groups, covered, total };
 }
@@ -780,6 +800,7 @@ function confirmSpot(p, fit) {
   if (cur.fit === fit && !spotMoved(t)) { cur.fit = "unknown"; delete cur.lat; delete cur.lon; delete cur.angle; }
   else Object.assign(cur, { name: t.sel, fit, lat: +c.lat.toFixed(6), lon: +c.lng.toFixed(6), angle: Math.round(angle), len: dims.len, wid: dims.wid, ez: dims.ez });
   t.fr[t.sel] = cur;
+  if (cur.fit === "multi") splitMulti(p, t, cur);
   // Rated fields get light poles placed along their long sides (4 to start) until a pole
   // is moved by hand; cleared ratings keep whatever lights they had.
   if (cur.fit !== "unknown" && hasLights(t) && cur.lightsAuto !== false && cur.lightCount) placeLights(p, cur);
@@ -787,6 +808,27 @@ function confirmSpot(p, fit) {
   // Rated: the decision buttons come back; the bar stays for lights and "Next field".
   fitArmed = false;
   drawParkFields(p); drawLights(p); renderTags(p); previewFields(p); renderCentre();
+}
+// "2+ fields" becomes two single fields side by side: the field as placed plus a twin one
+// field-width over, on the long side that overlaps the other set frisbee fields least (then
+// covers the most council area). If that side is already taken by a set field (over a
+// quarter of a field's overlap), that field is the second one: no overlapping copy is made.
+function splitMulti(p, t, F) {
+  const W = F.wid || dims.wid, { kx, ky } = metric(F.lat), th = (F.angle || 0) * Math.PI / 180;
+  const shift = v => ({ ...F, lat: +(F.lat - v * Math.cos(th) / ky).toFixed(6), lon: +(F.lon - v * Math.sin(th) / kx).toFixed(6) });
+  const others = Object.values(t.fr).filter(x => x !== F && x.lat != null && x.fit && x.fit !== "unknown");
+  const cf = fieldKeys(p), xy = fr => toXY(frisbeeCorners(fr), F.lat, F.lon), fa = (F.len || dims.len) * W;
+  const cand = [W, -W].map(v => { const tw = shift(v), txy = xy(tw);
+    const hit = others.map(o => ({ o, r: areaXY(clipXY(xy(o), txy)) / fa })).sort((a, b) => b.r - a.r)[0];
+    const cov = cf.reduce((s2, { f }) => s2 + areaXY(clipXY(toXY(f.p, F.lat, F.lon), txy)), 0);
+    return { tw, hit, ov: hit?.r || 0, cov }; }).sort((a, b) => a.ov - b.ov || b.cov - a.cov)[0];
+  F.fit = "full";
+  if (cand.ov > 0.25) { F.pair = cand.hit.o.name; cand.hit.o.pair = F.name;
+    setStatus(`2+ fields: ${F.name} pairs with ${cand.hit.o.name}, already set beside it.`); return; }
+  const name = newFrisbeeName(t);
+  t.fr[name] = { name, fit: "full", lat: cand.tw.lat, lon: cand.tw.lon, angle: F.angle, len: F.len, wid: F.wid, ez: F.ez, lights: [], pair: F.name };
+  F.pair = name;
+  setStatus(`2+ fields: ${F.name} and ${name} set side by side as two single fields.`);
 }
 // Auto-placed light poles: n poles (always even) split evenly between the field's two long
 // sides, a few metres outside the sideline. The first pair goes on the long side nearer the
