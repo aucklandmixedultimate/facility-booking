@@ -608,3 +608,11 @@ body.booting .filters,body.booting .profile,body.booting .seasonbar,body.booting
   padding-top:4px;text-shadow:0 0 3px #000,0 0 2px #000,0 1px 2px #000}
 /* Auckland zoom in park view: the frisbee field and its lock step aside */
 body.aklzoom #field,body.aklzoom #centreWrap,body.aklzoom #fitPop,body.aklzoom .rotatehint{display:none!important}
+
+/* Light poles: a beam shows the way each one shines (--dir, compass bearing) */
+.lightpin{position:relative;overflow:visible}
+.lightpin .bulb{position:relative;z-index:1}
+.lightpin .beam{position:absolute;left:50%;top:50%;width:30px;height:46px;pointer-events:none;
+  transform-origin:50% 100%;transform:translate(-50%,-100%) rotate(var(--dir,0deg));
+  background:linear-gradient(to top,rgba(255,226,110,.85),rgba(255,226,110,0));clip-path:polygon(50% 100%,0 0,100% 0)}
+.lightpin.other .beam{opacity:.5}
