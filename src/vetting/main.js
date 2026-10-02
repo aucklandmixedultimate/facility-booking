@@ -488,6 +488,23 @@ function councilFields(p, i = Math.min(mapIndex(p), Math.max(0, p.maps.length - 
   if (!shiftedFields.has(k)) shiftedFields.set(k, fs.map(f => ({ ...f, c: [f.c[0] + o.dlat, f.c[1] + o.dlon], p: f.p.map(q => [q[0] + o.dlat, q[1] + o.dlon]) })));
   return shiftedFields.get(k);
 }
+// Softball / baseball diamonds on a park's summer map: pitching mounds and skinned
+// infields can make that ground unsuitable for frisbee in summer.
+const DIAMOND_RE = /\b(softball|baseball|t-?ball)\b|diamond/i;
+function diamonds(p) {
+  const i = p.maps.findIndex(m => m.season === "summer"); if (i < 0) return [];
+  return councilFields(p, i).filter(f => DIAMOND_RE.test(f.n || ""));
+}
+function renderSoftWarn(p) {
+  const el = $("softWarn"), ds = diamonds(p);
+  el.hidden = !ds.length; if (!ds.length) return;
+  const t = tagsFor(p), names = [...new Set(ds.map(f => f.n))];
+  // Placed frisbee fields standing on a diamond.
+  const hit = Object.values(t.fr).filter(fr => fr.lat != null).filter(fr => { const r = toXY(frisbeeCorners(fr), fr.lat, fr.lon);
+    return ds.some(f => areaXY(clipXY(toXY(f.p, fr.lat, fr.lon), r)) > 0.05 * areaXY(r)); }).map(fr => fr.name);
+  el.innerHTML = `<b>⚾ Softball / baseball ground (summer)</b> — pitching mounds and skinned infields may make it unsuitable for frisbee in summer. `
+    + `<span class="sw-f">${esc(names.join(" · "))}</span>${hit.length ? `<br><b>On a diamond:</b> ${esc(hit.join(", "))}` : ""}`;
+}
 const mapBounds = (p, m) => { const o = offsets[p.id] || {}, a = o.dlat || 0, b = o.dlon || 0;
   return L.latLngBounds([m.bounds[0] + a, m.bounds[1] + b], [m.bounds[2] + a, m.bounds[3] + b]); };
 
@@ -721,10 +738,10 @@ function drawParkFields(p) {
   // once saved, each is tinted by the frisbee group it belongs to.
   const groups = reviews[p.id]?.placement?.groups || [];
   fieldKeys(p).forEach(({ f, key }) => {
-    const g = groups.find(x => x.council?.includes(key)), fc = g && FIT_COLOR[g.fit];
-    L.polygon(f.p, { pane: "fieldsPane", fill: true, fillColor: fc || "#ffffff", fillOpacity: fc ? 0.18 : 0.02,
-      color: fc || "#ffffff", weight: 1.2, dashArray: "4 4", opacity: 0.85, bubblingMouseEvents: false })
-      .bindTooltip(`${esc(key)}${g ? ` · in ${esc(g.frisbee.join(" + "))}${g.cap > 1 ? ` (${g.cap} field areas)` : ""}` : ""} — click to place a frisbee field here`, { className: "parktip", sticky: true })
+    const g = groups.find(x => x.council?.includes(key)), fc = g && FIT_COLOR[g.fit], dia = DIAMOND_RE.test(f.n || "");
+    L.polygon(f.p, { pane: "fieldsPane", fill: true, fillColor: fc || (dia ? "#f97316" : "#ffffff"), fillOpacity: fc ? 0.18 : dia ? 0.12 : 0.02,
+      color: dia ? "#f97316" : fc || "#ffffff", weight: dia ? 2 : 1.2, dashArray: "4 4", opacity: 0.85, bubblingMouseEvents: false })
+      .bindTooltip(`${dia ? "⚾ " : ""}${esc(key)}${dia ? " — pitching mound / infield: may be unsuitable for frisbee in summer" : ""}${g ? ` · in ${esc(g.frisbee.join(" + "))}${g.cap > 1 ? ` (${g.cap} field areas)` : ""}` : ""} — click to place a frisbee field here`, { className: "parktip", sticky: true })
       .on("click", () => { if (rotating) return lockField(); placeOnCouncil(p, f); })
       .addTo(parkFieldsLayer);
   });
@@ -1144,6 +1161,7 @@ function buildCity() {
         : pv?.length ? `<br><b style="color:${PRIV_COLOR}">◆ Privately managed: contact ${esc(pv[0].short)}</b> first` : "")
       + (ult.length ? `<br><b style="color:${ULT_COLOR}">🥏 ${ult.some(o => o.booking_only) ? "Book only through" : "Ultimate club"}: ${esc(ult.map(o => o.operator).join(", "))}</b>` : "")
       + (flags[p.id] ? `<br><b style="color:${PRIV_COLOR}">✎ ${esc(amendText(flags[p.id]))}</b>` : "")
+      + (diamonds(p).length ? `<br><b style="color:#c2410c">⚾ Softball / baseball ground: mounds may make it unsuitable in summer</b>` : "")
       + (workMode === "book" ? `<br>${nAct ? `📌 ${nAct} active booking field${nAct > 1 ? "s" : ""} · ` : ""}${inCart ? `🛒 ${inCart} in the cart · ` : ""}<i>Click to book fields</i>` : `<br><i>Click to rate</i>`),
       { className: "parktip", direction: "top", offset: [0, -6] });
     mk.on("click", () => openPark(p.id));
@@ -1539,7 +1557,7 @@ function updateActions() {
 }
 function renderTags(p) {
   const t = tagsFor(p);
-  updateActions(); if (view === "park") renderAlign(p);
+  updateActions(); if (view === "park") { renderAlign(p); renderSoftWarn(p); }
   $("editUndoBtn").disabled = !edits[p.id]?.length;
   // Stars fill to the crowd average; your own rating is ringed. Click to rate (again to clear).
   const avg = crowdAvg(p.id), cnt = ratings[p.id]?.n || 0, mine = ratings[p.id]?.mine || (ratingsShared ? 0 : t.quality), shown = Math.round(avg ?? t.quality ?? 0);
@@ -1795,7 +1813,7 @@ function render() {
     $("privBox").hidden = !pv.length && !co; $("privBox").classList.toggle("co", co);
     $("privBox").innerHTML = co ? councilOnlyBanner(p) : pv.length ? privBanner(pv) : "";
     renderInfo(p);
-    renderFlag(p); renderCouncilOnly(p);
+    renderFlag(p); renderCouncilOnly(p); renderSoftWarn(p);
     const r = reviews[p.id];
     // Chips: the managing club (◆) and any ultimate club (🥏), which may be the booking contact.
     const lead = (pv || []).find(o => o.code !== "ultimate"), ult = ultimateOf(p);
