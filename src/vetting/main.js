@@ -347,7 +347,7 @@ function initMap() {
   map.createPane("fieldsPane").style.zIndex = 420;
   lightLayer = L.layerGroup(); parkFieldsLayer = L.layerGroup(); cityLayer = L.layerGroup(); cityFieldsLayer = L.layerGroup();
   map.on("zoomanim", e => { $("field").classList.add("zooming"); sizeField(e.zoom, e.center); });
-  map.on("zoomend", () => { $("field").classList.remove("zooming"); updateLayer(); sizeField(); syncCityFields(); });
+  map.on("zoomend", () => { $("field").classList.remove("zooming"); updateLayer(); sizeField(); syncCityFields(); if (whereMark) schedulePinLabel(); });
   map.on("move", () => sizeField());
   map.on("moveend", () => { if (view === "park" && fieldOn && !rotating && !pin) afterMove(); });
   map.on("click", () => { if (view === "park" && rotating) lockField(); });
@@ -430,7 +430,13 @@ async function showSuburbs(p, ll) {
   const near = adjacentSuburbs(home);
   suburbLayer = L.layerGroup().addTo(map);
   map.attributionControl.addAttribution(SUBURB_CREDIT);
-  const label = (s, cls) => { const c = s.b; L.marker([(c[0] + c[2]) / 2, (c[1] + c[3]) / 2], { interactive: false, keyboard: false,
+  // Names sit at the centroid of the suburb's largest outline (inside it, unlike the bounding
+  // box centre for odd shapes); colliding names are pushed apart once drawn (spreadLabels).
+  const centroid = s => { const ring = s.p.reduce((a, r) => (r.length > a.length ? r : a), s.p[0]); let A = 0, cy = 0, cx = 0;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) { const f = ring[j][1] * ring[i][0] - ring[i][1] * ring[j][0]; A += f; cx += (ring[j][1] + ring[i][1]) * f; cy += (ring[j][0] + ring[i][0]) * f; }
+    const c = A ? [cy / (3 * A), cx / (3 * A)] : [(s.b[0] + s.b[2]) / 2, (s.b[1] + s.b[3]) / 2];
+    return inRings(c, s.p) ? c : [(s.b[0] + s.b[2]) / 2, (s.b[1] + s.b[3]) / 2]; };
+  const label = (s, cls) => { L.marker(centroid(s), { interactive: false, keyboard: false,
     icon: L.divIcon({ className: "", html: `<span class="sublbl ${cls}">${esc(s.n)}</span>`, iconSize: null }) }).addTo(suburbLayer); };
   near.forEach(s => { L.polygon(s.p, { pane: "fieldsPane", color: "#e2e8f0", weight: 1.5, dashArray: "5 4", fillOpacity: 0.04, fillColor: "#ffffff", interactive: false }).addTo(suburbLayer); label(s, ""); });
   L.polygon(home.p, { pane: "fieldsPane", color: "#f59e0b", weight: 3, fillColor: "#f59e0b", fillOpacity: 0.16, interactive: false }).addTo(suburbLayer);
@@ -443,6 +449,7 @@ function hideSuburbs() { if (suburbLayer) { suburbLayer.remove(); suburbLayer = 
 async function zoomToggle(p) {
   const back = !!whereMark;
   if (whereMark) { whereMark.remove(); whereMark = null; }
+  document.body.classList.remove("aklzoom");
   hideSuburbs();
   if (!back && (aklNext || atParkView())) {
     // Zoom out to the park's suburb and all its neighbours (with suburb outlines), or
@@ -451,14 +458,52 @@ async function zoomToggle(p) {
     const sb = await showSuburbs(p, ll);
     if (sb) map.fitBounds(sb, { padding: [20, 20] });
     else if (ll) map.setView(ll, z); else map.fitBounds(DEFAULT_VIEW, { padding: [16, 16] });
-    if (ll) whereMark = L.marker(ll, { icon: L.divIcon({ className: "", html: `<div class="wherepin">📍</div>`, iconSize: [30, 30], iconAnchor: [15, 28] }), interactive: false })
-      .bindTooltip(esc(p.name), { permanent: true, direction: "top", offset: [0, -26], className: "parktip" }).addTo(map);
+    if (ll) { whereMark = L.marker(ll, { icon: L.divIcon({ className: "", html: `<div class="wherepin">📍</div>`, iconSize: [30, 30], iconAnchor: [15, 28] }), interactive: false }).addTo(map);
+      whereMark._label = p.name; placePinLabel(); map.once("moveend", schedulePinLabel); document.body.classList.add("aklzoom"); }
     $("fitBtn").title = "Back to the park (0)"; aklNext = false; return;
   }
   const m = p.maps[Math.min(mapIndex(p), Math.max(0, p.maps.length - 1))];
   if (m) map.fitBounds(mapBounds(p, m));
   else if (p.lat) map.setView([p.lat, p.lon], 16.5);
   $("fitBtn").title = "All of Auckland, with this park pinned (0)"; aklNext = true;
+}
+// The pin's name label goes on whichever side (above, right, left, below) clashes least with
+// the suburb names; any suburb name it still covers is nudged clear. Re-run after zooming.
+const PIN_SIDES = [["top", [0, -26]], ["right", [12, -14]], ["left", [-12, -14]], ["bottom", [0, 4]]];
+// Suburb names that collide are pushed down, the park's own suburb first in place.
+function spreadLabels(labels, obstacles = []) {
+  labels.forEach(l => { l.style.marginTop = ""; });
+  const placed = [...obstacles];
+  [...labels].sort((a, b) => b.classList.contains("home") - a.classList.contains("home")).forEach(l => {
+    for (let k = 0; k < 12; k++) { const r = l.getBoundingClientRect();
+      const hit = placed.find(q => Math.min(r.right, q.right) > Math.max(r.left, q.left) && Math.min(r.bottom, q.bottom) > Math.max(r.top, q.top));
+      if (!hit) break; l.style.marginTop = `${(parseFloat(l.style.marginTop) || 0) + hit.bottom - r.top + 2}px`; }
+    placed.push(l.getBoundingClientRect()); });
+}
+// Measure only once the zoom animation has settled.
+let pinTimer = null;
+const schedulePinLabel = () => { clearTimeout(pinTimer); pinTimer = setTimeout(placePinLabel, 120); };
+function placePinLabel() {
+  if (!whereMark) return;
+  const labels = [...document.querySelectorAll(".sublbl")];
+  spreadLabels(labels);
+  const rects = labels.map(l => l.getBoundingClientRect());
+  // Clash = area over suburb names, plus (weighted) any part hanging off the map.
+  const box = map.getContainer().getBoundingClientRect();
+  const clash = r => rects.reduce((a, q) => a + Math.max(0, Math.min(r.right, q.right) - Math.max(r.left, q.left)) * Math.max(0, Math.min(r.bottom, q.bottom) - Math.max(r.top, q.top)), 0)
+    + 3 * (r.width * r.height - Math.max(0, Math.min(r.right, box.right) - Math.max(r.left, box.left)) * Math.max(0, Math.min(r.bottom, box.bottom) - Math.max(r.top, box.top)));
+  let best = null;
+  for (const [direction, offset] of PIN_SIDES) {
+    whereMark.unbindTooltip().bindTooltip(esc(whereMark._label), { permanent: true, direction, offset, className: "parktip" }).openTooltip();
+    const el = whereMark.getTooltip()?.getElement(); if (!el) continue;
+    const r = el.getBoundingClientRect(), c = clash(r);
+    if (!best || c < best.c) best = { direction, offset, c };
+    if (!c) break;
+  }
+  if (!best) return;
+  whereMark.unbindTooltip().bindTooltip(esc(whereMark._label), { permanent: true, direction: best.direction, offset: best.offset, className: "parktip" }).openTooltip();
+  // Still covering a name: lay the names out again with the pin label as an obstacle.
+  if (best.c) spreadLabels(labels, [whereMark.getTooltip().getElement().getBoundingClientRect()]);
 }
 // Phones: ⛶ fills the screen with the map and the rating buttons.
 function setFullMap(on) {
@@ -1847,7 +1892,7 @@ function render() {
     const c = p.lat ? `${p.lat},${p.lon}` : encodeURIComponent(p.name + " Auckland");
     $("gmaps").href = p.lat ? `https://www.google.com/maps/@${c},250m/data=!3m1!1e3` : `https://www.google.com/maps/search/${c}`;
     const fresh = shownPark !== p.id + "#" + i;
-    if (fresh) { fitArmed = false; aklNext = false; if (whereMark) { whereMark.remove(); whereMark = null; } hideSuburbs(); showMap(p); }
+    if (fresh) { fitArmed = false; aklNext = false; if (whereMark) { whereMark.remove(); whereMark = null; } document.body.classList.remove("aklzoom"); hideSuburbs(); showMap(p); }
     renderTags(p);
     if (workMode === "book") renderBookBar(p);
     // Coming back to a park with a placed field: lock the field to its saved spot and angle
