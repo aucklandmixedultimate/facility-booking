@@ -587,3 +587,7 @@ body.gated .backbtn .bl{display:inline!important}
 .fitbar .fb-tools .fb-align{border-color:rgba(255,255,255,.35);color:#cbd5e1}
 .fitbar .fb-tools .fb-align.warn{background:#f97316;border-color:#f97316;color:#fff}
 .fitbar .fb-tools .fb-align[hidden]{display:none}
+
+/* Suburb outlines in the park view's Auckland zoom */
+.sublbl{display:inline-block;transform:translate(-50%,-50%);white-space:nowrap;font:600 11px var(--font-body);color:#f8fafc;text-shadow:0 1px 3px rgba(0,0,0,.9),0 0 2px rgba(0,0,0,.9);pointer-events:none}
+.sublbl.home{font-size:14px;font-weight:800;color:#fde68a}

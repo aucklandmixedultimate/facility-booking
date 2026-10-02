@@ -399,13 +399,56 @@ function showMap(p) {
 let aklNext = false, whereMark = null, parkView = null;
 // (Zoom only: opening a placed field re-centres on it without zooming.)
 const atParkView = () => parkView && Math.abs(map.getZoom() - parkView.z) < 0.01;
-function zoomToggle(p) {
+// Suburb outlines (public/council-maps/suburbs.json, from LINZ; built by
+// scripts/build-suburbs.mjs). Optional: without the file the Auckland view has no outlines.
+let suburbs = null, suburbLayer = null;
+async function loadSuburbs() {
+  if (suburbs) return suburbs;
+  try { const r = await fetch(BASE + "council-maps/suburbs.json", { cache: "no-cache" }); suburbs = r.ok ? (await r.json()).suburbs || [] : []; }
+  catch { suburbs = []; }
+  return suburbs;
+}
+const inRings = ([la, lo], rings) => rings.some(r => { let inn = false;
+  for (let i = 0, j = r.length - 1; i < r.length; j = i++) { const [yi, xi] = r[i], [yj, xj] = r[j];
+    if ((yi > la) !== (yj > la) && lo < (xj - xi) * (la - yi) / (yj - yi) + xi) inn = !inn; }
+  return inn; });
+// Neighbours: bounding boxes within ~60 m, then any vertex within ~60 m of the other's.
+function adjacentSuburbs(home) {
+  const pad = 0.0006, hb = home.b, hv = home.p.flat();
+  return suburbs.filter(s => s !== home && s.b[0] <= hb[2] + pad && s.b[2] >= hb[0] - pad && s.b[1] <= hb[3] + pad && s.b[3] >= hb[1] - pad
+    && s.p.flat().some(([la, lo]) => la >= hb[0] - pad && la <= hb[2] + pad && lo >= hb[1] - pad && lo <= hb[3] + pad
+      && hv.some(([a, b]) => Math.abs(a - la) < pad && Math.abs(b - lo) < pad)));
+}
+// In the Auckland view: the park's suburb highlighted and named, its neighbours outlined and
+// named, and the zoom set to take in all of them. Returns the bounds, or null without data.
+async function showSuburbs(p, ll) {
+  hideSuburbs();
+  const all = await loadSuburbs(); if (!all.length || !ll) return null;
+  const home = all.find(s => ll[0] >= s.b[0] && ll[0] <= s.b[2] && ll[1] >= s.b[1] && ll[1] <= s.b[3] && inRings(ll, s.p));
+  if (!home) return null;
+  const near = adjacentSuburbs(home);
+  suburbLayer = L.layerGroup().addTo(map);
+  const label = (s, cls) => { const c = s.b; L.marker([(c[0] + c[2]) / 2, (c[1] + c[3]) / 2], { interactive: false, keyboard: false,
+    icon: L.divIcon({ className: "", html: `<span class="sublbl ${cls}">${esc(s.n)}</span>`, iconSize: null }) }).addTo(suburbLayer); };
+  near.forEach(s => { L.polygon(s.p, { pane: "fieldsPane", color: "#e2e8f0", weight: 1.5, dashArray: "5 4", fillOpacity: 0.04, fillColor: "#ffffff", interactive: false }).addTo(suburbLayer); label(s, ""); });
+  L.polygon(home.p, { pane: "fieldsPane", color: "#f59e0b", weight: 3, fillColor: "#f59e0b", fillOpacity: 0.16, interactive: false }).addTo(suburbLayer);
+  label(home, "home");
+  const b = L.latLngBounds([[home.b[0], home.b[1]], [home.b[2], home.b[3]]]);
+  near.forEach(s => b.extend([[s.b[0], s.b[1]], [s.b[2], s.b[3]]]));
+  return b;
+}
+function hideSuburbs() { if (suburbLayer) { suburbLayer.remove(); suburbLayer = null; } }
+async function zoomToggle(p) {
   const back = !!whereMark;
   if (whereMark) { whereMark.remove(); whereMark = null; }
+  hideSuburbs();
   if (!back && (aklNext || atParkView())) {
-    // Auckland-wide zoom, centred on the park so its pin sits mid-screen.
+    // Zoom out to the park's suburb and all its neighbours (with suburb outlines), or
+    // Auckland-wide centred on the park when there's no suburb data.
     const ll = parkLatLng(p), z = map.getBoundsZoom(L.latLngBounds(DEFAULT_VIEW));
-    if (ll) map.setView(ll, z); else map.fitBounds(DEFAULT_VIEW, { padding: [16, 16] });
+    const sb = await showSuburbs(p, ll);
+    if (sb) map.fitBounds(sb, { padding: [20, 20] });
+    else if (ll) map.setView(ll, z); else map.fitBounds(DEFAULT_VIEW, { padding: [16, 16] });
     if (ll) whereMark = L.marker(ll, { icon: L.divIcon({ className: "", html: `<div class="wherepin">📍</div>`, iconSize: [30, 30], iconAnchor: [15, 28] }), interactive: false })
       .bindTooltip(esc(p.name), { permanent: true, direction: "top", offset: [0, -26], className: "parktip" }).addTo(map);
     $("fitBtn").title = "Back to the park (0)"; aklNext = false; return;
@@ -1769,7 +1812,7 @@ function render() {
     const c = p.lat ? `${p.lat},${p.lon}` : encodeURIComponent(p.name + " Auckland");
     $("gmaps").href = p.lat ? `https://www.google.com/maps/@${c},250m/data=!3m1!1e3` : `https://www.google.com/maps/search/${c}`;
     const fresh = shownPark !== p.id + "#" + i;
-    if (fresh) { fitArmed = false; aklNext = false; if (whereMark) { whereMark.remove(); whereMark = null; } showMap(p); }
+    if (fresh) { fitArmed = false; aklNext = false; if (whereMark) { whereMark.remove(); whereMark = null; } hideSuburbs(); showMap(p); }
     renderTags(p);
     if (workMode === "book") renderBookBar(p);
     // Coming back to a park with a placed field: lock the field to its saved spot and angle
