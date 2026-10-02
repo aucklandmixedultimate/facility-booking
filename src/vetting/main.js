@@ -518,7 +518,7 @@ function drawParkFields(p) {
       L.polygon(f.p, { pane: "fieldsPane", fill: true, fillColor: st === "active" ? "#0f766e" : "#14b8a6",
         fillOpacity: st === "active" ? 0.55 : st ? 0.3 : 0.04, color: st === "active" ? "#0f766e" : st ? "#14b8a6" : "#ffffff",
         weight: st ? 3 : 1.4, dashArray: st === "cart" ? "7 4" : st ? null : "4 4", opacity: 0.95, bubblingMouseEvents: false })
-        .bindTooltip(`${esc(g ? g.name : key)}${g?.cap > 1 ? ` (multi-field area ×${g.cap})` : ""} — ${st === "active" ? "📌 active booking" : st ? "🛒 in the cart (not booked yet) · click to remove" : "click to add to the cart"}`, { className: "parktip", sticky: true })
+        .bindTooltip(`${esc(g ? g.name : key)}${g?.cap > 1 ? ` (${g.cap} field areas)` : ""} — ${st === "active" ? "📌 active booking" : st ? "🛒 in the cart (not booked yet) · click to remove" : "click to add to the cart"}`, { className: "parktip", sticky: true })
         .on("click", () => toggleCart(p, key))
         .addTo(parkFieldsLayer);
     });
@@ -531,7 +531,7 @@ function drawParkFields(p) {
     const g = groups.find(x => x.council?.includes(key)), fc = g && FIT_COLOR[g.fit];
     L.polygon(f.p, { pane: "fieldsPane", fill: true, fillColor: fc || "#ffffff", fillOpacity: fc ? 0.18 : 0.02,
       color: fc || "#ffffff", weight: 1.2, dashArray: "4 4", opacity: 0.85, bubblingMouseEvents: false })
-      .bindTooltip(`${esc(key)}${g ? ` · in ${esc(g.frisbee.join(" + "))}${g.cap > 1 ? ` (multi-field area ×${g.cap})` : ""}` : ""} — click to place a frisbee field here`, { className: "parktip", sticky: true })
+      .bindTooltip(`${esc(key)}${g ? ` · in ${esc(g.frisbee.join(" + "))}${g.cap > 1 ? ` (${g.cap} field areas)` : ""}` : ""} — click to place a frisbee field here`, { className: "parktip", sticky: true })
       .on("click", () => { if (rotating) return lockField(); placeOnCouncil(p, f); })
       .addTo(parkFieldsLayer);
   });

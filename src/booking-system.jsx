@@ -353,10 +353,11 @@ function parseCouncilApp(sysNotes) {
   const m = COUNCIL_APP_RE.exec(sysNotes || "");
   return m ? { id: m[1], at: m[2], fee: parseFloat(m[3]) } : null;
 }
-// Multi-field areas: council fields the Council fields page grouped because they overlap
-// more than one frisbee field. One booking takes one frisbee field of the area; bookings at
-// overlapping times on the same area share it. Where fewer frisbee fields are booked than
-// the area holds, there's extra occupancy available (CouncilOccupancyNotes).
+// Field areas are a property of the booking slot: council fields the Council fields page
+// grouped because they overlap more than one frisbee field make one slot holding N field
+// areas, and a booking of that slot books all of them. Bookings at overlapping times on the
+// same slot share it; while fewer bookings share it than it has field areas, the council
+// batch shows extra occupancy available (CouncilOccupancyNotes).
 const councilCap = b => FACILITIES.find(f => f.id === b.facility_id)?.council?.frisbee || 1;
 function councilOverlaps(bookings) {
   const live = (bookings || []).filter(b => !["cancelled", "rejected"].includes(b.status) && FACILITIES.find(f => f.id === b.facility_id)?.council);
@@ -372,6 +373,28 @@ function councilOverlaps(bookings) {
   });
   out.forEach(c => { c.cap = councilCap(c.bookings[0]); c.used = c.bookings.length; });
   return out;
+}
+// New council bookings that overlap another booker's booking on the same slot become its
+// child (see handleSave). Mutates each draft's system_notes; returns patches for existing
+// members (the parent's role, everyone's even share).
+function linkCouncilChildren(newDrafts, existing, canon) {
+  const patches = {};
+  newDrafts.forEach(d => {
+    if (!FACILITIES.find(f => f.id === d.facility_id)?.council || parseSlotLink(d.system_notes)) return;
+    const who = canon((d.email || "").toLowerCase()), end = d.start_hour + d.duration;
+    const over = (existing || []).filter(b => b.facility_id === d.facility_id && b.date === d.date && !["cancelled", "rejected"].includes(b.status)
+      && b.start_hour < end && d.start_hour < b.start_hour + b.duration && canon((b.email || "").toLowerCase()) !== who);
+    if (!over.length) return;
+    const notesOf = b => patches[b.id] ?? b.system_notes ?? "";
+    const linked = over.find(b => parseSlotLink(notesOf(b)));
+    const id = linked ? parseSlotLink(notesOf(linked)).id : newSlotRef();
+    const members = linked ? existing.filter(b => parseSlotLink(notesOf(b))?.id === id) : [[...over].sort((a, b) => (a.created_at || "").localeCompare(b.created_at || ""))[0]];
+    const shares = evenSlotShares(members.length + 1);
+    members.forEach((b, i) => { const role = parseSlotLink(notesOf(b))?.role || (i === 0 ? "parent" : "child");
+      patches[b.id] = setSlotLink(notesOf(b), id, role, shares[i]); });
+    d.system_notes = setSlotLink(d.system_notes, id, "child", shares[members.length]);
+  });
+  return Object.entries(patches).map(([id, system_notes]) => ({ id, system_notes }));
 }
 function isCouncilBooking(b) { const wf = workflowOf(b.facility_id); return wf === "council" || wf === "council_private"; }
 // Ready to go to the council: a plain council booking once AMUA has it, or a council +
@@ -461,7 +484,7 @@ function applyCouncilFacilities(map) {
       PROVIDERS.akl_council = { id: "akl_council", name: "Auckland Council", short: "Council", kind: "council", dynamic: true,
         address: "", gstNumber: "", recipientCode: "AKC" };
     }
-    byId.set(e.id, { id: e.id, name: `${e.park} – ${e.field}${e.frisbee > 1 ? ` (multi-field area ×${e.frisbee})` : ""}`, capacity: 50, color: COUNCIL_COLORS[byId.size % COUNCIL_COLORS.length],
+    byId.set(e.id, { id: e.id, name: `${e.park} – ${e.field}${e.frisbee > 1 ? ` (${e.frisbee} field areas)` : ""}`, capacity: 50, color: COUNCIL_COLORS[byId.size % COUNCIL_COLORS.length],
       kind: "field", site: e.park, provider: pid, defaultRate: e.kind === "community" ? (COMMUNITY_RATES[e.operator?.id] || 0) : 0, council: e, owners: active ? [owner] : [], inactive: !active });
   }));
   FACILITIES.push(...byId.values());
@@ -8785,7 +8808,7 @@ function CouncilOccupancyNotes({ bookings, ids, who = e => e }) {
   if (!spare.length && !shared.length) return null;
   const when = c => `${fmtDate(c.date)} ${fmtTime(c.start)}–${fmtTime(c.end)}`, fac = c => FACILITIES.find(f => f.id === c.facility_id)?.name || c.facility_id;
   return <div style={{flexBasis:"100%",display:"flex",flexDirection:"column",gap:3,fontSize:12}}>
-    {spare.map((c,i)=><div key={"x"+i} style={{color:"#166534"}}>🟢 <b>Extra occupancy available</b> — {fac(c)} · {when(c)}: {c.used} of {c.cap} frisbee fields booked</div>)}
+    {spare.map((c,i)=><div key={"x"+i} style={{color:"#166534"}}>🟢 <b>Extra occupancy available</b> — {fac(c)} · {when(c)}: the slot holds {c.cap} field areas; {c.used === 1 ? "one booking uses it" : `${c.used} bookings share it`}</div>)}
     {shared.map((c,i)=>{ const m=[...c.bookings].sort((a,b)=>(a.created_at||"").localeCompare(b.created_at||""));
       return <div key={"s"+i} style={{color:"#1e3a8a"}}>👥 Shared field — {fac(c)} · {when(c)}: parent <b>{who((m[0].email||"").toLowerCase())}</b> (booked first){m.slice(1).map(b=>`, child ${who((b.email||"").toLowerCase())}`).join("")}</div>; })}
   </div>;
@@ -11354,8 +11377,11 @@ export default function App() {
       // times share it as a parent–child slot: whoever booked first is the parent.
       const sentIds = new Set(bkgs.map(b => b.id)), extra = [];
       councilOverlaps(bookings).filter(c => c.bookings.some(b => sentIds.has(b.id)) && new Set(c.bookings.map(b => canonEmail((b.email||"").toLowerCase()))).size > 1)
-        .forEach(c => { if (c.bookings.some(b => parseSlotLink(b.system_notes))) return;
-          const members = [...c.bookings].sort((a, b) => (a.created_at||"").localeCompare(b.created_at||"")), id = newSlotRef(), shares = evenSlotShares(members.length);
+        .forEach(c => { // completes a link a booker couldn't write on the parent when they booked
+          const members = [...c.bookings].sort((a, b) => (a.created_at||"").localeCompare(b.created_at||""));
+          const ids = new Set(members.map(b => parseSlotLink(b.system_notes)?.id || "")), id = [...ids].find(Boolean) || newSlotRef();
+          if (ids.size === 1 && !ids.has("") && members.every(b => parseSlotLink(b.system_notes)?.role !== "peer")) return;   // already one group
+          const shares = evenSlotShares(members.length);
           members.forEach((b, i) => { const base = notes[b.id] ?? b.system_notes ?? "";
             notes[b.id] = setSlotLink(base, id, i === 0 ? "parent" : "child", shares[i]); if (!sentIds.has(b.id)) extra.push(b.id); }); });
       for (const b of bkgs) await sb.update("bookings", b.id, { status:"council_pending", system_notes:notes[b.id], updated_at:at });
@@ -11936,8 +11962,14 @@ export default function App() {
     // Strip client-only fields that don't exist in Supabase schema
     const toDb = d => Object.fromEntries(Object.entries(d).filter(([k]) => k !== 'recur'));
     const isNew = !bookings.find(b=>b.id===draftsArr[0].id);
+    // Parent–child is set when the child books: a new booking on a council slot that
+    // overlaps another booker's booking there joins it as the child (the earlier booking
+    // is the parent; shares split evenly). The parent's side is written here when allowed,
+    // and otherwise completed when the batch goes to the council.
+    const slotPatches = linkCouncilChildren(draftsArr.filter(d => !bookings.some(b => b.id === d.id)), bookings, canonEmail);
     if(configured){
       try{
+        for(const pt of slotPatches){ try{ await sb.update("bookings", pt.id, { system_notes: pt.system_notes, updated_at: new Date().toISOString() }); }catch{ /* not this booker's booking: completed on send to council */ } }
         for(const d of draftsArr){
           const exists=bookings.find(b=>b.id===d.id);
           if(exists) await sb.update("bookings",d.id,toDb(d));
@@ -11947,7 +11979,7 @@ export default function App() {
       }catch(e){showToast("Save failed: "+e.message,"error");return;}
     } else {
       setBookings(prev=>{
-        let next=[...prev];
+        let next=prev.map(b=>{ const pt=slotPatches.find(x=>x.id===b.id); return pt?{...b,system_notes:pt.system_notes}:b; });
         draftsArr.forEach(d=>{next=next.filter(b=>b.id!==d.id);next.push(d);});
         return next;
       });
