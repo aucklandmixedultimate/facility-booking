@@ -20,7 +20,7 @@ const supabase = SB_URL && SB_ANON
 
 // Lights come from bulbs dropped on the map's poles; "No lights" records that you checked and there aren't any.
 // Fit: how much ultimate the space holds.
-const FIT_LABEL = { unknown: "not rated", reduced: "reduced size (usable)", full: "1 full field", multi: "2+ fields", no: "reduced size (unusable)" };
+const FIT_LABEL = { unknown: "not rated", reduced: "reduced size (usable)", full: "1 full field", multi: "2+ fields", no: "reduced size (3v3 only)" };
 // WFDF field: 100 × 37 m overall, 18 m end zones, brick marks 20 m in from each goal line.
 const WFDF = { len: 100, wid: 37, ez: 18 };
 const BRICK = 20;
@@ -432,7 +432,7 @@ function fieldKeys(p) {
 const OVERLAP_TOL = 0.10, SPARE_RULE = 0.25;
 const newFrisbeeName = t => { let n = 1; while (t.fr["Frisbee " + n]) n++; return "Frisbee " + n; };
 const rated = x => x && x.fit && x.fit !== "unknown" && x.lat != null;
-// Unusable (reduced size, unusable) fields are kept as ratings but never become bookable.
+// 3v3-only fields (reduced size, fit "no") are kept as ratings but never become bookable.
 const bookable = x => rated(x) && x.fit !== "no";
 function metric(lat0) { const kx = 111320 * Math.cos(lat0 * Math.PI / 180), ky = 110540; return { kx, ky }; }
 // A frisbee field's rectangle as [lat, lon] corners (same convention as placeLights).
@@ -905,6 +905,11 @@ function buildCity() {
       { className: "parktip", direction: "top", offset: [0, -6] });
     mk.on("click", () => openPark(p.id));
     mk.addTo(cityLayer);
+    // Lights: a ⚡ badge inset at the marker's top right (saved review, or unsaved edits).
+    const lt = draft[p.id]?.lights ?? r?.lights;
+    if (lt === "full" || lt === "training")
+      L.marker(ll, { icon: L.divIcon({ className: "", html: `<span class="litbadge" aria-label="Lights">⚡</span>`, iconSize: [14, 14], iconAnchor: logoOp || isAmua ? [-6, 20] : [-3, 16] }),
+        interactive: false, keyboard: false, zIndexOffset: 500 }).addTo(cityLayer);
     const fs = p.maps[0]?.fields || [];
     const chosen = new Set((r?.fields || "").split(",").map(s => s.trim().toLowerCase()).filter(Boolean));
     fs.forEach(f => L.polygon(f.p, { pane: "fieldsPane", color: col, weight: chosen.has((f.n || "").toLowerCase()) ? 3 : 1.5, fillColor: col,
@@ -995,7 +1000,7 @@ function syncCityFields() {
 function renderLegend() {
   const row = (c, t) => `<div><i style="background:${c}"></i>${t}</div>`;
   $("legend").innerHTML = `<button class="lg-h" id="legendToggle" aria-expanded="true">Suitability <span aria-hidden="true">▾</span></button>`
-    + `<div class="lg-b">${row(`hsl(${suitHue(0.95)} 72% 42%)`, "Excellent")}${row(`hsl(${suitHue(0.7)} 72% 42%)`, "Good")}${row(`hsl(${suitHue(0.5)} 72% 42%)`, "Fair")}${row(`hsl(${suitHue(0.2)} 72% 42%)`, "Poor")}${row("#b3372d", "Rejected")}${row("#8a958f", "Not rated")}<div><span class="dia" style="background:linear-gradient(45deg,#f2b705 50%,#c8102e 50%);border-color:#f2b705;box-shadow:0 0 0 2px ${PRIV_COLOR}"></span><b>Ultimate club home</b> <span class="lg-note">(club colours)</span></div><div><span class="amualg"><span></span></span><b>AMUA venue</b> <span class="lg-note">(GTEC · CPSA)</span></div><div><span class="logolg">A</span>Club or venue logo</div><div><span class="logolg" style="border-color:${COMM_COLOR}">S</span>Community facility <span class="lg-note">(school)</span></div><div><span class="dia"></span>Privately managed</div><div><i style="background:#8a958f;border:2px dashed ${PRIV_COLOR};box-shadow:none"></i>Flagged: probably club-run</div><div class="lg-note">Gold ring = top pick</div></div>`;
+    + `<div class="lg-b">${row(`hsl(${suitHue(0.95)} 72% 42%)`, "Excellent")}${row(`hsl(${suitHue(0.7)} 72% 42%)`, "Good")}${row(`hsl(${suitHue(0.5)} 72% 42%)`, "Fair")}${row(`hsl(${suitHue(0.2)} 72% 42%)`, "Poor")}${row("#b3372d", "Rejected")}${row("#8a958f", "Not rated")}<div><span class="dia" style="background:linear-gradient(45deg,#f2b705 50%,#c8102e 50%);border-color:#f2b705;box-shadow:0 0 0 2px ${PRIV_COLOR}"></span><b>Ultimate club home</b> <span class="lg-note">(club colours)</span></div><div><span class="amualg"><span></span></span><b>AMUA venue</b> <span class="lg-note">(GTEC · CPSA)</span></div><div><span class="logolg">A</span>Club or venue logo</div><div><span class="logolg" style="border-color:${COMM_COLOR}">S</span>Community facility <span class="lg-note">(school)</span></div><div><span class="dia"></span>Privately managed</div><div><i style="background:#8a958f;border:2px dashed ${PRIV_COLOR};box-shadow:none"></i>Flagged: probably club-run</div><div><span class="litbadge lg">⚡</span>Lights</div><div class="lg-note">Gold ring = top pick</div></div>`;
   // Collapsed by default on small screens so it doesn't cover the map; the choice is remembered.
   const setOpen = open => { $("legend").classList.toggle("collapsed", !open); $("legendToggle").setAttribute("aria-expanded", String(open)); };
   setOpen(store.get("vet-legend-open", !matchMedia("(max-width: 640px)").matches));
