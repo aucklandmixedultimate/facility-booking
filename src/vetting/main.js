@@ -20,6 +20,11 @@ const supabase = SB_URL && SB_ANON
 
 // Lights come from bulbs dropped on the map's poles; "No lights" records that you checked and there aren't any.
 // Fit: how much ultimate the space holds.
+// Metres per degree on Leaflet's sphere (radius 6378137 m), the same scale the live field
+// is drawn at, so saved fields, outlines and lights land exactly where they were locked.
+const M_PER_DEG = 6378137 * Math.PI / 180;
+// Saved coordinates keep 8 decimals (about 1 mm) and angles 0.01°.
+const fx = v => +(+v).toFixed(8), fa = v => +(+v).toFixed(2);
 const FIT_LABEL = { unknown: "not rated", reduced: "reduced size (usable)", full: "1 full field", multi: "2+ fields", no: "reduced size (3v3 only)" };
 // WFDF field: 100 × 37 m overall, 18 m end zones, brick marks 20 m in from each goal line.
 const WFDF = { len: 100, wid: 37, ez: 18 };
@@ -434,12 +439,12 @@ const newFrisbeeName = t => { let n = 1; while (t.fr["Frisbee " + n]) n++; retur
 const rated = x => x && x.fit && x.fit !== "unknown" && x.lat != null;
 // 3v3-only fields (reduced size, fit "no") are kept as ratings but never become bookable.
 const bookable = x => rated(x) && x.fit !== "no";
-function metric(lat0) { const kx = 111320 * Math.cos(lat0 * Math.PI / 180), ky = 110540; return { kx, ky }; }
+function metric(lat0) { const kx = M_PER_DEG * Math.cos(lat0 * Math.PI / 180), ky = M_PER_DEG; return { kx, ky }; }
 // A frisbee field's rectangle as [lat, lon] corners (same convention as placeLights).
 function frisbeeCorners(fr) {
   const { kx, ky } = metric(fr.lat), th = (fr.angle || 0) * Math.PI / 180, L2 = (fr.len || dims.len) / 2, W2 = (fr.wid || dims.wid) / 2;
   return [[-L2, -W2], [L2, -W2], [L2, W2], [-L2, W2]].map(([u, v]) => { const ex = u * Math.cos(th) - v * Math.sin(th), sy = u * Math.sin(th) + v * Math.cos(th);
-    return [+(fr.lat - sy / ky).toFixed(7), +(fr.lon + ex / kx).toFixed(7)]; });
+    return [fx(fr.lat - sy / ky), fx(fr.lon + ex / kx)]; });
 }
 const toXY = (pts, lat0, lon0) => { const { kx, ky } = metric(lat0); return pts.map(([la, lo]) => [(lo - lon0) * kx, (la - lat0) * ky]); };
 const areaXY = pts => Math.abs(pts.reduce((s, [x, y], i) => { const [x2, y2] = pts[(i + 1) % pts.length]; return s + x * y2 - x2 * y; }, 0)) / 2;
@@ -518,13 +523,13 @@ function councilGroups(p, t) {
   cpoly.forEach(c => { let best = -1, bestOv = 0;
     tiles.forEach((tile, k) => { if (!tile.some(i => C[i].has(c.key))) return; const ov = tile.reduce((s2, i) => s2 + areaXY(clipXY(c.xy, fpoly[i].xy)), 0); if (ov > bestOv) { bestOv = ov; best = k; } });
     if (best < 0 && total && (total - covered) / total < SPARE_RULE)
-      best = tiles.map((tile, k) => ({ k, d: Math.min(...tile.map(i => Math.hypot((fs[i].lat - c.c[0]) * 110540, (fs[i].lon - c.c[1]) * metric(fs[i].lat).kx))) })).sort((a, b) => a.d - b.d)[0].k;
+      best = tiles.map((tile, k) => ({ k, d: Math.min(...tile.map(i => Math.hypot((fs[i].lat - c.c[0]) * M_PER_DEG, (fs[i].lon - c.c[1]) * metric(fs[i].lat).kx))) })).sort((a, b) => a.d - b.d)[0].k;
     if (best >= 0) council[best].push(c.key); });
   const groups = tiles.map((tile, k) => {
     const members = tile.map(i => fs[i]), cap = members.reduce((s2, x) => s2 + (x.fit === "multi" ? 2 : 1), 0), frisbee = members.map(x => x.name);
     const name = council[k].length ? council[k].join(" + ") : frisbee.join(" + ");
     const c = [members.reduce((s2, x) => s2 + x.lat, 0) / members.length, members.reduce((s2, x) => s2 + x.lon, 0) / members.length];
-    return { key: name, name, council: council[k], frisbee, cap, fit: cap > 1 ? "multi" : members[0].fit, crossings: Math.max(0, council[k].length - 1), c: [+c[0].toFixed(6), +c[1].toFixed(6)] };
+    return { key: name, name, council: council[k], frisbee, cap, fit: cap > 1 ? "multi" : members[0].fit, crossings: Math.max(0, council[k].length - 1), c: [fx(c[0]), fx(c[1])] };
   });
   return { groups, covered, total };
 }
@@ -620,7 +625,7 @@ function drawLights(p) {
     mk.on("dragend", () => {
       $("dispenser").classList.remove("target");
       if (lastPointer && overDispenser(lastPointer)) return removeLight(p, k);
-      snap(p); const l = mk.getLatLng(); arr[k] = [+l.lat.toFixed(6), +l.lng.toFixed(6)];
+      snap(p); const l = mk.getLatLng(); arr[k] = [fx(l.lat), fx(l.lng)];
       if (t.sel && t.fr[t.sel]) t.fr[t.sel].lightsAuto = false;
     });
     mk.addTo(lightLayer);
@@ -636,7 +641,7 @@ function overDispenser(ev) {
 function addLight(p, latlng) {
   snap(p);
   const t = tagsFor(p);
-  activeLights(t).push([+latlng.lat.toFixed(6), +latlng.lng.toFixed(6)]);
+  activeLights(t).push([fx(latlng.lat), fx(latlng.lng)]);
   if (t.sel && t.fr[t.sel]) t.fr[t.sel].lightsAuto = false;
   syncFromFields(t); drawLights(p); drawParkFields(p); renderTags(p);
 }
@@ -719,8 +724,8 @@ function sizeField(zoom, center) {
   $("field").style.top = $("centreWrap").style.top = top;
   // The unlocked how-to goes once the field has been moved and turned past a threshold.
   if (rotating && hintFrom && !$("rotateHint").hidden) {
-    const c = map.getCenter(), kx = 111320 * Math.cos(c.lat * Math.PI / 180);
-    if (Math.hypot((c.lng - hintFrom.c.lng) * kx, (c.lat - hintFrom.c.lat) * 110540) > 12) hintFrom.moved = true;
+    const c = map.getCenter(), kx = M_PER_DEG * Math.cos(c.lat * Math.PI / 180);
+    if (Math.hypot((c.lng - hintFrom.c.lng) * kx, (c.lat - hintFrom.c.lat) * M_PER_DEG) > 12) hintFrom.moved = true;
     if (Math.abs((((angle - hintFrom.a) % 360) + 540) % 360 - 180) > 15) hintFrom.turned = true;
     if (hintFrom.moved && hintFrom.turned) $("rotateHint").hidden = true;
   }
@@ -754,7 +759,7 @@ function lockField() {
   // Re-locking moves the selected frisbee field; otherwise this is a new one.
   const t = tagsFor(p), key = t.sel && t.fr[t.sel] ? t.sel : newFrisbeeName(t);
   const cur = t.fr[key] ||= { name: key, fit: "unknown", lights: [] };
-  Object.assign(cur, { name: key, lat: +pin.lat.toFixed(6), lon: +pin.lng.toFixed(6), angle: Math.round(angle), len: dims.len, wid: dims.wid, ez: dims.ez });
+  Object.assign(cur, { name: key, lat: fx(pin.lat), lon: fx(pin.lng), angle: fa(angle), len: dims.len, wid: dims.wid, ez: dims.ez });
   if (cur.fit && cur.fit !== "unknown" && hasLights(t) && cur.lightsAuto !== false && cur.lightCount) placeLights(p, cur);
   syncFromFields(t);
   t.sel = key; fitArmed = true;
@@ -764,8 +769,8 @@ function lockField() {
 const curRating = t => t.sel && t.fr[t.sel]?.lat != null ? t.fr[t.sel] : null;
 function spotMoved(t) {
   const sp = curRating(t); if (!sp) return false;
-  const c = fieldCentre(), kx = 111320 * Math.cos(c.lat * Math.PI / 180);
-  const dm = Math.hypot((sp.lon - c.lng) * kx, (sp.lat - c.lat) * 110540);
+  const c = fieldCentre(), kx = M_PER_DEG * Math.cos(c.lat * Math.PI / 180);
+  const dm = Math.hypot((sp.lon - c.lng) * kx, (sp.lat - c.lat) * M_PER_DEG);
   const da = Math.abs((((angle - sp.angle) % 360) + 540) % 360 - 180);
   return dm > 3 || da > 2;
 }
@@ -798,7 +803,7 @@ function confirmSpot(p, fit) {
   if (!t.sel) t.sel = newFrisbeeName(t);
   const cur = t.fr[t.sel] || { name: t.sel, lights: [] };
   if (cur.fit === fit && !spotMoved(t)) { cur.fit = "unknown"; delete cur.lat; delete cur.lon; delete cur.angle; }
-  else Object.assign(cur, { name: t.sel, fit, lat: +c.lat.toFixed(6), lon: +c.lng.toFixed(6), angle: Math.round(angle), len: dims.len, wid: dims.wid, ez: dims.ez });
+  else Object.assign(cur, { name: t.sel, fit, lat: fx(c.lat), lon: fx(c.lng), angle: fa(angle), len: dims.len, wid: dims.wid, ez: dims.ez });
   t.fr[t.sel] = cur;
   if (cur.fit === "multi") splitMulti(p, t, cur);
   // Rated fields get light poles placed along their long sides (4 to start) until a pole
@@ -815,7 +820,7 @@ function confirmSpot(p, fit) {
 // quarter of a field's overlap), that field is the second one: no overlapping copy is made.
 function splitMulti(p, t, F) {
   const W = F.wid || dims.wid, { kx, ky } = metric(F.lat), th = (F.angle || 0) * Math.PI / 180;
-  const shift = v => ({ ...F, lat: +(F.lat - v * Math.cos(th) / ky).toFixed(6), lon: +(F.lon - v * Math.sin(th) / kx).toFixed(6) });
+  const shift = v => ({ ...F, lat: fx((F.lat - v * Math.cos(th) / ky)), lon: fx((F.lon - v * Math.sin(th) / kx)) });
   const others = Object.values(t.fr).filter(x => x !== F && x.lat != null && x.fit && x.fit !== "unknown");
   const cf = fieldKeys(p), xy = fr => toXY(frisbeeCorners(fr), F.lat, F.lon), fa = (F.len || dims.len) * W;
   const cand = [W, -W].map(v => { const tw = shift(v), txy = xy(tw);
@@ -838,11 +843,11 @@ const POLE_OFFSET = 3;   // metres outside the sideline
 function placeLights(p, fr) {
   const n = Math.max(0, fr.lightCount || 0), per = n / 2;
   const lat0 = fr.lat, lon0 = fr.lon, th = (fr.angle || 0) * Math.PI / 180;
-  const kx = 111320 * Math.cos(lat0 * Math.PI / 180), ky = 110540;
+  const kx = M_PER_DEG * Math.cos(lat0 * Math.PI / 180), ky = M_PER_DEG;
   // Field-local (u along the length, v across) → lat/lon; the field is drawn rotated
   // clockwise on screen, so screen-x = u·cos − v·sin, screen-y (down) = u·sin + v·cos.
   const at = (u, v) => { const ex = u * Math.cos(th) - v * Math.sin(th), sy = u * Math.sin(th) + v * Math.cos(th);
-    return [+(lat0 - sy / ky).toFixed(6), +(lon0 + ex / kx).toFixed(6)]; };
+    return [fx((lat0 - sy / ky)), fx((lon0 + ex / kx))]; };
   const half = dims.wid / 2 + POLE_OFFSET;
   // Which long side is nearer the council field's boundary?
   const poly = councilFields(p).find(f => (f.n || "") === fr.name)?.p;
