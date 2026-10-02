@@ -1101,7 +1101,7 @@ const hasLights = t => t.lights === "full" || t.lights === "training";
 function renderDispenser(p) {
   const t = tagsFor(p), arr = activeLights(t), lit = hasLights(t), fr = t.sel && t.fr[t.sel];
   const src = $("bulbSrc");
-  src.textContent = lit ? "💡" : t.lights === "none" ? "🚫" : "❓";
+  src.textContent = lit ? "💡" : t.lights === "none" ? "🚫" : "?";   // unknown: "?" over a half-lit bulb (CSS)
   src.className = "bulbsrc " + (lit ? "lit" : t.lights === "none" ? "dark" : "unknown");
   src.setAttribute("aria-label", lit ? `Lights: ${arr.length} pole${arr.length === 1 ? "" : "s"}. Tap to add two (up to ${LIGHTS_MAX}), or drag a bulb onto a pole`
     : t.lights === "none" ? "No lights. Tap for lights, or drag a bulb onto a pole" : "Lights unknown. Tap for no lights, or drag a bulb onto a pole");
