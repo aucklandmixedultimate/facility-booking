@@ -4,14 +4,15 @@
 // Source: LINZ "NZ Suburbs and Localities" (CC BY 4.0, https://data.linz.govt.nz/layer/113764).
 // Either:
 //   LINZ_API_KEY=<key> node scripts/build-suburbs.mjs          (downloads the Auckland area by WFS)
-//   node scripts/build-suburbs.mjs path/to/suburbs.geojson     (a GeoJSON export from LINZ, WGS84)
+//   node scripts/build-suburbs.mjs path/to/suburbs.geojson     (a GeoJSON export from LINZ, WGS84 / NZGD2000;
+//                                                                a shapefile export converts with e.g. ogr2ogr or pyshp)
 //
 // Output: { source, licence, built, suburbs: [{ n: name, b: [s, w, n, e], p: [[[lat, lon], …], …] }] }
-// with polygons simplified to about 5 m and coordinates to 5 decimals.
+// with polygons simplified to about 10 m and coordinates to 5 decimals.
 import { readFileSync, writeFileSync } from "node:fs";
 
 const AKL = { s: -37.45, w: 174.15, n: -36.05, e: 175.6 };   // the Auckland region, roughly
-const TOL = 5;   // simplification tolerance (metres)
+const TOL = 10;   // simplification tolerance (metres): plenty at suburb zoom
 
 async function load() {
   const file = process.argv[2];
@@ -54,6 +55,8 @@ const out = [];
 for (const f of gj.features || []) {
   const name = f.properties?.name || f.properties?.NAME || f.properties?.suburb_locality || "";
   const g = f.geometry; if (!g || !name) continue;
+  // Suburbs and localities only (the layer also has coastal bays, islands and lakes).
+  const type = f.properties?.type || f.properties?.TYPE; if (type && !/^(suburb|locality)$/i.test(type)) continue;
   const polys = g.type === "Polygon" ? [g.coordinates] : g.type === "MultiPolygon" ? g.coordinates : [];
   const rings = polys.map(poly => simplify(poly[0].map(([lo, la]) => [r5(la), r5(lo)]))).filter(r => r.length >= 4);   // outer rings only
   if (!rings.length) continue;

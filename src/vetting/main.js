@@ -402,6 +402,7 @@ const atParkView = () => parkView && Math.abs(map.getZoom() - parkView.z) < 0.01
 // Suburb outlines (public/council-maps/suburbs.json, from LINZ; built by
 // scripts/build-suburbs.mjs). Optional: without the file the Auckland view has no outlines.
 let suburbs = null, suburbLayer = null;
+const SUBURB_CREDIT = 'Suburbs © <a href="https://data.linz.govt.nz/layer/113764" target="_blank" rel="noopener">LINZ</a> (CC BY 4.0)';
 async function loadSuburbs() {
   if (suburbs) return suburbs;
   try { const r = await fetch(BASE + "council-maps/suburbs.json", { cache: "no-cache" }); suburbs = r.ok ? (await r.json()).suburbs || [] : []; }
@@ -428,6 +429,7 @@ async function showSuburbs(p, ll) {
   if (!home) return null;
   const near = adjacentSuburbs(home);
   suburbLayer = L.layerGroup().addTo(map);
+  map.attributionControl.addAttribution(SUBURB_CREDIT);
   const label = (s, cls) => { const c = s.b; L.marker([(c[0] + c[2]) / 2, (c[1] + c[3]) / 2], { interactive: false, keyboard: false,
     icon: L.divIcon({ className: "", html: `<span class="sublbl ${cls}">${esc(s.n)}</span>`, iconSize: null }) }).addTo(suburbLayer); };
   near.forEach(s => { L.polygon(s.p, { pane: "fieldsPane", color: "#e2e8f0", weight: 1.5, dashArray: "5 4", fillOpacity: 0.04, fillColor: "#ffffff", interactive: false }).addTo(suburbLayer); label(s, ""); });
@@ -437,7 +439,7 @@ async function showSuburbs(p, ll) {
   near.forEach(s => b.extend([[s.b[0], s.b[1]], [s.b[2], s.b[3]]]));
   return b;
 }
-function hideSuburbs() { if (suburbLayer) { suburbLayer.remove(); suburbLayer = null; } }
+function hideSuburbs() { if (suburbLayer) { suburbLayer.remove(); suburbLayer = null; map.attributionControl.removeAttribution(SUBURB_CREDIT); } }
 async function zoomToggle(p) {
   const back = !!whereMark;
   if (whereMark) { whereMark.remove(); whereMark = null; }
