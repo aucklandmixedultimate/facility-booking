@@ -537,6 +537,16 @@ async function saveOffset(id, o) {
 }
 // Share of the placed fields' area inside the council field areas, with the council fields
 // shifted by (dx, dy) metres. Sampled on a 6 m grid across each field.
+// Each placed field's share inside the council areas (shifted by dx, dy metres).
+function alignShares(p, t, dx, dy) {
+  const fs = Object.values(t.fr).filter(rated); if (!fs.length) return [];
+  const lat0 = fs[0].lat, lon0 = fs[0].lon, cf = (p.maps[Math.min(mapIndex(p), Math.max(0, p.maps.length - 1))]?.fields || []).map(f => toXY(f.p, lat0, lon0));
+  const o = offsets[p.id] || {}, { kx, ky } = metric(lat0), ox = (o.dlon || 0) * kx + dx, oy = (o.dlat || 0) * ky + dy;
+  return fs.map(fr => { const r = toXY(frisbeeCorners(fr), lat0, lon0), xs = r.map(q => q[0]), ys = r.map(q => q[1]); let n = 0, inn = 0;
+    for (let x = Math.min(...xs) + 3; x < Math.max(...xs); x += 6) for (let y = Math.min(...ys) + 3; y < Math.max(...ys); y += 6) {
+      if (!insideXY([x, y], r)) continue; n++; if (cf.some(c => insideXY([x - ox, y - oy], c))) inn++; }
+    return { name: fr.name, share: n ? inn / n : 0 }; });
+}
 function alignScore(p, t, dx, dy) {
   const fs = Object.values(t.fr).filter(rated); if (!fs.length) return 0;
   const lat0 = fs[0].lat, lon0 = fs[0].lon, cf = (p.maps[Math.min(mapIndex(p), Math.max(0, p.maps.length - 1))]?.fields || []).map(f => toXY(f.p, lat0, lon0));
@@ -547,8 +557,11 @@ function alignScore(p, t, dx, dy) {
       if (!insideXY([x, y], r)) continue; n++; if (cf.some(c => insideXY([x - ox, y - oy], c))) inn++; } });
   return n ? inn / n : 0;
 }
-// Misaligned: placed fields under half inside the council areas, while a shift within ±60 m
-// would bring them at least a quarter further in. Returns the best shift found.
+// A field may stand up to a quarter outside the council areas (alignment wiggle room): it's
+// placed exactly where it was locked, with no warning. Misaligned: some field is more than
+// a quarter outside, and a shift of the council map within ±60 m would bring the fields
+// clearly further in (by 15 points or more). Returns the best shift found.
+const OUTSIDE_TOL = 0.25;
 const misCache = new Map();
 function misalignment(p, t) {
   if (!councilFields(p).length || !Object.values(t.fr).some(rated)) return null;
@@ -557,12 +570,14 @@ function misalignment(p, t) {
   return misCache.get(key);
 }
 function findMisalignment(p, t) {
-  const now = alignScore(p, t, 0, 0); if (now >= 0.5) return null;
+  const shares = alignShares(p, t, 0, 0), out = shares.filter(x => x.share < 1 - OUTSIDE_TOL);
+  if (!out.length) return null;
+  const now = alignScore(p, t, 0, 0);
   let best = { dx: 0, dy: 0, s: now };
   for (let dx = -60; dx <= 60; dx += 4) for (let dy = -60; dy <= 60; dy += 4) { const sc = alignScore(p, t, dx, dy);
     if (sc > best.s + 1e-9 || (Math.abs(sc - best.s) < 1e-9 && Math.hypot(dx, dy) < Math.hypot(best.dx, best.dy))) best = { dx, dy, s: sc }; }
   const c = best; for (let dx = c.dx - 3; dx <= c.dx + 3; dx++) for (let dy = c.dy - 3; dy <= c.dy + 3; dy++) { const sc = alignScore(p, t, dx, dy); if (sc > best.s) best = { dx, dy, s: sc }; }
-  return best.s >= now + 0.25 ? { ...best, now } : null;
+  return best.s >= now + 0.15 ? { ...best, now, out } : null;
 }
 function renderAlign(p) {
   const b = $("fbAlign"), t = tagsFor(p), o = offsets[p.id];
@@ -578,7 +593,7 @@ async function askAlign(p) {
   if (mis) {
     const d = Math.round(Math.hypot(mis.dx, mis.dy)), dir = (mis.dy > 0 ? "north" : mis.dy < 0 ? "south" : "") + (mis.dx > 0 ? "east" : mis.dx < 0 ? "west" : "");
     $("alignTitle").textContent = "Realign the council fields?";
-    $("alignBody").textContent = `Only ${Math.round(mis.now * 100)}% of your field placement at ${p.name} is inside the council's field areas, so the council map looks misaligned. `
+    $("alignBody").textContent = `${mis.out.map(x => `${x.name} is ${Math.round((1 - x.share) * 100)}% outside`).join(", ")} the council's field areas at ${p.name} (more than the ${Math.round(OUTSIDE_TOL * 100)}% allowed), so the council map looks misaligned. `
       + `Should the council fields be realigned to your field placement? That moves the council fields and map overlay ${d} m ${dir || ""} (then ${Math.round(mis.s * 100)}% inside).`;
     $("alignYes").textContent = "Yes, realign";
   } else if (o) {
