@@ -375,7 +375,7 @@ function showMap(p) {
   if (overlayPanel) { overlayPanel.remove(); overlayPanel = null; }
   map.invalidateSize();
   if (m) {
-    const b = L.latLngBounds([m.bounds[0], m.bounds[1]], [m.bounds[2], m.bounds[3]]);
+    const b = mapBounds(p, m);
     overlay = L.imageOverlay(BASE + "council-maps/" + m.file, b, { className: "council-overlay", interactive: false }).addTo(map);
     // The plan's base panel opens the plan opaque; once the plan has dissolved it's a dashed outline.
     overlayPanel = L.rectangle(panelBounds(b), { pane: "fieldsPane", className: "council-panel", color: "#ffffff", weight: 1.5,
@@ -384,18 +384,25 @@ function showMap(p) {
       .on("click", () => { if (rotating) return lockField(); openCouncilImage(); }).addTo(map);
     map.fitBounds(b, { animate: false });
     baseZoom = map.getZoom();
+    parkView = { c: map.getCenter(), z: map.getZoom() };
   } else {
     map.setView(p.lat ? [p.lat, p.lon] : [-36.87, 174.77], p.lat ? 16.5 : 11, { animate: false });
     baseZoom = null;
+    parkView = { c: map.getCenter(), z: map.getZoom() };
   }
   shownPark = p.id + "#" + i; pin = null; tagsFor(p).sel = null; updateLayer(); sizeField(); drawParkFields(p); drawLights(p);
 }
 // ⤢ alternates: zoom to the park (keeping the placed field), then all of Auckland with the
 // park pinned, then back to the park.
-let aklNext = false, whereMark = null;
+// While the map is still at the park's default zoom (as opened), the first press goes
+// straight to Auckland.
+let aklNext = false, whereMark = null, parkView = null;
+// (Zoom only: opening a placed field re-centres on it without zooming.)
+const atParkView = () => parkView && Math.abs(map.getZoom() - parkView.z) < 0.01;
 function zoomToggle(p) {
+  const back = !!whereMark;
   if (whereMark) { whereMark.remove(); whereMark = null; }
-  if (aklNext) {
+  if (!back && (aklNext || atParkView())) {
     // Auckland-wide zoom, centred on the park so its pin sits mid-screen.
     const ll = parkLatLng(p), z = map.getBoundsZoom(L.latLngBounds(DEFAULT_VIEW));
     if (ll) map.setView(ll, z); else map.fitBounds(DEFAULT_VIEW, { padding: [16, 16] });
@@ -404,7 +411,7 @@ function zoomToggle(p) {
     $("fitBtn").title = "Back to the park (0)"; aklNext = false; return;
   }
   const m = p.maps[Math.min(mapIndex(p), Math.max(0, p.maps.length - 1))];
-  if (m) map.fitBounds(L.latLngBounds([m.bounds[0], m.bounds[1]], [m.bounds[2], m.bounds[3]]));
+  if (m) map.fitBounds(mapBounds(p, m));
   else if (p.lat) map.setView([p.lat, p.lon], 16.5);
   $("fitBtn").title = "All of Auckland, with this park pinned (0)"; aklNext = true;
 }
@@ -426,11 +433,107 @@ function updateLayer() {
   if (overlayPanel) overlayPanel.setStyle(on ? { opacity: 0, dashArray: null } : { opacity: 0.8, dashArray: "6 5" });
   $("layerBadge").textContent = on ? "Council map" : "Satellite";
 }
-// Council fields traced from the map PDFs: [{n: name, c: [lat, lon], p: [[lat, lon], …]}].
-function councilFields(p) {
-  const i = Math.min(mapIndex(p), Math.max(0, p.maps.length - 1));
-  return p.maps[i]?.fields || [];
+// Council fields traced from the map PDFs: [{n: name, c: [lat, lon], p: [[lat, lon], …]}],
+// shifted by the park's alignment offset when its council map was realigned.
+const shiftedFields = new Map();
+function councilFields(p, i = Math.min(mapIndex(p), Math.max(0, p.maps.length - 1))) {
+  const fs = p.maps[i]?.fields || [], o = offsets[p.id];
+  if (!o || (!o.dlat && !o.dlon)) return fs;
+  const k = `${p.id}#${i}#${o.dlat},${o.dlon}`;
+  if (!shiftedFields.has(k)) shiftedFields.set(k, fs.map(f => ({ ...f, c: [f.c[0] + o.dlat, f.c[1] + o.dlon], p: f.p.map(q => [q[0] + o.dlat, q[1] + o.dlon]) })));
+  return shiftedFields.get(k);
 }
+const mapBounds = (p, m) => { const o = offsets[p.id] || {}, a = o.dlat || 0, b = o.dlon || 0;
+  return L.latLngBounds([m.bounds[0] + a, m.bounds[1] + b], [m.bounds[2] + a, m.bounds[3] + b]); };
+
+// ── Council map alignment ────────────────────────────────────────────────────
+// The council's maps can sit a few metres off the satellite imagery. When placed fields lie
+// mostly outside the council field areas, ⚠ Misaligned (beside Remove) offers to shift the
+// council fields and map overlay so they line up with the placement. Offsets are per park,
+// shared through settings (key council_offsets): { park_id: { dlat, dlon, by, at } }.
+const OFFSETS_KEY = "council_offsets";
+let offsets = {};
+const alignDismissed = new Set();
+async function loadOffsets() {
+  if (supabase && session) {
+    const { data, error } = await supabase.from("settings").select("value").eq("key", OFFSETS_KEY).maybeSingle();
+    if (!error) { offsets = data?.value || {}; return; }
+  }
+  offsets = store.get("vet-council-offsets", {});
+}
+async function saveOffset(id, o) {
+  const entry = o ? { ...o, by: session?.user?.email || "", at: new Date().toISOString() } : null;
+  if (supabase && session && IS_ADMIN) {
+    const { data } = await supabase.from("settings").select("value").eq("key", OFFSETS_KEY).maybeSingle();
+    const fresh = { ...(data?.value || {}) }; if (entry) fresh[id] = entry; else delete fresh[id];
+    const { error } = await supabase.from("settings").upsert({ key: OFFSETS_KEY, value: fresh, updated_at: new Date().toISOString() });
+    if (error) { setStatus("Couldn't save the alignment (" + error.message + ").", true); return false; }
+    offsets = fresh; return true;
+  }
+  if (entry) offsets[id] = entry; else delete offsets[id];
+  store.set("vet-council-offsets", offsets); return true;
+}
+// Share of the placed fields' area inside the council field areas, with the council fields
+// shifted by (dx, dy) metres. Sampled on a 6 m grid across each field.
+function alignScore(p, t, dx, dy) {
+  const fs = Object.values(t.fr).filter(rated); if (!fs.length) return 0;
+  const lat0 = fs[0].lat, lon0 = fs[0].lon, cf = (p.maps[Math.min(mapIndex(p), Math.max(0, p.maps.length - 1))]?.fields || []).map(f => toXY(f.p, lat0, lon0));
+  const o = offsets[p.id] || {}, { kx, ky } = metric(lat0), ox = (o.dlon || 0) * kx + dx, oy = (o.dlat || 0) * ky + dy;
+  let n = 0, inn = 0;
+  fs.forEach(fr => { const r = toXY(frisbeeCorners(fr), lat0, lon0), xs = r.map(q => q[0]), ys = r.map(q => q[1]);
+    for (let x = Math.min(...xs) + 3; x < Math.max(...xs); x += 6) for (let y = Math.min(...ys) + 3; y < Math.max(...ys); y += 6) {
+      if (!insideXY([x, y], r)) continue; n++; if (cf.some(c => insideXY([x - ox, y - oy], c))) inn++; } });
+  return n ? inn / n : 0;
+}
+// Misaligned: placed fields under half inside the council areas, while a shift within ±60 m
+// would bring them at least a quarter further in. Returns the best shift found.
+const misCache = new Map();
+function misalignment(p, t) {
+  if (!councilFields(p).length || !Object.values(t.fr).some(rated)) return null;
+  const key = JSON.stringify([p.id, mapIndex(p), offsets[p.id], Object.values(t.fr).filter(rated).map(x => [x.lat, x.lon, x.angle, x.len, x.wid])]);
+  if (!misCache.has(key)) { if (misCache.size > 50) misCache.clear(); misCache.set(key, findMisalignment(p, t)); }
+  return misCache.get(key);
+}
+function findMisalignment(p, t) {
+  const now = alignScore(p, t, 0, 0); if (now >= 0.5) return null;
+  let best = { dx: 0, dy: 0, s: now };
+  for (let dx = -60; dx <= 60; dx += 4) for (let dy = -60; dy <= 60; dy += 4) { const sc = alignScore(p, t, dx, dy);
+    if (sc > best.s + 1e-9 || (Math.abs(sc - best.s) < 1e-9 && Math.hypot(dx, dy) < Math.hypot(best.dx, best.dy))) best = { dx, dy, s: sc }; }
+  const c = best; for (let dx = c.dx - 3; dx <= c.dx + 3; dx++) for (let dy = c.dy - 3; dy <= c.dy + 3; dy++) { const sc = alignScore(p, t, dx, dy); if (sc > best.s) best = { dx, dy, s: sc }; }
+  return best.s >= now + 0.25 ? { ...best, now } : null;
+}
+function renderAlign(p) {
+  const b = $("fbAlign"), t = tagsFor(p), o = offsets[p.id];
+  const mis = IS_ADMIN && !alignDismissed.has(p.id) ? misalignment(p, t) : null;
+  b.hidden = !(mis || (IS_ADMIN && o));
+  b.classList.toggle("warn", !!mis);
+  b.textContent = mis ? "⚠ Misaligned" : "⟲ Realigned";
+  b.title = mis ? "Your fields sit outside the council field areas. Realign the council map to them?" : o ? `Council map shifted ${Math.round(Math.hypot((o.dlat || 0) * M_PER_DEG, (o.dlon || 0) * metric(p.lat || -36.85).kx))} m to line up with the fields. Click to reset it.` : "";
+  b._mis = mis;
+}
+async function askAlign(p) {
+  const b = $("fbAlign"), mis = b._mis, o = offsets[p.id], dlg = $("alignDlg");
+  if (mis) {
+    const d = Math.round(Math.hypot(mis.dx, mis.dy)), dir = (mis.dy > 0 ? "north" : mis.dy < 0 ? "south" : "") + (mis.dx > 0 ? "east" : mis.dx < 0 ? "west" : "");
+    $("alignTitle").textContent = "Realign the council fields?";
+    $("alignBody").textContent = `Only ${Math.round(mis.now * 100)}% of your field placement at ${p.name} is inside the council's field areas, so the council map looks misaligned. `
+      + `Should the council fields be realigned to your field placement? That moves the council fields and map overlay ${d} m ${dir || ""} (then ${Math.round(mis.s * 100)}% inside).`;
+    $("alignYes").textContent = "Yes, realign";
+  } else if (o) {
+    $("alignTitle").textContent = "Reset the council map alignment?";
+    $("alignBody").textContent = `The council fields at ${p.name} were shifted to line up with the field placement${o.by ? ` by ${o.by.split("@")[0]}` : ""}. Put them back where the council's map has them?`;
+    $("alignYes").textContent = "Yes, reset";
+  } else return;
+  dlg.returnValue = ""; dlg.showModal();
+  const a = await new Promise(res => dlg.addEventListener("close", () => res(dlg.returnValue), { once: true }));
+  if (a !== "yes") { if (mis) alignDismissed.add(p.id); renderAlign(p); return; }
+  const kx = metric(p.lat || -36.85).kx, cur = offsets[p.id] || {};
+  const ok = await saveOffset(p.id, mis ? { dlat: (cur.dlat || 0) + mis.dy / M_PER_DEG, dlon: (cur.dlon || 0) + mis.dx / kx } : null);
+  if (!ok) return;
+  shownPark = null; render();
+  setStatus(mis ? `Council fields at ${p.name} realigned to your field placement.` : `Council fields at ${p.name} back on the council's map position.`);
+}
+
 // Council field areas are clickable: selecting one targets it for rating (or editing an
 // existing rating) and shows only its lights.
 function fieldKeys(p) {
@@ -818,6 +921,7 @@ function previewFields(p) {
   $("fbTools").hidden = !IS_ADMIN || !(fr?.lat != null || edits[p.id]?.length);
   $("fbUndo").disabled = !edits[p.id]?.length;
   $("fbMove").hidden = $("fbRemove").hidden = !(fr?.lat != null);
+  renderAlign(p);
   $("saveNextBtn").hidden = !IS_ADMIN || !(curRating(t)?.fit && curRating(t).fit !== "unknown") || moved;
 }
 function afterMove() {
@@ -1004,7 +1108,7 @@ function buildCity() {
     if (lt === "full" || lt === "training")
       L.marker(ll, { icon: L.divIcon({ className: "", html: `<span class="litbadge" aria-label="Lights">⚡</span>`, iconSize: [14, 14], iconAnchor: logoOp || isAmua ? [-6, 20] : [-3, 16] }),
         interactive: false, keyboard: false, zIndexOffset: 500 }).addTo(cityLayer);
-    const fs = p.maps[0]?.fields || [];
+    const fs = councilFields(p, 0);
     const chosen = new Set((r?.fields || "").split(",").map(s => s.trim().toLowerCase()).filter(Boolean));
     fs.forEach(f => L.polygon(f.p, { pane: "fieldsPane", color: col, weight: chosen.has((f.n || "").toLowerCase()) ? 3 : 1.5, fillColor: col,
       fillOpacity: chosen.has((f.n || "").toLowerCase()) ? 0.45 : 0.22, bubblingMouseEvents: false })
@@ -1390,7 +1494,7 @@ function updateActions() {
 }
 function renderTags(p) {
   const t = tagsFor(p);
-  updateActions();
+  updateActions(); if (view === "park") renderAlign(p);
   $("editUndoBtn").disabled = !edits[p.id]?.length;
   // Stars fill to the crowd average; your own rating is ringed. Click to rate (again to clear).
   const avg = crowdAvg(p.id), cnt = ratings[p.id]?.n || 0, mine = ratings[p.id]?.mine || (ratingsShared ? 0 : t.quality), shown = Math.round(avg ?? t.quality ?? 0);
@@ -1887,6 +1991,7 @@ function bind() {
     confirmSpot(p, b.dataset.fit); });
   $("fbUndo").onclick = e => { e.stopPropagation(); editUndo(); };
   $("fbMove").onclick = e => { e.stopPropagation(); const p = current(); if (p && tagsFor(p).sel) { snap(p); setRotating(true); setStatus(`Moving ${tagsFor(p).sel}: turn and drag it, then tap 🔓 to lock it in its new spot.`); } };
+  $("fbAlign").onclick = e => { e.stopPropagation(); const p = current(); if (p) askAlign(p); };
   $("fbRemove").onclick = e => { e.stopPropagation(); const p = current(); if (p) removeField(p); };
   $("helpBtn").onclick = () => { const el = $("helpPanel"); el.hidden = !el.hidden; $("helpBtn").setAttribute("aria-expanded", String(!el.hidden)); };
   $("fieldBtn").onclick = () => showField(!fieldOn);
@@ -2073,7 +2178,7 @@ async function start() {
     setStatus("Demo mode (no Supabase configured): decisions are kept in this browser.", true);
   }
   $("app").hidden = false; renderSeasonBar();
-  await loadBookLocs(); await loadActivity(); await loadViews(); await loadRatings(); await loadCouncilOnly(); await loadRelations(); await syncCartWorkflows();
+  await loadBookLocs(); await loadActivity(); await loadViews(); await loadRatings(); await loadOffsets(); await loadCouncilOnly(); await loadRelations(); await syncCartWorkflows();
   initMap(); drawField(); showField(fieldOn); renderLegend(); bind();
   setView(view === "park" || view === "book" ? view : "city", { refit: true });
   if (mode === "shared") setInterval(async () => { if (!busy && !rotating && document.visibilityState === "visible" && !$("saveDlg").open) { await loadShared(); if (view === "city") render(); else renderRail(); } }, 30000);
