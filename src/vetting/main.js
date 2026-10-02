@@ -20,7 +20,7 @@ const supabase = SB_URL && SB_ANON
 
 // Lights come from bulbs dropped on the map's poles; "No lights" records that you checked and there aren't any.
 // Fit: how much ultimate the space holds.
-const FIT_LABEL = { unknown: "not rated", reduced: "reduced size", full: "1 full field", multi: "2+ fields", no: "doesn't fit" };
+const FIT_LABEL = { unknown: "not rated", reduced: "reduced size (usable)", full: "1 full field", multi: "2+ fields", no: "reduced size (unusable)" };
 // WFDF field: 100 × 37 m overall, 18 m end zones, brick marks 20 m in from each goal line.
 const WFDF = { len: 100, wid: 37, ez: 18 };
 const BRICK = 20;
@@ -186,7 +186,7 @@ function suitScore(r) {
   if (!r || r.decision === "rating") return null;
   if (r.decision === "no") return 0;
   let s = r.quality ? r.quality / 5 : 0.5;
-  s += { multi: 0.2, full: 0.1, reduced: -0.15 }[r.fit] || 0;
+  s += { multi: 0.2, full: 0.1, reduced: -0.15, no: -0.3 }[r.fit] || 0;
   if (r.lights === "full" || r.lights === "training") s += 0.1;
   if (r.decision === "top") s += 0.15;
   return Math.max(0.05, Math.min(1, s));
@@ -297,7 +297,7 @@ function tagsFor(p) {
   }
   return draft[p.id];
 }
-const FIT_RANK = { unknown: 0, reduced: 1, full: 2, multi: 3 };
+const FIT_RANK = { unknown: 0, no: 0.5, reduced: 1, full: 2, multi: 3 };
 // Park-level fit, fields and spot follow from the per-field ratings: the best fit wins.
 function syncFromFields(t) {
   const rated = Object.values(t.fr).filter(x => x.fit && x.fit !== "unknown");
@@ -432,6 +432,8 @@ function fieldKeys(p) {
 const OVERLAP_TOL = 0.10, SPARE_RULE = 0.25;
 const newFrisbeeName = t => { let n = 1; while (t.fr["Frisbee " + n]) n++; return "Frisbee " + n; };
 const rated = x => x && x.fit && x.fit !== "unknown" && x.lat != null;
+// Unusable (reduced size, unusable) fields are kept as ratings but never become bookable.
+const bookable = x => rated(x) && x.fit !== "no";
 function metric(lat0) { const kx = 111320 * Math.cos(lat0 * Math.PI / 180), ky = 110540; return { kx, ky }; }
 // A frisbee field's rectangle as [lat, lon] corners (same convention as placeLights).
 function frisbeeCorners(fr) {
@@ -474,7 +476,7 @@ function coverageXY(council, frisbee) {
 }
 // The venue's mapping: { groups: [{key, name, council[], frisbee[], fit, cap, c}], covered, total }.
 function councilGroups(p, t) {
-  const cf = fieldKeys(p), fs = Object.values(t.fr).filter(rated);
+  const cf = fieldKeys(p), fs = Object.values(t.fr).filter(bookable);
   if (!fs.length) return { groups: [], covered: 0, total: 0 };
   const lat0 = fs[0].lat, lon0 = fs[0].lon;
   const cpoly = cf.map(({ f, key }) => ({ key, xy: toXY(f.p, lat0, lon0), c: f.c })), fpoly = fs.map(fr => ({ fr, xy: toXY(frisbeeCorners(fr), lat0, lon0) }));
@@ -507,7 +509,7 @@ function councilGroups(p, t) {
   return { groups, covered, total };
 }
 const spareShare = m => m.total ? Math.max(0, (m.total - m.covered) / m.total) : 0;
-const FIT_COLOR = { multi: "#1f7a4d", full: "#46b37b", reduced: "#e0a647" };
+const FIT_COLOR = { multi: "#1f7a4d", full: "#46b37b", reduced: "#e0a647", no: "#b3372d" };
 function drawParkFields(p) {
   parkFieldsLayer.clearLayers();
   const t = tagsFor(p);
@@ -1595,7 +1597,7 @@ async function decide(decision) {
   const t = tagsFor(p);
   // Spare council space: if a quarter or more of the council field area has no frisbee
   // field, ask whether to add another before saving the venue.
-  if (decision !== "no" && Object.values(t.fr).some(rated)) {
+  if (decision !== "no" && Object.values(t.fr).some(bookable)) {
     const share = spareShare(councilGroups(p, t));
     if (share >= SPARE_RULE) {
       const a = await askSpare(p, share);
@@ -1640,7 +1642,7 @@ function venueEntries(p, status, extra = {}) {
     status, added_at: at, ...(status === "active" ? { activated_at: at } : {}), added_by: session?.user?.email || "", ...extra };
   const groups = reviews[p.id]?.placement?.groups || [];
   if (groups.length) return groups.map(g => ({ ...base, id: cartId(p, g.key), field: g.name, council_fields: g.council, frisbee: g.cap, fit: g.fit, lat: g.c[0], lon: g.c[1] }));
-  const keys = Object.values(t.fr).filter(rated).map(x => x.name);
+  const keys = Object.values(t.fr).filter(bookable).map(x => x.name);
   return (keys.length ? keys : ["Whole park"]).map(key => { const fr = t.fr[key], f = fieldKeys(p).find(x => x.key === key)?.f, c = fr?.lat != null ? [fr.lat, fr.lon] : f?.c || [p.lat, p.lon];
     return { ...base, id: cartId(p, key), field: key, lat: c[0], lon: c[1] }; });
 }
@@ -1848,6 +1850,7 @@ function bind() {
     const fm = $("actions").classList.contains("fitmode") && p;
     if (e.key === "ArrowRight") { e.preventDefault(); fm ? confirmSpot(p, "full") : decide("yes"); }
     else if (e.key === "ArrowLeft") { e.preventDefault(); fm ? confirmSpot(p, "reduced") : decide("no"); }
+    else if (e.key === "ArrowDown" && fm) { e.preventDefault(); confirmSpot(p, "no"); }
     else if (e.key === "ArrowUp") { e.preventDefault(); fm ? confirmSpot(p, "multi") : decide("top"); }
     else if (e.key === "Enter" && fieldOn && !e.target.closest("button")) { e.preventDefault(); $("centreBtn").click(); }
     else if (/^[sS]$/.test(e.key)) skip();
