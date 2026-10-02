@@ -577,3 +577,10 @@ body.gated .backbtn .bl{display:inline!important}
   .act.fit .b{white-space:normal;line-height:1.1;text-align:center;height:46px;max-width:96px}
   .act.fsplit .b{max-width:none}.act.fsplit .b button{white-space:normal;line-height:1.1;max-width:84px}
 }
+
+/* Field tools in the fit bar: Undo, Move, Remove */
+.fitbar .fb-tools{display:inline-flex;gap:4px}
+.fitbar .fb-tools[hidden],.fitbar .fb-tools button[hidden]{display:none}
+.fitbar .fb-tools button{border:1px solid rgba(255,255,255,.35);background:transparent;color:#fff;border-radius:8px;padding:4px 8px;font-size:12px;font-weight:600;cursor:pointer}
+.fitbar .fb-tools button:disabled{opacity:.4;cursor:default}
+.fitbar .fb-tools #fbRemove{border-color:#fca5a5;color:#fecaca}
