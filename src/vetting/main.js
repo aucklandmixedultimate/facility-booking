@@ -25,8 +25,8 @@ const supabase = SB_URL && SB_ANON
 const M_PER_DEG = 6378137 * Math.PI / 180;
 // Saved coordinates keep 8 decimals (about 1 mm) and angles 0.01°.
 const fx = v => +(+v).toFixed(8), fa = v => +(+v).toFixed(2);
-// Fit ratings: "no" = unusable (discounted, never bookable), "reduced" = 3v3 only.
-const FIT_LABEL = { unknown: "not rated", reduced: "3v3 only", full: "1 × full 7v7", multi: "2 × full 7v7", no: "unusable (discount)" };
+// Fit ratings: "no" = unusable (rejected, never bookable), "reduced" = 3v3 only.
+const FIT_LABEL = { unknown: "not rated", reduced: "3v3 only", full: "1 × full 7v7", multi: "2 × full 7v7", no: "unusable (reject)" };
 // WFDF field: 100 × 37 m overall, 18 m end zones, brick marks 20 m in from each goal line.
 const WFDF = { len: 100, wid: 37, ez: 18 };
 const BRICK = 20;
@@ -314,7 +314,19 @@ function syncFromFields(t) {
   const n = allLights(t).length;
   if (n && t.lights !== "full" && t.lights !== "training") t.lights = "full";
 }
-const allLights = t => t.lightPts.concat(...Object.values(t.fr).map(x => x.lights || []));
+// Poles are physical: one shared by two fields counts once.
+const allLights = t => { const seen = new Set();
+  return t.lightPts.concat(...Object.values(t.fr).map(x => x.lights || [])).filter(([la, lo]) => { const k = la.toFixed(7) + "," + lo.toFixed(7); return !seen.has(k) && seen.add(k); }); };
+// Poles of the venue's other fields (and park-wide ones), for sharing.
+const otherPoles = (t, fr) => t.lightPts.concat(...Object.values(t.fr).filter(x => x !== fr).map(x => x.lights || []));
+// Other poles standing along a field's long sides (within its length plus 6 m, and within
+// 8 m of the usual pole line just outside each sideline).
+function sharedPoles(t, fr) {
+  const { kx, ky } = metric(fr.lat), th = (fr.angle || 0) * Math.PI / 180, L2 = (fr.len || dims.len) / 2, line = (fr.wid || dims.wid) / 2 + POLE_OFFSET;
+  return otherPoles(t, fr).filter(([la, lo]) => { const ex = (lo - fr.lon) * kx, sy = (fr.lat - la) * ky;
+    const u = ex * Math.cos(th) + sy * Math.sin(th), v = -ex * Math.sin(th) + sy * Math.cos(th);
+    return Math.abs(u) <= L2 + 6 && Math.abs(Math.abs(v) - line) <= 8; }).map(q => [...q]);
+}
 // Bulbs go to the selected field; with no field selected they're park-wide.
 function activeLights(t) {
   if (!t.sel) return t.lightPts;
@@ -438,7 +450,7 @@ function fieldKeys(p) {
 const OVERLAP_TOL = 0.10, SPARE_RULE = 0.25;
 const newFrisbeeName = t => { let n = 1; while (t.fr["Frisbee " + n]) n++; return "Frisbee " + n; };
 const rated = x => x && x.fit && x.fit !== "unknown" && x.lat != null;
-// Unusable (discount) fields (fit "no") are kept as ratings but never become bookable.
+// Unusable (reject) fields (fit "no") are kept as ratings but never become bookable.
 const bookable = x => rated(x) && x.fit !== "no";
 function metric(lat0) { const kx = M_PER_DEG * Math.cos(lat0 * Math.PI / 180), ky = M_PER_DEG; return { kx, ky }; }
 // A frisbee field's rectangle as [lat, lon] corners (same convention as placeLights).
@@ -482,7 +494,12 @@ function coverageXY(council, frisbee) {
 }
 // The venue's mapping: { groups: [{key, name, council[], frisbee[], fit, cap, c}], covered, total }.
 function councilGroups(p, t) {
-  const cf = fieldKeys(p), fs = Object.values(t.fr).filter(bookable);
+  const cf = fieldKeys(p);
+  // Drafting allows overlap; here a field lying mostly (over half) on an earlier one is the
+  // same field, so only the earlier one counts.
+  const fs = [];
+  Object.values(t.fr).filter(bookable).forEach(fr => { const r = toXY(frisbeeCorners(fr), fr.lat, fr.lon), a = areaXY(r);
+    if (!fs.some(o => areaXY(clipXY(toXY(frisbeeCorners(o), fr.lat, fr.lon), r)) > 0.5 * a)) fs.push(fr); });
   if (!fs.length) return { groups: [], covered: 0, total: 0 };
   const lat0 = fs[0].lat, lon0 = fs[0].lon;
   const cpoly = cf.map(({ f, key }) => ({ key, xy: toXY(f.p, lat0, lon0), c: f.c })), fpoly = fs.map(fr => ({ fr, xy: toXY(frisbeeCorners(fr), lat0, lon0) }));
@@ -617,8 +634,11 @@ function drawLights(p) {
   lightLayer.clearLayers();
   const t = tagsFor(p), arr = activeLights(t);
   const icon = cls => L.divIcon({ className: "", html: `<div class="lightpin${cls}">💡</div>`, iconSize: [26, 26], iconAnchor: [13, 13] });
-  if (!t.sel) Object.values(t.fr).forEach(x => (x.lights || []).forEach(ll =>
-    L.marker(ll, { icon: icon(" other"), interactive: false, keyboard: false }).addTo(lightLayer)));
+  // The venue's other poles always show (shared poles sit under the selected field's own).
+  const mine = new Set(arr.map(([la, lo]) => la.toFixed(7) + "," + lo.toFixed(7)));
+  (t.sel ? otherPoles(t, t.fr[t.sel]) : Object.values(t.fr).flatMap(x => x.lights || [])).forEach(ll => {
+    if (mine.has(ll[0].toFixed(7) + "," + ll[1].toFixed(7))) return;
+    L.marker(ll, { icon: icon(" other"), interactive: false, keyboard: false }).addTo(lightLayer); });
   arr.forEach((ll, k) => {
     const mk = L.marker(ll, { icon: icon(""), title: "Light pole — drag to move, drag back to the dispenser (or click) to remove", keyboard: false, draggable: true });
     mk.on("click", e => { L.DomEvent.stopPropagation(e); removeLight(p, k); });
@@ -753,6 +773,9 @@ function showField(on) {
 // Locking also records the spot (centre and angle) on the nearest council field, so the
 // lock, not saving, fixes the coordinates; a rated field's auto lights follow it.
 function lockField() {
+  // Stop any glide (inertia after a fling, a zoom or pan animation) first: otherwise the
+  // field is pinned mid-glide and slides away with the map once locked.
+  map.stop();
   setRotating(false);
   pin = map.getCenter(); sizeField();
   const p = current(); if (!p) return;
@@ -762,6 +785,9 @@ function lockField() {
   const cur = t.fr[key] ||= { name: key, fit: "unknown", lights: [] };
   Object.assign(cur, { name: key, lat: fx(pin.lat), lon: fx(pin.lng), angle: fa(angle), len: dims.len, wid: dims.wid, ez: dims.ez });
   if (cur.fit && cur.fit !== "unknown" && hasLights(t) && cur.lightsAuto !== false && cur.lightCount) placeLights(p, cur);
+  // Poles already placed for the venue's other fields that stand along this one's long
+  // sides light it too: share them rather than placing new ones.
+  if (hasLights(t) && !(cur.lights || []).length) { const sh = sharedPoles(t, cur); if (sh.length) { cur.lights = sh; cur.lightsAuto = false; } }
   syncFromFields(t);
   t.sel = key; fitArmed = true;
   $("fitPop").hidden = false; drawParkFields(p); drawLights(p); previewFields(p); renderTags(p); renderCentre();
@@ -787,6 +813,11 @@ function previewFields(p) {
   $("actions").querySelectorAll("[data-fit]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.fit === chosen)));
   updateActions();
 
+  // Tools for the selected field: undo, move (unlock), remove.
+  const fr = t.sel && t.fr[t.sel];
+  $("fbTools").hidden = !IS_ADMIN || !(fr?.lat != null || edits[p.id]?.length);
+  $("fbUndo").disabled = !edits[p.id]?.length;
+  $("fbMove").hidden = $("fbRemove").hidden = !(fr?.lat != null);
   $("saveNextBtn").hidden = !IS_ADMIN || !(curRating(t)?.fit && curRating(t).fit !== "unknown") || moved;
 }
 function afterMove() {
@@ -815,26 +846,37 @@ function confirmSpot(p, fit) {
   fitArmed = false;
   drawParkFields(p); drawLights(p); renderTags(p); previewFields(p); renderCentre();
 }
-// "2 × full 7v7" becomes two single fields side by side: the field as placed plus a twin one
-// field-width over, on the long side that overlaps the other set frisbee fields least (then
-// covers the most council area). If that side is already taken by a set field (over a
-// quarter of a field's overlap), that field is the second one: no overlapping copy is made.
+// "2 × full 7v7" becomes two single fields: the field as placed plus a twin beside it (a
+// field-width over) or end to end (a field-length on). The direction that maximises the
+// venue's council area under the twin wins, with overlap of other frisbee fields counted
+// against it at half weight. Overlap is allowed while drafting: the roll-up resolves it.
 function splitMulti(p, t, F) {
   const W = F.wid || dims.wid, { kx, ky } = metric(F.lat), th = (F.angle || 0) * Math.PI / 180;
-  const shift = v => ({ ...F, lat: fx((F.lat - v * Math.cos(th) / ky)), lon: fx((F.lon - v * Math.sin(th) / kx)) });
+  // Field-local offset (u along the length, v across) → a copy of F moved by it.
+  const shift = (u, v) => ({ ...F, lat: fx(F.lat - (u * Math.sin(th) + v * Math.cos(th)) / ky), lon: fx(F.lon + (u * Math.cos(th) - v * Math.sin(th)) / kx) });
+  const L = F.len || dims.len;
   const others = Object.values(t.fr).filter(x => x !== F && x.lat != null && x.fit && x.fit !== "unknown");
-  const cf = fieldKeys(p), xy = fr => toXY(frisbeeCorners(fr), F.lat, F.lon), fa = (F.len || dims.len) * W;
-  const cand = [W, -W].map(v => { const tw = shift(v), txy = xy(tw);
+  const cf = fieldKeys(p).map(({ f }) => toXY(f.p, F.lat, F.lon)), xy = fr => toXY(frisbeeCorners(fr), F.lat, F.lon), fa = (F.len || dims.len) * W;
+  const taken = [xy(F), ...others.map(xy)];
+  // Under a candidate, sampled on a 2 m grid: council area (any of the venue's council
+  // fields) and area already under another frisbee field.
+  const measure = txy => { const xs = txy.map(q => q[0]), ys = txy.map(q => q[1]); let inC = 0, inF = 0;
+    for (let x = Math.min(...xs) + 1; x < Math.max(...xs); x += 2) for (let y = Math.min(...ys) + 1; y < Math.max(...ys); y += 2) {
+      const q = [x, y]; if (!insideXY(q, txy)) continue;
+      if (cf.some(c => insideXY(q, c))) inC++; if (taken.some(r => insideXY(q, r))) inF++; }
+    return { council: inC * 4, overlap: inF * 4 }; };
+  // Side by side (either long side) or end to end (either end), whichever covers most free
+  // council area; ties prefer side by side, as listed.
+  const cand = [[0, W], [0, -W], [L, 0], [-L, 0]].map(([u, v]) => { const tw = shift(u, v), txy = xy(tw);
     const hit = others.map(o => ({ o, r: areaXY(clipXY(xy(o), txy)) / fa })).sort((a, b) => b.r - a.r)[0];
-    const cov = cf.reduce((s2, { f }) => s2 + areaXY(clipXY(toXY(f.p, F.lat, F.lon), txy)), 0);
-    return { tw, hit, ov: hit?.r || 0, cov }; }).sort((a, b) => a.ov - b.ov || b.cov - a.cov)[0];
+    const m = measure(txy);
+    return { tw, hit, ov: hit?.r || 0, score: m.council - 0.5 * m.overlap, end: u !== 0 }; }).sort((a, b) => b.score - a.score || a.ov - b.ov)[0];
   F.fit = "full";
-  if (cand.ov > 0.25) { F.pair = cand.hit.o.name; cand.hit.o.pair = F.name;
-    setStatus(`2 × full 7v7: ${F.name} pairs with ${cand.hit.o.name}, already set beside it.`); return; }
   const name = newFrisbeeName(t);
   t.fr[name] = { name, fit: "full", lat: cand.tw.lat, lon: cand.tw.lon, angle: F.angle, len: F.len, wid: F.wid, ez: F.ez, lights: [], pair: F.name };
   F.pair = name;
-  setStatus(`2 × full 7v7: ${F.name} and ${name} set side by side as two single fields.`);
+  if (hasLights(t)) { const sh = sharedPoles(t, t.fr[name]); if (sh.length) { t.fr[name].lights = sh; t.fr[name].lightsAuto = false; } }
+  setStatus(`2 × full 7v7: ${F.name} and ${name} set ${cand.end ? "end to end" : "side by side"} as two single fields.`);
 }
 // Auto-placed light poles: n poles (always even) split evenly between the field's two long
 // sides, a few metres outside the sideline. The first pair goes on the long side nearer the
@@ -863,7 +905,11 @@ function placeLights(p, fr) {
   const out = [];
   for (let i = 0; i < per; i++) out.push(at(along(i), first));
   for (let i = 0; i < per; i++) out.push(at(along(i), -first));
-  fr.lights = out;
+  // A pole within 7 m of one another field already has is that same pole: share it (two
+  // fields side by side have their pole lines 6 m apart, either side of the shared edge).
+  const t = tagsFor(p), others = otherPoles(t, fr);
+  fr.lights = out.map(q => { const near = others.map(o => ({ o, d: Math.hypot((o[0] - q[0]) * ky, (o[1] - q[1]) * kx) })).sort((a, b) => a.d - b.d)[0];
+    return near && near.d <= 7 ? [...near.o] : q; });
 }
 // The lights button cycles ❓ unknown → 🚫 no lights → 💡 lights. In 💡 each tap adds two
 // poles along the selected field's long sides, up to 8, then the next tap goes back to 0.
@@ -1096,6 +1142,16 @@ function goBack() {
 }
 // Rating undo: snapshot a park's draft before each change; Undo restores the last one.
 function snap(p) { if (!p) return; (edits[p.id] ||= []).push(JSON.stringify(tagsFor(p))); if (edits[p.id].length > 50) edits[p.id].shift(); }
+// Remove the selected frisbee field (its 2 × partner stays, now unpaired).
+function removeField(p) {
+  const t = tagsFor(p), key = t.sel; if (!key || !t.fr[key]) return;
+  snap(p);
+  delete t.fr[key];
+  Object.values(t.fr).forEach(x => { if (x.pair === key) delete x.pair; });
+  t.sel = null; fitArmed = false; $("fitPop").hidden = true;
+  syncFromFields(t); drawParkFields(p); drawLights(p); renderTags(p); renderCentre();
+  setStatus(`Removed ${key}. ↶ Undo (Z) brings it back.`);
+}
 function editUndo() {
   const p = current(); const st = p && edits[p.id]; if (!st?.length) return;
   const sel = tagsFor(p).sel; draft[p.id] = JSON.parse(st.pop()); draft[p.id].sel = sel;
@@ -1829,6 +1885,9 @@ function bind() {
   $("centreBtn").onclick = e => { e.stopPropagation(); if (swallowClick) { swallowClick = false; return; } if (rotating) lockField(); else setRotating(true); };
   $("actions").addEventListener("click", e => { const b = e.target.closest("[data-fit]"), p = current(); if (!b || !p) return;
     confirmSpot(p, b.dataset.fit); });
+  $("fbUndo").onclick = e => { e.stopPropagation(); editUndo(); };
+  $("fbMove").onclick = e => { e.stopPropagation(); const p = current(); if (p && tagsFor(p).sel) { snap(p); setRotating(true); setStatus(`Moving ${tagsFor(p).sel}: turn and drag it, then tap 🔓 to lock it in its new spot.`); } };
+  $("fbRemove").onclick = e => { e.stopPropagation(); const p = current(); if (p) removeField(p); };
   $("helpBtn").onclick = () => { const el = $("helpPanel"); el.hidden = !el.hidden; $("helpBtn").setAttribute("aria-expanded", String(!el.hidden)); };
   $("fieldBtn").onclick = () => showField(!fieldOn);
   bindDispenser();
