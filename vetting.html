@@ -6,10 +6,10 @@
     <title>Council / Community Fields</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap">
-    <script type="module" crossorigin src="/facility-booking/assets/vetting-5Y0piSjj.js"></script>
+    <script type="module" crossorigin src="/facility-booking/assets/vetting-DvIOiYQ9.js"></script>
     <link rel="modulepreload" crossorigin href="/facility-booking/assets/index-VH2SDcMh.js">
     <link rel="modulepreload" crossorigin href="/facility-booking/assets/_commonjsHelpers-Cpj98o6Y.js">
-    <link rel="stylesheet" crossorigin href="/facility-booking/assets/vetting-D0rKk5lS.css">
+    <link rel="stylesheet" crossorigin href="/facility-booking/assets/vetting-DijvJyAK.css">
   </head>
   <body>
     <div class="wrap">
@@ -119,6 +119,7 @@
                     <button type="button" id="fbUndo" title="Undo the last change to this park's fields (Z)">↶ Undo</button>
                     <button type="button" id="fbMove" title="Move or turn this field: unlocks it; lock it again to save the spot">✎ Move</button>
                     <button type="button" id="fbRemove" title="Remove this frisbee field (Undo brings it back)">🗑 Remove</button>
+                    <button type="button" id="fbAlign" class="fb-align" hidden>⚠ Misaligned</button>
                   </span>
                   <button class="fb-next" id="saveNextBtn" hidden title="Save this park's field ratings and move on to its next unrated council field">💾 Next field</button>
                 </div>
@@ -190,6 +191,16 @@
 
       </div>
     </div>
+    <dialog id="alignDlg" class="dlg">
+      <form method="dialog">
+        <h3 id="alignTitle">Realign the council fields?</h3>
+        <p id="alignBody"></p>
+        <div class="dlg-actions">
+          <button value="no" class="ghost">No</button>
+          <button value="yes" class="primary" autofocus id="alignYes">Yes, realign</button>
+        </div>
+      </form>
+    </dialog>
     <dialog id="saveDlg" class="dlg">
       <form method="dialog">
         <h3 id="dlgTitle">Add another frisbee field?</h3>
