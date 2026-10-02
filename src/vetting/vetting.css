@@ -584,3 +584,6 @@ body.gated .backbtn .bl{display:inline!important}
 .fitbar .fb-tools button{border:1px solid rgba(255,255,255,.35);background:transparent;color:#fff;border-radius:8px;padding:4px 8px;font-size:12px;font-weight:600;cursor:pointer}
 .fitbar .fb-tools button:disabled{opacity:.4;cursor:default}
 .fitbar .fb-tools #fbRemove{border-color:#fca5a5;color:#fecaca}
+.fitbar .fb-tools .fb-align{border-color:rgba(255,255,255,.35);color:#cbd5e1}
+.fitbar .fb-tools .fb-align.warn{background:#f97316;border-color:#f97316;color:#fff}
+.fitbar .fb-tools .fb-align[hidden]{display:none}
