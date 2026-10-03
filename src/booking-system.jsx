@@ -2315,9 +2315,9 @@ export default function App() {
                 const on=listBookerFilter.size===addrs.length&&addrs.every(e=>listBookerFilter.has(e));
                 return [
                   <button key={"season-"+sid} onClick={()=>setListBookerFilter(on?new Set():new Set(addrs))}
-                    title={`${x.name} (${x.span})${sid===curSeason?" — current season":" — next season"}: select its ${members.length} booker${members.length!==1?"s":""}`}
+                    title={`${x.name} (${x.span})${sid===curSeason?" — current season":x.months.length?" — next season":""}: select its ${members.length} booker${members.length!==1?"s":""}`}
                     style={{padding:"4px 10px",borderRadius:8,border:`1.5px dashed ${on?"#0f172a":"#94a3b8"}`,cursor:"pointer",fontSize:11,fontWeight:800,fontFamily:"inherit",flexShrink:0,marginLeft:4,background:on?"#0f172a":"#f8fafc",color:on?"#fff":"#334155",letterSpacing:"0.02em"}}>
-                    {x.name}<span style={{fontWeight:500,opacity:.75,marginLeft:4}}>{sid===curSeason?"now":"next"}</span>
+                    {x.name}{x.months.length>0&&<span style={{fontWeight:500,opacity:.75,marginLeft:4}}>{sid===curSeason?"now":"next"}</span>}
                   </button>,
                   ...members.map(primary=>{
                 const group=bookerGroups[primary];
