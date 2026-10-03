@@ -268,7 +268,7 @@ export function CartModal({ cart, setCart, onClose, onSubmit, openNew, silentMod
   const totalSlot    = cart.filter(i=>i.slotChange).length;
   const totalClash  = cart.filter(i=>i.clashNotify).length;
   const totalInform = cart.filter(i=>i.informCpsa).reduce((s,i)=>s+(i.drafts?.length||0),0);
-  const totalRoom = cart.filter(i=>i.roomRequest).length;
+  const totalRoom = cart.filter(i=>i.roomRequest).reduce((s,i)=>s+(i.drafts?.length||0),0);
   // Group CPSA status notify-only items by booker email so the cart doesn't explode
   // into one row per booking. Status-change, clash and inform-CPSA items are rendered
   // separately below (clash/inform have no drafts to group).
@@ -513,22 +513,21 @@ export function CartModal({ cart, setCart, onClose, onSubmit, openNew, silentMod
               })}
               {/* Room requests to CPSA — one card each; a draft to AMUA's inbox on submit */}
               {cart.map((item,gi)=>{
-                if(!item.roomRequest) return null;
-                const b=item.drafts[0]; if(!b) return null;
-                const f=FACILITIES.find(x=>x.id===b.facility_id);
+                if(!item.roomRequest||!item.drafts.length) return null;
                 return (
                   <div key={'room-'+gi} style={{border:'1.5px solid #c4b5fd',borderRadius:12,overflow:'hidden'}}>
                     <div style={{background:'#f5f3ff',padding:'10px 14px',display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
                       <EmailChip email={item.email}/>
                       <span style={{fontSize:13,fontWeight:600,color:'#0f172a',flex:1}}>{item.name}</span>
-                      <span style={{fontSize:11,fontWeight:700,color:'#6d28d9',background:'#ede9fe',border:'1px solid #c4b5fd',borderRadius:4,padding:'1px 7px'}}>📨 Room request · draft to AMUA inbox</span>
-                      <button onClick={()=>removeDraft(gi,0)} title="Remove" style={{background:'none',border:'none',cursor:'pointer',color:'#f43f5e',fontSize:15,padding:'2px 4px',lineHeight:1}}>✕</button>
+                      <span style={{fontSize:11,fontWeight:700,color:'#6d28d9',background:'#ede9fe',border:'1px solid #c4b5fd',borderRadius:4,padding:'1px 7px'}}>📨 {item.drafts.length>1?`${item.drafts.length} room requests · one email`:'Room request'} · draft to AMUA inbox</span>
+                      <span style={{fontFamily:'monospace',color:'#94a3b8',fontSize:11}}>{item.ref}</span>
                     </div>
-                    <div style={{padding:'8px 14px',fontSize:12,color:'#64748b',background:'#fff'}}>
-                      <span style={{fontWeight:600,color:'#0f172a',marginRight:6}}>{f?.name||b.facility_id}</span>{fmtDate(b.date)} · {fmtTime(b.start_hour)}–{fmtTime(b.start_hour+b.duration)}{b.purpose?` · ${b.purpose}`:''}
-                      <span style={{marginLeft:8,fontFamily:'monospace',color:'#94a3b8'}}>{item.ref}</span>
-                      <div style={{marginTop:3,color:'#6d28d9'}}>On submit → Pending {vendorShortFor(b.facility_id)} review</div>
-                    </div>
+                    {item.drafts.map((b,di)=>{ const f=FACILITIES.find(x=>x.id===b.facility_id); return (
+                      <div key={b.id||di} style={{padding:'6px 14px',fontSize:12,color:'#64748b',background:'#fff',borderTop:di?'1px solid #f1f5f9':'none',display:'flex',alignItems:'center',gap:6}}>
+                        <span style={{flex:1}}><span style={{fontWeight:600,color:'#0f172a',marginRight:6}}>{f?.name||b.facility_id}</span>{fmtDate(b.date)} · {fmtTime(b.start_hour)}–{fmtTime(b.start_hour+b.duration)}{b.purpose?` · ${b.purpose}`:''}</span>
+                        <button onClick={()=>removeDraft(gi,di)} title="Remove this request" style={{background:'none',border:'none',cursor:'pointer',color:'#f43f5e',fontSize:14,padding:'2px 4px',lineHeight:1}}>✕</button>
+                      </div>); })}
+                    <div style={{padding:'4px 14px 8px',fontSize:12,color:'#6d28d9',background:'#fff'}}>On submit → Pending {vendorShortFor(item.drafts[0].facility_id)} review</div>
                   </div>
                 );
               })}

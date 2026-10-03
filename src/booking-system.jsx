@@ -602,6 +602,15 @@ export default function App() {
         const gtecSnap = { name: ev.EventName || "", date, start_hour, duration, facilityIds };
         const prev = bestByBooking.get(match.booking.id);
         if (!prev || rank > prev.rank) bestByBooking.set(match.booking.id, { match, gtecSnap, effectiveExact, rank });
+        // Other bookings by the same booker this event overlaps: mismatches, ranked below any
+        // direct match (so an exact match from another event still wins). A booking the
+        // admin confirmed stays confirmed.
+        for (const o of match.also || []) {
+          if (parseCpsaResolution(o.booking.system_notes)?.resolution === "confirmed") continue;
+          matchedUserIds.add(o.booking.id);
+          const oRank = 500 - (o.reasons?.length || 0), op = bestByBooking.get(o.booking.id);
+          if (!op || oRank > op.rank) bestByBooking.set(o.booking.id, { match: o, gtecSnap, effectiveExact: false, rank: oRank });
+        }
       }
 
       // Apply the winning match for each booking exactly once.
@@ -1777,11 +1786,18 @@ export default function App() {
 
   // Room request to CPSA: cart an email (a draft to AMUA's inbox, since it's vendor mail) for the
   // Meeting Room or Function Room; on submit the booking moves to Pending GTEC Review.
+  // Requests to the same vendor roll up into one cart item, and so one email.
   function addRoomRequestToCart(booking, vendorEmail, vendorName) {
-    const ref = "ROOM-" + Date.now().toString(36).toUpperCase();
-    setCart(c => [...c, { roomRequest: true, notifyOnly: true, drafts: [booking], name: vendorName || vendorEmail, email: vendorEmail, ref }]);
+    setCart(c => {
+      const i = c.findIndex(x => x.roomRequest && x.email.toLowerCase() === vendorEmail.toLowerCase());
+      if (i >= 0) {
+        if (c[i].drafts.some(d => d.id === booking.id)) return c;
+        return c.map((x, j) => j === i ? { ...x, drafts: [...x.drafts, booking].sort((a, b) => a.date.localeCompare(b.date) || a.start_hour - b.start_hour) } : x);
+      }
+      return [...c, { roomRequest: true, notifyOnly: true, drafts: [booking], name: vendorName || vendorEmail, email: vendorEmail, ref: "ROOM-" + Date.now().toString(36).toUpperCase() }];
+    });
     setRoomRequestFor(null);
-    showToast("Room request added to the cart.");
+    showToast(`Room request added to the ${vendorName || vendorEmail} email in the cart.`);
   }
 
   // Generic outbox queue — admin notification actions (clash, mismatch, …) push
@@ -1889,7 +1905,8 @@ export default function App() {
         }
         if (item.roomRequest) {
           const b0 = item.drafts[0], fac = FACILITIES.find(x=>x.id===b0?.facility_id);
-          await sendEmail({ to: item.email, subject: `Room booking request — ${fac?.name||"room"}, ${fmtDate(b0.date)} (${item.ref})`,
+          const n = item.drafts.length;
+          await sendEmail({ to: item.email, subject: n > 1 ? `Room booking requests — ${n} bookings from ${fmtDate(b0.date)} (${item.ref})` : `Room booking request — ${fac?.name||"room"}, ${fmtDate(b0.date)} (${item.ref})`,
             html: buildRoomRequestEmailHtml({ vendorName: item.name, bookings: item.drafts, ref: item.ref, players: approxPlayers }) });
           logActivity("room_request_drafted", { intended: item.email, ref: item.ref, ids: item.drafts.map(d=>d.id), items: item.drafts.map(d=>({ facility_id:d.facility_id, date:d.date, start_hour:d.start_hour, duration:d.duration })) });
           continue;
@@ -2331,7 +2348,7 @@ export default function App() {
                   {/* Grouped (schedule summary, the default) or Itemised (one row per booking). */}
                   <TableViewToggle value={listView} onChange={setListView}/>
                   {listView==="grouped" ? (
-                    <ScheduleSummaryModal bookings={bookings.filter(b=>inActiveVenue(b.facility_id)&&(listBookerFilter.size===0||listBookerFilter.has(b.email?.toLowerCase())))} isAdmin={isAdmin} loggedInEmail={loggedInEmail} onBulkApply={handleBulkApply} onBulkStatusChange={handleBulkStatusChange} aliasNames={aliasNames} emailAliases={emailAliases} embedded/>
+                    <ScheduleSummaryModal bookings={bookings.filter(b=>inActiveVenue(b.facility_id)&&(selFac==="all"||b.facility_id===selFac)&&(listBookerFilter.size===0||listBookerFilter.has(b.email?.toLowerCase()))&&(!listShowClashes||allClashIds.has(b.id)))} isAdmin={isAdmin} loggedInEmail={loggedInEmail} onBulkApply={handleBulkApply} onBulkStatusChange={handleBulkStatusChange} aliasNames={aliasNames} emailAliases={emailAliases} embedded/>
                   ) : isMobile ? (
                     // Phones: filters in a compact grid (bookers via the pills above), then one
                     // card per booking — date, time, field and status on top, booker and purpose below.
