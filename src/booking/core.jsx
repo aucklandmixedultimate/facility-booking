@@ -564,7 +564,10 @@ export function activeVenueKeys() {
   return d ? [d] : ALL_VENUES;
 }
 export function activeVenueKey() { const ks = activeVenueKeys(); return ks === ALL_VENUES ? ALL_VENUES : ks[0]; }
+// Facilities the viewer removed from the calendars' options (✕ on a facility pill).
+export let _hiddenFacs = new Set();
 export function inActiveVenue(facilityId) {
+  if (_hiddenFacs.has(facilityId)) return false;
   const ks = activeVenueKeys();
   if (ks === ALL_VENUES) return true;
   const f = FACILITIES.find(x => x.id === facilityId);
@@ -574,7 +577,14 @@ export function inActiveVenue(facilityId) {
 // even when it belongs to another venue, so editing never silently drops it.
 export function venueFacilities(keepId) {
   const ks = activeVenueKeys();
-  return visibleFacilities().filter(f => ks === ALL_VENUES || ks.includes(venueKeyOf(f)) || f.id === keepId);
+  return visibleFacilities().filter(f => f.id === keepId || (!_hiddenFacs.has(f.id) && (ks === ALL_VENUES || ks.includes(venueKeyOf(f)))));
+}
+// The calendars' default options: the default venue (GTEC Cornwall Park) plus the venues of
+// the viewer's own active council / community fields.
+export function defaultVenueSelection() {
+  const ks = [defaultVenueKey()];
+  visibleFacilities().filter(f => f.council && ownsCouncilFacility(f)).forEach(f => { const k = venueKeyOf(f); if (!ks.includes(k)) ks.push(k); });
+  return ks;
 }
 // The booking form picks a facility in three steps: provider → venue (a provider's site) →
 // facility. Every facility the viewer can book is offered (council fields added on the
@@ -836,6 +846,13 @@ export const MOBILE_STYLE = `
   .fac-social-tex {
     background-image: repeating-linear-gradient(45deg, rgba(255,255,255,0.20) 0 4px, rgba(255,255,255,0) 4px 9px);
   }
+  /* Facility pills on desktop: all one width, names cut with … and shown in full on hover. */
+  @media (min-width: 768px) {
+    .facpills .facpill { width: 150px; transition: width .15s ease; }
+    .facpills .facpill .facpill-n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .facpills .facpill:hover { width: auto; max-width: 420px; }
+  }
+  .facpills .facpill .facpill-n { white-space: nowrap; }
   .fac-social-tex-dark {
     background-image: repeating-linear-gradient(45deg, rgba(0,0,0,0.10) 0 4px, rgba(0,0,0,0) 4px 9px);
   }
@@ -1827,4 +1844,5 @@ export function setModuleState(patch) {
   if ("_activeVenue" in patch) _activeVenue = patch._activeVenue;
   if ("_bookerEmails" in patch) _bookerEmails = patch._bookerEmails;
   if ("_vendorEmails" in patch) _vendorEmails = patch._vendorEmails;
+  if ("_hiddenFacs" in patch) _hiddenFacs = patch._hiddenFacs;
 }

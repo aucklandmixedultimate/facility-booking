@@ -93,6 +93,7 @@ let focusId = null;                          // park opened from the Auckland ma
 let focusFrom = null;                        // "city" (opened from the map) or "back" (the Back button)
 const visited = [];                          // parks shown in park view, for Back
 const edits = {};                            // per-park undo stack of rating snapshots
+const savedDepth = {};                       // undo depth at the last save: edits since then are unsaved
 
 // ── Data ─────────────────────────────────────────────────────────────────────
 function fromRow(r) { return { decision: r.decision, lights: r.lights, fit: r.fit, quality: r.quality, fields: r.fields || "", notes: r.notes || "",
@@ -197,6 +198,7 @@ async function save(id, rev) {
     }
   }
   if (rev) reviews[id] = { ...rev, by: session?.user?.email || rev.by || "", at: new Date().toISOString() }; else delete reviews[id];
+  savedDepth[id] = edits[id]?.length || 0;
   if (mode === "local") store.set("vet-reviews", reviews);
   logChange("review", id, prev, snapOf(reviews[id]));
   return true;
@@ -2342,8 +2344,26 @@ async function saveAndNext() {
   startNextField(p);
   setStatus(`Saved ${done}. About ${Math.round(share * 100)}% of the council area is still free — would you like to add another frisbee field? Lock this one to add it.`);
 }
-function skip() {
+// Field configuration changed since the last save (each edit pushes an undo snapshot; notes don't).
+function hasUnsaved(p) {
+  if (!IS_ADMIN || !p || !draft[p.id]) return false;
+  return (edits[p.id]?.length || 0) !== (savedDepth[p.id] || 0) || (draft[p.id].notes || "").trim() !== (reviews[p.id]?.notes || "").trim();
+}
+function askUnsaved(p) {
+  const dlg = $("unsavedDlg");
+  $("unsavedTitle").textContent = `Save your changes to ${p.name}?`;
+  $("unsavedBody").textContent = "You've changed the field configuration here since it was last saved. Save it before moving on (any decision stays as it is), or discard the changes.";
+  return new Promise(res => { dlg.returnValue = ""; dlg.addEventListener("close", () => res(dlg.returnValue || "cancel"), { once: true }); dlg.showModal(); });
+}
+async function skip() {
   const p = current(); if (!p) return;
+  // Unsaved field configuration: offer to save it (or discard it) before moving on.
+  if (hasUnsaved(p)) {
+    const a = await askUnsaved(p);
+    if (a === "cancel") return;
+    if (a === "save") { busy = true; const ok = await save(p.id, buildReview(p, tagsFor(p), reviews[p.id]?.decision || "rating", false)); busy = false; if (!ok) return; renderRail(); }
+    else { delete draft[p.id]; delete edits[p.id]; delete savedDepth[p.id]; }
+  }
   if (focusId && focusFrom === "back") { focusId = null; focusFrom = null; render(); return; }
   if (focusId) { focusId = null; setView("city"); return; }
   later.add(p.id); bumpActivity(p.id, -1); cursor = $("mode").value === "todo" ? 0 : cursor + 1; $("fitPop").hidden = true; render();
@@ -2471,7 +2491,7 @@ function bind() {
   $("cimgBox").addEventListener("click", e => { if (!e.target.closest("#cimgOpen")) closeCouncilImage(); });
   document.addEventListener("keydown", e => {
     if (!$("cimgBox").hidden && e.key === "Escape") return closeCouncilImage();
-    if ($("saveDlg").open || e.target.matches("input, textarea, select")) return;
+    if ($("saveDlg").open || $("unsavedDlg").open || e.target.matches("input, textarea, select")) return;
     const p = current();
     if (!IS_ADMIN && !/^(Escape|c|C)$/.test(e.key)) return;   // bookers: no rating keys
     if (e.key === "Escape") { if (document.body.classList.contains("mapfull")) { setFullMap(false); return; } if (infoOpenFor) { infoOpenFor = null; render(); return; } if (rotating) setRotating(false); $("sizePanel").hidden = true; $("helpPanel").hidden = true; $("fitPop").hidden = true; if (p && tagsFor(p).sel) selectField(p, null); return; }
