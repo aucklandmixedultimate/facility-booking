@@ -1,7 +1,8 @@
 import { useState, Fragment } from "react";
-import { AMUA_INBOX, AMUA_INFO, Badge, COUNCIL_APPLICATION_FEE, ClashPair, CopyableTable, EmailChip, FACILITIES, INVOICED_META, isSocialFac, vendorShortFor, vendorsIn, TableViewToggle, useTableView, Modal, PROVIDERS, REVIEW_STATUSES, S, STATUS_META, SUPABASE_URL, _contactReviews, _currentUser, _sessionStartIso, authHeaders, bookingCost, buildCouncilPayload, canSendToCouncil, councilFeeSplit, councilOverlaps, emailColor, extractCpsaAmendValues, facCellLabel, fmt24, fmtCost, fmtDate, fmtDateShort, fmtDateShortDow, fmtDuration, fmtGtecEvent, fmtLoggedAt, fmtTime, getBillingDrift, getCrossFacilityOverlaps, getSameFacilityOverlaps, isAdminBooking, isCouncilBooking, nextWorkflowStatus, parseClashPrevStatus, parseCouncilApp, parseCpsaRefs, parseCpsaResolution, parseGtecSnapshot, parseMismatchNote, parseSlotLink, providerOfFacility, sb, setCpsaOrig, setCpsaResolution, setModuleState, stripMismatchNote, todayKey, visibleFacilities, workflowOf, workflowStep } from "./core.jsx";
-import { PatternModal, PricingConditionsManager, ScheduleSummaryModal } from "./summary.jsx";
+import { AMUA_INBOX, AMUA_INFO, Badge, COUNCIL_APPLICATION_FEE, ClashPair, CopyableTable, EmailChip, FACILITIES, INVOICED_META, Modal, PROVIDERS, REVIEW_STATUSES, S, STATUS_META, SUPABASE_URL, TableViewToggle, _contactReviews, _currentUser, _sessionStartIso, authHeaders, bookingCost, buildCouncilPayload, canSendToCouncil, councilFeeSplit, councilOverlaps, emailColor, extractCpsaAmendValues, facCellLabel, fmt24, fmtCost, fmtDate, fmtDateShort, fmtDateShortDow, fmtDuration, fmtGtecEvent, fmtLoggedAt, fmtTime, getBillingDrift, getCrossFacilityOverlaps, getSameFacilityOverlaps, isAdminBooking, isCouncilBooking, isSocialFac, nextWorkflowStatus, parseClashPrevStatus, parseCouncilApp, parseCpsaRefs, parseCpsaResolution, parseGtecSnapshot, parseMismatchNote, parseSlotLink, providerOfFacility, sb, setCpsaOrig, setCpsaResolution, setModuleState, stripMismatchNote, todayKey, useTableView, vendorShortFor, vendorsIn, visibleFacilities, workflowOf, workflowStep } from "./core.jsx";
+import { councilAppBookings } from "./councilData.jsx";
 import { ActivityLogModal, DateRangePicker } from "./modals.jsx";
+import { PatternModal, PricingConditionsManager, ScheduleSummaryModal } from "./schedule.jsx";
 import { InlineDayPicker } from "./forms.jsx";
 // One newly-synced CPSA field booking, expandable to reveal the AMUA bookings it
 // clashes with (same facility / same time), any simultaneous use of a different
@@ -115,25 +116,6 @@ export const COUNCIL_OUTCOME_META = {
   declined:  { label: "Declined",                bg: "#fff1f2", border: "#f43f5e", text: "#881337", rank: 2 },
   info:      { label: "Update",                  bg: "#f1f5f9", border: "#94a3b8", text: "#334155", rank: 3 },
 };
-export function mergeCouncilOutcomes(prev, parsed) {
-  const next = JSON.parse(JSON.stringify(prev || {})), changed = new Set();
-  for (const m of parsed) for (const [id, a] of Object.entries(m.apps)) {
-    const o = next[id] ||= { id, outcome: "info", history: [] };
-    if ((o.history ||= []).some(h => h.msgId === m.msgId)) continue;
-    o.history.push({ msgId: m.msgId, date: m.date, outcome: a.outcome, subject: m.subject });
-    ["park", "fields", "start", "end"].forEach(k => { if (a[k]) o[k] = a[k]; });
-    if (m.coordinator?.email) o.coordinator = m.coordinator;
-    o.threadId = m.threadId; o.subject = m.subject; o.date ||= m.date;
-    // The newest real outcome wins (emails arrive oldest first), unless AMUA set it by hand.
-    if (a.outcome !== "info" && !o.manual && (!o.outcomeAt || m.date >= o.outcomeAt)) {
-      o.outcome = a.outcome; o.outcomeAt = m.date;
-      o.reason = a.outcome === "declined" ? (m.reason || o.reason || "") : "";
-    }
-    changed.add(id);
-  }
-  return { next, changed: [...changed] };
-}
-export const councilAppBookings = (bookings, id) => bookings.filter(b => (parseCouncilApp(b.system_notes)?.id || "").toLowerCase() === String(id).toLowerCase());
 export const escHtml = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 // AMUA's reply to the council about an offer, drafted to AMUA's own inbox (the app never
 // emails the council: see the email rule at sendEmail). AMUA sends it from Gmail, in the thread.
