@@ -377,6 +377,7 @@ body.viewer .handle .hint,body.viewer .rail .help,body.viewer #fieldBtn,body.vie
 .amendrow{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:4px 0 2px}
 .amendrow select,.amendrow input{padding:3px 8px;border:1px solid #c9b5f5;border-radius:8px;background:var(--surface);color:inherit;font-size:12px;min-width:0}
 .amendrow #clubIn{flex:1 1 150px}.amendrow #amendContact{flex:0 1 160px}
+.amendrow #amendWebsite{flex:1 1 180px}.amendrow #amendDetails{flex:2 1 220px}
 .amendrow button{border:1px solid #7c3aed;background:#7c3aed;color:#fff;border-radius:8px;padding:3px 10px;font-size:12px;font-weight:600}
 .amendrow #amendClear{background:transparent;color:#5b21b6}
 .amendrow [hidden]{display:none}

@@ -346,6 +346,10 @@ create policy "field_flags admin all" on public.field_flags
 -- first name and last initial only (e.g. "Rory H.").
 alter table public.field_flags add column if not exists kind text not null default 'private';
 alter table public.field_flags add column if not exists contact text not null default '';
+-- More about the provider, saved with an amendment: its website and other info (club phone or
+-- email, booking page…). (v2)
+alter table public.field_flags add column if not exists website text not null default '';
+alter table public.field_flags add column if not exists details text not null default '';
 
 -- Everyone signed in reads the reviews and provider flags (admins still do the writing).
 drop policy if exists "field_reviews admin select" on public.field_reviews;
@@ -465,7 +469,7 @@ revoke all on function public.settings_merge(text, jsonb, text[]) from public, a
 grant execute on function public.settings_merge(text, jsonb, text[]) to authenticated;
 
 -- ── Version stamp ───────────────────────────────────────────────────────────────
-insert into public.schema_version (id, version, applied_at) values (1, 1, now())
+insert into public.schema_version (id, version, applied_at) values (1, 2, now())
 on conflict (id) do update set version = excluded.version, applied_at = now();
 
 -- ── 6. Making someone an admin ──────────────────────────────────────────────────

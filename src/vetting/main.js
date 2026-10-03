@@ -150,6 +150,7 @@ async function loadFlags() {
   if (mode === "shared") {
     const { data, error } = await supabase.from("field_flags").select("*");
     if (!error) { flagsShared = true; flags = Object.fromEntries(data.map(r => [r.park_id, { club: r.club || "", kind: r.kind || "private", contact: r.contact || "",
+      website: r.website || "", details: r.details || "",
       by: r.flagged_by_email || "", at: r.updated_at }])); return; }
   }
   flagsShared = false; flags = store.get("vet-flags", {});
@@ -158,11 +159,17 @@ async function saveFlag(id, flag) {
   const prev = snapOf(flags[id]);
   if (flagsShared) {
     const row = flag && { park_id: id, club: flag.club || "", kind: flag.kind || "private", contact: flag.contact || "",
+      website: flag.website || "", details: flag.details || "",
       flagged_by: session?.user?.id || null, flagged_by_email: session?.user?.email || null, updated_at: new Date().toISOString() };
     let { error } = flag ? await supabase.from("field_flags").upsert(row) : await supabase.from("field_flags").delete().eq("park_id", id);
+    // Before the website/details columns exist (supabase-setup.sql v2), save without them.
+    if (error && flag && /website|details/i.test(error.message || "")) {
+      const { website: _w, details: _d, ...rest } = row; ({ error } = await supabase.from("field_flags").upsert(rest));
+      if (!error) setStatus("Saved the provider; its website and other info need the updated supabase-setup.sql — re-run it.", true);
+    }
     // Before the kind/contact columns exist (supabase-setup.sql), keep the provider only.
     if (error && flag && /kind|contact|column/i.test(error.message || "")) {
-      const { kind: _kind, contact: _contact, ...old } = row; ({ error } = await supabase.from("field_flags").upsert(old));
+      const { kind: _kind, contact: _contact, website: _w2, details: _d2, ...old } = row; ({ error } = await supabase.from("field_flags").upsert(old));
       if (!error) setStatus("Saved the provider; its kind and contact person need supabase-setup.sql.", true);
     }
     if (error) { setStatus("Couldn't save the club flag (" + error.message + ").", true); return false; }
@@ -227,7 +234,7 @@ async function logChange(kind, id, before, after) {
       let { data, error } = await supabase.from("vetting_history").insert({ ...row, by_id: session.user.id }).select().single();
       // Before the by_name column exists, log without the person's name.
       if (error && row.by_name && /by_name/i.test(error.message || "")) { const { by_name, ...rest } = row; void by_name; ({ data, error } = await supabase.from("vetting_history").insert({ ...rest, by_id: session.user.id }).select().single()); }
-      if (error) return;
+      if (error || !data) return;
       history.unshift(data);
     } else history.unshift({ ...row, id: "l" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6) });
   }
@@ -1383,7 +1390,7 @@ function buildCity() {
       + (isAmua ? `<br><b style="color:#b7791f">★ Book only through: AMUA</b>`
         : pv?.length ? `<br><b style="color:${PRIV_COLOR}">◆ Privately managed: contact ${esc(pv[0].short)}</b> first` : "")
       + (ult.length ? `<br><b style="color:${ULT_COLOR}">🥏 ${ult.some(o => o.booking_only) ? "Book only through" : "Ultimate club"}: ${esc(ult.map(o => o.operator).join(", "))}</b>` : "")
-      + (flags[p.id] ? `<br><b style="color:${PRIV_COLOR}">✎ ${esc(amendText(flags[p.id]))}</b>` : "")
+      + (flags[p.id] ? `<br><b style="color:${PRIV_COLOR}">✎ ${esc(amendText(flags[p.id]))}</b>${flags[p.id].website ? `<br>🔗 ${esc(flags[p.id].website.replace(/^https?:\/\//, ""))}` : ""}` : "")
       + (diamonds(p).length ? `<br><b style="color:#c2410c">⚾ Softball / baseball ground: mounds may make it unsuitable in summer</b>` : "")
       + (workMode === "book" ? `<br>${nAct ? `📌 ${nAct} active booking field${nAct > 1 ? "s" : ""} · ` : ""}${inCart ? `🛒 ${inCart} in the cart · ` : ""}<i>Click to book fields</i>` : `<br><i>Click to rate</i>`),
       { className: "parktip", direction: "top", offset: [0, -6] });
@@ -2067,25 +2074,29 @@ function knownProvider(p) {
   if (councilOnly(p) && (PRIV_BY_PARK[p.id] || []).length) return { club: "Auckland Council (council only)", kind: "other", contact: "", known: true };
   const ops = PRIV_BY_PARK[p.id] || [], op = ops.find(o => o.code !== "ultimate") || ops[0];
   if (!op) return null;
-  return { club: op.short || op.operator, kind: "private", contact: shortName(relations[op.id]?.contacts?.[0]?.name || ""), known: true };
+  return { club: op.short || op.operator, kind: "private", contact: shortName(relations[op.id]?.contacts?.[0]?.name || ""), website: op.contact?.url || "", known: true };
 }
 function renderFlag(p) {
   const fl = flags[p.id], known = knownProvider(p), d = fl || known || {};
   $("clubFlagBtn").setAttribute("aria-pressed", String(!!fl));
   $("clubFlagBtn").textContent = fl ? "✎ " + amendText(fl) : known ? "✎ " + amendText(known) : "✎ Provider?";
-  $("clubFlagBtn").title = fl ? `Provider amendment${fl.by ? " by " + fl.by.split("@")[0] : ""}. Click to edit.`
+  $("clubFlagBtn").title = fl ? `Provider amendment${fl.by ? " by " + fl.by.split("@")[0] : ""}${fl.website ? " · " + fl.website : ""}${fl.details ? " · " + fl.details : ""}. Click to edit.`
     : known ? "Provider on record. Click to amend it (the fields start from what's on record)."
     : "Tag this park's provider for amendment, e.g. privately operated by a club that isn't listed yet";
   $("amendRow").hidden = amendFor !== p.id;
-  $("amendContact").hidden = !fl && !known;
+  $("amendContact").hidden = $("amendWebsite").hidden = $("amendDetails").hidden = !fl && !known;
   $("amendClear").hidden = !fl;
   const ae = document.activeElement;
   if (ae !== $("clubIn")) $("clubIn").value = d.club || "";
   if (ae !== $("amendKind")) $("amendKind").value = d.kind || "private";
   if (ae !== $("amendContact")) $("amendContact").value = d.contact || "";
+  if (ae !== $("amendWebsite")) $("amendWebsite").value = d.website || "";
+  if (ae !== $("amendDetails")) $("amendDetails").value = d.details || "";
   if (!$("providerList").options.length)
     $("providerList").innerHTML = [...new Set(PRIV.operators.map(o => o.short || o.operator))].sort().map(n => `<option value="${esc(n)}">`).join("");
 }
+// A website as typed: "easternsuburbs.org.nz" → "https://easternsuburbs.org.nz".
+const websiteValue = v => { v = String(v || "").trim(); return !v ? "" : /^https?:\/\//i.test(v) ? v : "https://" + v; };
 // Contact person as typed: the first space ends the first name, then one letter (the last
 // initial) is all that's allowed. "rory hughes" → "Rory H".
 function maskContact(v) {
@@ -2403,7 +2414,8 @@ function bind() {
   $("clubFlagBtn").onclick = () => { const p = current(); if (!p) return;
     amendFor = amendFor === p.id ? null : p.id; renderFlag(p); if (amendFor) $("clubIn").focus(); };
   const amendSave = async () => { const p = current(); if (!p) return;
-    const fl = { club: $("clubIn").value.trim(), kind: $("amendKind").value, contact: contactValue($("amendContact").value) };
+    const fl = { club: $("clubIn").value.trim(), kind: $("amendKind").value, contact: contactValue($("amendContact").value),
+      website: websiteValue($("amendWebsite").value), details: $("amendDetails").value.trim().slice(0, 300) };
     const isNew = !flags[p.id];
     if (!fl.club && fl.kind !== "other") { $("clubIn").focus(); return; }
     if (await saveFlag(p.id, fl)) { renderFlag(p); if (isNew) $("amendContact").focus(); renderRail(); } };
