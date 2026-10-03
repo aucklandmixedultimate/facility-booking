@@ -6,7 +6,7 @@
     <title>Council / Community Fields</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap">
-    <script type="module" crossorigin src="/facility-booking/assets/vetting-BoxqmsFt.js"></script>
+    <script type="module" crossorigin src="/facility-booking/assets/vetting-nPzQc5HQ.js"></script>
     <link rel="modulepreload" crossorigin href="/facility-booking/assets/councilSeasons-DYpmE0DM.js">
     <link rel="modulepreload" crossorigin href="/facility-booking/assets/_commonjsHelpers-Cpj98o6Y.js">
     <link rel="stylesheet" crossorigin href="/facility-booking/assets/vetting-DPuxgI-_.css">
@@ -211,6 +211,17 @@
         <div class="hist-filters" id="histFilters"><button type="button" data-f="all">All</button><button type="button" data-f="mine">Mine</button><button type="button" data-f="rejected">Rejected</button></div>
         <ul class="hist-list" id="histList"></ul>
         <div class="dlg-actions"><button value="close" class="primary">Close</button></div>
+      </form>
+    </dialog>
+    <dialog id="unsavedDlg" class="dlg">
+      <form method="dialog">
+        <h3 id="unsavedTitle">Save your changes?</h3>
+        <p id="unsavedBody"></p>
+        <div class="dlg-actions">
+          <button value="cancel" class="ghost">Cancel</button>
+          <button value="discard" class="ghost">Discard</button>
+          <button value="save" class="primary" autofocus>Save changes</button>
+        </div>
       </form>
     </dialog>
     <dialog id="saveDlg" class="dlg">
