@@ -1611,7 +1611,7 @@ async function toggleCommunity(o) {
   if (i >= 0) list.splice(i, 1);
   else list.push({ id, park_id: o.id, park: o.park, region: "", field: "Main field", lat: o.lat, lon: o.lon, kind: "community", status: "cart",
     operator: { id: o.id, name: o.operator, short: o.short, email: o.contact?.email || "", phone: o.contact?.phone || "" },
-    added_at: new Date().toISOString(), added_by: session?.user?.email || "" });
+    added_at: new Date().toISOString(), ...addedBy() });
   bookLocs[who] = list;
   if (!(await saveBookLocs())) { bookLocs[who] = before; return; }
   setStatus(`${i >= 0 ? "Removed" : "Added"} ${o.short || o.operator} ${i >= 0 ? "from" : "to"} ${who}'s cart.`);
@@ -1636,6 +1636,9 @@ const whoBooks = () => (bookFor = (bookFor || session?.user?.email || "demo@loca
 // A booker's council fields: "cart" entries are being chosen; saving the cart makes them
 // "active" bookings, which the booking site offers as Provider → Location → Facility.
 const isActive = x => x.status === "active";
+// Stamped on cart entries: the account and, on a shared login, the person using it.
+const addedBy = () => { const e = session?.user?.email || "", n = getActor(e); return { added_by: e, ...(n ? { added_by_name: n } : {}) }; };
+const activatedBy = () => { const n = getActor(session?.user?.email || ""); return n ? { activated_by_name: n } : {}; };
 const myLocs = () => bookLocs[whoBooks()] || [];
 // "retired": a field replaced when the venue's fields were regrouped; kept so bookings on it
 // keep their name, but neither active nor in the cart.
@@ -1648,7 +1651,7 @@ async function saveCartActive() {
   const who = whoBooks(), before = myLocs().map(x => ({ ...x })), n = cartOf().length;
   if (!n) return;
   const at = new Date().toISOString();
-  bookLocs[who] = before.map(x => isActive(x) || isRetired(x) ? x : { ...x, status: "active", activated_at: at });
+  bookLocs[who] = before.map(x => isActive(x) || isRetired(x) ? x : { ...x, status: "active", activated_at: at, ...activatedBy() });
   if (!(await saveBookLocs())) { bookLocs[who] = before; return; }
   setStatus(`Saved ${n} field${n > 1 ? "s" : ""} as active bookings. They're now in the booking site under Provider → Location.`);
   render(); renderTabs(); if (view === "book") renderBook();
@@ -1668,7 +1671,7 @@ async function toggleCart(p, key) {
   else {
     const wf = parkWorkflow(p), f = fieldKeys(p).find(x => x.key === key)?.f, c = grp ? grp.c : f?.c || [p.lat, p.lon];
     list.push({ id, park_id: p.id, park: p.name, region: p.region, field: grp ? grp.name : key, lat: c[0], lon: c[1], kind: wf.kind, operator: wf.operator, status: "cart",
-      ...(grp ? { council_fields: grp.council, frisbee: grp.cap, fit: grp.fit } : {}), added_at: new Date().toISOString(), added_by: session?.user?.email || "" });
+      ...(grp ? { council_fields: grp.council, frisbee: grp.cap, fit: grp.fit } : {}), added_at: new Date().toISOString(), ...addedBy() });
   }
   bookLocs[who] = list;
   const saved = await saveBookLocs();
@@ -1750,7 +1753,7 @@ function mfTimeline(x, who) {
 }
 function renderBook() {
   const me = whoBooks();
-  if (mfWho === null) mfWho = me;
+  if (mfWho === null) mfWho = IS_ADMIN ? "" : me;   // admins see every booker by default
   const bookers = Object.keys(bookLocs).filter(e => (bookLocs[e] || []).length).sort();
   if (mfWho && !bookers.includes(mfWho)) bookers.unshift(mfWho);
   const rows = (mfWho ? [mfWho] : bookers).flatMap(w => (bookLocs[w] || []).map(x => ({ x, w })));
@@ -1764,6 +1767,8 @@ function renderBook() {
   const prov = x => x.kind === "community" ? "cm_" + x.operator.id : x.kind === "council_private" ? "op_" + x.operator.id : "akl_council";
   const tag = x => x.kind === "community" ? `<span class="mf-tag comm" title="Community facility">🏫</span>` : x.kind === "council_private" ? `<span class="mf-tag priv" title="${esc(x.operator?.name || "operator")} + council">◆</span>` : `<span class="mf-tag" title="Council">🏛</span>`;
   const who = w => esc(personFromEmail(w));
+  // Who added it: the person picked at sign-in, else the adding account when it isn't the booker's.
+  const byWho = (x, w) => x.added_by_name ? shortName(x.added_by_name) : x.added_by && x.added_by.toLowerCase() !== w ? personFromEmail(x.added_by) : "";
   const stars = id => { const a = crowdAvg(id); return a ? `<span title="${ratings[id].n} rating${ratings[id].n > 1 ? "s" : ""}">★${a.toFixed(1)}</span>` : `<span class="mf-none">–</span>`; };
   const cell = (k, v, title) => `<td class="mf-d" data-k="${k}"${title ? ` title="${esc(title)}"` : ""}>${v || `<span class="mf-none">–</span>`}</td>`;
   loadContact(mfWho || me);
@@ -1774,12 +1779,12 @@ function renderBook() {
       <div class="mf-stages">${[["all", "All"], ["cart", "🛒 Cart"], ["active", "📌 Active"], ["ended", "Ended"]].map(([k, l]) => `<button data-mfstage="${k}" aria-pressed="${mfStage === k}">${l} <b>${counts[k]}</b></button>`).join("")}</div></div>
     ${mfWho ? contactNote(mfWho) : ""}
     ${cart.length ? `<div class="mf-go"><span>${cart.length} field${cart.length === 1 ? "" : "s"} in the cart, not bookable yet.</span><button class="primary" id="bkSave">✅ Save as active</button></div>` : ""}
-    ${shown.length ? `<div class="mf-wrap"><table class="mf"><thead><tr><th>Field</th>${mfWho ? "" : "<th>Booker</th>"}<th title="Added to the cart">Carted</th><th title="Saved as an active booking field">Active</th>
+    ${shown.length ? `<div class="mf-wrap"><table class="mf"><thead><tr><th>Field</th><th title="The booker, and who on the login added the field">Booker · by</th><th title="Added to the cart">Carted</th><th title="Saved as an active booking field">Active</th>
       <th title="First booking the council / provider accepted">Started</th><th title="Field retired, or its last booking once none are upcoming">Ended</th><th title="Crowd quality rating">★</th><th></th></tr></thead><tbody>
       ${shown.map(r => { const { x, w } = r, t = mfTimeline(x, w), st = stageOf(r);
         return `<tr class="mf-${st}"><td class="mf-f"><span class="mf-st ${st}" title="${st === "cart" ? "In the cart" : st === "active" ? "Active" : "Ended"}"></span>${tag(x)}
             <span class="mf-n" title="${esc(x.park)} – ${esc(x.field)}">${esc(x.park)} <span class="muted">– ${esc(x.field)}</span></span></td>
-          ${mfWho ? "" : `<td class="mf-w" title="${esc(w)}">${who(w)}</td>`}
+          <td class="mf-w" title="${esc(w)}${x.added_by ? " · added by " + esc(x.added_by_name ? `${x.added_by_name} (${x.added_by})` : x.added_by) : ""}${x.activated_by_name ? " · made active by " + esc(x.activated_by_name) : ""}">${who(w)}${byWho(x, w) ? `<span class="mf-by"> · ${esc(byWho(x, w))}</span>` : ""}</td>
           ${cell("Carted", mfDate(x.added_at), x.added_by && x.added_by !== w ? "Added by " + x.added_by : "")}${cell("Active", mfDate(x.activated_at))}
           ${cell("Started", t.started ? mfDate(t.started) : t.pending ? `<span class="mf-pend">${t.pending} pending</span>` : "", t.next ? "Next booking " + mfDate(t.next) : "")}${cell("Ended", mfDate(t.ended))}
           <td class="mf-r">${stars(x.park_id)}</td>
@@ -2188,7 +2193,7 @@ function parkStage(id) {
 // multi-field areas included), else its rated fields, else the whole park.
 function venueEntries(p, status, extra = {}) {
   const t = tagsFor(p), wf = parkWorkflow(p), at = new Date().toISOString(), base = { park_id: p.id, park: p.name, region: p.region, kind: wf.kind, operator: wf.operator,
-    status, added_at: at, ...(status === "active" ? { activated_at: at } : {}), added_by: session?.user?.email || "", ...extra };
+    status, added_at: at, ...(status === "active" ? { activated_at: at, ...activatedBy() } : {}), ...addedBy(), ...extra };
   const groups = reviews[p.id]?.placement?.groups || [];
   if (groups.length) return groups.map(g => ({ ...base, id: cartId(p, g.key), field: g.name, council_fields: g.council, frisbee: g.cap, fit: g.fit, lat: g.c[0], lon: g.c[1] }));
   const keys = Object.values(t.fr).filter(bookable).map(x => x.name);
@@ -2200,7 +2205,7 @@ async function setParkStage(p, stage) {
   const who = whoBooks(), before = [...(bookLocs[who] || [])], cur = parkStage(p.id), at = new Date().toISOString();
   let list;
   if (cur === stage) list = before.filter(x => x.park_id !== p.id || isRetired(x));
-  else if (cur) list = before.map(x => x.park_id !== p.id || isRetired(x) ? x : stage === "active" ? { ...x, status: "active", activated_at: x.activated_at || at } : { ...x, status: "cart" });
+  else if (cur) list = before.map(x => x.park_id !== p.id || isRetired(x) ? x : stage === "active" ? { ...x, status: "active", activated_at: x.activated_at || at, ...(x.activated_at ? {} : activatedBy()) } : { ...x, status: "cart" });
   else {
     const add = venueEntries(p, stage, { decision: reviews[p.id]?.decision }), ids = new Set(add.map(x => x.id));
     list = [...before.filter(x => !ids.has(x.id)), ...add];

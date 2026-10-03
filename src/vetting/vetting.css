@@ -650,11 +650,12 @@ body.aklzoom #field,body.aklzoom #centreWrap,body.aklzoom #fitPop,body.aklzoom .
 .bookpanel .mf-go{display:flex;align-items:center;gap:8px;flex-wrap:wrap;border:1px solid var(--line);border-radius:10px;padding:6px 10px;font-size:13px}
 .bookpanel .mf-go span{flex:1}
 .bookpanel .mf-go .primary{border:0;background:var(--turf);color:#fff;border-radius:8px;padding:6px 12px;font-weight:600}
-.bookpanel .mf-wrap{border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.bookpanel .mf-wrap{border:1px solid var(--line);border-radius:10px;overflow-x:auto}
 .bookpanel table.mf{width:100%;border-collapse:collapse;font-size:12.5px;text-align:left}
 .bookpanel .mf th{font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:700;padding:6px 8px;background:var(--bg);white-space:nowrap}
 .bookpanel .mf td{padding:6px 8px;border-top:1px solid var(--line);vertical-align:middle}
-.bookpanel .mf .mf-f{display:flex;align-items:center;gap:6px;min-width:0;max-width:34ch}
+.bookpanel .mf .mf-f{display:flex;align-items:center;gap:6px;min-width:0;max-width:30ch}
+.bookpanel .mf .mf-by{color:var(--muted);font-size:11.5px}
 .bookpanel .mf .mf-n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;min-width:0}
 .bookpanel .mf .mf-n .muted{font-weight:400}
 .bookpanel .mf .mf-st{width:8px;height:8px;border-radius:50%;flex-shrink:0;background:#94a3b8}
@@ -669,7 +670,7 @@ body.aklzoom #field,body.aklzoom #centreWrap,body.aklzoom #fitPop,body.aklzoom .
 /* Narrow (a phone, or the half-width panel on desktop): each row becomes a small card —
    field and actions, then the booker, then the four dates labelled. */
 .bookpanel{container-type:inline-size}
-@container (max-width: 640px){
+@container (max-width: 860px){
   .bookpanel table.mf,.bookpanel .mf tbody{display:block}
   .bookpanel .mf thead{display:none}
   .bookpanel .mf tr{display:grid;grid-template-columns:repeat(4,minmax(0,1fr)) 92px;gap:2px 6px;padding:7px 8px;border-top:1px solid var(--line)}
