@@ -12,6 +12,7 @@ import "./vetting.css";
 import { createClient } from "@supabase/supabase-js";
 import { councilState, fmtRange, fmtDay, COUNCIL_LINKS, COUNCIL_CONTACTS } from "../councilSeasons.js";
 import { askActor, getActor, clearActor } from "../actor.js";
+import { shortName, personFromEmail } from "../people.js";
 
 const BASE = import.meta.env.BASE_URL;
 const SB_URL = import.meta.env.VITE_SUPABASE_URL, SB_ANON = import.meta.env.VITE_SUPABASE_ANON;
@@ -161,7 +162,7 @@ async function saveFlag(id, flag) {
     let { error } = flag ? await supabase.from("field_flags").upsert(row) : await supabase.from("field_flags").delete().eq("park_id", id);
     // Before the kind/contact columns exist (supabase-setup.sql), keep the provider only.
     if (error && flag && /kind|contact|column/i.test(error.message || "")) {
-      const { kind, contact, ...old } = row; ({ error } = await supabase.from("field_flags").upsert(old));
+      const { kind: _kind, contact: _contact, ...old } = row; ({ error } = await supabase.from("field_flags").upsert(old));
       if (!error) setStatus("Saved the provider; its kind and contact person need supabase-setup.sql.", true);
     }
     if (error) { setStatus("Couldn't save the club flag (" + error.message + ").", true); return false; }
@@ -279,8 +280,6 @@ const HIST_KIND = { review: "Fields", flag: "Provider", rating: "Quality" };
 // Who, as a first name and last initial: the name picked at sign-in, else from the email
 // ("rory.hughes@…" → "Rory H.").
 const personOf = (email, name) => name ? shortName(name) : personFromEmail(email);
-const personFromEmail = email => { const w = String(email || "").split("@")[0].split(/[._\-+]+/).filter(Boolean).map(x => x[0].toUpperCase() + x.slice(1));
-  return shortName(w.join(" ")) || "Someone"; };
 const DEC_WORD = { top: "Top pick", yes: "Shortlist", no: "Reject", rating: "Rating in progress" };
 const FIT_WORD = { reduced: "3v3 only", full: "1 × full 7v7", multi: "2 × full 7v7", no: "unusable" };
 function histValue(kind, v) {
@@ -1550,7 +1549,7 @@ function editUndo() {
 // The booking site turns each entry into a facility at the "<provider>|<park>" venue, visible
 // to that booker (and admins), with the council or council + private-operator workflow.
 const BOOK_KEY = "council_facilities";
-let bookLocs = {}, bookFor = "", bookSel = new Set(), bookSelPark = null;
+let bookLocs = {}, bookFor = "";
 const slug = s => String(s).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 async function loadBookLocs() {
   if (supabase && session) {
@@ -1889,10 +1888,6 @@ const REL = {
   tone: { positive: "👍", neutral: "·", negative: "👎" },
 };
 let relations = {}, infoOpenFor = null;
-// People are often tagged here without asking them, so only a first name and last initial is
-// ever kept: "Clare Gibson" → "Clare G.", "Rory H" → "Rory H.".
-const shortName = s => { const w = String(s || "").trim().split(/\s+/).filter(Boolean);
-  return w.length < 2 ? (w[0] || "") : `${w[0]} ${w[w.length - 1][0].toUpperCase()}.`; };
 async function loadRelations() {
   if (!supabase || !session) { relations = store.get("vet-relations", {}); return; }
   const { data, error } = await supabase.from("settings").select("value").eq("key", REL_KEY).maybeSingle();
@@ -2545,3 +2540,14 @@ async function start() {
   if (mode === "shared") setInterval(async () => { if (!busy && !rotating && document.visibilityState === "visible" && !$("saveDlg").open) { await loadShared(); if (view === "city") render(); else renderRail(); } }, 30000);
 }
 start().catch(e => { document.body.classList.remove("booting"); setStatus("Couldn't start: " + (e.message || e), true); });
+// Uncaught errors go to the booking site's activity log (admins see them as "App error"),
+// at most five per page load.
+let errorsLogged = 0;
+function logClientError(message, where) {
+  if (errorsLogged >= 5 || !message || !supabase || !session) return;
+  errorsLogged++;
+  supabase.from("activity_log").insert({ user_id: session.user.id, user_email: session.user.email, session_id: "vetting", action: "client_error",
+    detail: { message: String(message).slice(0, 300), where: String(where || "").slice(0, 200), page: location.pathname, by: IS_ADMIN ? "admin" : "booker" } }).then(() => {}, () => {});
+}
+window.addEventListener("error", e => logClientError(e.message, e.filename ? `${e.filename.split("/").pop()}:${e.lineno}` : ""));
+window.addEventListener("unhandledrejection", e => logClientError(e.reason?.message || e.reason, "promise"));

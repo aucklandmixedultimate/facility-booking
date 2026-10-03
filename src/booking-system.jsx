@@ -6,6 +6,8 @@ import { driveConfigured, getDriveToken, ensureFolderPath, ensureFolder, uploadF
 import { htmlToPdfBlob } from "./pdf-utils.js";
 import { gmailToken, fetchCouncilEmails, parseCouncilEmail } from "./councilMail.js";
 import { askActor, getActor, clearActor } from "./actor.js";
+import { LEAGUE_SEASONS, currentLeagueSeason, seasonOfBooker } from "./seasons.js";
+import { initialsOf } from "./people.js";
 
 // ─── LOGO ─────────────────────────────────────────────────────────────────────
 const LOGO_SRC = logoUrl;
@@ -55,6 +57,19 @@ async function logActivity(action, detail = {}) {
       }),
     });
   } catch { /* silent */ }
+}
+
+// Uncaught errors in the browser go to the activity log (admins only, "App error"), at most
+// five per page load, so problems people hit are visible without a monitoring service.
+let _errorsLogged = 0;
+function logClientError(message, where) {
+  if (_errorsLogged >= 5 || !message) return;
+  _errorsLogged++;
+  logActivity("client_error", { message: String(message).slice(0, 300), where: String(where || "").slice(0, 200), page: location.pathname });
+}
+if (typeof window !== "undefined") {
+  window.addEventListener("error", e => logClientError(e.message, e.filename ? `${e.filename.split("/").pop()}:${e.lineno}` : ""));
+  window.addEventListener("unhandledrejection", e => logClientError(e.reason?.message || e.reason, "promise"));
 }
 
 const sb = {
@@ -162,16 +177,6 @@ function ownsCouncilFacility(f) {
 // Light tint of each facility colour for day-view column backgrounds.
 const FACILITY_TINT = { f1:"#f5f3ff", f2:"#ede9fe", f3:"#dcfce7", f4:"#ecfdf5", f5:"#f0fdf4", g1:"#cffafe", g2:"#ecfeff", g3:"#f0fdff", s1:"#ffedd5", a1:"#fff1f2", n1:"#eff6ff" };
 function isSocialFac(id) { return FACILITIES.find(f=>f.id===id)?.kind==="social"; }
-// League seasons bookers belong to: NZMUC runs May–November, NZUC December–April. Each
-// booker (canonical email) is assigned one by an admin (User Management → Season), saved in
-// settings "booker_seasons"; unassigned bookers are NZMUC.
-const LEAGUE_SEASONS = [
-  { id:"nzmuc", name:"NZMUC", span:"May–Nov", months:[5,6,7,8,9,10,11] },
-  { id:"nzuc",  name:"NZUC",  span:"Dec–Apr", months:[12,1,2,3,4] },
-];
-const DEFAULT_BOOKER_SEASONS = { "grootultimateclub@gmail.com":"nzuc" };
-const currentLeagueSeason = (d = new Date()) => LEAGUE_SEASONS.find(x => x.months.includes(d.getMonth()+1)).id;
-const seasonOfBooker = (email, map = {}) => { const e = (email||"").toLowerCase(); return map[e] || DEFAULT_BOOKER_SEASONS[e] || "nzmuc"; };
 const EMAIL_COLORS = ["#6366f1","#ec4899","#f59e0b","#10b981","#ef4444","#8b5cf6","#06b6d4","#84cc16","#f97316","#14b8a6","#e879f9","#fb7185","#34d399","#60a5fa","#fbbf24"];
 const _ecc = {}; let _eci = 0;
 // { primaryEmail: "#hex" } — admin-set colour overrides, kept in sync from the
@@ -800,11 +805,6 @@ function fmtLoggedAt(s) {
     : d.toLocaleDateString("en-NZ", { day:"numeric", month:"short", year:"numeric" });
 }
 function fmtCost(n) { return "$" + Number(n).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g,","); }
-// "pirates.team" → "PT", "Auckland Uni Ultimate" → "AU", "auultimateclub" → "AU".
-function initialsOf(name) {
-  const w = String(name||"").split(/[\s._@-]+/).filter(Boolean);
-  return (w.length > 1 ? w[0][0] + w[1][0] : (w[0]||"?").slice(0, 2)).toUpperCase();
-}
 function fmtTimeShort(h) {
   const hh=Math.floor(h), m=Math.round((h%1)*60), dh=hh>12?hh-12:hh===0?12:hh;
   return `${dh}${m?":"+String(m).padStart(2,"0"):""}${hh>=12?"p":"a"}`;
@@ -1752,6 +1752,7 @@ const ACTIVITY_LABELS = {
   drive_upload:"Saved to Drive", drive_attach:"GTEC invoice attached",
   email_sent:"Email sent", email_failed:"Email failed", sign_in:"Signed in", sign_out:"Signed out",
   settings_change:"Settings changed", council_fields:"Council fields", council_application_sent:"Sent to council",
+  vetting_change:"Vetting change", client_error:"App error",
 };
 // What non-admins see of the log: bookers' own activity (the activity_log select policy in
 // supabase-setup.sql allows the same), not sign-ins, emails or admin work.
@@ -1806,6 +1807,8 @@ function describeActivity(r) {
     case "council_fields": return [d.added?.length&&`Added ${d.added.join("; ")}`, d.activated?.length&&`Made active ${d.activated.join("; ")}`,
       d.removed?.length&&`Removed ${d.removed.join("; ")}`, d.retired?.length&&`Retired ${d.retired.join("; ")}`].filter(Boolean).join(" · ")
       + (d.booker&&d.booker!==r.user_email?.toLowerCase()?` · for ${d.booker}`:"");
+    case "vetting_change": return `${{review:"Fields",flag:"Provider",rating:"Quality"}[d.kind]||d.kind} · ${d.park||""}${d.status==="rejected"?" · ✕ rejected":""}`;
+    case "client_error": return `${d.message||"Error"}${d.where?` · ${d.where}`:""}`;
     case "sign_in":  return d.email ? `${d.email}` : "Signed in";
     case "sign_out": return "Signed out";
     default: { const { by, ...rest } = d; void by; return Object.keys(rest).length ? JSON.stringify(rest) : ""; }
@@ -1841,14 +1844,26 @@ function ActivityLogModal({onClose, inline=false, bookers=[], isAdmin=true}) {
       if (logTo)   q.push(`created_at=lte.${logTo}T23:59:59`);
       try {
         const data = await sb.select("activity_log", q.join("&"));
+        // Admins also see the Council fields page's vetting history here, so there's one
+        // place to review what changed (rejecting a change stays on that page).
+        let vet = [];
+        if (isAdmin) try {
+          const vq = [`select=*`, `order=at.desc`, `limit=${Math.min(limit, 500)}`];
+          if (logFrom) vq.push(`at=gte.${logFrom}T00:00:00`);
+          if (logTo)   vq.push(`at=lte.${logTo}T23:59:59`);
+          const r = await fetch(`${SUPABASE_URL}/rest/v1/vetting_history?${vq.join("&")}`, { headers: authHeaders() });
+          if (r.ok) vet = (await r.json()).map(h => ({ id:"vh-"+h.id, created_at:h.at, user_email:h.by_email, action:"vetting_change",
+            detail:{ by:"admin", park:h.park, kind:h.kind, status:h.status, ...(h.by_name?{actor:h.by_name}:{}) } }));
+        } catch { /* vetting history not set up yet */ }
         if (cancelled) return;
-        setRows(data||[]);
+        const all = [...(data||[]), ...vet].sort((a,b) => String(b.created_at).localeCompare(String(a.created_at)));
+        setRows(all);
         setTruncated((data||[]).length >= limit);
         setError("");
       } catch(e) { if (!cancelled) { setError(e.message); setRows([]); } }
     })();
     return ()=>{ cancelled = true; };
-  },[logFrom, logTo, limit]);
+  },[logFrom, logTo, limit, isAdmin]);
   // Collapse sign_in/sign_out into one row per user (most recent) — admins want
   // "last login per user", not a history of every session.
   const collapsed = useMemo(() => {
@@ -1910,9 +1925,9 @@ function ActivityLogModal({onClose, inline=false, bookers=[], isAdmin=true}) {
     if (a==="council_fields") return {color:"#047857",bg:"#ecfdf5",border:"#a7f3d0"};
     return {color:"#475569",bg:"#fff",border:"#e2e8f0"};
   };
-  const ALWrapper = inline
-    ? ({children}) => <div style={{background:"#fff",border:"1.5px solid #e2e8f0",borderRadius:12,padding:isMobile?10:16,maxHeight:520,display:"flex",flexDirection:"column"}}><div style={{fontSize:14,fontWeight:700,color:"#0f172a",marginBottom:10}}>📜 Activity Log</div>{children}</div>
-    : ({children}) => <Modal title="📜 Activity Log" onClose={onClose} width={780}>{children}</Modal>;
+  const ALWrapper = children => inline
+    ? <div style={{background:"#fff",border:"1.5px solid #e2e8f0",borderRadius:12,padding:isMobile?10:16,maxHeight:520,display:"flex",flexDirection:"column"}}><div style={{fontSize:14,fontWeight:700,color:"#0f172a",marginBottom:10}}>📜 Activity Log</div>{children}</div>
+    : <Modal title="📜 Activity Log" onClose={onClose} width={780}>{children}</Modal>;
   const when = r => new Date(r.created_at).toLocaleString("en-NZ",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"});
   // Who: the person picked at sign-in (first name, last initial), then the account.
   const whoLabel = r => <>{r.detail?.actor?<b style={{color:"#334155"}}>{r.detail.actor} </b>:null}<span>{(r.user_email||"—").replace(/@.*/, isAdmin?"$&":"")}</span></>;
@@ -1951,7 +1966,7 @@ function ActivityLogModal({onClose, inline=false, bookers=[], isAdmin=true}) {
   );
   const empty = <div style={{padding:24,textAlign:"center",color:"#94a3b8",fontSize:13}}>{rows===null?"Loading…":"No activity matches this filter."}</div>;
   return (
-    <ALWrapper>
+    ALWrapper(<>
       <div style={{display:"flex",flexDirection:"column",gap:8,minHeight:0,flex:1}}>
         {!isAdmin&&<div style={{fontSize:12,color:"#64748b",flexShrink:0}}>Bookings and council fields across all bookers, newest first.</div>}
         <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0,minWidth:0}}>
@@ -2019,7 +2034,7 @@ function ActivityLogModal({onClose, inline=false, bookers=[], isAdmin=true}) {
           )}
         </div>
       </div>
-    </ALWrapper>
+    </>)
   );
 }
 
@@ -2353,7 +2368,6 @@ function DateRangePicker({ from, to, onApply }) {
   const [open, setOpen] = useState(false);
   const [draftFrom, setDraftFrom] = useState(from||"");
   const [draftTo, setDraftTo] = useState(to||"");
-  useEffect(()=>{ if(open){ setDraftFrom(from||""); setDraftTo(to||""); } }, [open, from, to]);
   const label = (from||to)
     ? (fd => `${from?fd(from):"…"} – ${to?fd(to):"…"}`)(window.innerWidth<768?fmtDateShort:fmtDate)
     : "Any date";
@@ -2361,7 +2375,7 @@ function DateRangePicker({ from, to, onApply }) {
   function clear() { setDraftFrom(""); setDraftTo(""); onApply("", ""); setOpen(false); }
   return (
     <div style={{position:"relative"}}>
-      <button onClick={()=>setOpen(v=>!v)}
+      <button onClick={()=>{ if(!open){ setDraftFrom(from||""); setDraftTo(to||""); } setOpen(v=>!v); }}
         style={{display:"flex",alignItems:"center",gap:4,padding:"3px 8px",fontSize:11,borderRadius:5,border:`1.5px solid ${(from||to)?"#0f172a":"#cbd5e1"}`,background:"#fff",color:(from||to)?"#0f172a":"#475569",cursor:"pointer",fontFamily:"inherit",fontWeight:600,width:"100%",justifyContent:"center",minWidth:0,maxWidth:"100%"}}>
         <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",minWidth:0}}>📅 {label}</span><span style={{fontSize:9,color:"#94a3b8",flexShrink:0}}>▾</span>
       </button>
@@ -5228,9 +5242,10 @@ function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkApply, o
     return chips;
   }
 
-  const Wrapper = inline
-    ? ({children}) => <div style={{background:"#f0f9ff",border:"1.5px solid #bae6fd",borderRadius:12,padding:16}}><div style={{fontSize:14,fontWeight:700,color:"#0369a1",marginBottom:10}}>📅 Schedule Summary</div>{children}</div>
-    : ({children}) => <Modal title="📅 Schedule Summary" onClose={onClose}>{children}</Modal>;
+  // A function (not a component) so the panel isn't remounted on every render.
+  const Wrapper = children => inline
+    ? <div style={{background:"#f0f9ff",border:"1.5px solid #bae6fd",borderRadius:12,padding:16}}><div style={{fontSize:14,fontWeight:700,color:"#0369a1",marginBottom:10}}>📅 Schedule Summary</div>{children}</div>
+    : <Modal title="📅 Schedule Summary" onClose={onClose}>{children}</Modal>;
   const colCount = 5;
   const groupSelectable = isAdmin && onBulkStatusChange;
   function toggleGroup(email, status) {
@@ -5254,7 +5269,7 @@ function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkApply, o
   })();
   return (
     <>
-      <Wrapper>
+      {Wrapper(<>
         {/* Toolbar: facility-sensitive + date range filter + status filter */}
         <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",marginBottom:10}}>
           <label style={{display:"flex",alignItems:"center",gap:6,fontSize:12,cursor:"pointer",color:"#475569"}}>
@@ -5390,7 +5405,7 @@ function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkApply, o
             </div>
           </div>
         )}
-      </Wrapper>
+      </>)}
       {patternModal&&(
         <PatternModal {...patternModal} isAdmin={isAdmin}
           onClose={()=>setPatternModal(null)}

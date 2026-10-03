@@ -1,0 +1,30 @@
+name: Checks
+
+# Lint, unit tests and a build on every pull request (and on pushes to other branches),
+# so a change that would break the deploy is caught before it merges.
+
+on:
+  pull_request:
+  push:
+    branches-ignore: [main, gh-pages]
+
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Unit tests
+        run: npm test
+      - name: Build
+        run: npm run build
