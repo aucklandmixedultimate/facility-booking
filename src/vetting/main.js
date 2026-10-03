@@ -1660,7 +1660,7 @@ async function toggleCart(p, key) {
   let i = list.findIndex(x => x.id === id);
   if (i >= 0 && isRetired(list[i])) { list.splice(i, 1); i = -1; }
   if (i >= 0 && isActive(list[i])) {
-    setStatus(`${p.name} – ${key} is an active booking. Remove it under 🛒 Cart → Active bookings.`); return;
+    setStatus(`${p.name} – ${key} is an active booking. Remove it under 📌 My fields.`); return;
   }
   if (i >= 0) list.splice(i, 1);
   else {
@@ -1721,31 +1721,72 @@ function contactNote(who) {
     : `<p class="warn-note">📇 <b>Add ${who === (session?.user?.email || "").toLowerCase() ? "your" : "the booker's"} council contact</b> (name and phone) before booking these fields — the booker is the key holder on AMUA's council application.
        <a href="./?contact=1">Add it in Facility Booking ↗</a></p>`;
 }
-// The Cart tab: fields being chosen (cart), then the booker's active bookings.
-function renderBook() {
-  const who = whoBooks(), known = Object.keys(bookLocs).filter(e => e !== who), cart = cartOf(), act = activeOf();
-  loadContact(who);
-  const tag = x => x.kind === "community" ? `<span class="tag comm">🏫 community</span>` : `<span class="tag${x.kind === "council_private" ? " priv" : ""}">${x.kind === "council_private" ? "◆ " + esc(x.operator?.short || "operator") + " + council" : "🏛 council"}</span>`;
-  const prov = x => x.kind === "community" ? "cm_" + x.operator.id : x.kind === "council_private" ? "op_" + x.operator.id : "akl_council";
-  const parks = xs => new Set(xs.map(x => x.park)).size;
-  $("bookPanel").innerHTML = `<div class="bk-who"><h3>📌 Active bookings / 🛒 Cart</h3><label>for ${IS_ADMIN ? `<input id="bookWho" list="bookWhoList" value="${esc(who)}" title="The booker whose cart this is">` : `<b>${esc(who)}</b>`}</label>
-      <datalist id="bookWhoList">${known.map(e => `<option value="${esc(e)}">`).join("")}</datalist></div>
-    ${contactNote(who)}
-    <p class="muted">${IS_ADMIN ? `<b>★ Top pick</b> or <b>✓ Shortlist</b> a park and its rated fields become active here (Reject removes them). Then book dates and times in Facility Booking (Provider → Location → Facility).`
-      : `1. In <b>📅 Book</b> mode, open a park from the Auckland map and click its field areas to add them here. 2. <b>Save them as active bookings</b>. 3. Book dates and times for them in Facility Booking (Provider → Location → Facility).`}</p>
-    <section class="bk-sec"><h4>🛒 In the cart <span class="muted">${cart.length} field${cart.length === 1 ? "" : "s"}${cart.length ? ` at ${parks(cart)} park${parks(cart) === 1 ? "" : "s"}` : ""} · not booked yet</span></h4>
-      <div class="bk-list">${cart.length ? cart.map(x => `<div class="bk-row"><span class="n">${esc(x.park)} – ${esc(x.field)}</span>${tag(x)}
-        ${x.kind === "community" ? "" : `<button data-bkopen="${esc(x.park_id)}" title="Open this park in Book mode">open</button>`}
-        <button data-bkdel="${esc(x.id)}" title="Remove from the cart">✕</button></div>`).join("") : `<p class="muted">Nothing in the cart.</p>`}</div>
-      ${cart.length ? `<div class="bk-go"><button class="primary" id="bkSave">✅ Save ${cart.length} field${cart.length === 1 ? "" : "s"} as active bookings</button></div>` : ""}</section>
-    <section class="bk-sec act"><h4>📌 Active bookings <span class="muted">${act.length} field${act.length === 1 ? "" : "s"} · in Facility Booking</span></h4>
-      <div class="bk-list">${act.length ? act.map(x => `<div class="bk-row"><span class="n">${esc(x.park)} – ${esc(x.field)}</span>${tag(x)}
-        ${x.kind === "community" ? "" : `<button data-bkopen="${esc(x.park_id)}" title="Open this park in Book mode">open</button>`}
-        <a href="${venueLink(prov(x), x.park)}" target="_blank" rel="noopener">book dates ↗</a>
-        <button data-bkdel="${esc(x.id)}" data-active="1" title="Remove this active booking field">✕</button></div>`).join("") : `<p class="muted">No active bookings yet. Save cart fields to make them bookable.</p>`}</div></section>`;
+// ── My fields: every booker's council fields as one table (default: the signed-in booker) ──
+// Field · Booker · Carted · Active · Started (first accepted booking) · Ended (retired, or the
+// last booking once none are upcoming) · ★ crowd rating. The booker's cart can be saved as
+// active here; another booker's rows are read-only unless you're an admin.
+let mfWho = null, mfStage = "all";   // mfWho: booker email, "" = all bookers (null = you)
+let fieldBookings = null;            // facility_id -> [{date, status, email}] from Facility Booking
+const ACCEPTED = new Set(["approved", "council_granted", "cpsa_confirmed"]);
+async function loadFieldBookings() {
+  if (!supabase || !session) { fieldBookings = {}; return; }
+  const { data, error } = await supabase.from("bookings").select("facility_id,date,status,email").or("facility_id.like.cf-%,facility_id.like.cm-%");
+  fieldBookings = {};
+  if (!error) (data || []).forEach(r => (fieldBookings[r.facility_id] ||= []).push(r));
+  if (view === "book") renderBook();
 }
-function renderTabs() { const c = cartOf().length, a = activeOf().length;
-  $("bookTab").innerHTML = `📌<span class="tl"> Active bookings</span>${a ? ` (${a})` : ""} / 🛒<span class="tl"> Cart</span>${c ? ` (${c})` : ""}`; }
+const mfDate = iso => { if (!iso) return ""; const d = new Date(String(iso).length === 10 ? iso + "T12:00" : iso); if (isNaN(d)) return "";
+  return d.toLocaleDateString("en-NZ", { day: "numeric", month: "short", ...(d.getFullYear() !== new Date().getFullYear() ? { year: "2-digit" } : {}) }); };
+function mfTimeline(x, who) {
+  const today = new Date().toISOString().slice(0, 10);
+  const bk = (fieldBookings?.[x.id] || []).filter(r => (r.email || "").toLowerCase() === who && !["rejected", "cancelled"].includes(r.status)).sort((a, b) => a.date.localeCompare(b.date));
+  const acc = bk.filter(r => ACCEPTED.has(r.status));
+  const started = acc[0]?.date || "";
+  const ended = isRetired(x) ? x.retired_at : bk.length && !bk.some(r => r.date >= today) ? bk[bk.length - 1].date : "";
+  const pending = !started && bk.length ? bk.length : 0;
+  return { started, ended, pending, next: bk.find(r => r.date >= today)?.date || "" };
+}
+function renderBook() {
+  const me = whoBooks();
+  if (mfWho === null) mfWho = me;
+  const bookers = Object.keys(bookLocs).filter(e => (bookLocs[e] || []).length).sort();
+  if (mfWho && !bookers.includes(mfWho)) bookers.unshift(mfWho);
+  const rows = (mfWho ? [mfWho] : bookers).flatMap(w => (bookLocs[w] || []).map(x => ({ x, w })));
+  const stageOf = ({ x, w }) => isRetired(x) || mfTimeline(x, w).ended ? "ended" : isActive(x) ? "active" : "cart";
+  const counts = { all: rows.length, cart: 0, active: 0, ended: 0 }; rows.forEach(r => counts[stageOf(r)]++);
+  const shown = rows.filter(r => mfStage === "all" || stageOf(r) === mfStage)
+    .sort((a, b) => ({ cart: 0, active: 1, ended: 2 }[stageOf(a)] - { cart: 0, active: 1, ended: 2 }[stageOf(b)]) || (b.x.activated_at || b.x.added_at || "").localeCompare(a.x.activated_at || a.x.added_at || ""));
+  const canEdit = w => IS_ADMIN || w === (session?.user?.email || "demo@local").toLowerCase();
+  const editable = mfWho && canEdit(mfWho), cart = editable ? (bookLocs[mfWho] || []).filter(x => !isActive(x) && !isRetired(x)) : [];
+  if (IS_ADMIN && mfWho) bookFor = mfWho;   // admins' cart clicks in Book mode go to the booker shown
+  const prov = x => x.kind === "community" ? "cm_" + x.operator.id : x.kind === "council_private" ? "op_" + x.operator.id : "akl_council";
+  const tag = x => x.kind === "community" ? `<span class="mf-tag comm" title="Community facility">🏫</span>` : x.kind === "council_private" ? `<span class="mf-tag priv" title="${esc(x.operator?.name || "operator")} + council">◆</span>` : `<span class="mf-tag" title="Council">🏛</span>`;
+  const who = w => esc(personFromEmail(w));
+  const stars = id => { const a = crowdAvg(id); return a ? `<span title="${ratings[id].n} rating${ratings[id].n > 1 ? "s" : ""}">★${a.toFixed(1)}</span>` : `<span class="mf-none">–</span>`; };
+  const cell = (k, v, title) => `<td class="mf-d" data-k="${k}"${title ? ` title="${esc(title)}"` : ""}>${v || `<span class="mf-none">–</span>`}</td>`;
+  loadContact(mfWho || me);
+  if (fieldBookings === null) { fieldBookings = {}; loadFieldBookings(); }
+  $("bookPanel").innerHTML = `<div class="mf-head">
+      <select id="mfWho" aria-label="Booker">${[...new Set([me, ...bookers])].map(e => `<option value="${esc(e)}"${e === mfWho ? " selected" : ""}>${e === me ? "Me" : who(e)} · ${esc(e.split("@")[0])}</option>`).join("")}
+        <option value=""${mfWho === "" ? " selected" : ""}>All bookers</option></select>
+      <div class="mf-stages">${[["all", "All"], ["cart", "🛒 Cart"], ["active", "📌 Active"], ["ended", "Ended"]].map(([k, l]) => `<button data-mfstage="${k}" aria-pressed="${mfStage === k}">${l} <b>${counts[k]}</b></button>`).join("")}</div></div>
+    ${mfWho ? contactNote(mfWho) : ""}
+    ${cart.length ? `<div class="mf-go"><span>${cart.length} field${cart.length === 1 ? "" : "s"} in the cart, not bookable yet.</span><button class="primary" id="bkSave">✅ Save as active</button></div>` : ""}
+    ${shown.length ? `<div class="mf-wrap"><table class="mf"><thead><tr><th>Field</th>${mfWho ? "" : "<th>Booker</th>"}<th title="Added to the cart">Carted</th><th title="Saved as an active booking field">Active</th>
+      <th title="First booking the council / provider accepted">Started</th><th title="Field retired, or its last booking once none are upcoming">Ended</th><th title="Crowd quality rating">★</th><th></th></tr></thead><tbody>
+      ${shown.map(r => { const { x, w } = r, t = mfTimeline(x, w), st = stageOf(r);
+        return `<tr class="mf-${st}"><td class="mf-f"><span class="mf-st ${st}" title="${st === "cart" ? "In the cart" : st === "active" ? "Active" : "Ended"}"></span>${tag(x)}
+            <span class="mf-n" title="${esc(x.park)} – ${esc(x.field)}">${esc(x.park)} <span class="muted">– ${esc(x.field)}</span></span></td>
+          ${mfWho ? "" : `<td class="mf-w" title="${esc(w)}">${who(w)}</td>`}
+          ${cell("Carted", mfDate(x.added_at), x.added_by && x.added_by !== w ? "Added by " + x.added_by : "")}${cell("Active", mfDate(x.activated_at))}
+          ${cell("Started", t.started ? mfDate(t.started) : t.pending ? `<span class="mf-pend">${t.pending} pending</span>` : "", t.next ? "Next booking " + mfDate(t.next) : "")}${cell("Ended", mfDate(t.ended))}
+          <td class="mf-r">${stars(x.park_id)}</td>
+          <td class="mf-a">${x.kind === "community" ? "" : `<button data-bkopen="${esc(x.park_id)}" title="Open this park">↗</button>`}${isActive(x) ? `<a href="${venueLink(prov(x), x.park)}" target="_blank" rel="noopener" title="Book dates in Facility Booking">📅</a>` : ""}${canEdit(w) && !isRetired(x) ? `<button data-bkdel="${esc(x.id)}" data-bkw="${esc(w)}"${isActive(x) ? ` data-active="1"` : ""} title="Remove">✕</button>` : ""}</td></tr>`; }).join("")}
+      </tbody></table></div>`
+    : `<p class="muted">${rows.length ? "Nothing at this stage." : mfWho === me ? (IS_ADMIN ? "No fields yet. ★ Top pick or ✓ Shortlist a park and its rated fields are added here." : "No fields yet. In 📅 Book mode, open a park and tap its field areas to add them to your cart.") : "No fields."}</p>`}`;
+}
+function renderTabs() { const n = activeOf().length + cartOf().length;
+  $("bookTab").innerHTML = `📌<span class="tl"> My fields</span>${n ? ` (${n})` : ""}`; }
 function applyModeUi() {
   const book = workMode === "book";
   $("modeRate").setAttribute("aria-checked", String(!book)); $("modeBook").setAttribute("aria-checked", String(book));
@@ -1766,7 +1807,7 @@ function setMode(m) {
 }
 function bindBook() {
   const who = e => { bookFor = e.target.value.trim().toLowerCase(); renderTabs(); render(); };
-  $("bookPanel").addEventListener("change", e => { if (e.target.id === "bookWho") who(e); });
+  $("bookPanel").addEventListener("change", e => { if (e.target.id === "mfWho") { mfWho = e.target.value; renderBook(); renderTabs(); } });
   $("bookBar").addEventListener("change", e => { if (e.target.id === "bookWho2") who(e); });
   $("bookBar").addEventListener("click", e => { const p = current(); if (!p) return;
     const un = e.target.closest("[data-uncart]"); if (un) return toggleCart(p, un.dataset.uncart);
@@ -1774,10 +1815,11 @@ function bindBook() {
     if (e.target.id === "bbCart") setView("book");
     if (e.target.id === "bbSave") saveCartActive(); });
   $("bookPanel").addEventListener("click", async e => {
-    const del = e.target.closest("[data-bkdel]");
+    const del = e.target.closest("[data-bkdel]"), stage = e.target.closest("[data-mfstage]");
+    if (stage) { mfStage = stage.dataset.mfstage; renderBook(); return; }
     if (e.target.id === "bkSave") return saveCartActive();
     if (del && del.dataset.active && !confirm("Remove this field from the active bookings? It won't be offered in Facility Booking any more (existing bookings stay).")) return;
-    if (del) { const w = whoBooks(), before = bookLocs[w] || []; bookLocs[w] = before.filter(x => x.id !== del.dataset.bkdel);
+    if (del) { if (IS_ADMIN) bookFor = del.dataset.bkw; const w = whoBooks(), before = bookLocs[w] || []; bookLocs[w] = before.filter(x => x.id !== del.dataset.bkdel);
       if (await saveBookLocs()) setStatus("Removed from " + w + "'s cart."); else bookLocs[w] = before;
       renderBook(); renderTabs(); return; }
     const op = e.target.closest("[data-bkopen]"); if (op) { if (workMode !== "book") setMode("book"); openPark(op.dataset.bkopen); }
@@ -2030,7 +2072,7 @@ function renderParkHeader() {
   const p = current();
   $("parkName").textContent = "Cart";
   $("emptyState").hidden = true; $("card").hidden = false; $("behind").hidden = true;
-  $("parkName").textContent = "🛒 Cart"; $("parkRegion").textContent = p ? "last park: " + p.name : "";
+  $("parkName").textContent = "📌 My fields"; $("parkRegion").textContent = p ? "last park: " + p.name : "";
   $("decChip").innerHTML = ""; $("handle").title = "Council fields in the booker's cart, ready for the booking site";
 }
 function render() {

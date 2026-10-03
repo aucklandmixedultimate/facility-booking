@@ -638,3 +638,47 @@ body.aklzoom #field,body.aklzoom #centreWrap,body.aklzoom #fitPop,body.aklzoom .
 .hist-empty{padding:14px 2px;color:var(--muted);font-size:13px}
 .pm-actor{font-size:12px;color:var(--muted,#64748b);margin:-2px 0 6px}
 .hist-acct{opacity:.7}
+/* My fields: every booker's council fields as one compact table */
+.bookpanel .mf-head{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.bookpanel .mf-head select{margin-right:auto}
+.bookpanel .mf-head select{padding:5px 8px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);max-width:100%}
+.bookpanel .mf-stages{display:flex;gap:4px;overflow-x:auto;scrollbar-width:none;width:100%}
+.bookpanel .mf-stages button{flex-shrink:0;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:999px;padding:3px 10px;font-size:12px;font-weight:600}
+.bookpanel .mf-stages button b{font-weight:700;opacity:.6;margin-left:2px}
+.bookpanel .mf-stages button[aria-pressed="true"]{background:var(--turf);border-color:var(--turf);color:#fff}
+.bookpanel .mf-stages button[aria-pressed="true"] b{opacity:.85}
+.bookpanel .mf-go{display:flex;align-items:center;gap:8px;flex-wrap:wrap;border:1px solid var(--line);border-radius:10px;padding:6px 10px;font-size:13px}
+.bookpanel .mf-go span{flex:1}
+.bookpanel .mf-go .primary{border:0;background:var(--turf);color:#fff;border-radius:8px;padding:6px 12px;font-weight:600}
+.bookpanel .mf-wrap{border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.bookpanel table.mf{width:100%;border-collapse:collapse;font-size:12.5px;text-align:left}
+.bookpanel .mf th{font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:700;padding:6px 8px;background:var(--bg);white-space:nowrap}
+.bookpanel .mf td{padding:6px 8px;border-top:1px solid var(--line);vertical-align:middle}
+.bookpanel .mf .mf-f{display:flex;align-items:center;gap:6px;min-width:0;max-width:34ch}
+.bookpanel .mf .mf-n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;min-width:0}
+.bookpanel .mf .mf-n .muted{font-weight:400}
+.bookpanel .mf .mf-st{width:8px;height:8px;border-radius:50%;flex-shrink:0;background:#94a3b8}
+.bookpanel .mf .mf-st.cart{background:#f59e0b}.bookpanel .mf .mf-st.active{background:#0f766e}
+.bookpanel .mf .mf-tag{font-size:11px;flex-shrink:0}.bookpanel .mf .mf-tag.priv{color:#6d28d9}
+.bookpanel .mf .mf-d,.bookpanel .mf .mf-r,.bookpanel .mf .mf-w{white-space:nowrap;color:var(--ink)}
+.bookpanel .mf .mf-none{color:var(--muted);opacity:.6}
+.bookpanel .mf .mf-pend{color:#b45309;font-size:11px}
+.bookpanel .mf .mf-a{white-space:nowrap;text-align:right}
+.bookpanel .mf .mf-a button,.bookpanel .mf .mf-a a{border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:6px;padding:2px 7px;font-size:12px;text-decoration:none;margin-left:3px}
+.bookpanel .mf tr.mf-ended{opacity:.65}
+/* Narrow (a phone, or the half-width panel on desktop): each row becomes a small card —
+   field and actions, then the booker, then the four dates labelled. */
+.bookpanel{container-type:inline-size}
+@container (max-width: 640px){
+  .bookpanel table.mf,.bookpanel .mf tbody{display:block}
+  .bookpanel .mf thead{display:none}
+  .bookpanel .mf tr{display:grid;grid-template-columns:repeat(4,minmax(0,1fr)) 92px;gap:2px 6px;padding:7px 8px;border-top:1px solid var(--line)}
+  .bookpanel .mf tr:first-child{border-top:0}
+  .bookpanel .mf td{border:0;padding:0}
+  .bookpanel .mf .mf-f{grid-column:1 / 5;max-width:none}
+  .bookpanel .mf .mf-a{grid-column:5;grid-row:1}
+  .bookpanel .mf .mf-w{grid-column:1 / -1;font-size:11px;color:var(--muted)}
+  .bookpanel .mf .mf-r{grid-column:5;text-align:right}
+  .bookpanel .mf .mf-d{font-size:11.5px}
+  .bookpanel .mf .mf-d::before{content:attr(data-k);display:block;font-size:9.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:700}
+}
