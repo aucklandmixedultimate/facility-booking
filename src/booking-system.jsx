@@ -1649,6 +1649,7 @@ function EmailChip({email}) {
   return <span style={{display:"inline-flex",alignItems:"center",gap:4,padding:"2px 8px",borderRadius:999,background:c+"18",border:`1px solid ${c}44`,color:c,fontSize:11,fontWeight:700,whiteSpace:"nowrap"}}>{email||"unknown"}</span>;
 }
 function Modal({title,onClose,children,width=560}) {
+  const isMobile = useMobile();
   useEffect(()=>{
     const onKey=e=>{ if(e.key==="Escape"){ e.stopPropagation(); onClose(); } };
     window.addEventListener("keydown",onKey);
@@ -1659,11 +1660,11 @@ function Modal({title,onClose,children,width=560}) {
       className="modal-backdrop">
       <div style={{background:"#fff",borderRadius:"16px 16px 0 0",width:"100%",maxWidth:width,maxHeight:"92vh",display:"flex",flexDirection:"column",boxShadow:"0 -8px 40px rgba(0,0,0,0.2)"}}
         onClick={e=>e.stopPropagation()}>
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"20px 24px 16px",borderBottom:"1px solid #f1f5f9",flexShrink:0}}>
-          <h2 style={{margin:0,fontSize:18,fontWeight:700,color:"#0f172a"}}>{title}</h2>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:isMobile?"12px 14px 10px":"20px 24px 16px",borderBottom:"1px solid #f1f5f9",flexShrink:0}}>
+          <h2 style={{margin:0,fontSize:isMobile?16:18,fontWeight:700,color:"#0f172a"}}>{title}</h2>
           <button onClick={onClose} style={{background:"none",border:"none",cursor:"pointer",fontSize:20,color:"#94a3b8",lineHeight:1,padding:4}}>✕</button>
         </div>
-        <div style={{padding:24,flex:1,minHeight:0,display:"flex",flexDirection:"column",overflowY:"auto",overflowX:"hidden"}}>{children}</div>
+        <div style={{padding:isMobile?14:24,flex:1,minHeight:0,display:"flex",flexDirection:"column",overflowY:"auto",overflowX:"hidden"}}>{children}</div>
       </div>
     </div>
   );
@@ -1691,8 +1692,11 @@ const ACTIVITY_LABELS = {
   slot_shared:"Slot shared with a team", slot_merged:"Bookings merged into one slot", slot_unlinked:"Removed from a shared slot",
   drive_upload:"Saved to Drive", drive_attach:"GTEC invoice attached",
   email_sent:"Email sent", email_failed:"Email failed", sign_in:"Signed in", sign_out:"Signed out",
-  settings_change:"Settings changed",
+  settings_change:"Settings changed", council_fields:"Council fields", council_application_sent:"Sent to council",
 };
+// What non-admins see of the log: bookers' own activity (the activity_log select policy in
+// supabase-migration-activity-log-global.sql allows the same), not sign-ins, emails or admin work.
+const ACTIVITY_PUBLIC_ACTIONS = new Set(["booking_create","booking_edit","booking_delete","slot_shared","slot_merged","slot_unlinked","council_fields"]);
 // Who performed the action: explicit stamp from logActivity, else best-effort by action.
 function activityActor(r) {
   const by = r.detail?.by;
@@ -1740,13 +1744,18 @@ function describeActivity(r) {
     case "drive_attach": return `Attached ${d.file||"file"} · Invoice (from GTEC)`;
     case "email_sent":   return `→ ${d.to||""}${d.subject?` · ${d.subject}`:""}`;
     case "email_failed": return `→ ${d.to||""}${d.subject?` · ${d.subject}`:""}`;
+    case "council_fields": return [d.added?.length&&`Added ${d.added.join("; ")}`, d.activated?.length&&`Made active ${d.activated.join("; ")}`,
+      d.removed?.length&&`Removed ${d.removed.join("; ")}`, d.retired?.length&&`Retired ${d.retired.join("; ")}`].filter(Boolean).join(" · ")
+      + (d.booker&&d.booker!==r.user_email?.toLowerCase()?` · for ${d.booker}`:"");
     case "sign_in":  return d.email ? `${d.email}` : "Signed in";
     case "sign_out": return "Signed out";
     default: { const { by, ...rest } = d; void by; return Object.keys(rest).length ? JSON.stringify(rest) : ""; }
   }
 }
 
-function ActivityLogModal({onClose, inline=false, bookers=[]}) {
+function ActivityLogModal({onClose, inline=false, bookers=[], isAdmin=true}) {
+  const isMobile = useMobile();
+  const [showFilters, setShowFilters] = useState(false);
   const [rows, setRows] = useState(null);
   const [error, setError] = useState("");
   const [filter, setFilter] = useState("all"); // all | sync | admin | booker
@@ -1799,8 +1808,8 @@ function ActivityLogModal({onClose, inline=false, bookers=[]}) {
   }, [rows]);
   // Every action present in the fetched window, so the dropdown only offers real options.
   const actionsPresent = useMemo(
-    () => [...new Set((rows||[]).map(r=>r.action))].sort((a,b)=>(ACTIVITY_LABELS[a]||a).localeCompare(ACTIVITY_LABELS[b]||b)),
-    [rows]);
+    () => [...new Set((rows||[]).map(r=>r.action).filter(a=>isAdmin||ACTIVITY_PUBLIC_ACTIONS.has(a)))].sort((a,b)=>(ACTIVITY_LABELS[a]||a).localeCompare(ACTIVITY_LABELS[b]||b)),
+    [rows, isAdmin]);
   // Booker match scans the whole entry, not just user_email: a deletion records the
   // affected booker inside detail, and the actor is usually the admin who did it.
   const whoQ = who.trim().toLowerCase();
@@ -1815,6 +1824,7 @@ function ActivityLogModal({onClose, inline=false, bookers=[]}) {
     : [];
   const matchesBooker = r => !selBooker || bookerNeedles.some(nd => blob(r).includes(nd));
   const filtered = collapsed.filter(r => {
+    if (!isAdmin && (!ACTIVITY_PUBLIC_ACTIONS.has(r.action) || activityActor(r)!=="booker")) return false;
     if (!matchesWho(r) || !matchesBooker(r)) return false;
     if (actionFilter!=="all" && r.action!==actionFilter) return false;
     if (filter==="all")   return true;
@@ -1838,96 +1848,116 @@ function ActivityLogModal({onClose, inline=false, bookers=[]}) {
     if (a==="email_sent")   return {color:"#0e7490",bg:"#ecfeff",border:"#a5f3fc"};
     if (a==="email_failed") return {color:"#b91c1c",bg:"#fef2f2",border:"#fecaca"};
     if (a==="sign_in"||a==="sign_out") return {color:"#475569",bg:"#f8fafc",border:"#e2e8f0"};
+    if (a==="council_fields") return {color:"#047857",bg:"#ecfdf5",border:"#a7f3d0"};
     return {color:"#475569",bg:"#fff",border:"#e2e8f0"};
   };
   const ALWrapper = inline
-    ? ({children}) => <div style={{background:"#fff",border:"1.5px solid #e2e8f0",borderRadius:12,padding:16,maxHeight:520,display:"flex",flexDirection:"column"}}><div style={{fontSize:14,fontWeight:700,color:"#0f172a",marginBottom:10}}>📜 Activity Log</div>{children}</div>
+    ? ({children}) => <div style={{background:"#fff",border:"1.5px solid #e2e8f0",borderRadius:12,padding:isMobile?10:16,maxHeight:520,display:"flex",flexDirection:"column"}}><div style={{fontSize:14,fontWeight:700,color:"#0f172a",marginBottom:10}}>📜 Activity Log</div>{children}</div>
     : ({children}) => <Modal title="📜 Activity Log" onClose={onClose} width={780}>{children}</Modal>;
+  const when = r => new Date(r.created_at).toLocaleString("en-NZ",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"});
+  // Who: the person picked at sign-in (first name, last initial), then the account.
+  const whoLabel = r => <>{r.detail?.actor?<b style={{color:"#334155"}}>{r.detail.actor} </b>:null}<span>{(r.user_email||"—").replace(/@.*/, isAdmin?"$&":"")}</span></>;
+  const badge = r => { const st = actionStyle(r.action);
+    return <span style={{fontSize:11,fontWeight:700,padding:"1px 7px",borderRadius:10,background:st.bg,color:st.color,border:`1px solid ${st.border}`,whiteSpace:"nowrap"}}>{ACTIVITY_LABELS[r.action]||r.action}</span>; };
+  const roleChip = r => { const adm = activityActor(r)==="admin";
+    return <span style={{fontSize:9,fontWeight:700,padding:"0 5px",borderRadius:8,background:adm?"#eef2ff":"#f0fdf4",color:adm?"#4338ca":"#15803d",border:`1px solid ${adm?"#c7d2fe":"#bbf7d0"}`}}>{adm?"Admin":"Booker"}</span>; };
+  const tabs = isAdmin ? [["all","All"],["sync","Sync & GTEC"],["admin","Admin"],["booker","Bookers"]] : [];
+  const filtersSet = !!(who||logFrom||logTo||actionFilter!=="all"||bookerSel);
+  const inp = {...S.inp,fontSize:12,padding:"5px 8px",minWidth:0,boxSizing:"border-box"};
+  const pill = on => ({padding:"4px 10px",borderRadius:14,border:`1.5px solid ${on?"#0f172a":"#e2e8f0"}`,background:on?"#0f172a":"#fff",color:on?"#fff":"#475569",fontSize:12,fontWeight:600,fontFamily:"inherit",cursor:"pointer",whiteSpace:"nowrap",flexShrink:0});
+  const filterPanel = (
+    <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr 1fr":"repeat(auto-fit,minmax(150px,1fr))",gap:6,background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:8,flexShrink:0}}>
+      {isAdmin&&bookers.length>0&&(
+        <select value={bookerSel} onChange={e=>setBookerSel(e.target.value)} title="Match every address this booker owns, plus their display name" style={inp}>
+          <option value="">All bookers</option>
+          {bookers.map(b=><option key={b.email} value={b.email}>{b.name}</option>)}
+        </select>
+      )}
+      <select value={actionFilter} onChange={e=>setActionFilter(e.target.value)} style={inp}>
+        <option value="all">All actions</option>
+        {actionsPresent.map(a=><option key={a} value={a}>{ACTIVITY_LABELS[a]||a}</option>)}
+      </select>
+      <input value={who} onChange={e=>setWho(e.target.value)} placeholder="Search: name, date, ref…"
+        title="Matches who did it and anything recorded in the entry — booker addresses, references, booking dates"
+        style={{...inp,gridColumn:isMobile?"1 / -1":"auto"}}/>
+      <label style={{display:"flex",flexDirection:"column",gap:2,fontSize:10,color:"#64748b",fontWeight:700}}>FROM
+        <input type="date" value={logFrom} onChange={e=>setLogFrom(e.target.value)} style={inp}/></label>
+      <label style={{display:"flex",flexDirection:"column",gap:2,fontSize:10,color:"#64748b",fontWeight:700}}>TO
+        <input type="date" value={logTo} onChange={e=>setLogTo(e.target.value)} style={inp}/></label>
+      {filtersSet&&(
+        <button onClick={()=>{setWho("");setLogFrom("");setLogTo("");setActionFilter("all");setBookerSel("");}}
+          style={{gridColumn:isMobile?"1 / -1":"auto",padding:"5px 9px",borderRadius:6,border:"1px solid #e2e8f0",background:"#fff",color:"#64748b",cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit"}}>Clear filters</button>
+      )}
+    </div>
+  );
+  const empty = <div style={{padding:24,textAlign:"center",color:"#94a3b8",fontSize:13}}>{rows===null?"Loading…":"No activity matches this filter."}</div>;
   return (
     <ALWrapper>
-      <div style={{display:"flex",flexDirection:"column",gap:10,minHeight:0,flex:1}}>
-        <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0,flexWrap:"wrap"}}>
-          {[["all","All"],["sync","Sync & GTEC"],["admin","Admin activity"],["booker","Booker activity"]].map(([val,label])=>(
-            <button key={val} onClick={()=>setFilter(val)} style={{padding:"4px 10px",borderRadius:14,border:`1.5px solid ${filter===val?"#0f172a":"#e2e8f0"}`,background:filter===val?"#0f172a":"#fff",color:filter===val?"#fff":"#475569",fontSize:12,fontWeight:600,fontFamily:"inherit",cursor:"pointer"}}>{label}</button>
-          ))}
-          <span style={{marginLeft:"auto",fontSize:11,color:"#94a3b8"}}>{rows===null?"Loading…":`${filtered.length} of ${collapsed.length} entries (logins collapsed to most-recent per user)`}</span>
+      <div style={{display:"flex",flexDirection:"column",gap:8,minHeight:0,flex:1}}>
+        {!isAdmin&&<div style={{fontSize:12,color:"#64748b",flexShrink:0}}>Bookings and council fields across all bookers, newest first.</div>}
+        <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0,minWidth:0}}>
+          <div style={{display:"flex",gap:6,flex:1,minWidth:0,overflowX:"auto",scrollbarWidth:"none"}}>
+            {tabs.map(([val,label])=><button key={val} onClick={()=>setFilter(val)} style={pill(filter===val)}>{label}</button>)}
+          </div>
+          <span style={{fontSize:11,color:"#94a3b8",whiteSpace:"nowrap"}}>{rows===null?"…":isAdmin?`${filtered.length}/${collapsed.length}`:filtered.length}</span>
+          {isMobile&&<button onClick={()=>setShowFilters(v=>!v)} title="Filters" aria-pressed={showFilters} style={pill(showFilters||filtersSet)}>⚙{filtersSet?" •":""}</button>}
         </div>
-        {/* Booker / date-range / action filters. The dates query the server, so they reach
-            history the fetch window would otherwise cut off. */}
-        <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap",flexShrink:0,background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 9px"}}>
-          {bookers.length>0&&(
-            <select value={bookerSel} onChange={e=>setBookerSel(e.target.value)}
-              title="Match every address this booker owns, plus their display name"
-              style={{...S.inp,fontSize:12,padding:"4px 8px",flex:"0 1 170px"}}>
-              <option value="">All bookers</option>
-              {bookers.map(b=><option key={b.email} value={b.email}>{b.name}</option>)}
-            </select>
-          )}
-          <input value={who} onChange={e=>setWho(e.target.value)} placeholder="Date (2026-09), ref, any text…"
-            title="Matches the actor's email and anything recorded in the entry — booker addresses, references, booking dates"
-            style={{...S.inp,fontSize:12,padding:"4px 8px",flex:"1 1 190px",minWidth:150}}/>
-          <select value={actionFilter} onChange={e=>setActionFilter(e.target.value)}
-            style={{...S.inp,fontSize:12,padding:"4px 8px",flex:"0 1 165px"}}>
-            <option value="all">All actions</option>
-            {actionsPresent.map(a=><option key={a} value={a}>{ACTIVITY_LABELS[a]||a}</option>)}
-          </select>
-          <span style={{fontSize:11,color:"#64748b",fontWeight:600}}>Logged</span>
-          <input type="date" value={logFrom} onChange={e=>setLogFrom(e.target.value)} title="Only entries logged on or after this date"
-            style={{...S.inp,fontSize:12,padding:"4px 8px",flex:"0 1 140px"}}/>
-          <span style={{fontSize:11,color:"#94a3b8"}}>→</span>
-          <input type="date" value={logTo} onChange={e=>setLogTo(e.target.value)} title="Only entries logged on or before this date"
-            style={{...S.inp,fontSize:12,padding:"4px 8px",flex:"0 1 140px"}}/>
-          {(who||logFrom||logTo||actionFilter!=="all"||bookerSel)&&(
-            <button onClick={()=>{setWho("");setLogFrom("");setLogTo("");setActionFilter("all");setBookerSel("");}}
-              style={{padding:"4px 9px",borderRadius:6,border:"1px solid #e2e8f0",background:"#fff",color:"#64748b",cursor:"pointer",fontSize:11,fontWeight:600,fontFamily:"inherit"}}>Clear</button>
-          )}
-        </div>
+        {(!isMobile||showFilters)&&filterPanel}
         {truncated&&(
           <div style={{background:"#fffbeb",border:"1px solid #fde68a",borderRadius:8,padding:"6px 10px",fontSize:11,color:"#92400e",flexShrink:0,display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-            <span>⚠ Hit the {limit}-entry fetch limit — older history is not loaded. Narrow the <strong>Logged</strong> dates, or load more.</span>
+            <span>⚠ Showing the latest {limit} entries. Narrow the dates, or load more.</span>
             <button onClick={()=>setLimit(l=>l+2000)}
-              style={{marginLeft:"auto",padding:"3px 9px",borderRadius:6,border:"1px solid #fcd34d",background:"#fff",color:"#92400e",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"}}>Load {limit+2000} entries</button>
+              style={{marginLeft:"auto",padding:"3px 9px",borderRadius:6,border:"1px solid #fcd34d",background:"#fff",color:"#92400e",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"}}>Load more</button>
           </div>
         )}
-        {error&&<div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:6,padding:"6px 10px",fontSize:12,color:"#b91c1c"}}>⚠ {error} — has <code>supabase-migration-activity-log.sql</code> been run?</div>}
+        {error&&<div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:6,padding:"6px 10px",fontSize:12,color:"#b91c1c",flexShrink:0}}>⚠ {error} — has <code>supabase-migration-activity-log.sql</code> been run?</div>}
         <div style={{overflowY:"auto",flex:1,minHeight:0,border:"1px solid #f1f5f9",borderRadius:8}}>
+          {isMobile ? (
+            filtered.length===0 ? empty :
+            <ul style={{listStyle:"none",margin:0,padding:0}}>
+              {filtered.map(r=>(
+                <li key={r.id} style={{padding:"8px 10px",borderBottom:"1px solid #f1f5f9",display:"flex",flexDirection:"column",gap:3,minWidth:0}}>
+                  <div style={{display:"flex",alignItems:"center",gap:6,minWidth:0}}>
+                    {badge(r)}
+                    <span style={{marginLeft:"auto",fontSize:11,color:"#94a3b8",whiteSpace:"nowrap"}}>{when(r)}</span>
+                  </div>
+                  {describeActivity(r)&&<div style={{fontSize:12,color:"#334155",overflowWrap:"anywhere",lineHeight:1.35}}>{describeActivity(r)}</div>}
+                  <div style={{display:"flex",alignItems:"center",gap:5,fontSize:11,color:"#64748b",minWidth:0}}>
+                    {isAdmin&&roleChip(r)}<span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",minWidth:0}} title={r.user_email||""}>{whoLabel(r)}</span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          ) : (
           <CopyableTable>
-          <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,tableLayout:"fixed"}}>
+            <colgroup><col style={{width:100}}/><col style={{width:170}}/><col style={{width:150}}/><col/></colgroup>
             <thead style={{position:"sticky",top:0,background:"#f8fafc",zIndex:1}}>
               <tr>
-                <th style={{textAlign:"left",padding:"7px 10px",fontWeight:700,color:"#475569",borderBottom:"1px solid #e2e8f0"}}>When</th>
-                <th style={{textAlign:"left",padding:"7px 10px",fontWeight:700,color:"#475569",borderBottom:"1px solid #e2e8f0"}}>Who</th>
-                <th style={{textAlign:"left",padding:"7px 10px",fontWeight:700,color:"#475569",borderBottom:"1px solid #e2e8f0"}}>Action</th>
-                <th style={{textAlign:"left",padding:"7px 10px",fontWeight:700,color:"#475569",borderBottom:"1px solid #e2e8f0"}}>Detail</th>
+                {["When","Who","Action","Detail"].map(h=><th key={h} style={{textAlign:"left",padding:"7px 10px",fontWeight:700,color:"#475569",borderBottom:"1px solid #e2e8f0"}}>{h}</th>)}
               </tr>
             </thead>
             <tbody>
-              {filtered.length===0&&rows!==null
-                ? <tr><td colSpan={4} style={{padding:24,textAlign:"center",color:"#94a3b8",fontSize:13}}>No activity matches this filter.</td></tr>
-                : filtered.map(r=>{
-                    const st = actionStyle(r.action);
-                    const actor = activityActor(r);
-                    const isAdminActor = actor==="admin";
-                    return (
-                      <tr key={r.id} style={{borderBottom:"1px solid #f1f5f9"}}>
-                        <td style={{padding:"6px 10px",color:"#64748b",whiteSpace:"nowrap",fontSize:11}}>{new Date(r.created_at).toLocaleString("en-NZ",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})}</td>
-                        <td style={{padding:"6px 10px",fontSize:11,whiteSpace:"nowrap"}}>
-                          <div style={{display:"flex",flexDirection:"column",gap:2}}>
-                            <span style={{display:"inline-flex",alignItems:"center",gap:4}}>
-                              <span style={{fontSize:9,fontWeight:700,padding:"0 5px",borderRadius:8,background:isAdminActor?"#eef2ff":"#f0fdf4",color:isAdminActor?"#4338ca":"#15803d",border:`1px solid ${isAdminActor?"#c7d2fe":"#bbf7d0"}`}}>{isAdminActor?"Admin":"Booker"}</span>
-                            </span>
-                            <span style={{color:"#64748b",maxWidth:160,overflow:"hidden",textOverflow:"ellipsis"}} title={r.user_email||""}>{r.detail?.actor?<b style={{color:"#334155"}}>{r.detail.actor} </b>:null}{r.user_email||"—"}</span>
-                          </div>
-                        </td>
-                        <td style={{padding:"6px 10px",whiteSpace:"nowrap"}}><span style={{fontSize:11,fontWeight:700,padding:"1px 7px",borderRadius:10,background:st.bg,color:st.color,border:`1px solid ${st.border}`}}>{ACTIVITY_LABELS[r.action]||r.action}</span></td>
-                        <td style={{padding:"6px 10px",color:"#475569",fontSize:11,wordBreak:"break-word"}}>{describeActivity(r)}</td>
-                      </tr>
-                    );
-                  })
+              {filtered.length===0
+                ? <tr><td colSpan={4}>{empty}</td></tr>
+                : filtered.map(r=>(
+                    <tr key={r.id} style={{borderBottom:"1px solid #f1f5f9",verticalAlign:"top"}}>
+                      <td style={{padding:"6px 10px",color:"#64748b",whiteSpace:"nowrap",fontSize:11}}>{when(r)}</td>
+                      <td style={{padding:"6px 10px",fontSize:11}}>
+                        <div style={{display:"flex",flexDirection:"column",gap:2,minWidth:0}}>
+                          {isAdmin&&<span>{roleChip(r)}</span>}
+                          <span style={{color:"#64748b",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={r.user_email||""}>{whoLabel(r)}</span>
+                        </div>
+                      </td>
+                      <td style={{padding:"6px 10px"}}>{badge(r)}</td>
+                      <td style={{padding:"6px 10px",color:"#475569",fontSize:11,overflowWrap:"anywhere"}}>{describeActivity(r)}</td>
+                    </tr>
+                  ))
               }
             </tbody>
           </table>
           </CopyableTable>
+          )}
         </div>
       </div>
     </ALWrapper>
@@ -13121,11 +13151,11 @@ export default function App() {
                           <UserMenuItem icon="🏛" label="Council application" onClick={()=>{setShowUserMenu(false);window.open(COUNCIL_APPLICATION_URL,"_blank","noopener");}}/>
                           <UserMenuItem icon="🏢" label="AMUA details" onClick={()=>{setShowUserMenu(false);setShowAmuaModal(true);}}/>
                           <UserMenuItem icon="👤" label="User Management" onClick={()=>{setShowUserMenu(false);setShowUserMgmtModal(true);}}/>
-                          <UserMenuItem icon="📜" label="Activity Log" onClick={()=>{setShowUserMenu(false);setShowActivityLog(true);}}/>
                           <UserMenuItem icon="🗑" label="Log Retention" onClick={()=>{setShowUserMenu(false);setShowRetentionModal(true);}}/>
                           <UserMenuItem icon="⬇" label="Reload from DB" onClick={()=>{setShowUserMenu(false);handleSyncDB();}}/>
                         </div>
                       )}
+                      <UserMenuItem icon="📜" label="Activity Log" onClick={()=>{setShowUserMenu(false);setShowActivityLog(true);}}/>
                       <UserMenuItem icon="👥" label="Switch or edit names" onClick={()=>{setShowUserMenu(false);ensureActor(true);}}/>
                       <UserMenuItem icon="🗺" label="Council / Community fields" onClick={()=>{setShowUserMenu(false);window.open(import.meta.env.BASE_URL+"vetting.html","_blank","noopener");}}/>
                       <UserMenuItem icon="📇" label="My council contact" onClick={()=>{setShowUserMenu(false);setShowContactModal(true);}}/>
@@ -13469,8 +13499,8 @@ export default function App() {
         </Modal>
       )}
 
-      {showActivityLog&&isAdmin&&(
-        <ActivityLogModal onClose={()=>setShowActivityLog(false)} bookers={knownBookers}/>
+      {showActivityLog&&(
+        <ActivityLogModal onClose={()=>setShowActivityLog(false)} bookers={isAdmin?knownBookers:[]} isAdmin={isAdmin}/>
       )}
 
       {showRetentionModal&&isAdmin&&(

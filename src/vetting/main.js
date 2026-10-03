@@ -1550,11 +1550,35 @@ const slug = s => String(s).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^
 async function loadBookLocs() {
   if (supabase && session) {
     const { data, error } = await supabase.from("settings").select("value").eq("key", BOOK_KEY).maybeSingle();
-    if (!error) { bookLocs = data?.value || {}; return; }
+    if (!error) { bookLocs = data?.value || {}; savedLocs = Object.fromEntries(Object.keys(bookLocs).map(w => [w, locsSnap(w)])); return; }
   }
   bookLocs = store.get("vet-booklocs", {});
 }
+// Cart changes go to the booking site's activity log (fields added, made active, removed),
+// stamped with who on the login made them.
+const locsSnap = who => Object.fromEntries((bookLocs[who] || []).map(x => [x.id, { park: x.park, field: x.field, status: x.status || "cart" }]));
+async function logCartChange(who, before) {
+  if (!supabase || !session) return;
+  const after = locsSnap(who), lbl = x => `${x.park} · ${x.field}`;
+  const added = Object.keys(after).filter(k => !before[k]).map(k => lbl(after[k]));
+  const removed = Object.keys(before).filter(k => !after[k]).map(k => lbl(before[k]));
+  const activated = Object.keys(after).filter(k => before[k] && before[k].status !== "active" && after[k].status === "active").map(k => lbl(after[k]));
+  const retired = Object.keys(after).filter(k => before[k] && before[k].status !== "retired" && after[k].status === "retired").map(k => lbl(after[k]));
+  if (!added.length && !removed.length && !activated.length && !retired.length) return;
+  const actor = getActor(session.user.email);
+  try {
+    await supabase.from("activity_log").insert({ user_id: session.user.id, user_email: session.user.email, session_id: "vetting", action: "council_fields",
+      detail: { booker: who, added, removed, activated, retired, by: IS_ADMIN ? "admin" : "booker", ...(actor ? { actor } : {}) } });
+  } catch { /* the log is best-effort */ }
+}
 async function saveBookLocs() {
+  const logWho = whoBooks(), logBefore = savedLocs[logWho] || {};
+  const ok = await saveBookLocsRaw();
+  if (ok) { logCartChange(logWho, logBefore); savedLocs[logWho] = locsSnap(logWho); }
+  return ok;
+}
+let savedLocs = {};   // per booker, the cart as last loaded/saved (to log what changed)
+async function saveBookLocsRaw() {
   if (supabase && session && !IS_ADMIN) {
     // Bookers can only change their own cart, through a database function.
     const who = whoBooks();
