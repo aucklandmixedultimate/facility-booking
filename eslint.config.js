@@ -27,6 +27,12 @@ export default defineConfig([
     },
   },
   {
+    // The booking site's modules share helpers and components with each other (split from one
+    // file); they hot-reload as whole modules in dev, which is fine.
+    files: ['src/booking/**/*.jsx', 'src/booking-system.jsx'],
+    rules: { 'react-refresh/only-export-components': 'off' },
+  },
+  {
     // Build/deploy tooling runs under Node, not the browser.
     files: ['scripts/**/*.js', '*.config.js'],
     languageOptions: { globals: globals.node },
