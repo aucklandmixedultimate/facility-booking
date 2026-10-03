@@ -101,7 +101,7 @@ async function loadShared() {
   if (error) {
     mode = "local"; reviews = store.get("vet-reviews", {}); flags = store.get("vet-flags", {});
     const missing = /field_reviews|does not exist|schema cache/i.test(error.message || "");
-    setStatus(missing ? "The field_reviews table isn't set up yet (run supabase-migration-field-reviews.sql). Decisions are kept in this browser for now."
+    setStatus(missing ? "The field_reviews table isn't set up yet (run supabase-setup.sql). Decisions are kept in this browser for now."
                       : "Couldn't load shared decisions (" + error.message + "). Decisions are kept in this browser for now.", true);
     return;
   }
@@ -159,10 +159,10 @@ async function saveFlag(id, flag) {
     const row = flag && { park_id: id, club: flag.club || "", kind: flag.kind || "private", contact: flag.contact || "",
       flagged_by: session?.user?.id || null, flagged_by_email: session?.user?.email || null, updated_at: new Date().toISOString() };
     let { error } = flag ? await supabase.from("field_flags").upsert(row) : await supabase.from("field_flags").delete().eq("park_id", id);
-    // Before the kind/contact columns exist (supabase-migration-field-reviews.sql), keep the provider only.
+    // Before the kind/contact columns exist (supabase-setup.sql), keep the provider only.
     if (error && flag && /kind|contact|column/i.test(error.message || "")) {
       const { kind, contact, ...old } = row; ({ error } = await supabase.from("field_flags").upsert(old));
-      if (!error) setStatus("Saved the provider; its kind and contact person need the updated supabase-migration-field-reviews.sql.", true);
+      if (!error) setStatus("Saved the provider; its kind and contact person need supabase-setup.sql.", true);
     }
     if (error) { setStatus("Couldn't save the club flag (" + error.message + ").", true); return false; }
   }
@@ -183,7 +183,7 @@ async function save(id, rev) {
     const { error } = await q;
     if (error) {
       const old = /fit_check/i.test(error.message || ""), dec = /decision_check/i.test(error.message || "");
-      setStatus(old || dec ? `Saving ${dec ? "field ratings before a decision" : "\"2 × full 7v7\""} needs the updated supabase-migration-field-reviews.sql — re-run it in the Supabase SQL editor.`
+      setStatus(old || dec ? `Saving ${dec ? "field ratings before a decision" : "\"2 × full 7v7\""} needs supabase-setup.sql — run it in the Supabase SQL editor.`
                     : "Couldn't save that decision (" + error.message + "). Try again.", true);
       return false;
     }
@@ -298,7 +298,7 @@ function renderHistory() {
   const meName = getActor(me);
   const rows = history.filter(h => histFilter === "all" || (histFilter === "mine" ? h.by_email === me && (!meName || !h.by_name || h.by_name === meName) : h.status === "rejected"));
   $("histNote").textContent = historyShared ? `Everyone's vetting changes, newest first${IS_ADMIN ? ". Changes are accepted unless you reject them; rejecting restores what was there before." : "."}`
-    : "Kept in this browser until the vetting_history table is set up (supabase-migration-vetting-history.sql).";
+    : "Kept in this browser until the vetting_history table is set up (supabase-setup.sql).";
   $("histFilters").querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.f === histFilter)));
   $("histList").innerHTML = rows.length ? rows.map(h => `<li class="hist-row ${h.status}" data-id="${esc(String(h.id))}">
       <div class="hist-top"><button class="hist-park" data-park="${esc(h.park_id)}" title="Open in park view">${esc(h.park)}</button>
@@ -355,6 +355,18 @@ function renderInterests() {
     + (interestsSet() ? `<button data-int="reset" title="Serve every park again">↺ All</button>` : "");
   $("interestBtn").setAttribute("aria-pressed", String(interestsSet()));
 }
+// Change some entries of a shared settings value: settings_merge() (supabase-setup.sql) does it
+// atomically, so two admins saving different entries can't overwrite each other. Until that
+// function exists, falls back to read-modify-write. Returns { value } or { error }.
+async function mergeSetting(key, patch, remove = []) {
+  const { data, error } = await supabase.rpc("settings_merge", { setting_key: key, patch, remove_keys: remove });
+  if (!error && data && typeof data === "object" && !Array.isArray(data)) return { value: data };
+  if (error && !/settings_merge|function|schema cache/i.test(error.message || "")) return { error };
+  const { data: cur } = await supabase.from("settings").select("value").eq("key", key).maybeSingle();
+  const fresh = { ...(cur?.value || {}) }; remove.forEach(k => delete fresh[k]); Object.assign(fresh, patch);
+  const r = await supabase.from("settings").upsert({ key, value: fresh, updated_at: new Date().toISOString() });
+  return r.error ? { error: r.error } : { value: fresh };
+}
 // ── Activity score: a background ranking metric per park ─────────────────────
 // Starts at 0; each "Later" (skip) takes 1 off. Shared through the settings table for
 // signed-in admins (key vet_park_activity), else kept on this device.
@@ -382,10 +394,8 @@ async function loadViews() {
 async function bumpViews(id) {
   views[id] = viewsOf(id) + 1;
   if (supabase && session && IS_ADMIN) {
-    const { data } = await supabase.from("settings").select("value").eq("key", VIEWS_KEY).maybeSingle();
-    const fresh = data?.value || {}; fresh[id] = (fresh[id] || 0) + 1;
-    const { error } = await supabase.from("settings").upsert({ key: VIEWS_KEY, value: fresh, updated_at: new Date().toISOString() });
-    if (!error) { views = fresh; return; }
+    const { value, error } = await mergeSetting(VIEWS_KEY, { [id]: views[id] });
+    if (!error) { views = value; return; }
   }
   store.set("vet-views", views);
 }
@@ -393,11 +403,8 @@ let servedPark = null;   // the park on screen; its view counts once you move on
 async function bumpActivity(id, delta) {
   activity[id] = activityOf(id) + delta;
   if (supabase && session && IS_ADMIN) {
-    // Re-read first so two admins skipping at once both count.
-    const { data } = await supabase.from("settings").select("value").eq("key", ACTIVITY_KEY).maybeSingle();
-    const fresh = data?.value || {}; fresh[id] = (fresh[id] || 0) + delta;
-    const { error } = await supabase.from("settings").upsert({ key: ACTIVITY_KEY, value: fresh, updated_at: new Date().toISOString() });
-    if (!error) { activity = fresh; return; }
+    const { value, error } = await mergeSetting(ACTIVITY_KEY, { [id]: activity[id] });
+    if (!error) { activity = value; return; }
   }
   store.set("vet-activity", activity);
 }
@@ -716,11 +723,9 @@ async function loadOffsets() {
 async function saveOffset(id, o) {
   const entry = o ? { ...o, by: session?.user?.email || "", at: new Date().toISOString() } : null;
   if (supabase && session && IS_ADMIN) {
-    const { data } = await supabase.from("settings").select("value").eq("key", OFFSETS_KEY).maybeSingle();
-    const fresh = { ...(data?.value || {}) }; if (entry) fresh[id] = entry; else delete fresh[id];
-    const { error } = await supabase.from("settings").upsert({ key: OFFSETS_KEY, value: fresh, updated_at: new Date().toISOString() });
+    const { value, error } = entry ? await mergeSetting(OFFSETS_KEY, { [id]: entry }) : await mergeSetting(OFFSETS_KEY, {}, [id]);
     if (error) { setStatus("Couldn't save the alignment (" + error.message + ").", true); return false; }
-    offsets = fresh; return true;
+    offsets = value; return true;
   }
   if (entry) offsets[id] = entry; else delete offsets[id];
   store.set("vet-council-offsets", offsets); return true;
@@ -1583,17 +1588,15 @@ async function saveBookLocsRaw() {
     // Bookers can only change their own cart, through a database function.
     const who = whoBooks();
     const { data, error } = await supabase.rpc("set_my_council_facilities", { entries: bookLocs[who] || [] });
-    if (error) { setStatus("Couldn't save your cart (" + error.message + "). An admin may need to run supabase-migration-council-fields-access.sql.", true); return false; }
+    if (error) { setStatus("Couldn't save your cart (" + error.message + "). An admin may need to run supabase-setup.sql.", true); return false; }
     bookLocs = data || {}; return true;
   }
   if (supabase && session) {
-    // Re-read first so two admins adding at once don't overwrite each other's bookers.
-    const { data } = await supabase.from("settings").select("value").eq("key", BOOK_KEY).maybeSingle();
-    const fresh = data?.value || {}, who = bookFor.toLowerCase();
-    fresh[who] = bookLocs[who] || []; if (!fresh[who].length) delete fresh[who];
-    const { error } = await supabase.from("settings").upsert({ key: BOOK_KEY, value: fresh, updated_at: new Date().toISOString() });
+    // Only this booker's list changes, so two admins editing different bookers don't collide.
+    const who = bookFor.toLowerCase(), list = bookLocs[who] || [];
+    const { value, error } = list.length ? await mergeSetting(BOOK_KEY, { [who]: list }) : await mergeSetting(BOOK_KEY, {}, [who]);
     if (error) { setStatus("Couldn't save booking locations (" + error.message + ").", true); return false; }
-    bookLocs = fresh; return true;
+    bookLocs = value; return true;
   }
   store.set("vet-booklocs", bookLocs); return true;
 }
@@ -1898,11 +1901,9 @@ async function loadRelations() {
 async function saveRelation(id, rel) {
   const entry = { ...rel, updated_by: session?.user?.email || "", updated_at: new Date().toISOString() };
   if (supabase && session) {
-    const { data } = await supabase.from("settings").select("value").eq("key", REL_KEY).maybeSingle();
-    const fresh = { ...(data?.value || {}), [id]: entry };
-    const { error } = await supabase.from("settings").upsert({ key: REL_KEY, value: fresh, updated_at: entry.updated_at });
+    const { value, error } = await mergeSetting(REL_KEY, { [id]: entry });
     if (error) { setStatus("Couldn't save (" + error.message + ").", true); return false; }
-    relations = fresh;
+    relations = value;
   } else { relations[id] = entry; store.set("vet-relations", relations); }
   return true;
 }
@@ -1962,21 +1963,19 @@ function bindInfo() {
 async function setCouncilOnly(p, on) {
   const entry = { council_only: on, by: session?.user?.email || "", at: new Date().toISOString() };
   if (supabase && session) {
-    const { data } = await supabase.from("settings").select("value").eq("key", CO_KEY).maybeSingle();
-    const fresh = { ...(data?.value || {}), [p.id]: entry };
-    const { error } = await supabase.from("settings").upsert({ key: CO_KEY, value: fresh, updated_at: entry.at });
+    const { value, error } = await mergeSetting(CO_KEY, { [p.id]: entry });
     if (error) { setStatus("Couldn't save council-only (" + error.message + ").", true); return false; }
-    councilOnlyOv = fresh;
+    councilOnlyOv = value;
   } else { councilOnlyOv[p.id] = entry; store.set("vet-council-only", councilOnlyOv); }
   const wf = parkWorkflow(p);
   if (supabase && session) {
     const { data } = await supabase.from("settings").select("value").eq("key", BOOK_KEY).maybeSingle();
-    const all = data?.value || {}; let n = 0;
-    Object.values(all).forEach(list => list.forEach(x => { if (x.park_id === p.id) { x.kind = wf.kind; x.operator = wf.operator; n++; } }));
-    if (n) {
-      const { error } = await supabase.from("settings").upsert({ key: BOOK_KEY, value: all, updated_at: new Date().toISOString() });
+    const all = data?.value || {}, changed = {};
+    Object.entries(all).forEach(([w, list]) => list.forEach(x => { if (x.park_id === p.id) { x.kind = wf.kind; x.operator = wf.operator; changed[w] = list; } }));
+    if (Object.keys(changed).length) {
+      const { value, error } = await mergeSetting(BOOK_KEY, changed);
       if (error) { setStatus("Saved, but couldn't update carts (" + error.message + ").", true); return true; }
-      bookLocs = all;
+      bookLocs = value;
     }
   } else Object.values(bookLocs).forEach(list => list.forEach(x => { if (x.park_id === p.id) { x.kind = wf.kind; x.operator = wf.operator; } }));
   setStatus(on ? `${p.name}: council booking only — no private-operator step.` : `${p.name}: private-operator workflow restored.`);
@@ -1986,12 +1985,12 @@ async function setCouncilOnly(p, on) {
 // are re-filed on load, so the booking site uses the current workflow.
 async function syncCartWorkflows() {
   if (!IS_ADMIN) return;
-  let n = 0;
-  Object.values(bookLocs).forEach(list => list.forEach(x => { const p = BYID[x.park_id]; if (!p) return;
+  const changed = {};
+  Object.entries(bookLocs).forEach(([w, list]) => list.forEach(x => { const p = BYID[x.park_id]; if (!p) return;
     const wf = parkWorkflow(p);
-    if (x.kind !== wf.kind || (x.operator?.id || null) !== (wf.operator?.id || null)) { x.kind = wf.kind; x.operator = wf.operator; n++; } }));
-  if (!n) return;
-  if (supabase && session) await supabase.from("settings").upsert({ key: BOOK_KEY, value: bookLocs, updated_at: new Date().toISOString() });
+    if (x.kind !== wf.kind || (x.operator?.id || null) !== (wf.operator?.id || null)) { x.kind = wf.kind; x.operator = wf.operator; changed[w] = list; } }));
+  if (!Object.keys(changed).length) return;
+  if (supabase && session) await mergeSetting(BOOK_KEY, changed);
   else store.set("vet-booklocs", bookLocs);
 }
 // Provider amendments: tag a park whose provider listing needs changing, e.g. Liston Park is
