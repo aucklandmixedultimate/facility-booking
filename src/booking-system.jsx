@@ -2769,9 +2769,10 @@ export default function App() {
         <Modal title="📨 Room request to CPSA — choose the recipient" onClose={()=>setRoomRequestFor(null)} width={520}>
           {(()=>{
             const b = roomRequestFor, fac = FACILITIES.find(x=>x.id===b.facility_id);
-            // Vendors, CPSA / GTEC first.
-            const isCpsa = ([e,p]) => /cpsa|cornwall|gtec|grammar/i.test(`${e} ${p.fullName||""}`);
-            const vendors = Object.entries(profiles||{}).filter(([,p])=>p?.profileType==="vendor").sort((a,c)=>isCpsa(c)-isCpsa(a));
+            // The rooms are requested from CPSA: CPSA vendors first (and suggested), then GTEC, then others.
+            const rank = ([e,p]) => /cpsa|cornwall park sports/i.test(`${e} ${p.fullName||""}`) ? 2 : /gtec|grammar/i.test(`${e} ${p.fullName||""}`) ? 1 : 0;
+            const isCpsa = v => rank(v) === 2;
+            const vendors = Object.entries(profiles||{}).filter(([,p])=>p?.profileType==="vendor").sort((a,c)=>rank(c)-rank(a));
             return (
               <div style={{display:"flex",flexDirection:"column",gap:14}}>
                 <div style={{background:"#f5f3ff",border:"1px solid #ddd6fe",borderRadius:10,padding:"10px 14px",fontSize:13,color:"#4c1d95"}}>
