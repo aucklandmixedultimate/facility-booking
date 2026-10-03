@@ -162,6 +162,16 @@ function ownsCouncilFacility(f) {
 // Light tint of each facility colour for day-view column backgrounds.
 const FACILITY_TINT = { f1:"#f5f3ff", f2:"#ede9fe", f3:"#dcfce7", f4:"#ecfdf5", f5:"#f0fdf4", g1:"#cffafe", g2:"#ecfeff", g3:"#f0fdff", s1:"#ffedd5", a1:"#fff1f2", n1:"#eff6ff" };
 function isSocialFac(id) { return FACILITIES.find(f=>f.id===id)?.kind==="social"; }
+// League seasons bookers belong to: NZMUC runs May–November, NZUC December–April. Each
+// booker (canonical email) is assigned one by an admin (User Management → Season), saved in
+// settings "booker_seasons"; unassigned bookers are NZMUC.
+const LEAGUE_SEASONS = [
+  { id:"nzmuc", name:"NZMUC", span:"May–Nov", months:[5,6,7,8,9,10,11] },
+  { id:"nzuc",  name:"NZUC",  span:"Dec–Apr", months:[12,1,2,3,4] },
+];
+const DEFAULT_BOOKER_SEASONS = { "grootultimateclub@gmail.com":"nzuc" };
+const currentLeagueSeason = (d = new Date()) => LEAGUE_SEASONS.find(x => x.months.includes(d.getMonth()+1)).id;
+const seasonOfBooker = (email, map = {}) => { const e = (email||"").toLowerCase(); return map[e] || DEFAULT_BOOKER_SEASONS[e] || "nzmuc"; };
 const EMAIL_COLORS = ["#6366f1","#ec4899","#f59e0b","#10b981","#ef4444","#8b5cf6","#06b6d4","#84cc16","#f97316","#14b8a6","#e879f9","#fb7185","#34d399","#60a5fa","#fbbf24"];
 const _ecc = {}; let _eci = 0;
 // { primaryEmail: "#hex" } — admin-set colour overrides, kept in sync from the
@@ -1989,7 +1999,7 @@ function ActivityLogModal({onClose, inline=false, bookers=[], isAdmin=true}) {
 }
 
 // Admin UI: map secondary emails into a primary profile + manage profile details.
-function UserMgmtModal({ bookings, aliases, aliasNames, aliasColors={}, onChange, onChangeNames, onChangeColors, profiles, onUpdateProfile, adminEmail, onClose, onViewAs }) {
+function UserMgmtModal({ bookings, aliases, aliasNames, aliasColors={}, bookerSeasons={}, onChangeSeasons, onChange, onChangeNames, onChangeColors, profiles, onUpdateProfile, adminEmail, onClose, onViewAs }) {
   const allEmails = useMemo(() => {
     const s = new Set();
     bookings.forEach(b => { if (b.email && !isAdminBooking(b)) s.add(b.email.toLowerCase()); });
@@ -2165,6 +2175,7 @@ function UserMgmtModal({ bookings, aliases, aliasNames, aliasColors={}, onChange
                 <span style={{width:9,height:9,borderRadius:"50%",background:emailColor(primary),flexShrink:0}}/>
                 <span style={{fontSize:13,fontWeight:700,color:"#0f172a",flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{primary}</span>
                 <span style={{fontSize:10,fontWeight:700,padding:"1px 6px",borderRadius:10,background:`${PTYPE_COLOR[ptype]}18`,color:PTYPE_COLOR[ptype],border:`1px solid ${PTYPE_COLOR[ptype]}40`,flexShrink:0}}>{ptype}</span>
+                {ptype!=="admin"&&ptype!=="vendor"&&<span title="League season" style={{fontSize:10,fontWeight:800,padding:"1px 6px",borderRadius:10,background:"#f1f5f9",color:"#334155",border:"1px dashed #94a3b8",flexShrink:0}}>{LEAGUE_SEASONS.find(x=>x.id===seasonOfBooker(primary,bookerSeasons)).name}</span>}
                 {onViewAs && primary !== adminEmail?.toLowerCase() && (
                   <button onClick={e=>{e.stopPropagation(); onViewAs(primary);}}
                     title={`View interface as ${primary}`}
@@ -2199,6 +2210,16 @@ function UserMgmtModal({ bookings, aliases, aliasNames, aliasColors={}, onChange
                           placeholder={dflt}
                           style={{...si,width:"auto",flex:1}}/>
                         <span style={{fontSize:10,color:"#94a3b8",whiteSpace:"nowrap"}}>default: {dflt}</span>
+                      </div>
+                    )}
+                    {/* League season the booker plays in */}
+                    {onChangeSeasons && fieldRow("Season",
+                      <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                        {LEAGUE_SEASONS.map(x=>{ const on=seasonOfBooker(primary,bookerSeasons)===x.id; return (
+                          <button key={x.id} onClick={()=>onChangeSeasons({...bookerSeasons,[primary]:x.id})}
+                            style={{padding:"3px 10px",borderRadius:12,border:`1.5px solid ${on?"#0f172a":"#e2e8f0"}`,background:on?"#0f172a":"#fff",color:on?"#fff":"#475569",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
+                            {x.name} <span style={{fontWeight:400,opacity:.7}}>{x.span}</span>
+                          </button>); })}
                       </div>
                     )}
                     {/* Chip colour override */}
@@ -11257,6 +11278,7 @@ export default function App() {
   });
   useEffect(()=>{ try{ localStorage.setItem("fb_gtec_links", JSON.stringify(gtecLinks)); }catch{ /* ignore */ } }, [gtecLinks]);
   // aliasNames: { primaryEmail: displayName } — overrides the default email-prefix label.
+  const [bookerSeasons, setBookerSeasons] = useState(()=>{ try{ return JSON.parse(localStorage.getItem("fb_booker_seasons")||"{}"); }catch{ return {}; } });
   const [aliasNames, setAliasNames] = useState(()=>{
     try{ return JSON.parse(localStorage.getItem("fb_alias_names")||"{}"); }catch{ return {}; }
   });
@@ -11593,6 +11615,10 @@ export default function App() {
       if (map.alias_names && typeof map.alias_names === "object") {
         setAliasNames(map.alias_names);
         try{localStorage.setItem("fb_alias_names",JSON.stringify(map.alias_names));}catch{ /* ignore */ }
+      }
+      if (map.booker_seasons && typeof map.booker_seasons === "object") {
+        setBookerSeasons(map.booker_seasons);
+        try{localStorage.setItem("fb_booker_seasons",JSON.stringify(map.booker_seasons));}catch{ /* ignore */ }
       }
       if (map.alias_colors && typeof map.alias_colors === "object") {
         setAliasColors(map.alias_colors); _emailColorOverrides = map.alias_colors;
@@ -12388,6 +12414,7 @@ export default function App() {
   function saveEmailAliases(next) { setEmailAliases(next); persistSetting("email_aliases", next); }
   function saveAliasNames(next)   { setAliasNames(next);   persistSetting("alias_names", next); }
   function saveAliasColors(next)  { setAliasColors(next);  persistSetting("alias_colors", next); }
+  function saveBookerSeasons(next) { setBookerSeasons(next); try{localStorage.setItem("fb_booker_seasons",JSON.stringify(next));}catch{ /* ignore */ } persistSetting("booker_seasons", next); }
   function saveAmuaOrg(next) {
     applyAmuaOrg(next); setAmuaOrg(next);
     try{localStorage.setItem("fb_amua_org",JSON.stringify(next));}catch{ /* ignore */ }
@@ -12407,6 +12434,7 @@ export default function App() {
     await persistSetting("email_aliases", emailAliases);
     await persistSetting("alias_names", aliasNames);
     await persistSetting("alias_colors", aliasColors);
+    await persistSetting("booker_seasons", bookerSeasons);
     showToast("Synced with database.");
   }
 
@@ -13249,6 +13277,7 @@ export default function App() {
           // secondaries are folded into their primary's group.
           const allLower = [...new Set(emailLegend.flatMap(p=>[...bookerGroups[p]]))];
           const allSelected = listBookerFilter.size>0 && allLower.every(e=>listBookerFilter.has(e));
+          const curSeason = currentLeagueSeason(), seasonOrder = [curSeason, ...LEAGUE_SEASONS.map(x=>x.id).filter(x=>x!==curSeason)];
           return (
             <div style={{display:"flex",gap:6,marginBottom:12,alignItems:"center",overflowX:"auto",WebkitOverflowScrolling:"touch",scrollbarWidth:"none",msOverflowStyle:"none",paddingBottom:2}}>
               <button onClick={()=>setListBookerFilter(allSelected?new Set():new Set(allLower))}
@@ -13256,7 +13285,20 @@ export default function App() {
                 style={{padding:"5px 12px",borderRadius:20,border:"1.5px solid",cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",flexShrink:0,borderColor:listBookerFilter.size===0?"#0f172a":"#e2e8f0",background:listBookerFilter.size===0?"#0f172a":"#fff",color:listBookerFilter.size===0?"#fff":"#475569"}}>
                 {allSelected?"None":"All"}
               </button>
-              {emailLegend.map(primary=>{
+              {/* Bookers grouped by league season (current season first); a season chip
+                  selects just its bookers, again to clear. */}
+              {seasonOrder.flatMap(sid=>{
+                const members=emailLegend.filter(pr=>seasonOfBooker(pr,bookerSeasons)===sid);
+                if(!members.length) return [];
+                const x=LEAGUE_SEASONS.find(y=>y.id===sid), addrs=members.flatMap(pr=>[...bookerGroups[pr]]);
+                const on=listBookerFilter.size===addrs.length&&addrs.every(e=>listBookerFilter.has(e));
+                return [
+                  <button key={"season-"+sid} onClick={()=>setListBookerFilter(on?new Set():new Set(addrs))}
+                    title={`${x.name} (${x.span})${sid===curSeason?" — current season":" — next season"}: select its ${members.length} booker${members.length!==1?"s":""}`}
+                    style={{padding:"4px 10px",borderRadius:8,border:`1.5px dashed ${on?"#0f172a":"#94a3b8"}`,cursor:"pointer",fontSize:11,fontWeight:800,fontFamily:"inherit",flexShrink:0,marginLeft:4,background:on?"#0f172a":"#f8fafc",color:on?"#fff":"#334155",letterSpacing:"0.02em"}}>
+                    {x.name}<span style={{fontWeight:500,opacity:.75,marginLeft:4}}>{sid===curSeason?"now":"next"}</span>
+                  </button>,
+                  ...members.map(primary=>{
                 const group=bookerGroups[primary];
                 const active=[...group].every(em=>listBookerFilter.has(em));
                 const c=emailColor(primary);
@@ -13268,6 +13310,7 @@ export default function App() {
                     {displayNameFor(primary)}
                   </button>
                 );
+              })];
               })}
             </div>
           );
@@ -13725,6 +13768,8 @@ export default function App() {
           aliases={emailAliases}
           aliasNames={aliasNames}
           aliasColors={aliasColors}
+          bookerSeasons={bookerSeasons}
+          onChangeSeasons={saveBookerSeasons}
           onChange={saveEmailAliases}
           onChangeNames={saveAliasNames}
           onChangeColors={saveAliasColors}
