@@ -66,3 +66,16 @@ export function stepOf(status, workflow) {
   const i = steps.indexOf(normaliseStatus(status));
   return i < 0 ? null : { n: i + 1, of: steps.length };
 }
+
+// The step tag for a status across the workflows of a set of bookings: "2/4", or each distinct
+// position ("3/6 · 4/8") when they differ; "" when the status isn't a step of any of them.
+// Three or more positions shorten: the same step number → "1/…", the last step everywhere → "✓".
+export function stepTag(status, workflows) {
+  const pos = [...new Map([...new Set(workflows)].map(w => stepOf(status, w)).filter(Boolean)
+    .map(p => [`${p.n}/${p.of}`, p])).values()];
+  if (!pos.length) return "";
+  if (pos.length <= 2) return pos.map(p => `${p.n}/${p.of}`).join(" · ");
+  if (pos.every(p => p.n === pos[0].n)) return `${pos[0].n}/…`;
+  if (pos.every(p => p.n === p.of)) return "✓";
+  return "";
+}

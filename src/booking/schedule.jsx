@@ -1,5 +1,5 @@
 import { useState, Fragment } from "react";
-import { Badge, COUNCIL_STAGE_STATUSES, CopyableTable, DURATIONS, FACILITIES, Modal, S, STATUS_META, T, emailColor, fmtCost, fmtDate, fmtDateShort, fmtTime, isAdminBooking, newId, parseGroupRef, todayKey, venueFacilities, visibleFacilities } from "./core.jsx";
+import { Badge, COUNCIL_STAGE_STATUSES, groupStatusLabel, CopyableTable, DURATIONS, FACILITIES, Modal, S, STATUS_META, T, emailColor, fmtCost, fmtDate, fmtDateShort, fmtTime, isAdminBooking, newId, parseGroupRef, todayKey, venueFacilities, visibleFacilities } from "./core.jsx";
 import { DateRangePicker } from "./modals.jsx";
 import { isLive, isLegacyStatus } from "../statuses.js";
 // `canon` folds a (lowercased) email onto its canonical primary so linked
@@ -109,7 +109,7 @@ export function BookingSubsetPanel({ title, subtitle, email, pk, bkgs, isAdmin, 
             <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
               <span style={lbl}>Set status</span>
               <select value={statusTarget} onChange={e=>setStatusTarget(e.target.value)} style={si}>
-                {Object.entries(STATUS_META).filter(([k])=>!isLegacyStatus(k)&&k!=="clash").map(([k,v])=><option key={k} value={k}>{v.label.replace(/^\(\d\/\d\) /,"")}</option>)}
+                {Object.keys(STATUS_META).filter(k=>!isLegacyStatus(k)&&k!=="clash").map(k=><option key={k} value={k}>{groupStatusLabel(k, ticked)}</option>)}
               </select>
               <button disabled={!n} onClick={()=>onBulkStatusChange(ticked.map(b=>b.id),statusTarget)}
                 style={S.btn({padding:"4px 12px",fontSize:12,background:n?T.ink:T.faint,color:"#fff",cursor:n?"pointer":"not-allowed"})}>✓ Apply status</button>
@@ -361,11 +361,11 @@ export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkA
               <span style={{fontSize:11,fontWeight:600,color:"#64748b"}}>Status:</span>
               {allStatuses.map(st=>{
                 const m=STATUS_META[st]||STATUS_META.pending_amua;
-                const active=schedStatusFilter.has(st);
+                const on=schedStatusFilter.has(st);
                 return(
-                  <button key={st} onClick={()=>setSchedStatusFilter(prev=>{const s=new Set(prev);active?s.delete(st):s.add(st);return s;})}
-                    style={{padding:"2px 7px",borderRadius:8,fontSize:10,fontWeight:600,cursor:"pointer",fontFamily:"inherit",border:`1.5px solid ${active?m.border:"#e2e8f0"}`,background:active?m.bg:"#fff",color:active?m.text:"#64748b"}}>
-                    {m.label.replace(/^\(\d\/\d\) /,"")}
+                  <button key={st} onClick={()=>setSchedStatusFilter(prev=>{const s=new Set(prev);on?s.delete(st):s.add(st);return s;})}
+                    style={{padding:"2px 7px",borderRadius:8,fontSize:10,fontWeight:600,cursor:"pointer",fontFamily:"inherit",border:`1.5px solid ${on?m.border:"#e2e8f0"}`,background:on?m.bg:"#fff",color:on?m.text:"#64748b"}}>
+                    {groupStatusLabel(st, active.filter(b=>b.status===st))}
                   </button>
                 );
               })}
@@ -425,7 +425,7 @@ export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkA
                         {Object.entries(row.statusCounts).map(([st,cnt])=>{
                           const m=STATUS_META[st]||STATUS_META.pending_amua;
                           const sel=selectedGroups.has(`${row.email}::${st}`);
-                          const short=m.label.replace(/^\(\d\/\d\) /,"");
+                          const short=groupStatusLabel(st, row.filteredBkgs.filter(b=>b.status===st));
                           const desc={email:row.email,kind:"status",status:st,title:`${short} — ${row.nameDisplay}`};
                           const chip={display:"inline-flex",alignItems:"center",gap:3,padding:"2px 7px",background:sel?m.dot:m.bg,color:sel?"#fff":m.text,border:`1.5px solid ${sel?m.dot:m.border}`,fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit",outline:"none"};
                           return(
@@ -435,7 +435,7 @@ export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkA
                                 style={{...chip,borderRadius:"8px 0 0 8px",borderRight:"none"}}>
                                 {sel&&<span style={{fontSize:9}}>✓</span>}
                                 <span style={{width:5,height:5,borderRadius:"50%",background:sel?"#fff":m.dot,flexShrink:0}}/>
-                                {short.slice(0,10)} ×{cnt}
+                                {short.length>22?short.slice(0,21)+"…":short} ×{cnt}
                               </button>
                               <button title={sameGroup(expanded,desc)?"Collapse":`Itemise ${cnt} ${short}${groupSelectable?" with actions":""}`} aria-expanded={sameGroup(expanded,desc)}
                                 onClick={()=>toggleExpand(desc)}
@@ -490,8 +490,8 @@ export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkA
               <span style={{fontSize:11,color:"#94a3b8"}}>Set status to:</span>
               <select value={bulkStatusTarget} onChange={e=>setBulkStatusTarget(e.target.value)}
                 style={{fontSize:11,padding:"4px 8px",borderRadius:6,border:"1.5px solid #334155",background:"#1e293b",color:"#fff",fontFamily:"inherit",fontWeight:600}}>
-                {Object.entries(STATUS_META).filter(([k])=>!isLegacyStatus(k) && k!=="clash").map(([k,v])=>(
-                  <option key={k} value={k}>{v.label.replace(/^\(\d\/\d\) /,"")}</option>
+                {Object.keys(STATUS_META).filter(k=>!isLegacyStatus(k) && k!=="clash").map(k=>(
+                  <option key={k} value={k}>{groupStatusLabel(k, selectedBkgs)}</option>
                 ))}
               </select>
               <button onClick={()=>{
