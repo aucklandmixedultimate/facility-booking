@@ -8,7 +8,7 @@
     <title>Council / Community Fields</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap">
-    <script type="module" crossorigin src="/facility-booking/assets/vetting-GqCkr7Wc.js"></script>
+    <script type="module" crossorigin src="/facility-booking/assets/vetting-B1dlZAd2.js"></script>
     <link rel="modulepreload" crossorigin href="/facility-booking/assets/appnav-BWAgBoYX.js">
     <link rel="modulepreload" crossorigin href="/facility-booking/assets/_commonjsHelpers-Cpj98o6Y.js">
     <link rel="modulepreload" crossorigin href="/facility-booking/assets/councilSeasons-PuEG0kll.js">
@@ -109,7 +109,7 @@
                     <li><b>Decide:</b> ✕ Reject, ★ Top pick or ✓ Shortlist. A top pick or shortlist makes the park's rated fields active (bookable); Later skips it for now.</li>
                     <li>◆ parks are run by a club or trust; 🎯 Interests chooses which parks are served; ☀/❄ flips the season's maps.</li>
                   </ol>
-                  <p class="keys">Keys: <kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> decide (or rate the fit once locked; <kbd>←</kbd> unusable, <kbd>↓</kbd> 3v3 only, <kbd>↑</kbd> 1 ×, <kbd>→</kbd> 2 ×), <kbd>S</kbd> later, <kbd>Z</kbd> undo, <kbd>1</kbd>–<kbd>5</kbd> quality, <kbd>Enter</kbd> lock/unlock, <kbd>C</kbd> Auckland, <kbd>T</kbd> field, <kbd>M</kbd> next map, <kbd>0</kbd> zoom to the council map.</p>
+                  <p class="keys">Keys: <kbd>←</kbd> back, <kbd>→</kbd> later, <kbd>↓</kbd> shortlist, <kbd>↑</kbd> top pick, <kbd>Backspace</kbd> reject (or rate the fit once locked; <kbd>←</kbd> unusable, <kbd>↓</kbd> 3v3 only, <kbd>↑</kbd> 1 ×, <kbd>→</kbd> 2 ×), <kbd>Z</kbd> undo, <kbd>1</kbd>–<kbd>5</kbd> quality, <kbd>Enter</kbd> lock/unlock, <kbd>C</kbd> Auckland, <kbd>T</kbd> field, <kbd>M</kbd> next map, <kbd>0</kbd> zoom to the council map.</p>
                 </div>
                 <div class="sizepanel" id="sizePanel" hidden>
                   <label>Length (m) <input type="number" id="fLen" min="40" max="130" step="1"></label>
@@ -185,14 +185,14 @@
             <div class="empty" id="emptyState" hidden></div>
           </div>
           <div class="actions" id="actions">
-            <button class="act small" id="backBtn" title="Back to the previous park"><span class="b">←</span>Back</button>
-            <button class="act no" id="noBtn" title="Not suitable (←)"><span class="b">✕</span>Reject <kbd>←</kbd></button>
+            <button class="act small" id="backBtn" title="Back to the previous park (←)"><span class="b">←</span>Back <kbd>←</kbd></button>
+            <button class="act no" id="noBtn" title="Not suitable (Backspace)"><span class="b">✕</span>Reject <kbd>⌫</kbd></button>
             <div class="act fit fno fsplit" role="group" aria-label="Reduced or unusable"><span class="b"><button type="button" data-fit="no" title="Unusable — rejected, never bookable (←)">Unusable (reject)</button><button type="button" data-fit="reduced" title="Reduced size: 3v3 only (↓)">3v3 only</button></span>Reduced</div>
             <button class="act fit fyes" data-fit="full" title="1 × full 7v7 field fits here (↑)"><span class="b">1 × full 7v7</span>1 × full 7v7</button>
             <button class="act fit ftop" data-fit="multi" title="2 × full 7v7 fields fit here (→)"><span class="b">2 × full 7v7</span>2 × full 7v7</button>
             <button class="act top" id="topBtn" title="Top pick (↑): its rated fields become active, bookable fields"><span class="b">★</span>Top pick <kbd>↑</kbd></button>
-            <button class="act yes" id="yesBtn" title="Shortlist (→): its rated fields become active, bookable fields"><span class="b">✓</span>Shortlist <kbd>→</kbd></button>
-            <button class="act small" id="skipBtn" title="Decide later (S)"><span class="b">⤳</span>Later <kbd>S</kbd></button>
+            <button class="act yes" id="yesBtn" title="Shortlist (↓): its rated fields become active, bookable fields"><span class="b">✓</span>Shortlist <kbd>↓</kbd></button>
+            <button class="act small" id="skipBtn" title="Decide later (→ or S)"><span class="b">⤳</span>Later <kbd>→</kbd></button>
           </div>
         </main>
 
