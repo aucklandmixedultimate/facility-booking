@@ -1,5 +1,5 @@
 import { useState, Fragment } from "react";
-import { AMUA_INBOX, AMUA_INFO, Badge, COUNCIL_APPLICATION_FEE, ClashPair, CopyableTable, EmailChip, FACILITIES, INVOICED_META, Modal, PROVIDERS, REVIEW_STATUSES, S, STATUS_META, SUPABASE_URL, TableViewToggle, _contactReviews, _currentUser, _sessionStartIso, authHeaders, bookingCost, buildCouncilPayload, canSendToCouncil, councilFeeSplit, councilOverlaps, emailColor, extractCpsaAmendValues, facCellLabel, fmt24, fmtCost, fmtDate, fmtDateShort, fmtDateShortDow, fmtDuration, fmtGtecEvent, fmtLoggedAt, fmtTime, getBillingDrift, getCrossFacilityOverlaps, getSameFacilityOverlaps, isAdminBooking, isCouncilBooking, isSocialFac, nextWorkflowStatus, parseClashPrevStatus, parseCouncilApp, parseCpsaRefs, parseCpsaResolution, parseGtecSnapshot, parseMismatchNote, parseSlotLink, providerOfFacility, sb, setCpsaOrig, setCpsaResolution, setModuleState, stripMismatchNote, todayKey, useTableView, vendorShortFor, vendorsIn, visibleFacilities, workflowOf, workflowStep } from "./core.jsx";
+import { AMUA_INBOX, AMUA_INFO, Badge, bareStatusLabel, groupStatusLabel, COUNCIL_APPLICATION_FEE, ClashPair, CopyableTable, EmailChip, FACILITIES, INVOICED_META, Modal, PROVIDERS, REVIEW_STATUSES, S, STATUS_META, SUPABASE_URL, TableViewToggle, _contactReviews, _currentUser, _sessionStartIso, authHeaders, bookingCost, buildCouncilPayload, canSendToCouncil, councilFeeSplit, councilOverlaps, emailColor, extractCpsaAmendValues, facCellLabel, fmt24, fmtCost, fmtDate, fmtDateShort, fmtDateShortDow, fmtDuration, fmtGtecEvent, fmtLoggedAt, fmtTime, getBillingDrift, getCrossFacilityOverlaps, getSameFacilityOverlaps, isAdminBooking, isCouncilBooking, isSocialFac, nextWorkflowStatus, parseClashPrevStatus, parseCouncilApp, parseCpsaRefs, parseCpsaResolution, parseGtecSnapshot, parseMismatchNote, parseSlotLink, providerOfFacility, sb, setCpsaOrig, setCpsaResolution, setModuleState, stripMismatchNote, todayKey, useTableView, vendorShortFor, vendorsIn, visibleFacilities, workflowOf, workflowStep } from "./core.jsx";
 import { councilAppBookings } from "./councilData.jsx";
 import { ActivityLogModal, DateRangePicker } from "./modals.jsx";
 import { PatternModal, PricingConditionsManager, ScheduleSummaryModal } from "./schedule.jsx";
@@ -1736,7 +1736,7 @@ export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDel
                     const shown = keys.filter(k=>!sfHidden.has(k));
                     const label = sfHidden.size===0 ? "All"
                       : shown.length===0 ? "None"
-                      : shown.length===1 ? (STATUS_META[shown[0]]?.label||"").replace(/^\(\d\/\d\)\s*/,"")
+                      : shown.length===1 ? groupStatusLabel(shown[0], bookings.filter(b=>b.status===shown[0]))
                       : `${shown.length}/${keys.length}`;
                     // Hiding a status hides its legacy alias with it.
                     const withAliases = set => {
@@ -1775,9 +1775,9 @@ export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDel
                                 <span style={{width:8,height:8,borderRadius:"50%",background:m?.dot||"#94a3b8",flexShrink:0}}/>
                                 <span onClick={()=>toggle(k)} style={{cursor:"pointer",color:sfHidden.has(k)?"#94a3b8":"#0f172a",
                                   textDecoration:sfHidden.has(k)?"line-through":"none",whiteSpace:"nowrap"}}>
-                                  {(m?.label||k).replace(/^\(\d\/\d\)\s*/,"")}
+                                  {groupStatusLabel(k, bookings.filter(b=>b.status===k))}
                                 </span>
-                                <button onClick={()=>only(k)} title={`Show only ${(m?.label||k).replace(/^\(\d\/\d\)\s*/,"")}`}
+                                <button onClick={()=>only(k)} title={`Show only ${bareStatusLabel(k)}`}
                                   style={{marginLeft:"auto",padding:"0 5px",fontSize:9,border:"1px solid #e2e8f0",borderRadius:3,
                                     background:"#f8fafc",color:"#64748b",cursor:"pointer",fontFamily:"inherit"}}>only</button>
                               </div>

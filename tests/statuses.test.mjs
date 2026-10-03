@@ -35,3 +35,14 @@ test("stepOf", () => {
   assert.equal(stepOf("council_apply", "gtec"), null);
   assert.equal(stepOf("approved", "nope"), null);
 });
+
+test("stepTag gives the step in each workflow of a group", async () => {
+  const { stepTag } = await import("../src/statuses.js");
+  assert.equal(stepTag("pending_cpsa", ["gtec"]), "3/4");
+  assert.equal(stepTag("council_apply", ["council"]), "2/6");
+  assert.equal(stepTag("council_apply", ["council", "council_private"]), "2/6 · 3/8");
+  assert.equal(stepTag("pending", ["community"]), "1/4");
+  assert.equal(stepTag("pending_amua", ["gtec", "council", "council_private"]), "1/…");
+  assert.equal(stepTag("approved", ["gtec", "council", "council_private"]), "✓");
+  assert.equal(stepTag("cpsa_confirmed", ["gtec"]), "");
+});

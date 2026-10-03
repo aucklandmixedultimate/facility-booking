@@ -2,7 +2,7 @@ import logoUrl from "../assets/logo.jpg";
 import { createClient } from "@supabase/supabase-js";
 import { getActor } from "../actor.js";
 import { useState, useRef, useEffect } from "react";
-import { isClosed, isAmuaReview, isLegacyStatus, normaliseStatus, WORKFLOW_STEPS, VENDOR_QUEUE_STATUSES } from "../statuses.js";
+import { isClosed, isAmuaReview, isLegacyStatus, normaliseStatus, stepTag, WORKFLOW_STEPS, VENDOR_QUEUE_STATUSES } from "../statuses.js";
 // ─── LOGO ─────────────────────────────────────────────────────────────────────
 export const LOGO_SRC = logoUrl;
 // ─── SUPABASE ─────────────────────────────────────────────────────────────────
@@ -1753,13 +1753,25 @@ export function statusLabelFor(status, facilityId, vendor) {
   const v = vendor || (facilityId ? vendorShortFor(facilityId) : null);
   return m.tpl && v ? m.tpl.replace("{vendor}", v) : m.label;
 }
+// A status label without its step: "Pending GTEC review".
+export const bareStatusLabel = (status, facilityId, vendor) => statusLabelFor(status, facilityId, vendor).replace(/^\(\d+\/\d+\)\s*/, "");
+// A booking's status with its step in the facility's workflow: "(3/4) Pending GTEC review",
+// "(2/6) 🏛 Applying to council". wf defaults to the facility's workflow.
 export function stepLabel(status, wf, facilityId, vendor) {
-  const label = statusLabelFor(status, facilityId, vendor), bare = label.replace(/^\(\d+\/\d+\)\s*/, "");
-  const w = wf && WORKFLOW_STEPS[wf]?.includes(status === "pending" ? "pending_amua" : status) ? wf
-    : ["op_permission","op_confirm"].includes(status) ? "council_private" : null;
-  if (!w || (w === "gtec" && !wf)) return label;
-  const steps = WORKFLOW_STEPS[w], i = steps.indexOf(status === "pending" ? "pending_amua" : status);
-  return `(${i + 1}/${steps.length}) ${bare}`;
+  const bare = bareStatusLabel(status, facilityId, vendor);
+  const w = wf || (facilityId ? workflowOf(facilityId) : null)
+    || (["op_permission","op_confirm"].includes(status) ? "council_private" : null);
+  if (!w) return statusLabelFor(status, facilityId, vendor);
+  const tag = stepTag(status, [w]);
+  return tag ? `(${tag}) ${bare}` : bare;
+}
+// A status shown for a group of bookings (Grouped view chips, filters, pickers): the step in
+// each of their workflows, and their vendor when they share one.
+export function groupStatusLabel(status, bkgs = []) {
+  const vendors = [...new Set(bkgs.map(b => vendorShortFor(b.facility_id)))];
+  const bare = bareStatusLabel(status, null, vendors.length === 1 ? vendors[0] : null);
+  const tag = stepTag(status, bkgs.length ? bkgs.map(b => workflowOf(b.facility_id)) : Object.keys(WORKFLOW_STEPS));
+  return tag ? `(${tag}) ${bare}` : bare;
 }
 export function Badge({status, wf, fid, vendor}) {
   const m={...(STATUS_META[status]||STATUS_META.pending_amua), label: stepLabel(status, wf, fid, vendor)};
