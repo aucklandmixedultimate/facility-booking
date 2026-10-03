@@ -283,8 +283,6 @@ body.viewer .handle .hint,body.viewer .rail .help,body.viewer #fieldBtn,body.vie
 /* Back link and profile (matches the booking site's header) */
 .acct{display:flex;align-items:center;gap:8px;order:2}
 @media (min-width:641px){.top .brand{flex:1 1 auto;order:1}.top .filters{order:3;flex:1 1 100%}}
-.backbtn{display:inline-flex;align-items:center;gap:4px;padding:6px 11px;border-radius:9px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font-weight:600;font-size:13px;text-decoration:none;white-space:nowrap}
-.backbtn:hover{background:var(--line)}
 .profile{position:relative}
 #profileBtn{display:flex;align-items:center;gap:6px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:20px;padding:4px 8px 4px 4px;cursor:pointer;font:inherit;font-size:11px;font-weight:600;color:#475569}
 #profileBtn[aria-expanded="true"]{background:#eef2ff;border-color:#c7d2fe}
@@ -299,10 +297,8 @@ body.viewer .handle .hint,body.viewer .rail .help,body.viewer #fieldBtn,body.vie
 .pm-role.admin{background:#f3e8ff;color:#7c3aed;border-color:#ddd6fe}
 .pm-item{display:flex;align-items:center;gap:10px;width:100%;padding:9px 14px;background:transparent;border:0;font:inherit;font-size:13px;color:#0f172a;text-align:left;cursor:pointer;text-decoration:none;font-weight:500}
 .pm-item:hover{background:#f8fafc}.pm-item.danger{color:#b91c1c}.pm-item.danger:hover{background:#fef2f2}
-@media (prefers-color-scheme: dark){.backbtn{color:var(--ink)}}
 @media (max-width:640px){
   .acct{justify-content:space-between;margin-bottom:6px}
-  .backbtn{padding:5px 9px;font-size:12px}
   #profileBtn .pn{display:none}
 }
 
@@ -477,11 +473,11 @@ body.viewer .handle .hint,body.viewer .rail .help,body.viewer #fieldBtn,body.vie
 .tags .val:empty{display:none}.tags .k:has(+ .val:empty){display:none}
 
 @media (max-width:640px){
-  /* Header: ← back, the three views and the profile on one row; filters on the next. */
+  /* Header: the app switcher, the three views and the profile on one row; filters on the next. */
   .wrap{padding:4px 6px calc(4px + env(safe-area-inset-bottom,0px))}
   header.top{display:grid;grid-template-columns:auto repeat(3,minmax(0,1fr)) auto;gap:4px;align-items:center}
   .acct{display:contents}
-  .backbtn{grid-column:1;grid-row:1;padding:5px 9px;font-size:14px}.backbtn .bl{display:none}
+  .appnav{grid-column:1;grid-row:1}
   .profile{grid-column:5;grid-row:1}
   #profileBtn{padding:2px}#profileBtn .caret{display:none}
   .filters{display:contents}
@@ -512,7 +508,7 @@ body.viewer .handle .hint,body.viewer .rail .help,body.viewer #fieldBtn,body.vie
 @media (max-width:640px){.tags .lx{display:none}}
 /* Signed out: no view tabs, filters or progress until there's something to see. */
 body.gated .filters,body.gated .status:empty{display:none}
-body.gated .backbtn .bl{display:inline!important}
+body.gated .appnav .al{display:inline!important}
 /* Crowd quality: average-filled stars, your own rating ringed, and the count */
 .stars button.mine{box-shadow:inset 0 0 0 2px #d69e2e;border-radius:6px}
 .qavg{font-size:12px;color:var(--muted);margin-right:8px}.qavg:empty{display:none}

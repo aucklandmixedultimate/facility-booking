@@ -13,6 +13,7 @@ import { ActivityLogModal, AmuaDetailsModal, Banner, CouncilContactModal, DateRa
 import { DayTimelinePopup, MonthCalendar, WeekCalendar } from "./booking/calendar.jsx";
 import { BookingDetail, BookingForm, CartModal, DeleteCartModal } from "./booking/forms.jsx";
 import { isLegacyStatus } from "./statuses.js";
+import { APPS, appHref } from "./appnav.js";
 
 // Tabs loaded on first use, so the calendars open without downloading Summary, Billing,
 // Admin, Allocation or About.
@@ -2147,6 +2148,9 @@ export default function App() {
               <img src={LOGO_SRC} alt="AMUA" style={{width:34,height:34,borderRadius:8,objectFit:"cover"}}/>
               {!isMobile&&<span style={{fontSize:15,fontWeight:800,color:"#0f172a",letterSpacing:"-0.02em"}}>FacilityBook</span>}
               {!configured&&<span style={{fontSize:10,background:"#fef3c7",color:"#92400e",padding:"2px 6px",borderRadius:6,fontWeight:600}}>Demo</span>}
+              <nav className="appnav" aria-label="Apps">
+                {APPS.map(a=><a key={a.id} href={appHref(a)} title={a.title} aria-current={a.id==="bookings"?"page":undefined}><span className="ai" aria-hidden="true">{a.icon}</span><span className="al">{a.label}</span></a>)}
+              </nav>
             </div>
             <div style={{marginLeft:"auto",display:"flex",gap:6,alignItems:"center",flexShrink:0,flexWrap:"nowrap"}}>
               {/* Cart / removal — always visible when populated */}
@@ -2209,7 +2213,6 @@ export default function App() {
                         </div>
                       </div>
                       <div style={{padding:"4px 0"}}>
-                        <UserMenuItem icon="🗺" label="Council / Community fields" onClick={()=>{setShowUserMenu(false);window.open(import.meta.env.BASE_URL+"vetting.html","_blank","noopener");}}/>
                         <UserMenuItem icon="📜" label="Activity log" onClick={()=>{setShowUserMenu(false);setShowActivityLog(true);}}/>
                         <UserMenuItem icon="📇" label="My council contact" onClick={()=>{setShowUserMenu(false);setShowContactModal(true);}}/>
                       </div>
