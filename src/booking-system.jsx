@@ -4,7 +4,7 @@ import { gmailToken, fetchCouncilEmails, parseCouncilEmail } from "./councilMail
 import { driveConfigured, getDriveToken, renameFile, ensureFolderPath, DRIVE_ROOT_FOLDER, ensureFolder, findChildFile, uploadFile, keepLatestRevisionForever } from "./drive-client.js";
 import { htmlToPdfBlob } from "./pdf-utils.js";
 import { currentLeagueSeason, LEAGUE_SEASONS, seasonOfBooker } from "./seasons.js";
-import { ALL_VENUES, Badge, COUNCIL_APPLICATION_FEE, COUNCIL_APPLICATION_URL, COUNCIL_APP_RE, CPSA_FIELD_IDS, CopyableTable, EmailLoginScreen, FACILITIES, LOGO_SRC, MOBILE_STYLE, MONTHS, Modal, PROVIDERS, ProviderMenu, REVIEW_STATUSES, S, STATUS_META, SUPABASE_ANON, SUPABASE_URL, VENUE_SEP, _emailAliases, activeVenueKeys, applyAmuaOrg, applyCouncilFacilities, authHeaders, buildApprovalEmailHtml, buildClashEmailHtml, buildInformCpsaEmailHtml, buildMismatchEmailHtml, buildOrderEmailHtml, canSendToCouncil, clearSlotLink, councilFeeSplit, councilOverlaps, defaultProviderId, defaultVenueKey, emailColor, evenSlotShares, facShort, fmt24, fmtCost, fmtDate, fmtDateShort, fmtDateShortDow, fmtTime, fmtTimeShort, getBillingDrift, getClashes, isAdminBooking, linkCouncilChildren, listVenues, logActivity, newId, newSlotRef, parseClashPrevStatus, parseCouncilApp, parseCpsaOrig, parseCpsaRefs, parseCpsaResolution, parseMismatchNote, parseSlotLink, reachedGtecQueue, sb, sendApprovalEmail, sendEmail, setBilledSnapshot, setClashPrevStatus, setCpsaResolution, setGtecSnapshot, setMismatchNote, setModuleState, setSlotLink, slotGroupMembers, stripClashPrevStatus, stripMismatchNote, supabase, timeOverlaps, todayKey, useMobile, venueFacilities, venueKeyOf, visibleFacilities, workflowOf } from "./booking/core.jsx";
+import { ALL_VENUES, Badge, COUNCIL_APPLICATION_FEE, COUNCIL_APPLICATION_URL, COUNCIL_APP_RE, CPSA_FIELD_IDS, CopyableTable, EmailLoginScreen, FACILITIES, LOGO_SRC, MOBILE_STYLE, MONTHS, Modal, PROVIDERS, ProviderMenu, REVIEW_STATUSES, S, STATUS_META, SUPABASE_ANON, SUPABASE_URL, VENUE_SEP, _emailAliases, activeVenueKeys, applyAmuaOrg, applyCouncilFacilities, authHeaders, buildApprovalEmailHtml, buildClashEmailHtml, buildInformCpsaEmailHtml, buildMismatchEmailHtml, buildOrderEmailHtml, canSendToCouncil, clearSlotLink, councilFeeSplit, councilOverlaps, defaultProviderId, defaultVenueKey, defaultVenueSelection, emailColor, evenSlotShares, facShort, fmt24, fmtCost, fmtDate, fmtDateShort, fmtDateShortDow, fmtTime, fmtTimeShort, getBillingDrift, getClashes, isAdminBooking, linkCouncilChildren, listVenues, logActivity, newId, newSlotRef, parseClashPrevStatus, parseCouncilApp, parseCpsaOrig, parseCpsaRefs, parseCpsaResolution, parseMismatchNote, parseSlotLink, reachedGtecQueue, sb, sendApprovalEmail, sendEmail, setBilledSnapshot, setClashPrevStatus, setCpsaResolution, setGtecSnapshot, setMismatchNote, setModuleState, setSlotLink, slotGroupMembers, stripClashPrevStatus, stripMismatchNote, supabase, timeOverlaps, todayKey, useMobile, venueFacilities, venueKeyOf, visibleFacilities, workflowOf } from "./booking/core.jsx";
 import { AdminPanel, CouncilAllocationTab, councilAppBookings, mergeCouncilOutcomes } from "./booking/admin.jsx";
 import { fetchCJREvents, findMatchingUserBooking, gtecTeamKey, mapCJRFacility, parseCJRDate, parseCJRDateTime } from "./booking/gtec.jsx";
 import { BillingTab, DRIVE_SUBFOLDERS, billingDocBaseName, buildBillingDocHtml, driveBatchFolderName, drivePoFolderName } from "./booking/billing.jsx";
@@ -50,6 +50,15 @@ export default function App() {
     try{ const c = JSON.parse(localStorage.getItem("fb_council_facilities")||"null"); if (c) applyCouncilFacilities(c); }catch{ /* ignore */ }
     return 0; });
   setModuleState({ _activeVenue: venue });
+  // Facilities removed from the calendars' options, remembered on this device.
+  const [hiddenFacs, setHiddenFacsState] = useState(()=>{ try{ return new Set(JSON.parse(localStorage.getItem("fb_hidden_facs")||"[]")); }catch{ return new Set(); } });
+  setModuleState({ _hiddenFacs: hiddenFacs });
+  function setHiddenFacs(next) {
+    setHiddenFacsState(next); setModuleState({ _hiddenFacs: next });
+    try{ localStorage.setItem("fb_hidden_facs", JSON.stringify([...next])); }catch{ /* ignore */ }
+  }
+  // Reset (default locations, nothing hidden) turns into Undo for the rest of the session.
+  const [optionsUndo, setOptionsUndo] = useState(null);
   function setVenue(v) {
     setVenueState(v); setModuleState({ _activeVenue: v });
     try{ v ? localStorage.setItem("fb_venue", v) : localStorage.removeItem("fb_venue"); }catch{ /* ignore */ }
@@ -1975,8 +1984,9 @@ export default function App() {
   );}
 
   const venues = listVenues();
+  // Phones: one scrolling row. Desktop: wraps, so nothing is cut off.
   const FacilityPills=()=>(
-    <div style={{display:"flex",gap:6,marginBottom:16,alignItems:"center",overflowX:"auto",WebkitOverflowScrolling:"touch",scrollbarWidth:"none",msOverflowStyle:"none",paddingBottom:2}}>
+    <div className="facpills" style={{display:"flex",gap:6,marginBottom:16,alignItems:"center",overflowX:isMobile?"auto":"visible",flexWrap:isMobile?"nowrap":"wrap",WebkitOverflowScrolling:"touch",scrollbarWidth:"none",msOverflowStyle:"none",paddingBottom:2}}>
       {/* Provider + 📍 location: shown only when the viewer can see more than one location. */}
       {/* Locations shown (additive): one chip per venue, ✕ to drop it; ＋ adds a provider's
           venue, or (third level) a specific council field, alongside what's already shown. */}
@@ -2005,11 +2015,24 @@ export default function App() {
         </>;
       })()}
       <button onClick={()=>setSelFac("all")} style={{padding:"5px 12px",borderRadius:20,border:"1.5px solid",cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",flexShrink:0,borderColor:selFac==="all"?"#0f172a":"#e2e8f0",background:selFac==="all"?"#0f172a":"#fff",color:selFac==="all"?"#fff":"#475569"}}>All</button>
-      {venueFacilities().map(f=>(
-        <button key={f.id} onClick={()=>setSelFac(f.id===selFac?"all":f.id)} style={{padding:"5px 12px",borderRadius:20,border:"1.5px solid",cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",display:"inline-flex",alignItems:"center",gap:5,flexShrink:0,borderColor:selFac===f.id?f.color:"#e2e8f0",background:selFac===f.id?f.color:"#fff",color:selFac===f.id?"#fff":"#475569"}}>
-          <span style={{width:8,height:8,borderRadius:"50%",background:f.color}}/>{f.name}
-        </button>
-      ))}
+      {/* Facility pills: equal width (full name on hover, desktop); ✕ removes one from the options. */}
+      {venueFacilities().map(f=>{ const on=selFac===f.id; return (
+        <span key={f.id} className="facpill" title={f.name}
+          style={{display:"inline-flex",alignItems:"center",borderRadius:20,border:`1.5px solid ${on?f.color:"#e2e8f0"}`,background:on?f.color:"#fff",color:on?"#fff":"#475569",flexShrink:0,overflow:"hidden"}}>
+          <button onClick={()=>setSelFac(on?"all":f.id)} style={{display:"inline-flex",alignItems:"center",gap:5,minWidth:0,flex:1,padding:"5px 4px 5px 12px",border:"none",background:"none",color:"inherit",cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit"}}>
+            <span style={{width:8,height:8,borderRadius:"50%",background:on?"#fff":f.color,flexShrink:0}}/><span className="facpill-n">{f.name}</span>
+          </button>
+          <button onClick={()=>{ const next=new Set(hiddenFacs); next.add(f.id); setHiddenFacs(next); if(on) setSelFac("all"); }} title={`Remove ${f.name} from the options`} aria-label={`Remove ${f.name}`}
+            style={{border:"none",background:"none",color:"inherit",opacity:.6,cursor:"pointer",fontSize:11,padding:"5px 9px 5px 3px",flexShrink:0}}>✕</button>
+        </span>); })}
+      {/* Reset: default locations (CPSA + your active fields) and nothing removed; then Undo. */}
+      {optionsUndo
+        ? <button onClick={()=>{ setVenue(optionsUndo.venue); setHiddenFacs(new Set(optionsUndo.hidden)); setSelFac(optionsUndo.selFac); setOptionsUndo(null); }}
+            title="Put back the locations and facilities you had before Reset"
+            style={{padding:"5px 12px",borderRadius:20,border:"1.5px dashed #94a3b8",cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",flexShrink:0,background:"#f8fafc",color:"#334155"}}>↶ Undo reset</button>
+        : <button onClick={()=>{ setOptionsUndo({ venue, hidden:[...hiddenFacs], selFac }); const d=defaultVenueSelection(); setVenue(d.length===1?null:d.join(VENUE_SEP)); setHiddenFacs(new Set()); setSelFac("all"); }}
+            title="Back to the default: GTEC / CPSA plus your active fields, with nothing removed"
+            style={{padding:"5px 12px",borderRadius:20,border:"1.5px dashed #94a3b8",cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",flexShrink:0,background:"#fff",color:"#64748b"}}>↺ Reset{hiddenFacs.size?` (${hiddenFacs.size} removed)`:""}</button>}
     </div>
   );
 

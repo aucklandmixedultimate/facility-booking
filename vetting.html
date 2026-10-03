@@ -209,6 +209,17 @@
         <div class="dlg-actions"><button value="close" class="primary">Close</button></div>
       </form>
     </dialog>
+    <dialog id="unsavedDlg" class="dlg">
+      <form method="dialog">
+        <h3 id="unsavedTitle">Save your changes?</h3>
+        <p id="unsavedBody"></p>
+        <div class="dlg-actions">
+          <button value="cancel" class="ghost">Cancel</button>
+          <button value="discard" class="ghost">Discard</button>
+          <button value="save" class="primary" autofocus>Save changes</button>
+        </div>
+      </form>
+    </dialog>
     <dialog id="saveDlg" class="dlg">
       <form method="dialog">
         <h3 id="dlgTitle">Add another frisbee field?</h3>
