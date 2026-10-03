@@ -1,6 +1,7 @@
 import { useState, useRef, Fragment } from "react";
 import { BILLED_RE, Badge, CAL_SLOTS, CAL_START, CAL_TOTAL, DAY_EVENING_CUTOFF, DURATIONS, EmailChip, FACILITIES, FACILITY_TINT, FLOODLIT_FIELD_ID, FacilityOptions, INVOICED_META, Modal, ProviderVenuePicker, REVIEW_STATUSES, S, SLOTS_PER_HOUR, SLOT_HOURS, START_TIMES, STATUS_META, addDays, councilContactOk, emailColor, facColLabel, facShort, fmtCost, fmtDate, fmtDuration, fmtLoggedAt, fmtRefDate, fmtTime, fmtTimeShort, getCrossFacilityOverlaps, getSameFacilityOverlaps, isAdminBooking, newGroupRef, newId, parseCouncilInfo, parseFunctionCost, parseGroupRef, parseGtecSnapshot, parseMismatchNote, parseSlotLink, parseSplit, setCouncilInfo, setFunctionCost, setGroupRef, setSplit, slotGroupMembers, slotGroupName, splitReason, stripMismatchNote, timeOverlaps, todayKey, useMobile, vendorShortFor, venueFacilities, workflowOf } from "./core.jsx";
 import { OverlapWarning } from "./modals.jsx";
+import { isClosed, isLegacyStatus } from "../statuses.js";
 // ─── Single Booking Row Form ──────────────────────────────────────────────────
 // Used inside BookingForm to represent one item in the cart
 // onPick(facId,start,dur) fires immediately on release (single-pick / auto-complete).
@@ -58,7 +59,7 @@ export function InlineDayPicker({ date, bookings, onPick, onConfirm, multi=false
     loC: Math.min(drag.startCol,drag.endCol), hiC: Math.max(drag.startCol,drag.endCol),
     loS: Math.min(drag.startSlot,drag.endSlot), hiS: Math.max(drag.startSlot,drag.endSlot),
   } : null;
-  const dayBkgs = bookings.filter(b=>b.date===date && !["cancelled","rejected"].includes(b.status));
+  const dayBkgs = bookings.filter(b=>b.date===date && !isClosed(b.status));
   return (
     <div style={{border:"1.5px solid #e2e8f0",borderRadius:8,background:"#fff",padding:8}}>
       <div style={{fontSize:11,color:"#64748b",marginBottom:6,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
@@ -208,7 +209,7 @@ export function SlotRow({ slot, idx, onChange, onRemove, canRemove, allBookings 
   const facName = FACILITIES.find(f=>f.id===slot.facility_id)?.name || slot.facility_id;
   const ready = !!(slot.date && slot.facility_id && slot.duration);
   const draft = { id: slot.id||"__draft__", facility_id:slot.facility_id, date:slot.date, start_hour:slot.start_hour, duration:slot.duration, status:"pending_amua" };
-  const others = ready ? allBookings.filter(b=>b.id!==draft.id && !["cancelled","rejected"].includes(b.status)) : [];
+  const others = ready ? allBookings.filter(b=>b.id!==draft.id && !isClosed(b.status)) : [];
   const sameClashes = ready ? getSameFacilityOverlaps(draft, others) : [];
   const adminClashes = sameClashes.filter(isAdminBooking);
   const userClashes  = sameClashes.filter(b=>!isAdminBooking(b));
@@ -1094,7 +1095,7 @@ export function BookingForm({ booking, allBookings, onAddToCart, onClose, isAdmi
         <div>
           <label style={S.lbl}>Status</label>
           <select style={S.inp} value={status} onChange={e=>setStatus(e.target.value)}>
-            {Object.entries(STATUS_META).filter(([k])=>!["pending","amua_submit"].includes(k)).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
+            {Object.entries(STATUS_META).filter(([k])=>!isLegacyStatus(k)).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
           </select>
         </div>
       )}
@@ -1420,7 +1421,7 @@ export function BookingDetail({booking,onEdit,onClose,onCancel,isAdmin,onStatusC
         const sameSlot = allBookings.filter(b =>
           b.id !== booking.id && !isAdminBooking(b) && b.date === booking.date &&
           b.facility_id === booking.facility_id && timeOverlaps(b, booking) &&
-          !["cancelled","rejected"].includes(b.status) &&
+          !isClosed(b.status) &&
           !members.some(m => m.id === b.id));
         return (
           <div style={{background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:10,padding:"12px 16px",display:"flex",flexDirection:"column",gap:9}}>

@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { initialsOf } from "../people.js";
 import { CAL_SLOTS, CAL_START, CAL_TOTAL, FACILITIES, FACILITY_TINT, HOUR_H, MONTHS, Modal, REVIEW_STATUSES, S, SLOTS_PER_HOUR, SLOT_H, SLOT_HOURS, STATUS_CAL_COLOR, STATUS_CAL_TEXT, dateKey, emailColor, facColLabel, fmt24, fmtTime, fmtTimeShort, getDaysInMonth, getWeekDates, inActiveVenue, isAdminBooking, isSocialFac, layoutOverlapLanes, parseMismatchNote, todayKey, useMobile, venueFacilities } from "./core.jsx";
+import { isClosed } from "../statuses.js";
 export function WeekCalendar({ bookings, onNewBooking, onNewBookingRange, onBookingClick, selectedFacility, cartSourceIds=new Set(), deleteIds=new Set(), cartNewDrafts=[], focusedDate, setFocusedDate, onOpenDay, bookerFilter=new Set(), aliasNames={}, emailAliases={} }) {
   function calAlias(em) {
     if (!em) return "";
@@ -22,7 +23,7 @@ export function WeekCalendar({ bookings, onNewBooking, onNewBookingRange, onBook
   const days    = getWeekDates(weekBase);
   const today   = todayKey();
   const visible = (selectedFacility === "all" ? bookings.filter(b => inActiveVenue(b.facility_id)) : bookings.filter(b => b.facility_id === selectedFacility))
-    .filter(b => !["cancelled","rejected"].includes(b.status));
+    .filter(b => !isClosed(b.status));
 
   function yToSlot(y)      { return Math.max(0, Math.min(Math.floor(y / SLOT_H), CAL_SLOTS - 1)); }
   function slotToHour(s)   { return CAL_START + s * SLOT_HOURS; }
@@ -239,7 +240,7 @@ export function MonthCalendar({ bookings, onBookingClick, onNewBooking, onNewBoo
 
   const days    = getDaysInMonth(year, month);
   const visible = (selectedFacility === "all" ? bookings.filter(b => inActiveVenue(b.facility_id)) : bookings.filter(b => b.facility_id === selectedFacility))
-    .filter(b => !["cancelled","rejected"].includes(b.status));
+    .filter(b => !isClosed(b.status));
 
   const firstDow = days[0].getDay();
   const padStart = firstDow === 0 ? 6 : firstDow - 1;
@@ -482,7 +483,7 @@ export function DayTimelinePopup({ date, bookings, onClose, onBookingClick, onNe
 
   const dk = typeof date === "string" ? date : dateKey(date);
   const dObj = typeof date === "string" ? new Date(date+"T00:00:00") : date;
-  const dayBkgs = bookings.filter(b=>b.date===dk && !["cancelled","rejected"].includes(b.status));
+  const dayBkgs = bookings.filter(b=>b.date===dk && !isClosed(b.status));
 
   const yToSlot   = y => Math.max(0, Math.min(Math.floor(y/SLOT_H), CAL_SLOTS-1));
   const slotToHour= s => CAL_START + s*SLOT_HOURS;

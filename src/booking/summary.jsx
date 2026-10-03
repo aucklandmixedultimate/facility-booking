@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, Fragment } from "react";
 import { AMUA_INFO, Badge, COUNCIL_APPLICATION_FEE, CopyableTable, DURATIONS, FACILITIES, PROVIDERS, RECIPIENT_CODE_AMUA, S, cleanRecipientCode, deriveRecipientCode, emailColor, facCellLabel, fmt24, fmtCost, fmtDate, fmtDateShort, fmtTime, genBankRef, isAdminBooking, parseBilledSnapshot, parseCouncilApp, parseCpsaResolution, parseFunctionCost, parseSlotLink, parseSplit, providerOfFacility, todayKey, visibleFacilities, workflowOf } from "./core.jsx";
 import { OneOffModal, PatternModal, PricingConditionsManager, buildOverlapPatternMap, defaultFacRates, resolveRates } from "./schedule.jsx";
 import { InvoiceOptionRow, InvoicePill, invLineLabel, renderInvoiceDocHtml } from "./billingDocs.jsx";
+import { isClosed } from "../statuses.js";
 export function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingConditions = [], onAddPricingCondition, onUpdatePricingCondition, onRemovePricingCondition, isAdmin = false, approxPlayers = {}, onUpdateApproxPlayers, approxDurations = {}, onUpdateApproxDuration, onUpdateFacilityRate, pricingMode = "hourly", onSetPricingMode, onProposeMerge, onBulkApply, onMarkInvoiced, onMarkAdjustmentSettled, bookerFilter=new Set(), profiles={}, emailAliases={}, aliasNames={}, onCreateOfficialInvoice, onEmailInvoice, onFilterChange=null, loadRequest=null }) {
   const now = new Date();
   const thisYear = now.getFullYear();
@@ -134,7 +135,7 @@ export function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricin
 
   const active = bookings.filter(b => {
     if (isAdminBooking(b)) return false;
-    if (["cancelled","rejected"].includes(b.status)) return false;
+    if (isClosed(b.status)) return false;
     if (b.invoiced && !summaryIncludeInvoiced) return false;
     if (dateFrom && b.date < dateFrom) return false;
     if (dateTo   && b.date > dateTo)   return false;
@@ -147,7 +148,7 @@ export function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricin
   // invSelectedEmails further sub-filters within this pool.
   const activeForInvoice = bookings.filter(b => {
     if (isAdminBooking(b)) return false;
-    if (["cancelled","rejected"].includes(b.status)) return false;
+    if (isClosed(b.status)) return false;
     if (b.invoiced && !invIncludeInvoiced) return false;
     if (emailFilterSet.size>0 && !emailFilterSet.has(b.email?.toLowerCase())) return false;
     if (dateFrom && b.date < dateFrom) return false;
