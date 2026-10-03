@@ -377,6 +377,7 @@ body.viewer .handle .hint,body.viewer .rail .help,body.viewer #fieldBtn,body.vie
 .amendrow{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:4px 0 2px}
 .amendrow select,.amendrow input{padding:3px 8px;border:1px solid #c9b5f5;border-radius:8px;background:var(--surface);color:inherit;font-size:12px;min-width:0}
 .amendrow #clubIn{flex:1 1 150px}.amendrow #amendContact{flex:0 1 160px}
+.amendrow #amendWebsite{flex:1 1 180px}.amendrow #amendDetails{flex:2 1 220px}
 .amendrow button{border:1px solid #7c3aed;background:#7c3aed;color:#fff;border-radius:8px;padding:3px 10px;font-size:12px;font-weight:600}
 .amendrow #amendClear{background:transparent;color:#5b21b6}
 .amendrow [hidden]{display:none}
@@ -697,3 +698,13 @@ body.aklzoom #field,body.aklzoom #centreWrap,body.aklzoom #fitPop,body.aklzoom .
 .myfpin.cart b{background:#d97706}
 .bookpanel .mf-hidden{margin:0;font-size:12px;color:var(--muted)}
 .bookpanel .mf-hidden button{border:0;background:none;color:var(--turf);font-weight:700;padding:0;cursor:pointer;font-size:12px}
+/* Lights inside the park's own marker */
+.litin{position:absolute;display:grid;place-items:center;font-size:9px;line-height:1;pointer-events:none;filter:drop-shadow(0 0 1px #000)}
+.dotpin{position:relative;width:20px;height:20px;box-sizing:border-box;border-radius:50%;box-shadow:0 1px 3px rgba(0,0,0,.4);cursor:pointer}
+.dotpin .litin{inset:0;font-size:11px}
+.privpin{position:relative}
+.privpin .litin{inset:0;transform:rotate(-45deg);font-size:9px}
+.amuapin{position:relative}
+.amuapin .litin{inset:0;font-size:10px}
+.logopin{position:relative}
+.logopin .litin{right:-3px;bottom:-3px;width:15px;height:15px;border-radius:50%;background:#15211c;border:1.5px solid #fff;font-size:9px;filter:none;z-index:20}

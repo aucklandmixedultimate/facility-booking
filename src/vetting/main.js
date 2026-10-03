@@ -150,6 +150,7 @@ async function loadFlags() {
   if (mode === "shared") {
     const { data, error } = await supabase.from("field_flags").select("*");
     if (!error) { flagsShared = true; flags = Object.fromEntries(data.map(r => [r.park_id, { club: r.club || "", kind: r.kind || "private", contact: r.contact || "",
+      website: r.website || "", details: r.details || "",
       by: r.flagged_by_email || "", at: r.updated_at }])); return; }
   }
   flagsShared = false; flags = store.get("vet-flags", {});
@@ -158,11 +159,17 @@ async function saveFlag(id, flag) {
   const prev = snapOf(flags[id]);
   if (flagsShared) {
     const row = flag && { park_id: id, club: flag.club || "", kind: flag.kind || "private", contact: flag.contact || "",
+      website: flag.website || "", details: flag.details || "",
       flagged_by: session?.user?.id || null, flagged_by_email: session?.user?.email || null, updated_at: new Date().toISOString() };
     let { error } = flag ? await supabase.from("field_flags").upsert(row) : await supabase.from("field_flags").delete().eq("park_id", id);
+    // Before the website/details columns exist (supabase-setup.sql v2), save without them.
+    if (error && flag && /website|details/i.test(error.message || "")) {
+      const { website: _w, details: _d, ...rest } = row; ({ error } = await supabase.from("field_flags").upsert(rest));
+      if (!error) setStatus("Saved the provider; its website and other info need the updated supabase-setup.sql — re-run it.", true);
+    }
     // Before the kind/contact columns exist (supabase-setup.sql), keep the provider only.
     if (error && flag && /kind|contact|column/i.test(error.message || "")) {
-      const { kind: _kind, contact: _contact, ...old } = row; ({ error } = await supabase.from("field_flags").upsert(old));
+      const { kind: _kind, contact: _contact, website: _w2, details: _d2, ...old } = row; ({ error } = await supabase.from("field_flags").upsert(old));
       if (!error) setStatus("Saved the provider; its kind and contact person need supabase-setup.sql.", true);
     }
     if (error) { setStatus("Couldn't save the club flag (" + error.message + ").", true); return false; }
@@ -227,7 +234,7 @@ async function logChange(kind, id, before, after) {
       let { data, error } = await supabase.from("vetting_history").insert({ ...row, by_id: session.user.id }).select().single();
       // Before the by_name column exists, log without the person's name.
       if (error && row.by_name && /by_name/i.test(error.message || "")) { const { by_name, ...rest } = row; void by_name; ({ data, error } = await supabase.from("vetting_history").insert({ ...rest, by_id: session.user.id }).select().single()); }
-      if (error) return;
+      if (error || !data) return;
       history.unshift(data);
     } else history.unshift({ ...row, id: "l" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6) });
   }
@@ -1366,9 +1373,15 @@ function buildCity() {
     const isAmua = pv?.some(o => o.amua);
     // Grounds with a club or venue logo show it (letters until the logo file is added).
     const logoOp = pv?.find(o => o.icons);
-    const mk = logoOp ? logoMarker(ll, logoOp.icons, isAmua ? "#e0a647" : ult.length ? ULT_COLOR : PRIV_COLOR, isCur)
-      : isAmua ? amuaMarker(ll, col, isCur) : pv?.length ? privMarker(ll, col, isCur, top, clubCol) : L.circleMarker(ll, { radius: r ? 8 : 6,
-      color: top ? "#e0a647" : isCur ? "#15211c" : fl ? PRIV_COLOR : "#ffffff", weight: top || isCur || fl ? 3 : 1.5, dashArray: fl ? "3 3" : null,
+    // Lights (saved review, or unsaved edits) show as ⚡ inside the park's own marker.
+    const lt = draft[p.id]?.lights ?? r?.lights, lit = lt === "full" || lt === "training";
+    const dotEdge = top ? "#e0a647" : isCur ? "#15211c" : fl ? PRIV_COLOR : "#ffffff", dotW = top || isCur || fl ? 3 : 1.5;
+    const mk = logoOp ? logoMarker(ll, logoOp.icons, isAmua ? "#e0a647" : ult.length ? ULT_COLOR : PRIV_COLOR, isCur, 600, false, lit)
+      : isAmua ? amuaMarker(ll, col, isCur, lit) : pv?.length ? privMarker(ll, col, isCur, top, clubCol, lit)
+      : lit ? L.marker(ll, { icon: L.divIcon({ className: "", iconSize: [20, 20], iconAnchor: [10, 10],
+          html: `<div class="dotpin" style="background:${col};opacity:${r ? 1 : 0.8};border:${dotW}px ${fl ? "dashed" : "solid"} ${dotEdge}"><span class="litin" aria-label="Lights">⚡</span></div>` }),
+          keyboard: false, bubblingMouseEvents: false, zIndexOffset: 300 })
+      : L.circleMarker(ll, { radius: r ? 8 : 6, color: dotEdge, weight: dotW, dashArray: fl ? "3 3" : null,
       fillColor: col, fillOpacity: r ? 0.95 : 0.7, bubblingMouseEvents: false });
     const tags = r ? [r.decision === "top" ? "★ Top pick" : r.decision === "yes" ? "Shortlisted" : r.decision === "rating" ? "Rating in progress" : "Rejected",
       r.quality ? r.quality + "/5" : "", r.fit && r.fit !== "unknown" ? FIT_LABEL[r.fit] : "",
@@ -1377,17 +1390,12 @@ function buildCity() {
       + (isAmua ? `<br><b style="color:#b7791f">★ Book only through: AMUA</b>`
         : pv?.length ? `<br><b style="color:${PRIV_COLOR}">◆ Privately managed: contact ${esc(pv[0].short)}</b> first` : "")
       + (ult.length ? `<br><b style="color:${ULT_COLOR}">🥏 ${ult.some(o => o.booking_only) ? "Book only through" : "Ultimate club"}: ${esc(ult.map(o => o.operator).join(", "))}</b>` : "")
-      + (flags[p.id] ? `<br><b style="color:${PRIV_COLOR}">✎ ${esc(amendText(flags[p.id]))}</b>` : "")
+      + (flags[p.id] ? `<br><b style="color:${PRIV_COLOR}">✎ ${esc(amendText(flags[p.id]))}</b>${flags[p.id].website ? `<br>🔗 ${esc(flags[p.id].website.replace(/^https?:\/\//, ""))}` : ""}` : "")
       + (diamonds(p).length ? `<br><b style="color:#c2410c">⚾ Softball / baseball ground: mounds may make it unsuitable in summer</b>` : "")
       + (workMode === "book" ? `<br>${nAct ? `📌 ${nAct} active booking field${nAct > 1 ? "s" : ""} · ` : ""}${inCart ? `🛒 ${inCart} in the cart · ` : ""}<i>Click to book fields</i>` : `<br><i>Click to rate</i>`),
       { className: "parktip", direction: "top", offset: [0, -6] });
     mk.on("click", () => openPark(p.id));
     mk.addTo(cityLayer);
-    // Lights: a ⚡ badge inset at the marker's top right (saved review, or unsaved edits).
-    const lt = draft[p.id]?.lights ?? r?.lights;
-    if (lt === "full" || lt === "training")
-      L.marker(ll, { icon: L.divIcon({ className: "", html: `<span class="litbadge" aria-label="Lights">⚡</span>`, iconSize: [14, 14], iconAnchor: logoOp || isAmua ? [-6, 20] : [-3, 16] }),
-        interactive: false, keyboard: false, zIndexOffset: 500 }).addTo(cityLayer);
     const fs = councilFields(p, 0);
     const chosen = new Set((r?.fields || "").split(",").map(s => s.trim().toLowerCase()).filter(Boolean));
     fs.forEach(f => L.polygon(f.p, { pane: "fieldsPane", color: col, weight: chosen.has((f.n || "").toLowerCase()) ? 3 : 1.5, fillColor: col,
@@ -1454,23 +1462,24 @@ function drawMyFieldPins(reg) {
 // A round badge per logo (several overlap if a ground lists more than one). The
 // image sits over the club's letters; if the logo file isn't there yet it removes itself.
 // Sizes: AMUA's own badge 36px, other clubs and venues 27px, community facilities 18px.
-function logoMarker(ll, icons, ring, isCur, z = 600, small = false) {
+// Every park marker can carry the lights symbol inside it (`lit`), so a park is one icon.
+function logoMarker(ll, icons, ring, isCur, z = 600, small = false, lit = false) {
   const badge = (ic, i) => `<span class="lp" style="background:${ic.bg || "#334155"};z-index:${9 - i}"><b>${esc(ic.mono || "")}</b>`
     + (ic.img ? `<img src="${BASE}council-maps/${esc(ic.img)}" alt="" onerror="this.remove()">` : "") + `</span>`;
   const d = small ? 18 : icons.some(ic => ic.mono === "AMUA") ? 36 : 27, w = d + (icons.length - 1) * (d * 2 / 3);
   return L.marker(ll, { icon: L.divIcon({ className: "", iconSize: [w, d], iconAnchor: [w / 2, d / 2],
-    html: `<div class="logopin${isCur ? " cur" : ""}${d <= 18 ? " sm" : d < 36 ? " md" : ""}" style="--ring:${ring}">${icons.map(badge).join("")}</div>` }), keyboard: false, bubblingMouseEvents: false, zIndexOffset: z });
+    html: `<div class="logopin${isCur ? " cur" : ""}${d <= 18 ? " sm" : d < 36 ? " md" : ""}" style="--ring:${ring}">${icons.map(badge).join("")}${lit ? `<span class="litin" aria-label="Lights">⚡</span>` : ""}</div>` }), keyboard: false, bubblingMouseEvents: false, zIndexOffset: z });
 }
-function amuaMarker(ll, fill, isCur) {
+function amuaMarker(ll, fill, isCur, lit = false) {
   return L.marker(ll, { icon: L.divIcon({ className: "", iconSize: [30, 30], iconAnchor: [15, 15],
-    html: `<div class="amuapin${isCur ? " cur" : ""}"><div><span style="background:${fill}"></span></div></div>` }), keyboard: false, bubblingMouseEvents: false, zIndexOffset: 500 });
+    html: `<div class="amuapin${isCur ? " cur" : ""}"><div><span style="background:${fill}"></span></div>${lit ? `<span class="litin" aria-label="Lights">⚡</span>` : ""}</div>` }), keyboard: false, bubblingMouseEvents: false, zIndexOffset: 500 });
 }
-function privMarker(ll, fill, isCur, top, club) {
+function privMarker(ll, fill, isCur, top, club, lit = false) {
   const style = club
     ? `background:${club.pattern || club.fill};border-color:${club.edge || "#fff"};box-shadow:0 0 0 2.5px ${PRIV_COLOR},0 1px 5px rgba(0,0,0,.5);width:18px;height:18px;margin:2px`
     : `background:${fill};${top ? "border-color:#e0a647;" : ""}margin:3px`;
   return L.marker(ll, { icon: L.divIcon({ className: "", iconSize: [26, 26], iconAnchor: [13, 13],
-    html: `<div class="privpin${isCur ? " cur" : ""}" style="${style}"></div>` }), keyboard: false, bubblingMouseEvents: false });
+    html: `<div class="privpin${isCur ? " cur" : ""}" style="${style}">${lit ? `<span class="litin" aria-label="Lights">⚡</span>` : ""}</div>` }), keyboard: false, bubblingMouseEvents: false });
 }
 function privContacts(o) {
   const c = o.contact || {}, bits = [];
@@ -1516,7 +1525,7 @@ function syncCityFields() {
 function renderLegend() {
   const row = (c, t) => `<div><i style="background:${c}"></i>${t}</div>`;
   $("legend").innerHTML = `<button class="lg-h" id="legendToggle" aria-expanded="true">Suitability <span aria-hidden="true">▾</span></button>`
-    + `<div class="lg-b">${row(`hsl(${suitHue(0.95)} 72% 42%)`, "Excellent")}${row(`hsl(${suitHue(0.7)} 72% 42%)`, "Good")}${row(`hsl(${suitHue(0.5)} 72% 42%)`, "Fair")}${row(`hsl(${suitHue(0.2)} 72% 42%)`, "Poor")}${row("#b3372d", "Rejected")}${row("#8a958f", "Not rated")}<div><span class="dia" style="background:linear-gradient(45deg,#f2b705 50%,#c8102e 50%);border-color:#f2b705;box-shadow:0 0 0 2px ${PRIV_COLOR}"></span><b>Ultimate club home</b> <span class="lg-note">(club colours)</span></div><div><span class="amualg"><span></span></span><b>AMUA venue</b> <span class="lg-note">(GTEC · CPSA)</span></div><div><span class="logolg">A</span>Club or venue logo</div><div><span class="logolg" style="border-color:${COMM_COLOR}">S</span>Community facility <span class="lg-note">(school)</span></div><div><span class="dia"></span>Privately managed</div><div><i style="background:#8a958f;border:2px dashed ${PRIV_COLOR};box-shadow:none"></i>Flagged: probably club-run</div><div><span class="litbadge lg">⚡</span>Lights</div><div class="lg-note">Gold ring = top pick</div></div>`;
+    + `<div class="lg-b">${row(`hsl(${suitHue(0.95)} 72% 42%)`, "Excellent")}${row(`hsl(${suitHue(0.7)} 72% 42%)`, "Good")}${row(`hsl(${suitHue(0.5)} 72% 42%)`, "Fair")}${row(`hsl(${suitHue(0.2)} 72% 42%)`, "Poor")}${row("#b3372d", "Rejected")}${row("#8a958f", "Not rated")}<div><span class="dia" style="background:linear-gradient(45deg,#f2b705 50%,#c8102e 50%);border-color:#f2b705;box-shadow:0 0 0 2px ${PRIV_COLOR}"></span><b>Ultimate club home</b> <span class="lg-note">(club colours)</span></div><div><span class="amualg"><span></span></span><b>AMUA venue</b> <span class="lg-note">(GTEC · CPSA)</span></div><div><span class="logolg">A</span>Club or venue logo</div><div><span class="logolg" style="border-color:${COMM_COLOR}">S</span>Community facility <span class="lg-note">(school)</span></div><div><span class="dia"></span>Privately managed</div><div><i style="background:#8a958f;border:2px dashed ${PRIV_COLOR};box-shadow:none"></i>Flagged: probably club-run</div><div><span class="litbadge lg">⚡</span>Lights <span class="lg-note">(shown inside the park's marker)</span></div><div class="lg-note">Gold ring = top pick</div></div>`;
   // Collapsed by default on small screens so it doesn't cover the map; the choice is remembered.
   const setOpen = open => { $("legend").classList.toggle("collapsed", !open); $("legendToggle").setAttribute("aria-expanded", String(open)); };
   setOpen(store.get("vet-legend-open", !matchMedia("(max-width: 640px)").matches));
@@ -2065,25 +2074,29 @@ function knownProvider(p) {
   if (councilOnly(p) && (PRIV_BY_PARK[p.id] || []).length) return { club: "Auckland Council (council only)", kind: "other", contact: "", known: true };
   const ops = PRIV_BY_PARK[p.id] || [], op = ops.find(o => o.code !== "ultimate") || ops[0];
   if (!op) return null;
-  return { club: op.short || op.operator, kind: "private", contact: shortName(relations[op.id]?.contacts?.[0]?.name || ""), known: true };
+  return { club: op.short || op.operator, kind: "private", contact: shortName(relations[op.id]?.contacts?.[0]?.name || ""), website: op.contact?.url || "", known: true };
 }
 function renderFlag(p) {
   const fl = flags[p.id], known = knownProvider(p), d = fl || known || {};
   $("clubFlagBtn").setAttribute("aria-pressed", String(!!fl));
   $("clubFlagBtn").textContent = fl ? "✎ " + amendText(fl) : known ? "✎ " + amendText(known) : "✎ Provider?";
-  $("clubFlagBtn").title = fl ? `Provider amendment${fl.by ? " by " + fl.by.split("@")[0] : ""}. Click to edit.`
+  $("clubFlagBtn").title = fl ? `Provider amendment${fl.by ? " by " + fl.by.split("@")[0] : ""}${fl.website ? " · " + fl.website : ""}${fl.details ? " · " + fl.details : ""}. Click to edit.`
     : known ? "Provider on record. Click to amend it (the fields start from what's on record)."
     : "Tag this park's provider for amendment, e.g. privately operated by a club that isn't listed yet";
   $("amendRow").hidden = amendFor !== p.id;
-  $("amendContact").hidden = !fl && !known;
+  $("amendContact").hidden = $("amendWebsite").hidden = $("amendDetails").hidden = !fl && !known;
   $("amendClear").hidden = !fl;
   const ae = document.activeElement;
   if (ae !== $("clubIn")) $("clubIn").value = d.club || "";
   if (ae !== $("amendKind")) $("amendKind").value = d.kind || "private";
   if (ae !== $("amendContact")) $("amendContact").value = d.contact || "";
+  if (ae !== $("amendWebsite")) $("amendWebsite").value = d.website || "";
+  if (ae !== $("amendDetails")) $("amendDetails").value = d.details || "";
   if (!$("providerList").options.length)
     $("providerList").innerHTML = [...new Set(PRIV.operators.map(o => o.short || o.operator))].sort().map(n => `<option value="${esc(n)}">`).join("");
 }
+// A website as typed: "easternsuburbs.org.nz" → "https://easternsuburbs.org.nz".
+const websiteValue = v => { v = String(v || "").trim(); return !v ? "" : /^https?:\/\//i.test(v) ? v : "https://" + v; };
 // Contact person as typed: the first space ends the first name, then one letter (the last
 // initial) is all that's allowed. "rory hughes" → "Rory H".
 function maskContact(v) {
@@ -2401,7 +2414,8 @@ function bind() {
   $("clubFlagBtn").onclick = () => { const p = current(); if (!p) return;
     amendFor = amendFor === p.id ? null : p.id; renderFlag(p); if (amendFor) $("clubIn").focus(); };
   const amendSave = async () => { const p = current(); if (!p) return;
-    const fl = { club: $("clubIn").value.trim(), kind: $("amendKind").value, contact: contactValue($("amendContact").value) };
+    const fl = { club: $("clubIn").value.trim(), kind: $("amendKind").value, contact: contactValue($("amendContact").value),
+      website: websiteValue($("amendWebsite").value), details: $("amendDetails").value.trim().slice(0, 300) };
     const isNew = !flags[p.id];
     if (!fl.club && fl.kind !== "other") { $("clubIn").focus(); return; }
     if (await saveFlag(p.id, fl)) { renderFlag(p); if (isNew) $("amendContact").focus(); renderRail(); } };
