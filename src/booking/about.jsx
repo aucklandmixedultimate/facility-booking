@@ -154,7 +154,7 @@ export function AboutTab() {
           <div style={stepNum("#f59e0b")}>2/4</div>
           <div>
             <div style={{fontWeight:600,fontSize:14,color:"#0f172a"}}>AMUA reviews your request</div>
-            <div style={{fontSize:13,color:"#475569",marginTop:2}}>AMUA checks availability and eligibility. If accepted, the booking is queued for submission to GTEC — status becomes <Badge status="queued_cpsa"/>. If there is a conflict or issue, AMUA may reject or request revision.</div>
+            <div style={{fontSize:13,color:"#475569",marginTop:2}}>AMUA checks availability and eligibility. If accepted, the booking is queued for submission to GTEC — status becomes <Badge status="queued_cpsa" vendor="GTEC"/>. If there is a conflict or issue, AMUA may reject or request revision.</div>
           </div>
         </div>
         <div style={arrow}>↓</div>
@@ -164,7 +164,7 @@ export function AboutTab() {
             <div style={{fontWeight:600,fontSize:14,color:"#0f172a"}}>AMUA submits to GTEC</div>
             <div style={{fontSize:13,color:"#475569",marginTop:2}}>AMUA lodges the request with GTEC using the{" "}
               <a href="https://www.grammartec.co.nz/viewform/499414" target="_blank" rel="noopener noreferrer" style={link}>GTEC field hire form</a>.
-              Status becomes <Badge status="pending_cpsa"/>. You can also contact GTEC directly — AMUA can co-sign as the responsible party.
+              Status becomes <Badge status="pending_cpsa" vendor="GTEC"/>. You can also contact GTEC directly — AMUA can co-sign as the responsible party.
             </div>
           </div>
         </div>
@@ -208,11 +208,13 @@ export function AboutTab() {
 
       <div style={card}>
         <h2 style={h2}>Status Guide</h2>
+        <p style={{fontSize:13,color:"#475569",margin:"0 0 10px"}}>Every booking moves through the same kinds of stage. Where a stage involves the facility's vendor it's named on the booking — e.g. <Badge status="pending_cpsa" vendor="GTEC"/> for Cornwall Park, or <Badge status="pending_cpsa" vendor="St Cuthbert's"/> — and reads "vendor" here.</p>
         <div style={{display:"flex",flexDirection:"column",gap:8}}>
           {Object.entries(STATUS_META).filter(([k])=>!["pending","amua_submit"].includes(k)).map(([k,v])=>(
-            <div key={k} style={{display:"flex",alignItems:"center",gap:10,padding:"6px 10px",background:v.bg,border:`1px solid ${v.border}`,borderRadius:8}}>
+            <div key={k} style={{display:"flex",alignItems:"center",gap:10,padding:"6px 10px",background:v.bg,border:`1px solid ${v.border}`,borderRadius:8,flexWrap:"wrap"}}>
               <span style={{width:8,height:8,borderRadius:"50%",background:v.dot,flexShrink:0}}/>
               <span style={{fontWeight:600,fontSize:13,color:v.text}}>{v.label}</span>
+              {v.desc&&<span style={{fontSize:12,color:"#475569"}}>— {v.desc}</span>}
             </div>
           ))}
         </div>

@@ -1,5 +1,5 @@
 import { useState, Fragment } from "react";
-import { AMUA_INBOX, AMUA_INFO, Badge, COUNCIL_APPLICATION_FEE, ClashPair, CopyableTable, EmailChip, FACILITIES, INVOICED_META, isSocialFac, Modal, PROVIDERS, REVIEW_STATUSES, S, STATUS_META, SUPABASE_URL, _contactReviews, _currentUser, _sessionStartIso, authHeaders, bookingCost, buildCouncilPayload, canSendToCouncil, councilFeeSplit, councilOverlaps, emailColor, extractCpsaAmendValues, facCellLabel, fmt24, fmtCost, fmtDate, fmtDateShort, fmtDateShortDow, fmtDuration, fmtGtecEvent, fmtLoggedAt, fmtTime, getBillingDrift, getCrossFacilityOverlaps, getSameFacilityOverlaps, isAdminBooking, isCouncilBooking, nextWorkflowStatus, parseClashPrevStatus, parseCouncilApp, parseCpsaRefs, parseCpsaResolution, parseGtecSnapshot, parseMismatchNote, parseSlotLink, providerOfFacility, sb, setCpsaOrig, setCpsaResolution, setModuleState, stripMismatchNote, todayKey, visibleFacilities, workflowOf, workflowStep } from "./core.jsx";
+import { AMUA_INBOX, AMUA_INFO, Badge, COUNCIL_APPLICATION_FEE, ClashPair, CopyableTable, EmailChip, FACILITIES, INVOICED_META, isSocialFac, vendorShortFor, Modal, PROVIDERS, REVIEW_STATUSES, S, STATUS_META, SUPABASE_URL, _contactReviews, _currentUser, _sessionStartIso, authHeaders, bookingCost, buildCouncilPayload, canSendToCouncil, councilFeeSplit, councilOverlaps, emailColor, extractCpsaAmendValues, facCellLabel, fmt24, fmtCost, fmtDate, fmtDateShort, fmtDateShortDow, fmtDuration, fmtGtecEvent, fmtLoggedAt, fmtTime, getBillingDrift, getCrossFacilityOverlaps, getSameFacilityOverlaps, isAdminBooking, isCouncilBooking, nextWorkflowStatus, parseClashPrevStatus, parseCouncilApp, parseCpsaRefs, parseCpsaResolution, parseGtecSnapshot, parseMismatchNote, parseSlotLink, providerOfFacility, sb, setCpsaOrig, setCpsaResolution, setModuleState, stripMismatchNote, todayKey, visibleFacilities, workflowOf, workflowStep } from "./core.jsx";
 import { PatternModal, PricingConditionsManager, ScheduleSummaryModal } from "./summary.jsx";
 import { ActivityLogModal, DateRangePicker } from "./modals.jsx";
 import { InlineDayPicker } from "./forms.jsx";
@@ -230,7 +230,7 @@ export function CouncilAllocationTab({ outcomes = {}, bookings = [], syncing, sy
                   <label key={b.id} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", fontSize: 13, opacity: live(b) ? 1 : 0.55 }}>
                     <input type="checkbox" disabled={!live(b)} checked={pick.has(b.id)} onChange={() => toggle(setSel, o.id, b.id, pick)}/>
                     <b>{who(b)}</b><span style={{ color: "#475569" }}>{facName(b)} · {fmtDate(b.date)} {fmtTime(b.start_hour)}–{fmtTime(b.start_hour + b.duration)}</span>
-                    <Badge status={b.status} wf={workflowOf(b.facility_id)}/>
+                    <Badge status={b.status} wf={workflowOf(b.facility_id)} fid={b.facility_id}/>
                     {sl && sl.role !== "peer" && <span style={{ fontSize: 11, fontWeight: 700, color: "#1e3a8a", background: "#dbeafe", borderRadius: 999, padding: "1px 8px" }}>{sl.role === "parent" ? "👥 parent" : "👥 child"}</span>}
                   </label>); })}
                 <CouncilOccupancyNotes bookings={bookings} ids={new Set(linked.map(b => b.id))} who={e => aliasNames[e] || e}/>
@@ -242,7 +242,7 @@ export function CouncilAllocationTab({ outcomes = {}, bookings = [], syncing, sy
                   <label key={b.id} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", fontSize: 13 }}>
                     <input type="checkbox" checked={lpick.has(b.id)} onChange={() => toggle(setLinkSel, o.id, b.id, lpick)}/>
                     <b>{who(b)}</b><span style={{ color: "#475569" }}>{facName(b)} · {fmtDate(b.date)}{parseCouncilApp(b.system_notes)?.id ? ` · ${parseCouncilApp(b.system_notes).id}` : ""}</span>
-                    <Badge status={b.status} wf={workflowOf(b.facility_id)}/>
+                    <Badge status={b.status} wf={workflowOf(b.facility_id)} fid={b.facility_id}/>
                   </label>))}
                 {cands.length > 0 && <div><button disabled={!lpick.size} onClick={() => { onLinkApp(o.id, [...lpick]); setLinkSel(s => ({ ...s, [o.id]: new Set() })); }} style={S.btn({ padding: "5px 12px", fontSize: 12, background: lpick.size ? "#0d9488" : "#e2e8f0", color: lpick.size ? "#fff" : "#94a3b8" })}>🔗 Link {lpick.size || ""} to # {o.id}</button></div>}
               </div>
@@ -1819,7 +1819,7 @@ export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDel
                 const queued=actionQueue.find(a=>a.id===b.id);
                 const isDeleteQueued=deleteIds.has(b.id);
                 const rowBg=isDeleteQueued?"#fff1f2":queued?"#f0fdf4":selected.has(b.id)?"#f5f3ff":"#fff";
-                const queueLabel = queued ? {queued_cpsa:"→ Queue for GTEC",approved:"✓ GTEC Approved",rejected:"✗ Reject"}[queued.newStatus]||("→ "+(STATUS_META[queued.newStatus]?.label||queued.newStatus)) : null;
+                const queueLabel = queued ? {queued_cpsa:`→ Queue for ${vendorShortFor(b.facility_id)}`,approved:"✓ Approve",rejected:"✗ Reject"}[queued.newStatus]||("→ "+(STATUS_META[queued.newStatus]?.label||queued.newStatus)) : null;
                 const wf=workflowOf(b.facility_id), isCouncilWf=wf==="council"||wf==="council_private"||wf==="community", nxt=nextWorkflowStatus(b);
                 const opContact=PROVIDERS[providerOfFacility(b.facility_id)]?.contact;
                 const opHint=(opContact&&(nxt==="op_permission"||nxt==="op_confirm")?` — ${[opContact.contact_name||opContact.name,opContact.email,opContact.phone].filter(Boolean).join(" · ")}`:"")
@@ -1845,7 +1845,7 @@ export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDel
                       </span>
                     </td>
                     <td style={{padding:"3px 6px"}}>
-                      <Badge status={b.status} wf={workflowOf(b.facility_id)}/>
+                      <Badge status={b.status} wf={workflowOf(b.facility_id)} fid={b.facility_id}/>
                       {workflowStep(b)&&<span title="Step in the council workflow" style={{fontSize:9,fontWeight:700,color:"#0f766e",marginLeft:3}}>{workflowStep(b)}</span>}
                       {isCouncilBooking(b)&&!["rejected","cancelled"].includes(b.status)&&(()=>{ const app=parseCouncilApp(b.system_notes);
                         return <span title={app?`Council application ${app.id} (sent ${fmtDate(app.at.slice(0,10))}): this booking's share of the $${COUNCIL_APPLICATION_FEE}-per-field fee`:`Council application fee: pending until AMUA sends the application ($${COUNCIL_APPLICATION_FEE} per field, shared)`}
@@ -1861,11 +1861,13 @@ export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDel
                     <td style={{padding:"3px 8px"}} onClick={e=>e.stopPropagation()}>
                       <div style={{display:"flex",gap:3,justifyContent:"flex-end",flexWrap:"wrap"}}>
                         {isPending&&!isDeleteQueued&&<>
-                          {isAmuaStage&&providerOfFacility(b.facility_id)==="gtec"&&<button onClick={()=>queueAction(b.id,"queued_cpsa")} title="Queue for GTEC"
-                            style={S.btn({padding:"3px 7px",fontSize:10,background:queued?.newStatus==="queued_cpsa"?"#1d4ed8":"#3b82f6",color:"#fff",outline:queued?.newStatus==="queued_cpsa"?"2px solid #1d4ed8":"none"})}>GTEC →</button>}
-                          {/* Meeting / Function Room: email CPSA a room request (an AMUA draft), then Pending GTEC Review. */}
-                          {onRequestRoom&&isSocialFac(b.facility_id)&&(isAmuaStage||b.status==="queued_cpsa"||b.status==="amua_submit")&&<button onClick={()=>onRequestRoom(b)} title="Email CPSA a room booking request (it lands as a draft in AMUA's inbox)"
-                            style={S.btn({padding:"3px 7px",fontSize:10,background:"#7c3aed",color:"#fff"})}>📨 Room</button>}
+                          {/* One "<vendor> →" button: rooms send CPSA a room request (an AMUA draft) and go
+                              to Pending CPSA review; Cornwall Park fields queue for GTEC. */}
+                          {providerOfFacility(b.facility_id)==="gtec"&&(isSocialFac(b.facility_id)
+                            ? (onRequestRoom&&(isAmuaStage||b.status==="queued_cpsa"||b.status==="amua_submit")&&<button onClick={()=>onRequestRoom(b)} title={`Email ${vendorShortFor(b.facility_id)} a room request (it lands as a draft in AMUA's inbox)`}
+                                style={S.btn({padding:"3px 7px",fontSize:10,background:"#7c3aed",color:"#fff"})}>{vendorShortFor(b.facility_id)} →</button>)
+                            : isAmuaStage&&<button onClick={()=>queueAction(b.id,"queued_cpsa")} title={`Queue for ${vendorShortFor(b.facility_id)}`}
+                                style={S.btn({padding:"3px 7px",fontSize:10,background:queued?.newStatus==="queued_cpsa"?"#1d4ed8":"#3b82f6",color:"#fff",outline:queued?.newStatus==="queued_cpsa"?"2px solid #1d4ed8":"none"})}>{vendorShortFor(b.facility_id)} →</button>)}
                           {(b.status==="queued_cpsa"||b.status==="amua_submit")&&<button onClick={()=>queueAction(b.id,"pending_cpsa")} title="Mark as Pending GTEC Review (no email)"
                             style={S.btn({padding:"3px 7px",fontSize:10,background:queued?.newStatus==="pending_cpsa"?"#0369a1":"#0ea5e9",color:"#fff",outline:queued?.newStatus==="pending_cpsa"?"2px solid #0369a1":"none"})}>⏳</button>}
                           {/* Council workflows step through their stages one at a time. */}

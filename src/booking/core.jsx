@@ -118,8 +118,8 @@ export const sb = {
 //            raises one purchase order per provider, and only "gtec" facilities take part
 //            in the GTEC/CPSA workflow.
 export const FACILITIES = [
-  { id:"f1", name:"Meeting Room – Ground Floor", capacity:20,  color:"#a78bfa", kind:"social", provider:"gtec" }, // light purple
-  { id:"f2", name:"Function Room – Upstairs",    capacity:100, color:"#7c3aed", kind:"social", provider:"gtec" }, // deep purple
+  { id:"f1", name:"Meeting Room – Ground Floor", capacity:20,  color:"#a78bfa", kind:"social", provider:"gtec", vendor:"CPSA" }, // light purple — rooms are requested from CPSA
+  { id:"f2", name:"Function Room – Upstairs",    capacity:100, color:"#7c3aed", kind:"social", provider:"gtec", vendor:"CPSA" }, // deep purple
   { id:"f3", name:"Field #1",                    capacity:50,  color:"#166534", kind:"field", provider:"gtec" }, // darkest green
   { id:"f4", name:"Field #2",                    capacity:50,  color:"#22c55e", kind:"field", provider:"gtec" }, // mid green
   { id:"f5", name:"Field #3",                    capacity:50,  color:"#86efac", kind:"field", provider:"gtec" }, // light green
@@ -214,31 +214,33 @@ export const DURATIONS = [
   3.5, 4, 5, 6, 8,
 ].map(value=>({ value, label: fmtDuration(value) }));
 export const STATUS_META = {
-  pending_amua: {bg:"#fff8e1",border:"#f59e0b",text:"#92400e",dot:"#f59e0b",label:"(1/4) Pending AMUA Review"},
-  queued_cpsa:  {bg:"#dbeafe",border:"#93c5fd",text:"#1e40af",dot:"#3b82f6",label:"(2/4) Queued for GTEC"},
-  pending_cpsa: {bg:"#e0f2fe",border:"#7dd3fc",text:"#075985",dot:"#0ea5e9",label:"(3/4) Pending GTEC Review"},
-  approved:      {bg:"#f0fdf4",border:"#22c55e",text:"#14532d",dot:"#22c55e",label:"(4/4) Approved"},
-  cpsa_confirmed:{bg:"#ecfeff",border:"#0891b2",text:"#155e75",dot:"#0891b2",label:"🌐 GTEC Confirmed"},
-  cpsa_review_needed: {bg:"#fef9c3",border:"#a16207",text:"#713f12",dot:"#a16207",label:"⚠ GTEC Mismatch — AMUA Review"},
-  rejected:     {bg:"#fff1f2",border:"#f43f5e",text:"#881337",dot:"#f43f5e",label:"Rejected"},
-  cancelled:    {bg:"#f8f8f8",border:"#94a3b8",text:"#475569",dot:"#94a3b8",label:"Cancelled"},
-  clash:        {bg:"#fef3c7",border:"#d97706",text:"#92400e",dot:"#d97706",label:"Clash"},
-  amua_submit:  {bg:"#dbeafe",border:"#93c5fd",text:"#1e40af",dot:"#3b82f6",label:"(2/4) Queued for GTEC"},
+  // Vendor stages name the provider of the booking's facility ({vendor}: GTEC for Cornwall
+  // Park, St Cuthbert's, a school…); without a facility they read "vendor". desc = meaning.
+  pending_amua: {bg:"#fff8e1",border:"#f59e0b",text:"#92400e",dot:"#f59e0b",label:"(1/4) Pending AMUA Review", desc:"Requested; AMUA is checking it"},
+  queued_cpsa:  {bg:"#dbeafe",border:"#93c5fd",text:"#1e40af",dot:"#3b82f6",label:"(2/4) Queued for vendor", tpl:"(2/4) Queued for {vendor}", desc:"AMUA accepted it and will send it to the facility's vendor"},
+  pending_cpsa: {bg:"#e0f2fe",border:"#7dd3fc",text:"#075985",dot:"#0ea5e9",label:"(3/4) Pending vendor review", tpl:"(3/4) Pending {vendor} review", desc:"Sent to the facility's vendor (GTEC, St Cuthbert's, a school…), awaiting their answer"},
+  approved:      {bg:"#f0fdf4",border:"#22c55e",text:"#14532d",dot:"#22c55e",label:"(4/4) Approved", desc:"Confirmed — the field is yours at that time"},
+  cpsa_confirmed:{bg:"#ecfeff",border:"#0891b2",text:"#155e75",dot:"#0891b2",label:"🌐 Vendor confirmed", tpl:"🌐 {vendor} confirmed", desc:"The vendor's published schedule matches the booking"},
+  cpsa_review_needed: {bg:"#fef9c3",border:"#a16207",text:"#713f12",dot:"#a16207",label:"⚠ Vendor mismatch — AMUA review", tpl:"⚠ {vendor} mismatch — AMUA review", desc:"The vendor's schedule differs from the booking; AMUA is sorting it out"},
+  rejected:     {bg:"#fff1f2",border:"#f43f5e",text:"#881337",dot:"#f43f5e",label:"Rejected", desc:"Declined by AMUA or the vendor"},
+  cancelled:    {bg:"#f8f8f8",border:"#94a3b8",text:"#475569",dot:"#94a3b8",label:"Cancelled", desc:"Withdrawn"},
+  clash:        {bg:"#fef3c7",border:"#d97706",text:"#92400e",dot:"#d97706",label:"Clash", desc:"Overlaps another booking or a vendor block"},
+  amua_submit:  {bg:"#dbeafe",border:"#93c5fd",text:"#1e40af",dot:"#3b82f6",label:"(2/4) Queued for vendor", tpl:"(2/4) Queued for {vendor}"},
   pending:      {bg:"#fff8e1",border:"#f59e0b",text:"#92400e",dot:"#f59e0b",label:"(1/4) Pending AMUA Review"},
   // Council workflows (see WORKFLOW_STEPS): AMUA review → [ask the private operator] →
   // apply to council → council decision → [confirm with the operator] → approved.
-  op_permission:  {bg:"#f3e8ff",border:"#a855f7",text:"#6b21a8",dot:"#a855f7",label:"🤝 Asking operator permission"},
-  council_apply:  {bg:"#e0f2f1",border:"#14b8a6",text:"#115e59",dot:"#14b8a6",label:"🏛 Applying to council"},
-  council_pending:{bg:"#ccfbf1",border:"#0d9488",text:"#134e4a",dot:"#0d9488",label:"⏳ Awaiting council decision"},
+  op_permission:  {bg:"#f3e8ff",border:"#a855f7",text:"#6b21a8",dot:"#a855f7",label:"🤝 Asking operator permission", desc:"AMUA is asking the club or trust that runs the field"},
+  council_apply:  {bg:"#e0f2f1",border:"#14b8a6",text:"#115e59",dot:"#14b8a6",label:"🏛 Applying to council", desc:"Going into AMUA's next council application"},
+  council_pending:{bg:"#ccfbf1",border:"#0d9488",text:"#134e4a",dot:"#0d9488",label:"⏳ Awaiting council decision", desc:"Application lodged; the council is deciding"},
   // From the council's emails (🏛 Allocation tab): an offer AMUA must confirm, then the
   // council's confirmation, after which AMUA allocates the fields to the bookers.
-  council_action: {bg:"#ffedd5",border:"#ea580c",text:"#7c2d12",dot:"#ea580c",label:"📨 Council offer — AMUA confirming"},
-  council_granted:{bg:"#ecfccb",border:"#65a30d",text:"#365314",dot:"#65a30d",label:"🏛 Council granted — allocating"},
-  op_confirm:     {bg:"#ede9fe",border:"#7c3aed",text:"#4c1d95",dot:"#7c3aed",label:"🤝 Confirming with operator"},
+  council_action: {bg:"#ffedd5",border:"#ea580c",text:"#7c2d12",dot:"#ea580c",label:"📨 Council offer — AMUA confirming", desc:"The council offered the fields; AMUA is confirming"},
+  council_granted:{bg:"#ecfccb",border:"#65a30d",text:"#365314",dot:"#65a30d",label:"🏛 Council granted — allocating", desc:"The council granted it; AMUA is allocating fields"},
+  op_confirm:     {bg:"#ede9fe",border:"#7c3aed",text:"#4c1d95",dot:"#7c3aed",label:"🤝 Confirming with operator", desc:"Confirming keys, lights and access with the operator"},
   // Community facilities (schools, trusts): AMUA review → [review the contact, first time
   // only] → request drafted to AMUA's inbox (sent by AMUA from Gmail) → approved.
-  contact_review:    {bg:"#fef9c3",border:"#ca8a04",text:"#713f12",dot:"#ca8a04",label:"🔎 Reviewing facility contact"},
-  community_request: {bg:"#dbeafe",border:"#2563eb",text:"#1e3a8a",dot:"#2563eb",label:"✉ Requested from facility"},
+  contact_review:    {bg:"#fef9c3",border:"#ca8a04",text:"#713f12",dot:"#ca8a04",label:"🔎 Reviewing facility contact", desc:"First request to this facility: AMUA checks the contact"},
+  community_request: {bg:"#dbeafe",border:"#2563eb",text:"#1e3a8a",dot:"#2563eb",label:"✉ Requested from facility", desc:"AMUA has asked the facility by email"},
 };
 // Each provider kind walks its own steps. Stored statuses stay provider-neutral keys.
 export const COUNCIL_STAGE_STATUSES = ["op_permission","council_apply","council_pending","council_action","council_granted","op_confirm","contact_review","community_request"];
@@ -287,8 +289,8 @@ export const AMUA_INFO = {
   council:   {},   // { rso, orgType, postalAddressSearch, keyCodes, playersPerTeam } — council application answers
 };
 export const AMUA_CONTACT_ROLES = [
-  { key:"operations", label:"Operations contact", hint:"Main contact for facility providers, printed on invoices, and AMUA's point of contact in the CPSA and council extensions." },
-  { key:"secondary",  label:"Secondary contact",  hint:"Backup contact on provider applications." },
+  { key:"operations", label:"Operations contact", hint:"Main contact for facility vendors, printed on invoices, and AMUA's point of contact in the CPSA and council extensions." },
+  { key:"secondary",  label:"Secondary contact",  hint:"Backup contact on vendor applications." },
   { key:"keyHolder",  label:"Key / access-code holder", hint:"Holds gate, door or floodlight keys and codes." },
 ];
 export function applyAmuaOrg(org) {
@@ -657,7 +659,7 @@ export function ProviderMenu({ pids, value, onPick, sites, style, extra = [], fa
   const menu = { position: "absolute", zIndex: 1200, background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, boxShadow: "0 10px 30px rgba(15,23,42,.15)", padding: "4px 0", minWidth: 220 };
   return (
     <div ref={ref} style={{ position: "relative", flexShrink: 0 }}>
-      <button ref={btnRef} type="button" aria-haspopup="menu" aria-expanded={!!open} title="Provider" onClick={toggleOpen}
+      <button ref={btnRef} type="button" aria-haspopup="menu" aria-expanded={!!open} title="Vendor" onClick={toggleOpen}
         style={{ ...style, display: "inline-flex", alignItems: "center", gap: 6, textAlign: "left", cursor: "pointer" }}>
         <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{shown}</span><span aria-hidden>▾</span>
       </button>
@@ -706,7 +708,7 @@ export function ProviderVenuePicker({ facilityId, onPick, small }) {
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
       <div>
-        <label style={S.lbl}>Provider</label>
+        <label style={S.lbl}>Vendor</label>
         <ProviderMenu pids={pids} value={curPid} onPick={pid => pickVenue(venues.find(v => v.pid === pid)?.key)}
           sites={pid => venues.filter(v => v.pid === pid).map(v => v.site)} style={{ ...st, width: "100%" }}
           facilitiesOf={pid => venues.filter(v => v.pid === pid).flatMap(v => v.facs)} onPickFacility={onPick}/>
@@ -1540,15 +1542,16 @@ export function buildApprovalEmailHtml({ name, email, bookings: bkgs, newStatus,
   const isCpsaConfirmed = newStatus === "cpsa_confirmed";
   const isCpsaReview = newStatus === "cpsa_review_needed";
   const color = isApproved ? "#22c55e" : isCpsaConfirmed ? "#0891b2" : isQueued ? "#3b82f6" : isCpsaReview ? "#d97706" : "#f43f5e";
-  const label = isApproved ? "Approved ✓" : isCpsaConfirmed ? "Confirmed by GTEC ✓" : isQueued ? "Queued for GTEC Review" : isCpsaReview ? "Needs Review — GTEC Mismatch" : "Rejected ✗";
+  const vendor = vendorShortFor(bkgs[0]?.facility_id);
+  const label = isApproved ? "Approved ✓" : isCpsaConfirmed ? `Confirmed by ${vendor} ✓` : isQueued ? `Queued for ${vendor} review` : isCpsaReview ? `Needs review — ${vendor} mismatch` : "Rejected ✗";
   const bodyText = isApproved
     ? "Great news — your booking request has been approved!"
     : isCpsaConfirmed
-    ? "Good news — GTEC has confirmed your booking. The details on GTEC's official schedule match what you booked, so nothing further is needed."
+    ? `Good news — ${vendor} has confirmed your booking. The details on ${vendor}'s schedule match what you booked, so nothing further is needed.`
     : isQueued
-    ? "Your booking request has been reviewed by AMUA and is now queued to be submitted to GTEC for final approval. We'll notify you once a decision has been made."
+    ? `Your booking request has been reviewed by AMUA and is now queued to be submitted to ${vendor} for final approval. We'll notify you once a decision has been made.`
     : isCpsaReview
-    ? "The details GTEC holds for your booking currently differ from your original request. AMUA is clarifying this with GTEC — nothing is final yet, and we'll do our best to align it to your original request."
+    ? `The details ${vendor} holds for your booking currently differ from your original request. AMUA is clarifying this with ${vendor} — nothing is final yet, and we'll do our best to align it to your original request.`
     : "We're sorry — your booking request could not be approved.";
   const rows = bkgs.map(b => {
     const f = FACILITIES.find(x=>x.id===b.facility_id);
@@ -1729,16 +1732,28 @@ export function EmailLoginScreen() {
 // Status pill. With the booking's workflow (`wf`), the label carries its step in that
 // workflow, e.g. "(3/6)" at a privately operated council ground; the operator-only steps are
 // numbered in the council + operator workflow even without it.
-export function stepLabel(status, wf) {
-  const m = STATUS_META[status] || STATUS_META.pending_amua, bare = m.label.replace(/^\(\d+\/\d+\)\s*/, "");
+// The provider named in a facility's vendor stages: "GTEC", "St Cuthbert's", a school…
+export function vendorShortFor(facilityId) {
+  const f = FACILITIES.find(x => x.id === facilityId); if (f?.vendor) return f.vendor;   // e.g. the rooms: CPSA
+  const p = PROVIDERS[providerOfFacility(facilityId)];
+  return p?.short || p?.label || p?.name || "vendor";
+}
+// A status label for a booking: vendor stages name its facility's provider.
+export function statusLabelFor(status, facilityId, vendor) {
+  const m = STATUS_META[status] || STATUS_META.pending_amua;
+  const v = vendor || (facilityId ? vendorShortFor(facilityId) : null);
+  return m.tpl && v ? m.tpl.replace("{vendor}", v) : m.label;
+}
+export function stepLabel(status, wf, facilityId, vendor) {
+  const label = statusLabelFor(status, facilityId, vendor), bare = label.replace(/^\(\d+\/\d+\)\s*/, "");
   const w = wf && WORKFLOW_STEPS[wf]?.includes(status === "pending" ? "pending_amua" : status) ? wf
     : ["op_permission","op_confirm"].includes(status) ? "council_private" : null;
-  if (!w || (w === "gtec" && !wf)) return m.label;
+  if (!w || (w === "gtec" && !wf)) return label;
   const steps = WORKFLOW_STEPS[w], i = steps.indexOf(status === "pending" ? "pending_amua" : status);
   return `(${i + 1}/${steps.length}) ${bare}`;
 }
-export function Badge({status, wf}) {
-  const m={...(STATUS_META[status]||STATUS_META.pending_amua), label: stepLabel(status, wf)};
+export function Badge({status, wf, fid, vendor}) {
+  const m={...(STATUS_META[status]||STATUS_META.pending_amua), label: stepLabel(status, wf, fid, vendor)};
   return <span style={{display:"inline-flex",alignItems:"center",gap:5,padding:"2px 10px",borderRadius:999,background:m.bg,border:`1px solid ${m.border}`,color:m.text,fontSize:12,fontWeight:600,whiteSpace:"nowrap"}}><span style={{width:6,height:6,borderRadius:"50%",background:m.dot,display:"inline-block"}}/>{m.label}</span>;
 }
 export function EmailChip({email}) {
@@ -1846,7 +1861,7 @@ export function describeActivity(r) {
     case "council_fields": return [d.added?.length&&`Added ${d.added.join("; ")}`, d.activated?.length&&`Made active ${d.activated.join("; ")}`,
       d.removed?.length&&`Removed ${d.removed.join("; ")}`, d.retired?.length&&`Retired ${d.retired.join("; ")}`].filter(Boolean).join(" · ")
       + (d.booker&&d.booker!==r.user_email?.toLowerCase()?` · for ${d.booker}`:"");
-    case "vetting_change": return `${{review:"Fields",flag:"Provider",rating:"Quality"}[d.kind]||d.kind} · ${d.park||""}${d.status==="rejected"?" · ✕ rejected":""}`;
+    case "vetting_change": return `${{review:"Fields",flag:"Vendor",rating:"Quality"}[d.kind]||d.kind} · ${d.park||""}${d.status==="rejected"?" · ✕ rejected":""}`;
     case "client_error": return `${d.message||"Error"}${d.where?` · ${d.where}`:""}`;
     case "sign_in":  return d.email ? `${d.email}` : "Signed in";
     case "sign_out": return "Signed out";
