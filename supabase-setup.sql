@@ -123,6 +123,10 @@ set invoiced = true,
     status   = 'approved'
 where status = 'invoiced';
 
+-- v3: the two legacy status keys move to their current names (src/statuses.js).
+update public.bookings set status = 'pending_amua' where status = 'pending';
+update public.bookings set status = 'queued_cpsa'  where status = 'amua_submit';
+
 create index if not exists bookings_invoiced_idx on public.bookings (invoiced) where invoiced = true;
 
 -- system_notes: machine markers kept apart from the user-editable notes.
@@ -469,7 +473,7 @@ revoke all on function public.settings_merge(text, jsonb, text[]) from public, a
 grant execute on function public.settings_merge(text, jsonb, text[]) to authenticated;
 
 -- ── Version stamp ───────────────────────────────────────────────────────────────
-insert into public.schema_version (id, version, applied_at) values (1, 2, now())
+insert into public.schema_version (id, version, applied_at) values (1, 3, now())
 on conflict (id) do update set version = excluded.version, applied_at = now();
 
 -- ── 6. Making someone an admin ──────────────────────────────────────────────────

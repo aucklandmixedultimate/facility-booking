@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { councilState, allPhases, fmtDay, fmtRange, COUNCIL_LINKS, COUNCIL_CONTACTS } from "../councilSeasons.js";
 import { Badge, COUNCIL_APPLICATION_FEE, STATUS_META, venueFacilities } from "./core.jsx";
+import { isLegacyStatus } from "../statuses.js";
 // One numbered step in About → How to Book.
 export function AboutStep({ n, col, title, children }) {
   return (
@@ -210,7 +211,7 @@ export function AboutTab() {
         <h2 style={h2}>Status Guide</h2>
         <p style={{fontSize:13,color:"#475569",margin:"0 0 10px"}}>Every booking moves through the same kinds of stage. Where a stage involves the facility's vendor it's named on the booking — e.g. <Badge status="pending_cpsa" vendor="GTEC"/> for Cornwall Park, or <Badge status="pending_cpsa" vendor="St Cuthbert's"/> — and reads "vendor" here.</p>
         <div style={{display:"flex",flexDirection:"column",gap:8}}>
-          {Object.entries(STATUS_META).filter(([k])=>!["pending","amua_submit"].includes(k)).map(([k,v])=>(
+          {Object.entries(STATUS_META).filter(([k])=>!isLegacyStatus(k)).map(([k,v])=>(
             <div key={k} style={{display:"flex",alignItems:"center",gap:10,padding:"6px 10px",background:v.bg,border:`1px solid ${v.border}`,borderRadius:8,flexWrap:"wrap"}}>
               <span style={{width:8,height:8,borderRadius:"50%",background:v.dot,flexShrink:0}}/>
               <span style={{fontWeight:600,fontSize:13,color:v.text}}>{v.label}</span>

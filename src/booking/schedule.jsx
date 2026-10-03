@@ -1,6 +1,7 @@
 import { useState, Fragment } from "react";
 import { COUNCIL_STAGE_STATUSES, CopyableTable, DURATIONS, FACILITIES, Modal, S, STATUS_META, emailColor, fmtCost, fmtDate, fmtDateShort, fmtTime, isAdminBooking, newId, parseGroupRef, todayKey, venueFacilities, visibleFacilities } from "./core.jsx";
 import { DateRangePicker } from "./modals.jsx";
+import { isLive, isLegacyStatus } from "../statuses.js";
 // `canon` folds a (lowercased) email onto its canonical primary so linked
 // secondary bookers group under one entry. Defaults to identity.
 export function buildOverlapPatternMap(active, facSensitive, canon) {
@@ -203,7 +204,7 @@ export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkA
     return aliasNames[primary] || primary.split("@")[0];
   };
 
-  const active = bookings.filter(b=>(["approved","cpsa_confirmed","cpsa_review_needed","pending_cpsa","queued_cpsa","pending_amua","amua_submit","pending",...COUNCIL_STAGE_STATUSES].includes(b.status)||b.invoiced)&&!isAdminBooking(b));
+  const active = bookings.filter(b=>(isLive(b.status)||b.invoiced)&&!isAdminBooking(b));
   const canonEmail = em => (emailAliases[(em||"").toLowerCase()] || (em||"").toLowerCase());
   const patternMap = buildOverlapPatternMap(active, facSensitive, canonEmail);
 
@@ -449,7 +450,7 @@ export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkA
               <span style={{fontSize:11,color:"#94a3b8"}}>Set status to:</span>
               <select value={bulkStatusTarget} onChange={e=>setBulkStatusTarget(e.target.value)}
                 style={{fontSize:11,padding:"4px 8px",borderRadius:6,border:"1.5px solid #334155",background:"#1e293b",color:"#fff",fontFamily:"inherit",fontWeight:600}}>
-                {Object.entries(STATUS_META).filter(([k])=>!["pending","amua_submit","clash"].includes(k)).map(([k,v])=>(
+                {Object.entries(STATUS_META).filter(([k])=>!isLegacyStatus(k) && k!=="clash").map(([k,v])=>(
                   <option key={k} value={k}>{v.label.replace(/^\(\d\/\d\) /,"")}</option>
                 ))}
               </select>

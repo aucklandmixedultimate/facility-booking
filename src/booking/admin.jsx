@@ -4,6 +4,7 @@ import { councilAppBookings } from "./councilData.jsx";
 import { ActivityLogModal, DateRangePicker } from "./modals.jsx";
 import { PatternModal, PricingConditionsManager, ScheduleSummaryModal } from "./schedule.jsx";
 import { InlineDayPicker } from "./forms.jsx";
+import { isClosed } from "../statuses.js";
 // One newly-synced CPSA field booking, expandable to reveal the AMUA bookings it
 // clashes with (same facility / same time), any simultaneous use of a different
 // facility, and the CPSA-review/mismatch status of clashing bookings. Detail is
@@ -41,7 +42,7 @@ export function SyncedItemRow({ ab, bookings }) {
     || bookings.find(b=>isAdminBooking(b) && b.facility_id===ab.facility_id && b.date===ab.date && b.start_hour===ab.start_hour && b.duration===ab.duration)
     || null;
   const bk = live || ab;
-  const others    = bookings.filter(b => b.id!==bk.id && !["cancelled","rejected"].includes(b.status));
+  const others    = bookings.filter(b => b.id!==bk.id && !isClosed(b.status));
   const sameAll   = getSameFacilityOverlaps(bk, others);
   const sameAdmin = sameAll.filter(isAdminBooking);
   const sameUser  = sameAll.filter(b=>!isAdminBooking(b));
@@ -141,7 +142,7 @@ export function CouncilAllocationTab({ outcomes = {}, bookings = [], syncing, sy
   const apps = Object.values(outcomes).sort((a, b) => (COUNCIL_OUTCOME_META[a.outcome]?.rank ?? 9) - (COUNCIL_OUTCOME_META[b.outcome]?.rank ?? 9) || (b.outcomeAt || b.date || "").localeCompare(a.outcomeAt || a.date || ""));
   const count = k => apps.filter(a => k === "open" ? a.outcome === "action" || a.outcome === "confirmed" : k === "all" || a.outcome === k).length;
   const shown = apps.filter(a => filter === "all" ? true : filter === "open" ? a.outcome === "action" || a.outcome === "confirmed" : a.outcome === filter);
-  const live = b => !["cancelled", "rejected"].includes(b.status);
+  const live = b => !isClosed(b.status);
   const who = b => aliasNames[(b.email || "").toLowerCase()] || b.name || b.email;
   const facName = b => FACILITIES.find(f => f.id === b.facility_id)?.name || b.facility_id;
   const picked = (o, linked) => sel[o.id] || new Set(linked.filter(live).map(b => b.id));
@@ -1838,7 +1839,7 @@ export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDel
                     <td style={{padding:"3px 6px"}}>
                       <Badge status={b.status} wf={workflowOf(b.facility_id)} fid={b.facility_id}/>
                       {workflowStep(b)&&<span title="Step in the council workflow" style={{fontSize:9,fontWeight:700,color:"#0f766e",marginLeft:3}}>{workflowStep(b)}</span>}
-                      {isCouncilBooking(b)&&!["rejected","cancelled"].includes(b.status)&&(()=>{ const app=parseCouncilApp(b.system_notes);
+                      {isCouncilBooking(b)&&!isClosed(b.status)&&(()=>{ const app=parseCouncilApp(b.system_notes);
                         return <span title={app?`Council application ${app.id} (sent ${fmtDate(app.at.slice(0,10))}): this booking's share of the $${COUNCIL_APPLICATION_FEE}-per-field fee`:`Council application fee: pending until AMUA sends the application ($${COUNCIL_APPLICATION_FEE} per field, shared)`}
                           style={{fontSize:9,fontWeight:700,marginLeft:3,padding:"0 4px",borderRadius:4,background:app?"#ccfbf1":"#f1f5f9",color:app?"#115e59":"#64748b"}}>🏛 {app?`$${app.fee.toFixed(2)}`:"fee pending"}</span>; })()}
                       {b.invoiced&&<span style={{fontSize:9,fontWeight:700,background:INVOICED_META.bg,color:INVOICED_META.text,border:`1px solid ${INVOICED_META.border}`,borderRadius:4,padding:"1px 4px",marginLeft:2}}>🧾</span>}

@@ -12,6 +12,7 @@ import { ScheduleSummaryModal, resolveRates } from "./booking/schedule.jsx";
 import { ActivityLogModal, AmuaDetailsModal, Banner, CouncilContactModal, DateRangePicker, UserMenuItem, UserMgmtModal } from "./booking/modals.jsx";
 import { DayTimelinePopup, MonthCalendar, WeekCalendar } from "./booking/calendar.jsx";
 import { BookingDetail, BookingForm, CartModal, DeleteCartModal } from "./booking/forms.jsx";
+import { isLegacyStatus } from "./statuses.js";
 
 // Tabs loaded on first use, so the calendars open without downloading Summary, Billing,
 // Admin, Allocation or About.
@@ -2372,7 +2373,7 @@ export default function App() {
                         <select value={listStatusFilter} onChange={e=>setListStatusFilter(e.target.value)} aria-label="Status"
                           style={{...S.inp,fontSize:12,padding:"6px 8px",minWidth:0}}>
                           <option value="all">All statuses</option>
-                          {Object.entries(STATUS_META).filter(([k])=>!["pending","amua_submit"].includes(k)).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
+                          {Object.entries(STATUS_META).filter(([k])=>!isLegacyStatus(k)).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
                         </select>
                         <input placeholder="Search purpose…" value={listColPurpose} onChange={e=>setListColPurpose(e.target.value)}
                           style={{...S.inp,fontSize:12,padding:"6px 8px",minWidth:0,gridColumn:anyListFilter?"auto":"1 / -1"}}/>
@@ -2491,7 +2492,7 @@ export default function App() {
                                 <select value={listStatusFilter} onChange={e=>setListStatusFilter(e.target.value)}
                                   style={{padding:"3px 4px",fontSize:11,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",width:"100%"}}>
                                   <option value="all">All</option>
-                                  {Object.entries(STATUS_META).filter(([k])=>!["pending","amua_submit"].includes(k)).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
+                                  {Object.entries(STATUS_META).filter(([k])=>!isLegacyStatus(k)).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
                                 </select>
                               </th>
                               <th style={{padding:"3px 4px"}}/>

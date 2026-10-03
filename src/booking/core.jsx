@@ -2,6 +2,7 @@ import logoUrl from "../assets/logo.jpg";
 import { createClient } from "@supabase/supabase-js";
 import { getActor } from "../actor.js";
 import { useState, useRef, useEffect } from "react";
+import { isClosed, isAmuaReview, isLegacyStatus, normaliseStatus, WORKFLOW_STEPS, VENDOR_QUEUE_STATUSES } from "../statuses.js";
 // ─── LOGO ─────────────────────────────────────────────────────────────────────
 export const LOGO_SRC = logoUrl;
 // ─── SUPABASE ─────────────────────────────────────────────────────────────────
@@ -65,11 +66,15 @@ if (typeof window !== "undefined") {
   window.addEventListener("unhandledrejection", e => logClientError(e.reason?.message || e.reason, "promise"));
 }
 
+// Rows written before the status model (pending, amua_submit) read as their current keys.
+const normaliseRows = (table, rows) => table === "bookings" && Array.isArray(rows)
+  ? rows.map(b => isLegacyStatus(b.status) ? { ...b, status: normaliseStatus(b.status) } : b) : rows;
+
 export const sb = {
   async select(table, query="") {
     const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${query}&order=created_at.desc`,
       { headers: authHeaders() });
-    if (!r.ok) throw new Error(await r.text()); return r.json();
+    if (!r.ok) throw new Error(await r.text()); return normaliseRows(table, await r.json());
   },
   async insert(table, data) {
     const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, { method:"POST",
@@ -103,7 +108,7 @@ export const sb = {
   async selectAll(table) {
     const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}?select=*`,
       { headers: authHeaders() });
-    if (!r.ok) throw new Error(await r.text()); return r.json();
+    if (!r.ok) throw new Error(await r.text()); return normaliseRows(table, await r.json());
   },
 };
 
@@ -243,14 +248,8 @@ export const STATUS_META = {
   community_request: {bg:"#dbeafe",border:"#2563eb",text:"#1e3a8a",dot:"#2563eb",label:"✉ Requested from facility", desc:"AMUA has asked the facility by email"},
 };
 // Each provider kind walks its own steps. Stored statuses stay provider-neutral keys.
-export const COUNCIL_STAGE_STATUSES = ["op_permission","council_apply","council_pending","council_action","council_granted","op_confirm","contact_review","community_request"];
-export const WORKFLOW_STEPS = {
-  gtec:            ["pending_amua","queued_cpsa","pending_cpsa","approved"],
-  council:         ["pending_amua","council_apply","council_pending","council_action","council_granted","approved"],
-  council_private: ["pending_amua","op_permission","council_apply","council_pending","council_action","council_granted","op_confirm","approved"],
-  direct:          ["pending_amua","approved"],
-  community:       ["pending_amua","contact_review","community_request","approved"],
-};
+// The stages, groups and workflows live in src/statuses.js (the status model).
+export { COUNCIL_STAGE_STATUSES, WORKFLOW_STEPS, REVIEW_STATUSES } from "../statuses.js";
 // Community facility rates ($/hr) by operator id; the rest are set in Facility Rates.
 export const COMMUNITY_RATES = { "ani-epsom": 20, "ani-lower": 20 };
 // Contact details AMUA has reviewed before its first request to a community facility
@@ -259,7 +258,6 @@ export let _contactReviews = {};
 export const isContactReviewed = pid => !!_contactReviews[pid];
 // invoiced is an orthogonal billing flag (booking.invoiced boolean), not a workflow status.
 export const INVOICED_META = {bg:"#f5f3ff",border:"#7c3aed",text:"#5b21b6",dot:"#7c3aed",label:"🧾 Invoiced"};
-export const REVIEW_STATUSES = new Set(["pending_amua","queued_cpsa","amua_submit","pending_cpsa","pending","cpsa_review_needed",...COUNCIL_STAGE_STATUSES]);
 // Solid status colours used as the primary background in week/month calendar blocks.
 // Field colour becomes the left-border accent; booker email colour appears as a small dot.
 // Matches STATUS_META.dot exactly so calendar chips and status badges use the same palette.
@@ -372,7 +370,7 @@ export function parseCouncilApp(sysNotes) {
 // batch shows extra occupancy available (CouncilOccupancyNotes).
 export const councilCap = b => FACILITIES.find(f => f.id === b.facility_id)?.council?.frisbee || 1;
 export function councilOverlaps(bookings) {
-  const live = (bookings || []).filter(b => !["cancelled", "rejected"].includes(b.status) && FACILITIES.find(f => f.id === b.facility_id)?.council);
+  const live = (bookings || []).filter(b => !isClosed(b.status) && FACILITIES.find(f => f.id === b.facility_id)?.council);
   const byKey = {};
   live.forEach(b => (byKey[b.facility_id + "|" + b.date] ||= []).push(b));
   const out = [];
@@ -394,7 +392,7 @@ export function linkCouncilChildren(newDrafts, existing, canon) {
   newDrafts.forEach(d => {
     if (!FACILITIES.find(f => f.id === d.facility_id)?.council || parseSlotLink(d.system_notes)) return;
     const who = canon((d.email || "").toLowerCase()), end = d.start_hour + d.duration;
-    const over = (existing || []).filter(b => b.facility_id === d.facility_id && b.date === d.date && !["cancelled", "rejected"].includes(b.status)
+    const over = (existing || []).filter(b => b.facility_id === d.facility_id && b.date === d.date && !isClosed(b.status)
       && b.start_hour < end && d.start_hour < b.start_hour + b.duration && canon((b.email || "").toLowerCase()) !== who);
     if (!over.length) return;
     const notesOf = b => patches[b.id] ?? b.system_notes ?? "";
@@ -413,7 +411,7 @@ export function isCouncilBooking(b) { const wf = workflowOf(b.facility_id); retu
 // operator booking once the operator has given permission (it's then at council_apply).
 export function canSendToCouncil(b) {
   const wf = workflowOf(b.facility_id);
-  return (wf === "council" && ["pending_amua", "pending", "council_apply"].includes(b.status))
+  return (wf === "council" && (isAmuaReview(b.status) || b.status === "council_apply"))
       || (wf === "council_private" && b.status === "council_apply");
 }
 // The batch as the council form wants it, for the AMUA Council Application extension
@@ -914,7 +912,7 @@ export function getDaysInMonth(y,m) {
 }
 export function timeOverlaps(a,b) {
   if(a.date!==b.date||a.id===b.id) return false;
-  if(["cancelled","rejected"].includes(a.status)||["cancelled","rejected"].includes(b.status)) return false;
+  if(isClosed(a.status)||isClosed(b.status)) return false;
   return a.start_hour<b.start_hour+b.duration && a.start_hour+a.duration>b.start_hour;
 }
 export function isAdminBooking(b)  { return b.email === "admin"; }
@@ -1127,7 +1125,7 @@ export function stripClashPrevStatus(sysNotes) { return (sysNotes||"").replace(C
 // and beyond). Once here, GTEC holds the slot, so a later cancellation must be
 // requested from GTEC for purging — not just removed from our records. A booking
 // flagged "clash" hides its real stage in [CLASH-PREV]; resolve through to that.
-export const GTEC_QUEUE_STATUSES = new Set(["queued_cpsa","amua_submit","pending_cpsa","approved","cpsa_confirmed","cpsa_review_needed"]);
+export const GTEC_QUEUE_STATUSES = VENDOR_QUEUE_STATUSES;
 export function reachedGtecQueue(b) {
   let s = b?.status;
   if (s === "clash") s = parseClashPrevStatus(b?.system_notes) || s;

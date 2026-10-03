@@ -38,7 +38,10 @@ Two apps on GitHub Pages (`/facility-booking/`), one Supabase project:
    `setModuleState({...})` — imports are read-only.
 6. Say **vendor** (not provider) in the interface. Vendor stages name the facility's vendor
    (`statusLabelFor`, `<Badge fid={…}/>`): GTEC for Cornwall Park fields, CPSA for the rooms.
-7. No model identifiers in commits, PRs or code.
+7. **Statuses** live in `src/statuses.js` (stages, workflow order, groups such as `isClosed`,
+   `isLive`, `reachedVendorQueue`). Use its helpers rather than hand-written status lists.
+   The legacy keys `pending` / `amua_submit` are migrated by the SQL (v3) and normalised on load.
+8. No model identifiers in commits, PRs or code.
 
 ## Testing
 

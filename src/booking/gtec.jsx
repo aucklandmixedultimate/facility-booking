@@ -1,4 +1,5 @@
 import { COUNCIL_STAGE_STATUSES, facShort, fmtTimeShort } from "./core.jsx";
+import { isLive } from "../statuses.js";
 // ─── Main App ─────────────────────────────────────────────────────────────────
 // ─── CARLTON JUNIORS RUGBY SYNC ──────────────────────────────────────────────
 // (sync bookings use empty email/name and are deduped by date+facility+time+purpose)
@@ -141,7 +142,7 @@ export function findMatchingUserBooking(allBookings, ev, facilityIds, gtecLinks=
   // Facility is NOT required — any time overlap on the same date is a potential link.
   const candidates = allBookings.filter(b => {
     if (b.email === "admin") return false;
-    if (!["approved","cpsa_confirmed","cpsa_review_needed","clash","pending_cpsa","queued_cpsa","pending_amua","amua_submit","pending",...COUNCIL_STAGE_STATUSES].includes(b.status) && !b.invoiced) return false;
+    if (!(isLive(b.status) || b.status === "clash") && !b.invoiced) return false;
     if (b.date !== date) return false;
     if (b.start_hour + b.duration <= start_hour) return false;
     if (start_hour + duration <= b.start_hour) return false;
