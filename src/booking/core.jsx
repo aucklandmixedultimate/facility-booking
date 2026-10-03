@@ -1647,6 +1647,31 @@ export function buildInformCpsaEmailHtml({ vendorName, booking, refs = [], submi
     + "<p style='color:#64748b;font-size:12px'>Sent from FacilityBook – AMUA.</p></div>";
 }
 
+// Room request to CPSA / GTEC for the Meeting Room or Function Room (vendor mail: sendEmail
+// turns it into a draft in AMUA's inbox with the recipients listed, per the email rule).
+export function buildRoomRequestEmailHtml({ vendorName, bookings, ref, players = {} }) {
+  const rows = bookings.map(b => {
+    const fac = FACILITIES.find(x => x.id === b.facility_id);
+    const n = players[(b.email || "").toLowerCase()];
+    return "<tr>"
+      + "<td style='padding:6px 8px;border-top:1px solid #e2e8f0;font-weight:600;color:#0f172a'>" + (fac?.name || b.facility_id) + "</td>"
+      + "<td style='padding:6px 8px;border-top:1px solid #e2e8f0'>" + fmtDate(b.date) + "</td>"
+      + "<td style='padding:6px 8px;border-top:1px solid #e2e8f0'>" + fmtTime(b.start_hour) + "–" + fmtTime(b.start_hour + b.duration) + "</td>"
+      + "<td style='padding:6px 8px;border-top:1px solid #e2e8f0'>" + (b.purpose || "") + (n ? " · about " + n + " people" : "") + "</td>"
+      + "</tr>";
+  }).join("");
+  return "<div style='font-family:sans-serif;max-width:640px'>"
+    + "<h2 style='color:#7c3aed'>Room booking request</h2>"
+    + "<p>Hi " + (vendorName || "there") + ",</p>"
+    + "<p>AMUA would like to book the following at Cornwall Park. Could you please confirm availability, and let us know of any setup or access requirements?</p>"
+    + "<table style='width:100%;border-collapse:collapse;font-size:13px;margin:12px 0;border:1px solid #e2e8f0'>"
+    + "<thead><tr style='background:#f8fafc;color:#64748b;text-align:left'><th style='padding:6px 8px'>Room</th><th style='padding:6px 8px'>Date</th><th style='padding:6px 8px'>Time</th><th style='padding:6px 8px'>For</th></tr></thead>"
+    + "<tbody>" + rows + "</tbody></table>"
+    + "<p>" + amuaContactLine() + "</p>"
+    + (ref ? "<p style='color:#94a3b8;font-size:12px'>Reference: " + ref + "</p>" : "")
+    + "<p style='color:#64748b;font-size:12px'>Sent from FacilityBook – AMUA.</p></div>";
+}
+
 // Scheduling-clash email shown to a booker whose booking overlaps an admin/field
 // reservation. Top-level so the cart outbox can send it on submit.
 export function buildClashEmailHtml({ name, email, clashes }) {
