@@ -1,5 +1,5 @@
 import { useState, Fragment } from "react";
-import { AMUA_INBOX, AMUA_INFO, Badge, COUNCIL_APPLICATION_FEE, ClashPair, CopyableTable, EmailChip, FACILITIES, INVOICED_META, isSocialFac, vendorShortFor, Modal, PROVIDERS, REVIEW_STATUSES, S, STATUS_META, SUPABASE_URL, _contactReviews, _currentUser, _sessionStartIso, authHeaders, bookingCost, buildCouncilPayload, canSendToCouncil, councilFeeSplit, councilOverlaps, emailColor, extractCpsaAmendValues, facCellLabel, fmt24, fmtCost, fmtDate, fmtDateShort, fmtDateShortDow, fmtDuration, fmtGtecEvent, fmtLoggedAt, fmtTime, getBillingDrift, getCrossFacilityOverlaps, getSameFacilityOverlaps, isAdminBooking, isCouncilBooking, nextWorkflowStatus, parseClashPrevStatus, parseCouncilApp, parseCpsaRefs, parseCpsaResolution, parseGtecSnapshot, parseMismatchNote, parseSlotLink, providerOfFacility, sb, setCpsaOrig, setCpsaResolution, setModuleState, stripMismatchNote, todayKey, visibleFacilities, workflowOf, workflowStep } from "./core.jsx";
+import { AMUA_INBOX, AMUA_INFO, Badge, COUNCIL_APPLICATION_FEE, ClashPair, CopyableTable, EmailChip, FACILITIES, INVOICED_META, isSocialFac, vendorShortFor, vendorsIn, TableViewToggle, useTableView, Modal, PROVIDERS, REVIEW_STATUSES, S, STATUS_META, SUPABASE_URL, _contactReviews, _currentUser, _sessionStartIso, authHeaders, bookingCost, buildCouncilPayload, canSendToCouncil, councilFeeSplit, councilOverlaps, emailColor, extractCpsaAmendValues, facCellLabel, fmt24, fmtCost, fmtDate, fmtDateShort, fmtDateShortDow, fmtDuration, fmtGtecEvent, fmtLoggedAt, fmtTime, getBillingDrift, getCrossFacilityOverlaps, getSameFacilityOverlaps, isAdminBooking, isCouncilBooking, nextWorkflowStatus, parseClashPrevStatus, parseCouncilApp, parseCpsaRefs, parseCpsaResolution, parseGtecSnapshot, parseMismatchNote, parseSlotLink, providerOfFacility, sb, setCpsaOrig, setCpsaResolution, setModuleState, stripMismatchNote, todayKey, visibleFacilities, workflowOf, workflowStep } from "./core.jsx";
 import { PatternModal, PricingConditionsManager, ScheduleSummaryModal } from "./summary.jsx";
 import { ActivityLogModal, DateRangePicker } from "./modals.jsx";
 import { InlineDayPicker } from "./forms.jsx";
@@ -332,6 +332,9 @@ export function ContactReviewModal({ booking, onClose, onConfirm }) {
 }
 export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,clashes=[],deleteIds=new Set(),facilityRates={},onClearOldUnapproved,onBulkApply,onSaveMismatch,onInformCpsa,onRequestRoom,onQueueNotifications,onMarkAdjustmentSettled,onLinkClash,loggedInEmail,syncResults=[],onClearSyncResults,showSyncResults=false,onToggleSyncResults,bookerFilter=new Set(),onToggleBooker,onSetBookerFilter,aliasNames={},emailAliases={},pricingConditions=[],onAddPricingCondition,onUpdatePricingCondition,onRemovePricingCondition,cpsaDeleteLog=[],onClearDeleteLogEntry,onClearDeleteLog,onSendToCouncil,approxPlayers={}}) {
   const [showSchedulePanel, setShowSchedulePanel] = useState(false);
+  // The bookings table: Grouped (schedule summary, the default) or Itemised; and a vendor filter.
+  const [adminView, setAdminView] = useTableView("fb_admin_view");
+  const [adminVendor, setAdminVendor] = useState("all");
   const [reviewFor, setReviewFor] = useState(null);   // community booking awaiting a first-request contact review
   const [showActivityPanel, setShowActivityPanel] = useState(false);
   // Which sync-result months are expanded in the grouped dropdown (monthKey set).
@@ -500,8 +503,10 @@ export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDel
     return !t||`${b.name} ${b.email} ${b.purpose} ${b.notes||""}`.toLowerCase().includes(t);
   }
 
+  const vendorOk = b => adminVendor==="all" || vendorShortFor(b.facility_id)===adminVendor;
   const list=bookings.filter(b=>{
     if(isAdminBooking(b)) return false;
+    if(!vendorOk(b)) return false;
     if(sfHidden.has(b.status)) return false;
     if(ff!=="all"&&b.facility_id!==ff) return false;
     if(adminBookerFilter.size>0&&!adminBookerFilter.has(b.email?.toLowerCase())) return false;
@@ -628,9 +633,6 @@ export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDel
             🧹 Clear old unapproved ({oldUnapproved.length})
           </button>
         )}
-        <button onClick={e=>toggleSection(0,e)} title="Open or close this section (Alt-click: show only this one)" style={S.btn({background:showSchedulePanel?"#f0f9ff":"#fff",color:"#0369a1",border:`1.5px solid ${showSchedulePanel?"#7dd3fc":"#bae6fd"}`,fontSize:12,fontWeight:700})}>
-          📅 Schedule {showSchedulePanel?"▴":"▾"}
-        </button>
         <button onClick={e=>toggleSection(1,e)} title="Open or close this section (Alt-click: show only this one)" style={S.btn({background:showActivityPanel?"#f8fafc":"#fff",color:"#475569",border:`1.5px solid ${showActivityPanel?"#94a3b8":"#e2e8f0"}`,fontSize:12,fontWeight:700})}>
           📜 Activity Log {showActivityPanel?"▴":"▾"}
         </button>
@@ -755,10 +757,6 @@ export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDel
         </div>
       )}
 
-      {/* Schedule Summary — inline */}
-      {showSchedulePanel && (
-        <ScheduleSummaryModal bookings={bookings.filter(b=>inBookerFilter(b.email))} isAdmin={true} loggedInEmail={loggedInEmail} onBulkApply={onBulkApply} onBulkStatusChange={onBulkStatusChange} aliasNames={aliasNames} emailAliases={emailAliases} inline onClose={()=>setShowSchedulePanel(false)}/>
-      )}
 
       {/* Activity Log — inline */}
       {showActivityPanel && (
@@ -1659,8 +1657,19 @@ export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDel
         );
       })()}
 
-      {/* Bookings table */}
-      {list.length===0
+      {/* Bookings: Grouped (schedule summary) or Itemised, with a vendor filter for both. */}
+      <TableViewToggle value={adminView} onChange={setAdminView}>
+        <span style={{width:1,height:18,background:"#e2e8f0",flexShrink:0,margin:"0 4px"}}/>
+        <span style={{color:"#64748b",fontWeight:600}}>Vendor:</span>
+        <select value={adminVendor} onChange={e=>setAdminVendor(e.target.value)} aria-label="Vendor"
+          style={{padding:"3px 8px",borderRadius:6,border:"1px solid #e2e8f0",fontSize:11,fontWeight:600,fontFamily:"inherit",background:adminVendor==="all"?"#fff":"#0f172a",color:adminVendor==="all"?"#475569":"#fff"}}>
+          <option value="all">All vendors</option>
+          {vendorsIn(bookings.filter(b=>!isAdminBooking(b))).map(v=><option key={v} value={v}>{v}</option>)}
+        </select>
+      </TableViewToggle>
+      {adminView==="grouped"
+        ? <ScheduleSummaryModal bookings={bookings.filter(b=>inBookerFilter(b.email)&&vendorOk(b))} isAdmin={true} loggedInEmail={loggedInEmail} onBulkApply={onBulkApply} onBulkStatusChange={onBulkStatusChange} aliasNames={aliasNames} emailAliases={emailAliases} embedded/>
+      : list.length===0
         ? <div style={{textAlign:"center",padding:"40px 0",color:"#94a3b8",fontSize:14}}>No bookings found.</div>
         : (
         <div style={{overflowX:"auto",borderRadius:12,border:"1px solid #f1f5f9"}}>
