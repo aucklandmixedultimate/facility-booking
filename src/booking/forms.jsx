@@ -1,5 +1,5 @@
 import { useState, useRef, Fragment } from "react";
-import { BILLED_RE, Badge, CAL_SLOTS, CAL_START, CAL_TOTAL, DAY_EVENING_CUTOFF, DURATIONS, EmailChip, FACILITIES, FACILITY_TINT, FLOODLIT_FIELD_ID, FacilityOptions, INVOICED_META, Modal, ProviderVenuePicker, REVIEW_STATUSES, S, SLOTS_PER_HOUR, SLOT_HOURS, START_TIMES, STATUS_META, addDays, councilContactOk, emailColor, facColLabel, facShort, fmtCost, fmtDate, fmtDuration, fmtLoggedAt, fmtRefDate, fmtTime, fmtTimeShort, getCrossFacilityOverlaps, getSameFacilityOverlaps, isAdminBooking, newGroupRef, newId, parseCouncilInfo, parseFunctionCost, parseGroupRef, parseGtecSnapshot, parseMismatchNote, parseSlotLink, parseSplit, setCouncilInfo, setFunctionCost, setGroupRef, setSplit, slotGroupMembers, slotGroupName, splitReason, stripMismatchNote, timeOverlaps, todayKey, useMobile, vendorShortFor, venueFacilities, workflowOf } from "./core.jsx";
+import { T, parseVendorVariance, setVendorVariance, vendorVarianceText, stepLabel, BILLED_RE, Badge, CAL_SLOTS, CAL_START, CAL_TOTAL, DAY_EVENING_CUTOFF, DURATIONS, EmailChip, FACILITIES, FACILITY_TINT, FLOODLIT_FIELD_ID, FacilityOptions, INVOICED_META, Modal, ProviderVenuePicker, REVIEW_STATUSES, S, SLOTS_PER_HOUR, SLOT_HOURS, START_TIMES, STATUS_META, addDays, councilContactOk, emailColor, facColLabel, facShort, fmtCost, fmtDate, fmtDuration, fmtLoggedAt, fmtRefDate, fmtTime, fmtTimeShort, getCrossFacilityOverlaps, getSameFacilityOverlaps, isAdminBooking, newGroupRef, newId, parseCouncilInfo, parseFunctionCost, parseGroupRef, parseGtecSnapshot, parseMismatchNote, parseSlotLink, parseSplit, setCouncilInfo, setFunctionCost, setGroupRef, setSplit, slotGroupMembers, slotGroupName, splitReason, stripMismatchNote, timeOverlaps, todayKey, useMobile, vendorShortFor, venueFacilities, workflowOf } from "./core.jsx";
 import { OverlapWarning } from "./modals.jsx";
 import { isClosed, isLegacyStatus } from "../statuses.js";
 // ─── Single Booking Row Form ──────────────────────────────────────────────────
@@ -1171,6 +1171,59 @@ export function BookingForm({ booking, allBookings, onAddToCart, onClose, isAdmi
 }
 
 // ─── Booking Detail ───────────────────────────────────────────────────────────
+// The vendor's actual start / end for a booking whose vendor record didn't match the request.
+// value = {vendorStart, vendorDur}. Starts from GTEC's captured event (sync), else the booking.
+export function vendorTimesDefault(b) {
+  const g = parseGtecSnapshot(b.system_notes), v = parseVendorVariance(b.system_notes);
+  if (v) return { vendorStart: v.vendorStart, vendorDur: v.vendorDur };
+  if (g && g.start_hour != null && !Number.isNaN(g.start_hour) && g.duration) return { vendorStart: g.start_hour, vendorDur: g.duration };
+  return { vendorStart: b.start_hour, vendorDur: b.duration };
+}
+export function VendorTimesFields({ booking, value, onChange }) {
+  const times = Array.from({ length: 24 * 4 }, (_, i) => i / 4);
+  const end = value.vendorStart + value.vendorDur;
+  const si = { border:`1px solid ${T.line}`, borderRadius:T.rSm, padding:"3px 6px", fontSize:12, fontFamily:"inherit", background:T.surface, color:T.ink };
+  return (
+    <span style={{display:"inline-flex",alignItems:"center",gap:5,flexWrap:"wrap",fontSize:12,color:T.ink2}}>
+      {vendorShortFor(booking.facility_id)} had
+      <select aria-label="Vendor start" value={value.vendorStart} onChange={e=>{ const st=parseFloat(e.target.value); onChange({ vendorStart: st, vendorDur: Math.max(0.25, end - st) }); }} style={si}>
+        {times.map(t=><option key={t} value={t}>{fmtTime(t)}</option>)}
+      </select>–
+      <select aria-label="Vendor end" value={end} onChange={e=>onChange({ ...value, vendorDur: Math.max(0.25, parseFloat(e.target.value) - value.vendorStart) })} style={si}>
+        {times.filter(t=>t>value.vendorStart).concat(24).map(t=><option key={t} value={t}>{fmtTime(t)}</option>)}
+      </select>
+      <span style={{color:T.muted}}>· requested {fmtTime(booking.start_hour)}–{fmtTime(booking.start_hour+booking.duration)}</span>
+    </span>
+  );
+}
+// A booking's vendor mismatch kept on record (admin): shown, set or cleared from the details.
+function VendorVarianceSection({ booking, onPatch }) {
+  const v = parseVendorVariance(booking.system_notes);
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState(() => vendorTimesDefault(booking));
+  const save = vv => onPatch && onPatch(booking, { system_notes: setVendorVariance(booking.system_notes, vv) });
+  if (!v && !editing) return (
+    <button onClick={()=>{ setVal(vendorTimesDefault(booking)); setEditing(true); }} title="Record that the vendor's booking differed from the request (it can be asterisked on invoices)"
+      style={{alignSelf:"flex-start",...S.btn({padding:"4px 10px",fontSize:11,background:T.surface,color:"#a16207",border:"1.5px dashed #eab308"})}}>⚠ Record a vendor mismatch</button>
+  );
+  return (
+    <div style={{background:"#fefce8",border:"1px solid #fde047",borderRadius:10,padding:"10px 14px",display:"flex",flexDirection:"column",gap:8}}>
+      <div style={{fontSize:12,fontWeight:700,color:"#713f12",textTransform:"uppercase",letterSpacing:"0.05em"}}>⚠ Vendor mismatch on record</div>
+      {editing
+        ? <VendorTimesFields booking={booking} value={val} onChange={setVal}/>
+        : <div style={{fontSize:13,color:"#713f12"}}>{vendorVarianceText(booking)}</div>}
+      <div style={{fontSize:11,color:"#a16207"}}>Kept whatever the status (e.g. after confirming it as it stood). Invoices can asterisk it — an option when creating them.</div>
+      <div style={{display:"flex",gap:6}}>
+        {editing
+          ? <><button onClick={()=>{ save({ ...val, reqStart: booking.start_hour, reqDur: booking.duration }); setEditing(false); }} style={S.btn({padding:"4px 12px",fontSize:12,background:"#a16207",color:"#fff"})}>Save</button>
+              <button onClick={()=>setEditing(false)} style={S.btn({padding:"4px 12px",fontSize:12,background:T.surface,color:T.muted,border:`1.5px solid ${T.line}`})}>Cancel</button></>
+          : <><button onClick={()=>{ setVal(vendorTimesDefault(booking)); setEditing(true); }} style={S.btn({padding:"4px 12px",fontSize:12,background:T.surface,color:"#a16207",border:"1.5px solid #eab308"})}>Edit</button>
+              <button onClick={()=>save(null)} style={S.btn({padding:"4px 12px",fontSize:12,background:T.surface,color:T.danger,border:`1.5px solid ${T.line}`})}>Clear</button></>}
+      </div>
+    </div>
+  );
+}
+
 export function BookingDetail({booking,onEdit,onClose,onCancel,isAdmin,onStatusChange,onPatch,loggedInEmail,allClashes=[],bookers=[],onConvertAdmin,allBookings=[],onShareSlot,onMergeSlot,onUnlinkSlot}) {
   const f=FACILITIES.find(x=>x.id===booking.facility_id);
   const m=STATUS_META[booking.status]||STATUS_META.pending;
@@ -1222,8 +1275,8 @@ export function BookingDetail({booking,onEdit,onClose,onCancel,isAdmin,onStatusC
                 onChange={e=>onStatusChange(e.target.value)}
                 style={{padding:"4px 10px",borderRadius:8,border:`1.5px solid ${m.border}`,background:m.bg,color:m.text,fontSize:13,fontWeight:600,cursor:"pointer",outline:"none"}}
               >
-                {Object.entries(STATUS_META).map(([key,meta])=>(
-                  <option key={key} value={key}>{meta.label}</option>
+                {Object.keys(STATUS_META).filter(key=>!isLegacyStatus(key)||key===booking.status).map(key=>(
+                  <option key={key} value={key}>{stepLabel(key, undefined, booking.facility_id)}</option>
                 ))}
               </select>
             </label>
@@ -1289,6 +1342,8 @@ export function BookingDetail({booking,onEdit,onClose,onCancel,isAdmin,onStatusC
           </div>
         );
       })()}
+      {isAdmin&&!isAdminBk&&onPatch ? <VendorVarianceSection key={booking.id+(booking.system_notes||"")} booking={booking} onPatch={onPatch}/>
+        : vendorVarianceText(booking) ? <div style={{background:"#fefce8",border:"1px solid #fde047",borderRadius:10,padding:"8px 14px",fontSize:12,color:"#713f12"}}>⚠ {vendorVarianceText(booking)}</div> : null}
       {isPast&&<div style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:"8px 12px",fontSize:12,color:"#64748b",display:"flex",alignItems:"center",gap:6}}>🔒 Past booking — {isAdmin?"admin can delete":"read-only"}</div>}
       <div><EmailChip email={booking.email}/></div>
       {[

@@ -1018,6 +1018,29 @@ export function setGtecSnapshot(sysNotes, gtec) {
   const marker = `[CPSA-GTEC] ${[enc(gtec.name),enc(gtec.date),enc(gtec.start_hour),enc(gtec.duration),enc((gtec.facilityIds||[]).join(","))].join("|")}`;
   return base ? `${base}\n${marker}` : marker;
 }
+// A vendor mismatch kept on record after the booking moves on (e.g. set to vendor confirmed
+// as it stood): the vendor's times against the requested ones. Unlike the sync's mismatch
+// markers it survives confirming, so invoices can footnote it (an opt-in invoice option).
+// [VENDOR-VAR] vendorStart|vendorDur|requestedStart|requestedDur
+const VENDOR_VAR_RE = /\[VENDOR-VAR\][^\n]*/g;
+export function parseVendorVariance(sysNotes) {
+  const m = (sysNotes||"").match(/\[VENDOR-VAR\]\s*([^\n]*)/);
+  if (!m) return null;
+  const [vs, vd, rs, rd] = m[1].split("|").map(x => parseFloat(x));
+  return [vs, vd, rs, rd].some(Number.isNaN) ? null : { vendorStart: vs, vendorDur: vd, reqStart: rs, reqDur: rd };
+}
+export function setVendorVariance(sysNotes, v) {
+  const base = (sysNotes||"").replace(VENDOR_VAR_RE, "").replace(/\n{2,}/g, "\n").trim();
+  if (!v) return base;
+  const marker = `[VENDOR-VAR] ${v.vendorStart}|${v.vendorDur}|${v.reqStart}|${v.reqDur}`;
+  return base ? `${base}\n${marker}` : marker;
+}
+// "GTEC booking (6:30 PM–8:30 PM) did not match request (8:00 PM–9:15 PM)", or "".
+export function vendorVarianceText(b) {
+  const v = parseVendorVariance(b?.system_notes); if (!v) return "";
+  const span = (st, d) => `${fmtTime(st)}–${fmtTime(st + d)}`;
+  return `${vendorShortFor(b.facility_id)} booking (${span(v.vendorStart, v.vendorDur)}) did not match request (${span(v.reqStart, v.reqDur)})`;
+}
 export function parseGtecSnapshot(sysNotes) {
   const m = (sysNotes||"").match(/\[CPSA-GTEC\]\s*([^\n]*)/);
   if (!m) return null;
