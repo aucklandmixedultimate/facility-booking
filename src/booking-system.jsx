@@ -1952,7 +1952,7 @@ export default function App() {
     setShowCart(false);
   }
 
-  // Admin → Back up database: every table in supabase-setup.sql (all rows, paged), plus this
+  // Admin → Backup / upload to Drive: every table in supabase-setup.sql (all rows, paged), plus this
   // browser's device-only data (profiles, billing records, sync logs…), as one JSON file.
   async function handleBackupDatabase() {
     if (!configured) { showToast("No database configured.", "error"); return; }
@@ -1977,12 +1977,27 @@ export default function App() {
     const backup = { app:"FacilityBook", exported_at:new Date().toISOString(), exported_by:realLoggedInEmail, ...(actor?{exported_by_name:actor}:{}),
       schema_version: tables.schema_version?.[0]?.version ?? null, counts, ...(Object.keys(problems).length?{problems}:{}), tables,
       device_note:"This browser's device-only data (not stored in the database): profiles, billing records, sync logs, filters.", device };
-    const url = URL.createObjectURL(new Blob([JSON.stringify(backup, null, 1)], { type:"application/json" }));
-    const a = document.createElement("a"); a.href = url; a.download = `facilitybook-backup-${new Date().toISOString().slice(0,16).replace(/[:T]/g,"-")}.json`;
-    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 5000);
-    logActivity("backup_downloaded", { counts, ...(Object.keys(problems).length ? { problems: Object.keys(problems) } : {}) });
-    const total = Object.values(counts).reduce((a,b)=>a+b,0);
-    showToast(Object.keys(problems).length ? `Backup saved (${total} rows). Not included: ${Object.keys(problems).join(", ")}.` : `Backup saved: ${total} rows from ${Object.keys(counts).length} tables.`, Object.keys(problems).length ? "error" : "success");
+    const blob = new Blob([JSON.stringify(backup, null, 1)], { type:"application/json" });
+    const fname = `facilitybook-backup-${new Date().toISOString().slice(0,16).replace(/[:T]/g,"-")}.json`;
+    const total = Object.values(counts).reduce((a,b)=>a+b,0), missing = Object.keys(problems);
+    // Upload to Google Drive (AMUA Billing / Backups / <year>); download it if Drive isn't
+    // set up or the upload fails, so a backup is never lost.
+    let driveFile = null;
+    if (driveConfigured()) {
+      try {
+        const folder = await ensureFolderPath([DRIVE_ROOT_FOLDER, "Backups", String(new Date().getFullYear())]);
+        driveFile = await uploadFile({ name: fname, parentId: folder.id, blob, mimeType: "application/json" });
+      } catch(e) { showToast("Couldn't upload to Drive ("+(e.message||e)+") — downloading instead.", "error"); }
+    }
+    if (!driveFile) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a"); a.href = url; a.download = fname;
+      document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 5000);
+    }
+    logActivity("backup_downloaded", { counts, where: driveFile ? "drive" : "download", ...(driveFile ? { file: driveFile.name } : {}), ...(missing.length ? { problems: missing } : {}) });
+    const where = driveFile ? `uploaded to Drive (${DRIVE_ROOT_FOLDER} / Backups)` : "downloaded";
+    showToast(missing.length ? `Backup ${where} (${total} rows). Not included: ${missing.join(", ")}.` : `Backup ${where}: ${total} rows from ${Object.keys(counts).length} tables.`, missing.length ? "error" : "success");
+    if (driveFile?.webViewLink) window.open(driveFile.webViewLink, "_blank", "noopener");
   }
   function handleLogout(){clearActor(session?.user?.email);supabase?.auth.signOut();setCart([]);}
 
@@ -2179,7 +2194,7 @@ export default function App() {
                             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:2,padding:"0 8px 6px"}}>
                               {[["💲","Rates",()=>setShowRatesModal(true)],["👥","Players",()=>setShowPlayersModal(true)],["👤","Users",()=>setShowUserMgmtModal(true)],
                                 ["🏢","AMUA details",()=>setShowAmuaModal(true)],["🗑","Log retention",()=>setShowRetentionModal(true)],["🧩","Extensions",()=>setShowExtensionModal(true)],
-                                ["🏛","Council form",()=>window.open(COUNCIL_APPLICATION_URL,"_blank","noopener")],["⬇","Reload data",()=>handleSyncDB()],["💾","Back up database",()=>handleBackupDatabase()]].map(([ic,lbl,fn])=>(
+                                ["🏛","Council form",()=>window.open(COUNCIL_APPLICATION_URL,"_blank","noopener")],["⬇","Reload data",()=>handleSyncDB()],[driveConfigured()?"☁":"💾",driveConfigured()?"Backup / upload to Drive":"Backup (download)",()=>handleBackupDatabase()]].map(([ic,lbl,fn])=>(
                                 <button key={lbl} onClick={()=>{setShowUserMenu(false);fn();}}
                                   style={{display:"flex",alignItems:"center",gap:6,padding:"7px 8px",border:"1px solid #f1f5f9",borderRadius:8,background:"#fff",fontFamily:"inherit",fontSize:12,color:"#0f172a",cursor:"pointer",textAlign:"left",fontWeight:500}}>
                                   <span style={{width:16,textAlign:"center"}}>{ic}</span>{lbl}
