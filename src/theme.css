@@ -1,0 +1,50 @@
+/* Design tokens shared by both apps (imported first by src/main.jsx and src/vetting/main.js).
+   Use these in new styles: CSS `var(--c-ink)`, or `T.ink` from src/booking/core.jsx in the
+   booking site's inline styles.
+
+   Dark mode: the dark values apply only on pages that opt in with <html data-dark-ok> (the
+   Council fields page). The booking site still has many hard-coded light colours in its
+   inline styles, so it stays light until those move onto tokens. */
+:root{
+  /* Neutrals */
+  --c-ink:#0f172a;        /* body text, headings */
+  --c-ink-2:#475569;      /* secondary text */
+  --c-muted:#64748b;      /* labels, captions */
+  --c-faint:#94a3b8;      /* placeholders, close icons */
+  --c-line:#e2e8f0;       /* borders, input outlines */
+  --c-line-soft:#f1f5f9;  /* dividers, card borders */
+  --c-surface:#ffffff;    /* cards, modals */
+  --c-surface-2:#f8fafc;  /* inputs, toolbars, page background */
+  --c-surface-3:#f1f5f9;  /* segmented controls */
+  /* Brand and meaning */
+  --c-brand:#2d4a1e;      /* AMUA green: primary actions */
+  --c-turf:#1f7a4d;       /* fields, "good" */
+  --c-turf-soft:#dcefe4;
+  --c-focus:#2563eb;
+  --c-danger:#b91c1c;  --c-danger-soft:#fef2f2;
+  --c-warn:#92400e;    --c-warn-soft:#fef3c7;
+  --c-gold:#b7791f;    --c-gold-soft:#f8ecd6;
+  --c-backdrop:rgba(15,23,42,.55);
+  /* Shape and space */
+  --r-sm:6px; --r-md:8px; --r-lg:10px; --r-xl:16px; --r-pill:999px;
+  --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:24px;
+  --shadow-1:0 1px 2px rgba(15,23,42,.12);
+  --shadow-2:0 1px 8px rgba(0,0,0,.04);
+  --shadow-3:0 8px 40px rgba(0,0,0,.10);
+  /* Type */
+  --font-ui:"DM Sans","Segoe UI",system-ui,-apple-system,sans-serif;
+  --fs-xs:11px; --fs-sm:12px; --fs-md:13px; --fs-base:14px; --fs-lg:16px; --fs-xl:18px;
+}
+@media (prefers-color-scheme:dark){
+  :root[data-dark-ok]{
+    --c-ink:#e6ede9; --c-ink-2:#c9d4ce; --c-muted:#9aaba2; --c-faint:#6b7c73;
+    --c-line:#2c3a33; --c-line-soft:#223029;
+    --c-surface:#18211c; --c-surface-2:#121a16; --c-surface-3:#1e2a24;
+    --c-brand:#46b37b; --c-turf:#46b37b; --c-turf-soft:#173427; --c-focus:#7aa7ff;
+    --c-danger:#e0685d; --c-danger-soft:#3a1d1a;
+    --c-warn:#fcd34d;   --c-warn-soft:#3a2c12;
+    --c-gold:#e0a647;   --c-gold-soft:#3a2c12;
+    --c-backdrop:rgba(0,0,0,.6);
+    --shadow-1:0 1px 2px rgba(0,0,0,.4);
+  }
+}

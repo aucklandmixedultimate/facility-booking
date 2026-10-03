@@ -1,9 +1,10 @@
 /* Council fields — one screen, no page scroll (the wheel only zooms the map): an Auckland-wide
    suitability map for navigation, and a park card with the council field map over live satellite. */
 :root{
-  --bg:#eef1ef; --surface:#ffffff; --ink:#15211c; --muted:#5b6b63; --line:#d5ddd8;
-  --turf:#1f7a4d; --turf-soft:#dcefe4; --reject:#b3372d; --reject-soft:#f7e1de;
-  --top:#b7791f; --top-soft:#f8ecd6; --focus:#2563eb; --field:#ffd400;
+  /* On the shared tokens (src/theme.css); the page keeps its turf-tinted greys. */
+  --bg:#eef1ef; --surface:var(--c-surface); --ink:#15211c; --muted:#5b6b63; --line:#d5ddd8;
+  --turf:var(--c-turf); --turf-soft:var(--c-turf-soft); --reject:#b3372d; --reject-soft:#f7e1de;
+  --top:var(--c-gold); --top-soft:var(--c-gold-soft); --focus:var(--c-focus); --field:#ffd400;
   --font-display:"Barlow Condensed","Arial Narrow",Arial,sans-serif;
   --font-body:"Barlow",system-ui,-apple-system,"Segoe UI",sans-serif;
   --font-mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
@@ -11,9 +12,8 @@
 }
 @media (prefers-color-scheme: dark){.privbox{background:#241a3a;color:#d9ccff;border-color:#45327a}.privbox a{color:#c4b0ff}.chip.priv{background:#241a3a;color:#c4b0ff}}
 @media (prefers-color-scheme: dark){:root{
-  --bg:#0f1512; --surface:#18211c; --ink:#e6ede9; --muted:#9aaba2; --line:#2c3a33;
-  --turf:#46b37b; --turf-soft:#173427; --reject:#e0685d; --reject-soft:#3a1d1a;
-  --top:#e0a647; --top-soft:#3a2c12; --focus:#7aa7ff; color-scheme:dark }}
+  --bg:#0f1512; --ink:var(--c-ink); --muted:var(--c-muted); --line:var(--c-line);
+  --reject:var(--c-danger); --reject-soft:var(--c-danger-soft); color-scheme:dark }}
 *{box-sizing:border-box}
 html,body{margin:0;height:100%;overflow:hidden}
 body{background:var(--bg);color:var(--ink);font-family:var(--font-body);font-size:14px;line-height:1.4}

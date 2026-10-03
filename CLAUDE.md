@@ -42,7 +42,10 @@ Two apps on GitHub Pages (`/facility-booking/`), one Supabase project:
 7. **Statuses** live in `src/statuses.js` (stages, workflow order, groups such as `isClosed`,
    `isLive`, `reachedVendorQueue`). Use its helpers rather than hand-written status lists.
    The legacy keys `pending` / `amua_submit` are migrated by the SQL (v3) and normalised on load.
-8. No model identifiers in commits, PRs or code.
+8. **Colours, radii, spacing** come from the design tokens in `src/theme.css` (CSS `var(--c-…)`,
+   or `T.…` from `core.jsx` in inline styles). Emails keep literal colours (no CSS variables in mail).
+   Only pages with `<html data-dark-ok>` get dark mode; the booking site isn't on tokens enough yet.
+9. No model identifiers in commits, PRs or code.
 
 ## Testing
 

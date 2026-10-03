@@ -1689,11 +1689,22 @@ export function buildClashEmailHtml({ name, email, clashes }) {
     + "<p style='color:#64748b;font-size:12px'>Automated notification from FacilityBook – AMUA.</p></div>";
 }
 
+// Design tokens (src/theme.css) for inline styles. Emails can't use CSS variables: their
+// builders keep literal colours.
+export const T = {
+  ink:"var(--c-ink)", ink2:"var(--c-ink-2)", muted:"var(--c-muted)", faint:"var(--c-faint)",
+  line:"var(--c-line)", lineSoft:"var(--c-line-soft)", surface:"var(--c-surface)", surface2:"var(--c-surface-2)", surface3:"var(--c-surface-3)",
+  brand:"var(--c-brand)", turf:"var(--c-turf)", focus:"var(--c-focus)", danger:"var(--c-danger)", dangerSoft:"var(--c-danger-soft)",
+  warn:"var(--c-warn)", warnSoft:"var(--c-warn-soft)", backdrop:"var(--c-backdrop)",
+  rSm:"var(--r-sm)", rMd:"var(--r-md)", rLg:"var(--r-lg)", rXl:"var(--r-xl)", rPill:"var(--r-pill)",
+  shadow1:"var(--shadow-1)", shadow2:"var(--shadow-2)", shadow3:"var(--shadow-3)", font:"var(--font-ui)",
+};
+
 export const S = {
-  inp:  {width:"100%",padding:"9px 12px",borderRadius:8,border:"1.5px solid #e2e8f0",fontSize:14,color:"#0f172a",background:"#f8fafc",outline:"none",boxSizing:"border-box",fontFamily:"inherit"},
-  lbl:  {display:"block",fontSize:12,fontWeight:600,color:"#64748b",marginBottom:5,textTransform:"uppercase",letterSpacing:"0.05em"},
-  btn:  (x={})=>({padding:"8px 18px",borderRadius:8,border:"none",cursor:"pointer",fontSize:13,fontWeight:600,fontFamily:"inherit",...x}),
-  card: {background:"#fff",borderRadius:16,border:"1px solid #f1f5f9",padding:24,boxShadow:"0 1px 8px rgba(0,0,0,0.04)"},
+  inp:  {width:"100%",padding:"9px 12px",borderRadius:T.rMd,border:`1.5px solid ${T.line}`,fontSize:14,color:T.ink,background:T.surface2,outline:"none",boxSizing:"border-box",fontFamily:"inherit"},
+  lbl:  {display:"block",fontSize:12,fontWeight:600,color:T.muted,marginBottom:5,textTransform:"uppercase",letterSpacing:"0.05em"},
+  btn:  (x={})=>({padding:"8px 18px",borderRadius:T.rMd,border:"none",cursor:"pointer",fontSize:13,fontWeight:600,fontFamily:"inherit",...x}),
+  card: {background:T.surface,borderRadius:T.rXl,border:`1px solid ${T.lineSoft}`,padding:24,boxShadow:T.shadow2},
 };
 
 // ─── Google Sign-In ───────────────────────────────────────────────────────────
@@ -1708,16 +1719,16 @@ export function EmailLoginScreen() {
     });
   }
   return (
-    <div style={{minHeight:"100vh",background:"#f8fafc",display:"flex",alignItems:"center",justifyContent:"center",padding:16,fontFamily:"'DM Sans','Segoe UI',system-ui,sans-serif"}}>
-      <div style={{background:"#fff",borderRadius:20,padding:40,maxWidth:400,width:"100%",boxShadow:"0 8px 40px rgba(0,0,0,0.10)",border:"1px solid #f1f5f9"}}>
+    <div style={{minHeight:"100vh",background:T.surface2,display:"flex",alignItems:"center",justifyContent:"center",padding:16,fontFamily:T.font}}>
+      <div style={{background:T.surface,borderRadius:20,padding:40,maxWidth:400,width:"100%",boxShadow:T.shadow3,border:`1px solid ${T.lineSoft}`}}>
         <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:28}}>
           <img src={LOGO_SRC} alt="AMUA" style={{width:48,height:48,borderRadius:10,objectFit:"cover"}}/>
           <div>
-            <div style={{fontSize:20,fontWeight:800,color:"#0f172a",letterSpacing:"-0.02em"}}>FacilityBook</div>
-            <div style={{fontSize:13,color:"#64748b"}}>Sign in to manage bookings</div>
+            <div style={{fontSize:20,fontWeight:800,color:T.ink,letterSpacing:"-0.02em"}}>FacilityBook</div>
+            <div style={{fontSize:13,color:T.muted}}>Sign in to manage bookings</div>
           </div>
         </div>
-        <button onClick={signIn} disabled={busy} style={S.btn({width:"100%",padding:"11px",background:"#2d4a1e",color:"#fff",fontSize:14,opacity:busy?0.7:1,cursor:busy?"wait":"pointer"})}>
+        <button onClick={signIn} disabled={busy} style={S.btn({width:"100%",padding:"11px",background:T.brand,color:"#fff",fontSize:14,opacity:busy?0.7:1,cursor:busy?"wait":"pointer"})}>
           {busy ? "Redirecting…" : "Sign in with Google"}
         </button>
         <p style={{marginTop:16,fontSize:12,color:"#94a3b8",textAlign:"center",lineHeight:1.5}}>Only authorised Google accounts can access this system.</p>
@@ -1763,11 +1774,11 @@ export function useTableView(key) {
 export function TableViewToggle({ value, onChange, children }) {
   const opt = (k, l, t) => (
     <button key={k} onClick={() => onChange(k)} title={t} aria-pressed={value === k}
-      style={{padding:"3px 10px",borderRadius:6,border:"1px solid",cursor:"pointer",fontSize:11,fontWeight:600,fontFamily:"inherit",
-        borderColor:value===k?"#0f172a":"#e2e8f0",background:value===k?"#0f172a":"#fff",color:value===k?"#fff":"#475569"}}>{l}</button>);
+      style={{padding:"3px 10px",borderRadius:T.rSm,border:"1px solid",cursor:"pointer",fontSize:11,fontWeight:600,fontFamily:"inherit",
+        borderColor:value===k?T.ink:T.line,background:value===k?T.ink:T.surface,color:value===k?T.surface:T.ink2}}>{l}</button>);
   return (
-    <div style={{display:"flex",alignItems:"center",gap:6,padding:"6px 10px",background:"#f8fafc",borderRadius:8,fontSize:11,flexWrap:"wrap",marginBottom:10}}>
-      <span style={{color:"#64748b",fontWeight:600,whiteSpace:"nowrap"}}>View:</span>
+    <div style={{display:"flex",alignItems:"center",gap:6,padding:"6px 10px",background:T.surface2,borderRadius:T.rMd,fontSize:11,flexWrap:"wrap",marginBottom:10}}>
+      <span style={{color:T.muted,fontWeight:600,whiteSpace:"nowrap"}}>View:</span>
       {opt("grouped", "Grouped", "Bookings grouped by booker and recurring pattern (the schedule summary)")}
       {opt("itemised", "Itemised", "Every booking as its own row")}
       {children}
@@ -1792,13 +1803,13 @@ export function Modal({title,onClose,children,width=560,side=false}) {
     return ()=>window.removeEventListener("keydown",onKey);
   },[onClose]);
   return (
-    <div style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.55)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:1000,padding:"0",backdropFilter:"blur(2px)"}}
+    <div style={{position:"fixed",inset:0,background:T.backdrop,display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:1000,padding:"0",backdropFilter:"blur(2px)"}}
       className={side?"modal-backdrop side":"modal-backdrop"} onMouseDown={e=>{ if(side&&e.target===e.currentTarget) onClose(); }}>
-      <div style={{background:"#fff",borderRadius:"16px 16px 0 0",width:"100%",maxWidth:width,maxHeight:"92vh",display:"flex",flexDirection:"column",boxShadow:"0 -8px 40px rgba(0,0,0,0.2)"}}
+      <div style={{background:T.surface,borderRadius:"16px 16px 0 0",width:"100%",maxWidth:width,maxHeight:"92vh",display:"flex",flexDirection:"column",boxShadow:"0 -8px 40px rgba(0,0,0,0.2)"}}
         onClick={e=>e.stopPropagation()}>
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:isMobile?"12px 14px 10px":"20px 24px 16px",borderBottom:"1px solid #f1f5f9",flexShrink:0}}>
-          <h2 style={{margin:0,fontSize:isMobile?16:18,fontWeight:700,color:"#0f172a"}}>{title}</h2>
-          <button onClick={onClose} style={{background:"none",border:"none",cursor:"pointer",fontSize:20,color:"#94a3b8",lineHeight:1,padding:4}}>✕</button>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:isMobile?"12px 14px 10px":"20px 24px 16px",borderBottom:`1px solid ${T.lineSoft}`,flexShrink:0}}>
+          <h2 style={{margin:0,fontSize:isMobile?16:18,fontWeight:700,color:T.ink}}>{title}</h2>
+          <button onClick={onClose} aria-label="Close" style={{background:"none",border:"none",cursor:"pointer",fontSize:20,color:T.faint,lineHeight:1,padding:4}}>✕</button>
         </div>
         <div style={{padding:isMobile?14:24,flex:1,minHeight:0,display:"flex",flexDirection:"column",overflowY:"auto",overflowX:"hidden"}}>{children}</div>
       </div>
