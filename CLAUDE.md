@@ -12,7 +12,8 @@ Two apps on GitHub Pages (`/facility-booking/`), one Supabase project:
   - lazily loaded tabs: `summary.jsx`, `billing.jsx`, `admin.jsx`, `about.jsx`
 - **Council fields** — `vetting.html` → `src/vetting/main.js` (Leaflet, vanilla JS).
 - Shared: `src/actor.js` (who's using a shared login), `src/people.js`, `src/seasons.js`,
-  `src/councilSeasons.js`, `src/drive-client.js`, `src/councilMail.js`.
+  `src/councilSeasons.js`, `src/drive-client.js`, `src/councilMail.js`, `src/statuses.js` (the status model),
+  `src/appnav.js` (the Bookings / Council fields switcher in both headers — add a page there).
 
 ## Commands
 

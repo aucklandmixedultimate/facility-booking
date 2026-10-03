@@ -13,8 +13,10 @@ import { createClient } from "@supabase/supabase-js";
 import { councilState, fmtRange, fmtDay, COUNCIL_LINKS, COUNCIL_CONTACTS } from "../councilSeasons.js";
 import { askActor, getActor, clearActor } from "../actor.js";
 import { shortName, personFromEmail } from "../people.js";
+import { renderAppNav } from "../appnav.js";
 
 const BASE = import.meta.env.BASE_URL;
+renderAppNav(document.getElementById("appNav"), "fields", BASE);
 const SB_URL = import.meta.env.VITE_SUPABASE_URL, SB_ANON = import.meta.env.VITE_SUPABASE_ANON;
 const supabase = SB_URL && SB_ANON
   ? createClient(SB_URL, SB_ANON, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, flowType: "pkce" } })
