@@ -198,6 +198,15 @@
         </div>
       </form>
     </dialog>
+    <dialog id="histDlg" class="dlg hist-dlg">
+      <form method="dialog">
+        <h3>Vetting history</h3>
+        <p id="histNote"></p>
+        <div class="hist-filters" id="histFilters"><button type="button" data-f="all">All</button><button type="button" data-f="mine">Mine</button><button type="button" data-f="rejected">Rejected</button></div>
+        <ul class="hist-list" id="histList"></ul>
+        <div class="dlg-actions"><button value="close" class="primary">Close</button></div>
+      </form>
+    </dialog>
     <dialog id="saveDlg" class="dlg">
       <form method="dialog">
         <h3 id="dlgTitle">Add another frisbee field?</h3>

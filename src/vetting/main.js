@@ -11,6 +11,7 @@ import "leaflet/dist/leaflet.css";
 import "./vetting.css";
 import { createClient } from "@supabase/supabase-js";
 import { councilState, fmtRange, fmtDay, COUNCIL_LINKS, COUNCIL_CONTACTS } from "../councilSeasons.js";
+import { askActor, getActor, clearActor } from "../actor.js";
 
 const BASE = import.meta.env.BASE_URL;
 const SB_URL = import.meta.env.VITE_SUPABASE_URL, SB_ANON = import.meta.env.VITE_SUPABASE_ANON;
@@ -126,6 +127,7 @@ async function loadRatings() {
 }
 async function setRating(id, stars) {
   const e = ratings[id] ||= { sum: 0, n: 0, mine: 0 }, before = { ...e };
+  if ((e.mine || 0) === (stars || 0)) return true;
   if (e.mine) { e.sum -= e.mine; e.n--; }
   if (stars) { e.sum += stars; e.n++; }
   e.mine = stars;
@@ -137,6 +139,7 @@ async function setRating(id, stars) {
   } else {
     const mine = store.get("vet-ratings", {}); if (stars) mine[id] = stars; else delete mine[id]; store.set("vet-ratings", mine);
   }
+  logChange("rating", id, before.mine ? { stars: before.mine } : null, stars ? { stars } : null);
   return true;
 }
 const crowdAvg = id => ratings[id]?.n ? ratings[id].sum / ratings[id].n : null;
@@ -151,6 +154,7 @@ async function loadFlags() {
   flagsShared = false; flags = store.get("vet-flags", {});
 }
 async function saveFlag(id, flag) {
+  const prev = snapOf(flags[id]);
   if (flagsShared) {
     const row = flag && { park_id: id, club: flag.club || "", kind: flag.kind || "private", contact: flag.contact || "",
       flagged_by: session?.user?.id || null, flagged_by_email: session?.user?.email || null, updated_at: new Date().toISOString() };
@@ -164,9 +168,11 @@ async function saveFlag(id, flag) {
   }
   if (flag) flags[id] = { ...flag, by: session?.user?.email || "", at: new Date().toISOString() }; else delete flags[id];
   if (!flagsShared) store.set("vet-flags", flags);
+  logChange("flag", id, prev, snapOf(flags[id]));
   return true;
 }
 async function save(id, rev) {
+  const prev = snapOf(reviews[id]);
   if (mode === "shared") {
     const p = BYID[id];
     const q = rev
@@ -184,7 +190,138 @@ async function save(id, rev) {
   }
   if (rev) reviews[id] = { ...rev, by: session?.user?.email || rev.by || "", at: new Date().toISOString() }; else delete reviews[id];
   if (mode === "local") store.set("vet-reviews", reviews);
+  logChange("review", id, prev, snapOf(reviews[id]));
   return true;
+}
+
+// ── Vetting history: a global log of vetting changes (profile menu → 📜 Vetting history) ──
+// Every saved field rating / decision, provider amendment and quality rating is logged with
+// the value it replaced. Entries are accepted by default; an admin can reject one, which
+// restores that earlier value (and accept it again, which re-applies the change). Shared
+// through the vetting_history table; until it exists, kept in this browser.
+const HIST_MAX = 500, HIST_FOLD_MS = 15 * 60000;
+let history = [], historyShared = false, replaying = false;
+// The saved value without its who/when stamp (those live on the history entry).
+const snapOf = v => { if (!v) return null; const { by, at, ...rest } = v; void by; void at; return JSON.parse(JSON.stringify(rest)); };
+const sameThing = (a, b) => a.kind === b.kind && a.park_id === b.park_id && (a.kind !== "rating" || a.by_email === b.by_email);
+const histTime = h => Date.parse(h.at) || 0;
+async function loadHistory() {
+  if (supabase && session) {
+    const { data, error } = await supabase.from("vetting_history").select("*").order("at", { ascending: false }).limit(HIST_MAX);
+    if (!error) { historyShared = true; history = data; return; }
+  }
+  historyShared = false; history = store.get("vet-history", []);
+}
+async function logChange(kind, id, before, after) {
+  if (replaying || JSON.stringify(before) === JSON.stringify(after)) return;
+  const me = session?.user?.email || "demo@local", who = getActor(me), now = new Date().toISOString();
+  // Quick successive saves of the same park by the same person fold into one entry.
+  const last = history.find(h => sameThing(h, { kind, park_id: id, by_email: me }));
+  if (last && last.by_email === me && (last.by_name || "") === who && last.status === "accepted" && Date.now() - histTime(last) < HIST_FOLD_MS) {
+    last.after = after; last.at = now;
+    if (historyShared) await supabase.from("vetting_history").update({ after, at: now }).eq("id", last.id);
+  } else {
+    const row = { park_id: id, park: BYID[id]?.name || id, kind, before, after, by_email: me, ...(who ? { by_name: who } : {}), at: now, status: "accepted" };
+    if (historyShared) {
+      let { data, error } = await supabase.from("vetting_history").insert({ ...row, by_id: session.user.id }).select().single();
+      // Before the by_name column exists, log without the person's name.
+      if (error && row.by_name && /by_name/i.test(error.message || "")) { const { by_name, ...rest } = row; void by_name; ({ data, error } = await supabase.from("vetting_history").insert({ ...rest, by_id: session.user.id }).select().single()); }
+      if (error) return;
+      history.unshift(data);
+    } else history.unshift({ ...row, id: "l" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6) });
+  }
+  history.sort((a, b) => histTime(b) - histTime(a));
+  if (history.length > HIST_MAX) history.length = HIST_MAX;
+  if (!historyShared) store.set("vet-history", history);
+  if ($("histDlg")?.open) renderHistory();
+}
+// Put a logged value back: a review or provider through the normal saves (not logged again),
+// someone's quality stars directly (admins may write any rating).
+async function applyValue(h, v) {
+  replaying = true;
+  try {
+    if (h.kind === "review") { delete draft[h.park_id]; delete edits[h.park_id]; return await save(h.park_id, v ? JSON.parse(JSON.stringify(v)) : null); }
+    if (h.kind === "flag") return await saveFlag(h.park_id, v ? { ...v } : null);
+    if (h.by_email === (session?.user?.email || "demo@local")) { await setRating(h.park_id, v?.stars || 0); return true; }
+    if (!ratingsShared || !h.by_id) { setStatus("That rating was made on another device and can only be changed there.", true); return false; }
+    const { error } = v?.stars
+      ? await supabase.from("field_ratings").upsert({ park_id: h.park_id, user_id: h.by_id, user_email: h.by_email, stars: v.stars, updated_at: new Date().toISOString() })
+      : await supabase.from("field_ratings").delete().eq("park_id", h.park_id).eq("user_id", h.by_id);
+    if (error) { setStatus("Couldn't change that rating (" + error.message + ").", true); return false; }
+    await loadRatings(); return true;
+  } finally { replaying = false; }
+}
+// Reject: restore the value before this change. Later accepted changes to the same thing were
+// made on top of it, so they're rejected with it. Accept again: re-apply this change.
+async function setHistoryStatus(h, status) {
+  if (!IS_ADMIN || h.status === status) return;
+  const after = history.filter(x => x !== h && sameThing(x, h) && histTime(x) > histTime(h) && x.status === "accepted");
+  if (status === "rejected" && after.length
+    && !confirm(`${after.length} later change${after.length > 1 ? "s" : ""} to ${h.park} ${after.length > 1 ? "were" : "was"} made on top of this one and will be rejected too.`)) return;
+  // Accepting an older change again doesn't override a newer accepted one: only its status flips.
+  const apply = status === "rejected" || !after.length;
+  if (apply && !(await applyValue(h, status === "rejected" ? h.before : h.after))) return;
+  const me = session?.user?.email || "demo@local", meName = getActor(me), now = new Date().toISOString();
+  for (const x of status === "rejected" ? [h, ...after] : [h]) {
+    if (historyShared) {
+      const { error } = await supabase.from("vetting_history").update({ status, status_by_email: meName ? `${meName} (${me})` : me, status_at: now }).eq("id", x.id);
+      if (error) { setStatus("Couldn't update the history (" + error.message + ").", true); break; }
+    }
+    Object.assign(x, { status, status_by_email: meName ? `${meName} (${me})` : me, status_at: now });
+  }
+  if (!historyShared) store.set("vet-history", history);
+  renderHistory();
+  const p = BYID[h.park_id];
+  if (p && view === "park" && current()?.id === p.id) render(); else renderRail();
+  setStatus(`${status === "rejected" ? "Rejected" : "Accepted"} the ${HIST_KIND[h.kind].toLowerCase()} change to ${h.park}.`);
+}
+const HIST_KIND = { review: "Fields", flag: "Provider", rating: "Quality" };
+// Who, as a first name and last initial: the name picked at sign-in, else from the email
+// ("rory.hughes@…" → "Rory H.").
+const personOf = (email, name) => name ? shortName(name) : personFromEmail(email);
+const personFromEmail = email => { const w = String(email || "").split("@")[0].split(/[._\-+]+/).filter(Boolean).map(x => x[0].toUpperCase() + x.slice(1));
+  return shortName(w.join(" ")) || "Someone"; };
+const DEC_WORD = { top: "Top pick", yes: "Shortlist", no: "Reject", rating: "Rating in progress" };
+const FIT_WORD = { reduced: "3v3 only", full: "1 × full 7v7", multi: "2 × full 7v7", no: "unusable" };
+function histValue(kind, v) {
+  if (!v) return kind === "review" ? "not rated" : kind === "flag" ? "no provider" : "no stars";
+  if (kind === "rating") return "★".repeat(v.stars) + "☆".repeat(5 - v.stars);
+  if (kind === "flag") return [v.club || "provider", v.contact && `contact ${shortName(v.contact)}`].filter(Boolean).join(", ");
+  const fields = Object.values(v.placement?.fields || {});
+  return [DEC_WORD[v.decision] || v.decision, fields.length ? `${fields.length} field${fields.length > 1 ? "s" : ""}${fields.some(f => f.fit) ? " (" + fields.map(f => FIT_WORD[f.fit] || "?").join(", ") + ")" : ""}` : FIT_WORD[v.fit],
+    v.lights && v.lights !== "unknown" ? (v.lights === "none" ? "no lights" : "lights") : "", v.quality && "★" + v.quality].filter(Boolean).join(" · ");
+}
+const fmtWhen = iso => { const d = new Date(iso); return isNaN(d) ? "" : d.toLocaleString("en-NZ", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }); };
+let histFilter = "all";
+function renderHistory() {
+  const me = session?.user?.email || "demo@local";
+  const meName = getActor(me);
+  const rows = history.filter(h => histFilter === "all" || (histFilter === "mine" ? h.by_email === me && (!meName || !h.by_name || h.by_name === meName) : h.status === "rejected"));
+  $("histNote").textContent = historyShared ? `Everyone's vetting changes, newest first${IS_ADMIN ? ". Changes are accepted unless you reject them; rejecting restores what was there before." : "."}`
+    : "Kept in this browser until the vetting_history table is set up (supabase-migration-vetting-history.sql).";
+  $("histFilters").querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.f === histFilter)));
+  $("histList").innerHTML = rows.length ? rows.map(h => `<li class="hist-row ${h.status}" data-id="${esc(String(h.id))}">
+      <div class="hist-top"><button class="hist-park" data-park="${esc(h.park_id)}" title="Open in park view">${esc(h.park)}</button>
+        <span class="hist-kind">${HIST_KIND[h.kind] || esc(h.kind)}</span>
+        <span class="hist-st ${h.status}" title="${h.status_by_email ? esc(`${h.status === "rejected" ? "Rejected" : "Accepted again"} by ${/^[^@]+ \(/.test(h.status_by_email) ? h.status_by_email.split(" (")[0] : personOf(h.status_by_email)}${h.status_at ? " · " + fmtWhen(h.status_at) : ""}`) : "Accepted by default"}">${h.status === "rejected" ? "✕ Rejected" : "✓ Accepted"}</span></div>
+      <div class="hist-chg"><span class="hist-b">${esc(histValue(h.kind, h.before))}</span> → <span class="hist-a">${esc(histValue(h.kind, h.after))}</span></div>
+      <div class="hist-meta">${esc(personOf(h.by_email, h.by_name))}${h.by_name ? ` <span class="hist-acct">(${esc(h.by_email.split("@")[0])})</span>` : ""} · ${esc(fmtWhen(h.at))}
+        ${IS_ADMIN ? `<button class="hist-act" data-act="${h.status === "rejected" ? "accepted" : "rejected"}">${h.status === "rejected" ? "↺ Accept again" : "✕ Reject"}</button>` : ""}</div></li>`).join("")
+    : `<li class="hist-empty">${histFilter === "all" ? "No vetting changes yet." : "Nothing here."}</li>`;
+}
+async function openHistory() {
+  await loadHistory(); renderHistory();
+  const dlg = $("histDlg");
+  if (!dlg.dataset.bound) {
+    dlg.dataset.bound = "1";
+    $("histFilters").onclick = e => { const b = e.target.closest("button[data-f]"); if (b) { histFilter = b.dataset.f; renderHistory(); } };
+    $("histList").onclick = async e => {
+      const act = e.target.closest(".hist-act"), park = e.target.closest(".hist-park");
+      if (act) { const h = history.find(x => String(x.id) === act.closest(".hist-row").dataset.id); act.disabled = true; if (h) await setHistoryStatus(h, act.dataset.act); act.disabled = false; }
+      else if (park && BYID[park.dataset.park]) { dlg.close(); openPark(park.dataset.park); }
+    };
+  }
+  dlg.showModal();
 }
 
 // Overall suitability, 0 (rejected) … 1 (ideal); null when not rated yet.
@@ -2263,16 +2400,31 @@ function renderProfile() {
   if (!email) { $("profileBtn").hidden = true; return; }
   let h = 0; for (const ch of email.toLowerCase()) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
   $("profileAv").textContent = email[0].toUpperCase(); $("profileAv").style.background = EMAIL_COLORS[h % EMAIL_COLORS.length];
-  $("profileName").textContent = email.split("@")[0]; $("profileBtn").title = email; $("profileBtn").hidden = false;
+  const actor = getActor(email);
+  $("profileName").textContent = actor || email.split("@")[0]; $("profileBtn").title = actor ? `${actor} · ${email}` : email; $("profileBtn").hidden = false;
   $("profileMenu").innerHTML = `<div class="pm-head"><div class="pm-k">Signed in</div><div class="pm-e">${esc(email)}</div>
+      ${actor ? `<div class="pm-actor">as <b>${esc(actor)}</b></div>` : ""}
       <span class="pm-role${IS_ADMIN ? " admin" : ""}">${IS_ADMIN ? "👑 Admin" : "👤 User"}</span></div>
+    <button class="pm-item" id="pmActor">👥 Switch or edit names</button>
     <a class="pm-item" href="./">📅 Facility Booking</a>
     ${IS_ADMIN ? `<a class="pm-item" href="${COUNCIL_APPLICATION_URL}" target="_blank" rel="noopener">🏛 Council application</a>` : ""}
+    <button class="pm-item" id="pmHistory">📜 Vetting history</button>
     <button class="pm-item danger" id="pmSignOut">↪ Sign out</button>`;
   const close = () => { $("profileMenu").hidden = true; $("profileBtn").setAttribute("aria-expanded", "false"); };
   $("profileBtn").onclick = e => { e.stopPropagation(); const open = $("profileMenu").hidden; $("profileMenu").hidden = !open; $("profileBtn").setAttribute("aria-expanded", String(open)); };
   document.addEventListener("click", e => { if (!e.target.closest(".profile")) close(); });
-  $("pmSignOut").onclick = async () => { await supabase?.auth.signOut(); location.reload(); };
+  $("pmHistory").onclick = () => { close(); openHistory(); };
+  $("pmActor").onclick = async () => { close(); await askActor({ supabase, user: session.user, edit: true }); await ensureActor(); renderProfile(); };
+  $("pmSignOut").onclick = signOut;
+}
+
+async function signOut() { clearActor(session?.user?.email); await supabase?.auth.signOut(); location.reload(); }
+// A shared login: whoever is using it picks their name (first name, last initial) first.
+async function ensureActor() {
+  while (session && !getActor(session.user.email)) {
+    if (await askActor({ supabase, user: session.user, onSignOut: signOut }) === null) return false;
+  }
+  return true;
 }
 
 // ── Start ────────────────────────────────────────────────────────────────────
@@ -2307,6 +2459,7 @@ async function start() {
       setStatus(""); return;
     }
     IS_ADMIN = session.user?.app_metadata?.role === "admin";
+    if (!(await ensureActor())) return;
     renderProfile();
     await loadShared();
     if (!IS_ADMIN) {
@@ -2318,7 +2471,7 @@ async function start() {
     setStatus("Demo mode (no Supabase configured): decisions are kept in this browser.", true);
   }
   $("app").hidden = false; renderSeasonBar();
-  await loadBookLocs(); await loadActivity(); await loadViews(); await loadRatings(); await loadOffsets(); await loadCouncilOnly(); await loadRelations(); await syncCartWorkflows();
+  await loadBookLocs(); await loadActivity(); await loadViews(); await loadRatings(); await loadHistory(); await loadOffsets(); await loadCouncilOnly(); await loadRelations(); await syncCartWorkflows();
   initMap(); drawField(); showField(fieldOn); renderLegend(); bind();
   setView(view === "park" || view === "book" ? view : "city", { refit: true });
   // The header controls stay hidden (body.booting) until sign-in, role and mode are known,
