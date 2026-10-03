@@ -2198,7 +2198,7 @@ function render() {
   }
   ["noBtn", "yesBtn", "topBtn", "skipBtn"].forEach(b => $(b).disabled = !p);
   $("interestBtn").setAttribute("aria-pressed", String(interestsSet()));
-  $("skipBtn").title = `Decide later (S)${p ? ` · lowers its activity score (now ${activityOf(p.id)}), so it ranks lower in the queue` : ""}`;
+  $("skipBtn").title = `Decide later (→ or S)${p ? ` · lowers its activity score (now ${activityOf(p.id)}), so it ranks lower in the queue` : ""}`;
   if (p && visited[visited.length - 1] !== p.id) visited.push(p.id);
   $("backBtn").disabled = !visited.some(id => id !== p?.id);
   renderRail();
@@ -2502,10 +2502,13 @@ function bind() {
     if (/^[bB]$/.test(e.key)) { setMode(workMode === "book" ? "rate" : "book"); return; }
     if (view === "city") return;
     const fm = $("actions").classList.contains("fitmode") && p;
-    if (e.key === "ArrowRight") { e.preventDefault(); fm ? confirmSpot(p, "multi") : decide("yes"); }
-    else if (e.key === "ArrowLeft") { e.preventDefault(); fm ? confirmSpot(p, "no") : decide("no"); }
-    else if (e.key === "ArrowDown" && fm) { e.preventDefault(); confirmSpot(p, "reduced"); }
+    // Deciding a park: ← back, → later, ↓ shortlist, ↑ top pick, Backspace reject.
+    // A locked field's fit keeps its own arrows: ← unusable, ↓ 3v3, ↑ 1 ×, → 2 ×.
+    if (e.key === "ArrowRight") { e.preventDefault(); fm ? confirmSpot(p, "multi") : skip(); }
+    else if (e.key === "ArrowLeft") { e.preventDefault(); fm ? confirmSpot(p, "no") : goBack(); }
+    else if (e.key === "ArrowDown") { e.preventDefault(); fm ? confirmSpot(p, "reduced") : decide("yes"); }
     else if (e.key === "ArrowUp") { e.preventDefault(); fm ? confirmSpot(p, "full") : decide("top"); }
+    else if (e.key === "Backspace" && !fm) { e.preventDefault(); decide("no"); }
     else if (e.key === "Enter" && fieldOn && !e.target.closest("button")) { e.preventDefault(); $("centreBtn").click(); }
     else if (/^[sS]$/.test(e.key)) skip();
     else if (/^[zZ]$/.test(e.key)) editUndo();
