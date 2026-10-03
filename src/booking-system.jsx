@@ -1729,7 +1729,7 @@ const ACTIVITY_LABELS = {
   settings_change:"Settings changed", council_fields:"Council fields", council_application_sent:"Sent to council",
 };
 // What non-admins see of the log: bookers' own activity (the activity_log select policy in
-// supabase-migration-activity-log-global.sql allows the same), not sign-ins, emails or admin work.
+// supabase-setup.sql allows the same), not sign-ins, emails or admin work.
 const ACTIVITY_PUBLIC_ACTIONS = new Set(["booking_create","booking_edit","booking_delete","slot_shared","slot_merged","slot_unlinked","council_fields"]);
 // Who performed the action: explicit stamp from logActivity, else best-effort by action.
 function activityActor(r) {
@@ -1944,7 +1944,7 @@ function ActivityLogModal({onClose, inline=false, bookers=[], isAdmin=true}) {
               style={{marginLeft:"auto",padding:"3px 9px",borderRadius:6,border:"1px solid #fcd34d",background:"#fff",color:"#92400e",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"}}>Load more</button>
           </div>
         )}
-        {error&&<div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:6,padding:"6px 10px",fontSize:12,color:"#b91c1c",flexShrink:0}}>⚠ {error} — has <code>supabase-migration-activity-log.sql</code> been run?</div>}
+        {error&&<div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:6,padding:"6px 10px",fontSize:12,color:"#b91c1c",flexShrink:0}}>⚠ {error} — has <code>supabase-setup.sql</code> been run?</div>}
         <div style={{overflowY:"auto",flex:1,minHeight:0,border:"1px solid #f1f5f9",borderRadius:8}}>
           {isMobile ? (
             filtered.length===0 ? empty :
@@ -4633,7 +4633,7 @@ function CouncilContactModal({ email, isAdmin, contacts, tableReady, onClose, on
         so the council's booking coordinator can reach you. Council fields can be booked once your name and phone are here.
       </div>
       {!tableReady && <div style={{fontSize:12,color:"#92400e",background:"#fffbeb",border:"1px solid #fde68a",borderRadius:8,padding:"8px 10px",marginBottom:10}}>
-        The contacts table isn't set up yet (an admin needs to run <code>supabase-migration-booker-contacts.sql</code>).</div>}
+        The contacts table isn't set up yet (an admin needs to run <code>supabase-setup.sql</code>).</div>}
       <div style={{display:"flex",flexDirection:"column",gap:10}}>
         <label style={S.lbl}>Booker (sign-in email)
           {isAdmin ? <input style={si} list="ccBookers" value={who} onChange={e=>pick(e.target.value)}/> : <div style={{...si,background:"#f1f5f9"}}>{who}</div>}
@@ -6795,6 +6795,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
   // Invoice modal state
   const [showInvoice, setShowInvoice] = useState(false);
   const [showRatesEdit, setShowRatesEdit] = useState(false);
+  const [showUnusedFacs, setShowUnusedFacs] = useState(false);   // facilities with no bookings in the period
   // "Add pricing condition" form
   // (pricing-rule form state now lives inside <PricingConditionsManager/>)
   // Inline player-count editing: email being edited
@@ -7712,8 +7713,9 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
                 aliasFor={summaryAlias}/>
             </div>
           )}
+          {/* Only facilities used in the period; the rest (unused council fields etc.) on request. */}
           <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:10 }}>
-            {facCosts.map(({ fac, dayHrs, eveningHrs, hours, bkgCount, rates, cost }) => {
+            {facCosts.filter(x => showUnusedFacs || x.bkgCount > 0).map(({ fac, dayHrs, eveningHrs, hours, bkgCount, rates, cost }) => {
               const hasRates = rates.day > 0 || rates.evening > 0;
               const isEmpty  = bkgCount === 0;
               return (
@@ -7747,6 +7749,11 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
               </div>
             )}
           </div>
+          {(()=>{ const n = facCosts.filter(x => x.bkgCount === 0).length; return n > 0 && (
+            <button onClick={()=>setShowUnusedFacs(v=>!v)}
+              style={{ marginTop:8, background:"none", border:"none", padding:0, color:"#64748b", fontSize:12, fontWeight:600, cursor:"pointer", fontFamily:"inherit" }}>
+              {showUnusedFacs ? "Hide facilities with no bookings" : `+ ${n} facilit${n===1?"y":"ies"} with no bookings in this period`}
+            </button>); })()}
         </div>
       )}
 
@@ -12381,7 +12388,7 @@ export default function App() {
   }
   // Purge activity-log rows and sync-log months older than the retention window.
   // 0 months = keep forever. Activity-log deletes require the admin DELETE policy
-  // from supabase-migration-activity-log.sql.
+  // from supabase-setup.sql.
   async function purgeOldLogs(months = logRetentionMonths) {
     const m = Math.max(0, parseInt(months,10) || 0);
     if (!m) return;
@@ -13677,7 +13684,7 @@ export default function App() {
           <div style={{fontSize:11,color:"#94a3b8",marginTop:8}}>Set to 0 to keep logs forever (no automatic purge).</div>
           {configured&&(
             <div style={{fontSize:11,color:"#94a3b8",marginTop:10,background:"#f8fafc",border:"1px solid #f1f5f9",borderRadius:6,padding:"6px 10px"}}>
-              Activity-log purging needs the admin <code>DELETE</code> policy from <code>supabase-migration-activity-log.sql</code>.
+              Activity-log purging needs the admin <code>DELETE</code> policy from <code>supabase-setup.sql</code>.
             </div>
           )}
           <div style={{marginTop:16,display:"flex",justifyContent:"flex-end",gap:8}}>

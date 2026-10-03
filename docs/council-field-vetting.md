@@ -358,7 +358,7 @@ The page always fits one screen: nothing scrolls except the map, where the wheel
     the first name, and only one more letter is taken as the last initial: "rory hughes"
     becomes "Rory H.".
   - It saves straight away, with no decision needed, to `field_flags` (`kind` and `contact`
-    columns in `supabase-migration-field-reviews.sql`; until it's run, amendments stay in the
+    columns in `supabase-setup.sql`; until it's run, amendments stay in the
     browser).
   - Unlisted parks with an amendment get a dashed purple ring on the Auckland map. The
     tooltip and the CSV's "Provider amendment" column show it.
@@ -387,7 +387,7 @@ The page always fits one screen: nothing scrolls except the map, where the wheel
   lat/lon, the angle and the dimensions. Saved positions are restored next time and
   place the park on the Auckland map.
 - **Saving.** Decisions go to Supabase `field_reviews`, admin-only
-  (`supabase-migration-field-reviews.sql`; re-run it for the "2+ fields" option).
+  (`supabase-setup.sql`; re-run it for the "2+ fields" option).
   `placement` holds the field position and the light poles. Until the migration is run,
   decisions stay in the browser. **Download CSV** exports them.
 
@@ -426,7 +426,7 @@ be imported when 4.4 lands.
 Every signed-in user can open Council fields (User menu → 🗺 Council fields). Bookers who
 aren't admins see the Auckland and park maps with the ratings, read-only, and Book mode for
 their own cart only. Rating, decisions, flags and the council-only toggle stay admin-only.
-This needs `supabase-migration-council-fields-access.sql`, which makes these changes:
+This needs `supabase-setup.sql`, which makes these changes:
 - lets signed-in users read `field_reviews` and `field_flags`;
 - adds `set_my_council_facilities(entries)`, a security-definer function that replaces only the
   caller's own entry in the `council_facilities` setting. The settings table stays
@@ -459,7 +459,7 @@ their player numbers.
   booking site's User menu → **📇 My council contact**. Admins can enter them for any booker.
 - Council fields can't be booked until the booker's details are on file. The booking form
   says so, and the Council fields cart shows a reminder.
-- The details are stored in `booker_contacts` (`supabase-migration-booker-contacts.sql`).
+- The details are stored in `booker_contacts` (`supabase-setup.sql`).
   RLS lets a booker see and edit only their own row, and admins all rows.
 
 ## Operator info (ⓘ): local boards, relationships, community
@@ -504,5 +504,5 @@ has **📅 Add to cart**. The entry is `cm-<operator id>` with `kind: "community
   contact review only happens before the first request to that facility (settings key
   `provider_contact_reviews`).
 - **The request email:** it's drafted to AMUA's inbox, never sent to the facility.
-- **Setup:** bookers need `supabase-migration-community-cart.sql`, which lets the cart
+- **Setup:** bookers need `supabase-setup.sql`, which lets the cart
   function accept `cm-` ids.

@@ -55,14 +55,12 @@ npm run build    # production build into dist/
 
 ## Database (Supabase)
 
-Run the SQL files in the Supabase **SQL Editor**, in order:
-
-1. `supabase-schema.sql` — base schema
-2. `supabase-migration-auth.sql` — OAuth + RLS + `is_admin()` helper
-3. `supabase-migration-invoiced-flag.sql` — `invoiced` boolean column
-4. `supabase-migration-system-notes.sql` — `system_notes` column + marker migration
-5. `supabase-migration-activity-log.sql` — append-only audit log + RLS
-6. `supabase-migration-mismatch-log.sql` — mismatch-resolution audit table
+Run **`supabase-setup.sql`** in the Supabase **SQL Editor** — the whole file, once. It sets up
+everything (settings, bookings columns and RLS, activity and mismatch logs, booker contacts,
+council-field tables, vetting history, `settings_merge()`), and it is safe to re-run after any
+update: tables and columns are created only if missing, policies and functions are replaced.
+`select version from schema_version` shows which version last ran. (It replaces the older
+`supabase-schema.sql` / `supabase-migration-*.sql` files, which are in git history.)
 
 Admin is granted via `app_metadata.role = 'admin'` (see `HANDOFF_SUPABASE_AUTH.md`
 for the exact SQL). There is no client-side admin password.
