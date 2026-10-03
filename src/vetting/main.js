@@ -585,10 +585,17 @@ function adjacentSuburbs(home) {
 }
 // In the Auckland view: the park's suburb highlighted and named, its neighbours outlined and
 // named, and the zoom set to take in all of them. Returns the bounds, or null without data.
+const suburbAt = (all, ll) => ll && all.find(s => ll[0] >= s.b[0] && ll[0] <= s.b[2] && ll[1] >= s.b[1] && ll[1] <= s.b[3] && inRings(ll, s.p));
+// The zoom-out button names the park's suburb (where it zooms to); 🔍 without suburb data.
+async function labelFitBtn(p) {
+  const btn = $("fitBtn"); btn.textContent = "🔍"; btn.title = "Zoom to the park; press again for its suburb and neighbours (0)";
+  const home = suburbAt(await loadSuburbs(), parkLatLng(p));
+  if (home && current()?.id === p.id) btn.textContent = home.n;
+}
 async function showSuburbs(p, ll) {
   hideSuburbs();
   const all = await loadSuburbs(); if (!all.length || !ll) return null;
-  const home = all.find(s => ll[0] >= s.b[0] && ll[0] <= s.b[2] && ll[1] >= s.b[1] && ll[1] <= s.b[3] && inRings(ll, s.p));
+  const home = suburbAt(all, ll);
   if (!home) return null;
   const near = adjacentSuburbs(home);
   suburbLayer = L.layerGroup().addTo(map);
@@ -628,7 +635,7 @@ async function zoomToggle(p) {
   const m = p.maps[Math.min(mapIndex(p), Math.max(0, p.maps.length - 1))];
   if (m) map.fitBounds(mapBounds(p, m));
   else if (p.lat) map.setView([p.lat, p.lon], 16.5);
-  $("fitBtn").title = "All of Auckland, with this park pinned (0)"; aklNext = true;
+  $("fitBtn").title = "Zoom out to this suburb and its neighbours, with the park pinned (0)"; aklNext = true;
 }
 // The pin's name label goes on whichever side (above, right, left, below) clashes least with
 // the suburb names; any suburb name it still covers is nudged clear. Re-run after zooming.
@@ -2189,7 +2196,7 @@ function render() {
     const c = p.lat ? `${p.lat},${p.lon}` : encodeURIComponent(p.name + " Auckland");
     $("gmaps").href = p.lat ? `https://www.google.com/maps/@${c},250m/data=!3m1!1e3` : `https://www.google.com/maps/search/${c}`;
     const fresh = shownPark !== p.id + "#" + i;
-    if (fresh) { fitArmed = false; aklNext = false; if (whereMark) { whereMark.remove(); whereMark = null; } document.body.classList.remove("aklzoom"); hideSuburbs(); showMap(p); }
+    if (fresh) { fitArmed = false; aklNext = false; if (whereMark) { whereMark.remove(); whereMark = null; } document.body.classList.remove("aklzoom"); hideSuburbs(); showMap(p); labelFitBtn(p); }
     renderTags(p);
     if (workMode === "book") renderBookBar(p);
     // Coming back to a park with a placed field: lock the field to its saved spot and angle
