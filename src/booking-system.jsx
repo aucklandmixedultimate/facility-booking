@@ -808,6 +808,30 @@ const MOBILE_STYLE = `
   .fac-social-tex-dark {
     background-image: repeating-linear-gradient(45deg, rgba(0,0,0,0.10) 0 4px, rgba(0,0,0,0) 4px 9px);
   }
+  /* Admin bookings table → one card per booking on phones (cells: select, date, booker,
+     facility, status, time · purpose, actions). The column filters become a two-column grid. */
+  @media (max-width: 767px) {
+    .admin-bk, .admin-bk thead, .admin-bk tbody { display: block; width: 100%; }
+    .admin-bk thead tr:first-child { display: flex; align-items: center; gap: 4px; overflow-x: auto; padding: 4px 6px; }
+    .admin-bk thead tr:first-child th { padding: 2px 6px !important; width: auto !important; border: 0 !important; }
+    .admin-bk thead tr:first-child th:nth-child(6), .admin-bk thead tr:first-child th:nth-child(7) { display: none; }
+    .admin-bk thead tr:nth-child(2) { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 6px; }
+    .admin-bk thead tr:nth-child(2) th { display: block; padding: 0 !important; min-width: 0; }
+    .admin-bk thead tr:nth-child(2) th:empty { display: none; }
+    .admin-bk tbody tr { display: grid; grid-template-columns: 26px minmax(0,1fr) minmax(0,1fr);
+      grid-template-areas: "cb date time" "cb fac booker" "cb status status" "cb act act"; gap: 3px 6px; padding: 8px 6px; }
+    .admin-bk tbody td { display: block; padding: 0 !important; min-width: 0; }
+    .admin-bk tbody td:nth-child(1) { grid-area: cb; padding-top: 2px !important; }
+    .admin-bk tbody td:nth-child(2) { grid-area: date; font-weight: 700; color: #334155 !important; }
+    .admin-bk tbody td:nth-child(3) { grid-area: booker; justify-self: end; max-width: 100%; overflow: hidden; }
+    .admin-bk tbody td:nth-child(4) { grid-area: fac; }
+    .admin-bk tbody td:nth-child(5) { grid-area: status; }
+    .admin-bk tbody td:nth-child(6) { grid-area: time; justify-self: end; text-align: right; max-width: 100%; }
+    .admin-bk tbody td:nth-child(6) div { max-width: 100% !important; }
+    .admin-bk tbody td:nth-child(7) { grid-area: act; }
+    .admin-bk tbody td:nth-child(7) > div { justify-content: flex-start !important; }
+    .admin-bk tbody td:nth-child(7) button { padding: 5px 10px !important; font-size: 11px !important; }
+  }
 `;
 function useMobile() {
   const [mobile, setMobile] = useState(() => window.innerWidth < 768);
@@ -2285,15 +2309,15 @@ function DateRangePicker({ from, to, onApply }) {
   const [draftTo, setDraftTo] = useState(to||"");
   useEffect(()=>{ if(open){ setDraftFrom(from||""); setDraftTo(to||""); } }, [open, from, to]);
   const label = (from||to)
-    ? `${from?fmtDate(from):"…"} – ${to?fmtDate(to):"…"}`
+    ? (fd => `${from?fd(from):"…"} – ${to?fd(to):"…"}`)(window.innerWidth<768?fmtDateShort:fmtDate)
     : "Any date";
   function apply() { onApply(draftFrom, draftTo); setOpen(false); }
   function clear() { setDraftFrom(""); setDraftTo(""); onApply("", ""); setOpen(false); }
   return (
     <div style={{position:"relative"}}>
       <button onClick={()=>setOpen(v=>!v)}
-        style={{display:"flex",alignItems:"center",gap:4,padding:"3px 8px",fontSize:11,borderRadius:5,border:`1.5px solid ${(from||to)?"#0f172a":"#cbd5e1"}`,background:"#fff",color:(from||to)?"#0f172a":"#475569",cursor:"pointer",fontFamily:"inherit",fontWeight:600,width:"100%",justifyContent:"center"}}>
-        📅 {label}<span style={{fontSize:9,color:"#94a3b8"}}>▾</span>
+        style={{display:"flex",alignItems:"center",gap:4,padding:"3px 8px",fontSize:11,borderRadius:5,border:`1.5px solid ${(from||to)?"#0f172a":"#cbd5e1"}`,background:"#fff",color:(from||to)?"#0f172a":"#475569",cursor:"pointer",fontFamily:"inherit",fontWeight:600,width:"100%",justifyContent:"center",minWidth:0,maxWidth:"100%"}}>
+        <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",minWidth:0}}>📅 {label}</span><span style={{fontSize:9,color:"#94a3b8",flexShrink:0}}>▾</span>
       </button>
       {open && (
         <>
@@ -4027,12 +4051,12 @@ function WeekCalendar({ bookings, onNewBooking, onNewBookingRange, onBookingClic
 
   return (
     <div>
-      <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:14 }}>
-        {[["← Prev",-7],["Today",0],["Next →",7]].map(([lbl,delta])=>(
-          <button key={lbl} onClick={()=>delta===0?setWeekBase(new Date()):setWeekBase(d=>{const nd=new Date(d);nd.setDate(nd.getDate()+delta);return nd;})}
-            style={S.btn({ border:"1.5px solid #e2e8f0", background:"#fff", color:"#475569" })}>{lbl}</button>
+      <div style={{ display:"flex", alignItems:"center", gap:window.innerWidth<768?6:10, marginBottom:window.innerWidth<768?10:14, minWidth:0 }}>
+        {(window.innerWidth<768?[["‹",-7,"Previous week"],["Today",0,"This week"],["›",7,"Next week"]]:[["← Prev",-7],["Today",0],["Next →",7]]).map(([lbl,delta,title])=>(
+          <button key={lbl} title={title} onClick={()=>delta===0?setWeekBase(new Date()):setWeekBase(d=>{const nd=new Date(d);nd.setDate(nd.getDate()+delta);return nd;})}
+            style={S.btn({ border:"1.5px solid #e2e8f0", background:"#fff", color:"#475569", ...(window.innerWidth<768?{padding:"6px 10px",minWidth:36}:{}) })}>{lbl}</button>
         ))}
-        <span style={{ fontSize:15, fontWeight:700, color:"#0f172a", marginLeft:4 }}>{days[0].toLocaleDateString("en-NZ",{month:"long",year:"numeric"})}</span>
+        <span style={{ fontSize:15, fontWeight:700, color:"#0f172a", marginLeft:4, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", minWidth:0 }}>{days[0].toLocaleDateString("en-NZ",{month:window.innerWidth<768?"short":"long",year:"numeric"})}</span>
         {window.innerWidth>=768&&<span style={{ fontSize:12, color:"#94a3b8", marginLeft:8 }}>Click or drag a day; drag across days for a grouped booking</span>}
       </div>
       <div style={{ overflowX:"auto" }} ref={gridRef} onMouseLeave={()=>{ dragMoved.current=false; setDragState(null); }}>
@@ -4056,7 +4080,8 @@ function WeekCalendar({ bookings, onNewBooking, onNewBookingRange, onBookingClic
           <div style={{ display:"flex" }}>
             {/* Hour labels — border-box so paddingTop doesn't inflate rows past HOUR_H
                 (a 3px/hour drift that pushed labels progressively below their gridlines) */}
-            <div style={{ width:52, flexShrink:0 }}>
+            {/* Sticky so the times stay in view while the days scroll sideways on a phone. */}
+            <div style={{ width:52, flexShrink:0, position:"sticky", left:0, zIndex:4, background:"#fff" }}>
               {Array.from({length:CAL_TOTAL+1},(_,i)=>CAL_START+i).map(h=>(
                 <div key={h} style={{ height:HOUR_H, boxSizing:"border-box", display:"flex", alignItems:"flex-start", justifyContent:"flex-end", paddingRight:8, paddingTop:3 }}>
                   <span style={{ fontSize:10, color:"#94a3b8", whiteSpace:"nowrap" }}>{fmtTime(h)}</span>
@@ -7486,6 +7511,9 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
     a.click(); URL.revokeObjectURL(url);
   }
 
+  // Phones: the period and booker chips each scroll in one row instead of wrapping into many.
+  const narrow = window.innerWidth<768;
+  const chipRow = narrow ? { flexWrap:"nowrap", overflowX:"auto", scrollbarWidth:"none", WebkitOverflowScrolling:"touch", paddingBottom:2 } : { flexWrap:"wrap" };
   const thS = { textAlign:"left", padding:"10px 14px", fontSize:11, fontWeight:700, color:"#94a3b8", textTransform:"uppercase", letterSpacing:"0.06em", borderBottom:"2px solid #f1f5f9", whiteSpace:"nowrap" };
   const tdS = { padding:"10px 14px", fontSize:13, color:"#0f172a", borderBottom:"1px solid #f8fafc", verticalAlign:"middle" };
 
@@ -7494,17 +7522,17 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
       {/* Controls */}
       <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
         {/* Date range presets */}
-        <div style={{ display:"flex", alignItems:"center", gap:6, flexWrap:"wrap" }}>
+        <div style={{ display:"flex", alignItems:"center", gap:6, ...chipRow }}>
           <span style={{ fontSize:12, fontWeight:600, color:"#64748b", marginRight:2 }}>Period:</span>
           {PRESETS.map(p=>(
             <button key={p.key} onClick={()=>setPreset(p.key)}
-              style={{ padding:"5px 12px", borderRadius:8, border: preset===p.key?"1.5px solid #0f172a":"1.5px solid #e2e8f0",
+              style={{ flexShrink:0, whiteSpace:"nowrap", padding:"5px 12px", borderRadius:8, border: preset===p.key?"1.5px solid #0f172a":"1.5px solid #e2e8f0",
                 background: preset===p.key?"#0f172a":"#f8fafc", color: preset===p.key?"#fff":"#475569",
                 fontWeight:600, fontSize:12, cursor:"pointer", fontFamily:"inherit" }}>
               {p.label}
             </button>
           ))}
-          <label style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:5,fontSize:12,color:"#475569",cursor:"pointer",userSelect:"none"}} title="Include or exclude already-invoiced bookings in the summary totals">
+          <label style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:5,fontSize:12,color:"#475569",cursor:"pointer",userSelect:"none",flexShrink:0,whiteSpace:"nowrap"}} title="Include or exclude already-invoiced bookings in the summary totals">
             <input type="checkbox" checked={summaryIncludeInvoiced} onChange={e=>setSummaryIncludeInvoiced(e.target.checked)} style={{accentColor:"#5b21b6"}}/>
             🧾 Include invoiced
           </label>
@@ -7522,6 +7550,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
         )}
         {/* Booker filter chips — additive multi-select, mirrors global pills */}
         <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+          <div style={{display:"flex",gap:6,alignItems:"center",minWidth:0,...(narrow?{...chipRow,width:"100%"}:{display:"contents"})}}>
           <button onClick={()=>{
             setEmailFilterSet(prev=>{
               const next=prev.size===0?new Set(allEmails.map(e=>e.toLowerCase())):new Set();
@@ -7543,12 +7572,13 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
               </button>
             );
           })}
-          <div style={{marginLeft:"auto",display:"flex",gap:6}}>
-            <button onClick={exportCSV} style={S.btn({ background:"#0f172a", color:"#fff", display:"flex", alignItems:"center", gap:6 })}>
+          </div>
+          <div style={{marginLeft:"auto",display:"flex",gap:6,...(narrow?{width:"100%"}:{})}}>
+            <button onClick={exportCSV} style={S.btn({ background:"#0f172a", color:"#fff", display:"flex", alignItems:"center", gap:6, ...(narrow?{flex:1,justifyContent:"center"}:{}) })}>
               ⬇ Export All Data (CSV)
             </button>
             {anyRates && (
-              <button onClick={openInvoice} style={S.btn({ background:"#15803d", color:"#fff", display:"flex", alignItems:"center", gap:6 })}>
+              <button onClick={openInvoice} style={S.btn({ background:"#15803d", color:"#fff", display:"flex", alignItems:"center", gap:6, ...(narrow?{flex:1,justifyContent:"center"}:{}) })}>
                 🧾 Export Invoice
               </button>
             )}
@@ -7579,7 +7609,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
       </div>
 
       {/* KPI cards */}
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:12 }}>
+      <div style={{ display:"grid", gridTemplateColumns:window.innerWidth<768?"repeat(3,minmax(0,1fr))":"repeat(auto-fit,minmax(150px,1fr))", gap:window.innerWidth<768?6:12 }}>
         {[
           { label:"Bookings",      value:active.length,         icon:"📋" },
           { label:"Total Hours",   value:fmtHrs(totalHrs),      icon:"⏱" },
@@ -7588,12 +7618,20 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
           { label:"Unique Bookers",value:rows.length,           icon:"👥" },
           ...(anyRates ? [{ label:"Total Cost", value:fmtCost(totalCost), icon:"💰", highlight:true }] : []),
         ].map(c=>(
+          window.innerWidth<768 ? (
+          // Phones: three compact tiles a row (value, then icon + label).
+          <div key={c.label} title={c.sub||c.label} style={{ background: c.highlight?"#f0fdf4":"#fff", border:`1px solid ${c.highlight?"#bbf7d0":"#f1f5f9"}`, borderRadius:10, padding:"8px 9px", minWidth:0 }}>
+            <div style={{ fontSize:15, fontWeight:800, color: c.highlight?"#15803d":"#0f172a", letterSpacing:"-0.03em", whiteSpace:"nowrap" }}>{c.value}</div>
+            <div style={{ fontSize:10.5, fontWeight:600, color:"#64748b", lineHeight:1.25 }}>{c.icon} {c.label}</div>
+          </div>
+          ) : (
           <div key={c.label} style={{ background: c.highlight?"#f0fdf4":"#fff", border:`1px solid ${c.highlight?"#bbf7d0":"#f1f5f9"}`, borderRadius:12, padding:"16px 18px", boxShadow:"0 1px 4px rgba(0,0,0,0.04)" }}>
             <div style={{ fontSize:22, marginBottom:6 }}>{c.icon}</div>
             <div style={{ fontSize:22, fontWeight:800, color: c.highlight?"#15803d":"#0f172a", letterSpacing:"-0.03em" }}>{c.value}</div>
             <div style={{ fontSize:12, fontWeight:600, color:"#64748b", marginTop:2 }}>{c.label}</div>
             {c.sub&&<div style={{ fontSize:11, color:"#94a3b8" }}>{c.sub}</div>}
           </div>
+          )
         ))}
       </div>
 
@@ -9361,8 +9399,8 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
       {reviewFor&&<ContactReviewModal booking={reviewFor} onClose={()=>setReviewFor(null)}
         onConfirm={async (pid, data)=>{ try { await saveContactReview(pid, data); } catch(e) { alert("Couldn't save the reviewed contact: "+(e.message||e)); return; }
           const b=reviewFor; setReviewFor(null); requestCommunity(b); }}/>}
-      {/* Top action bar */}
-      <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+      {/* Top action bar: on phones an even two-column grid of section toggles. */}
+      <div style={window.innerWidth<768?{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:6}:{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
         {oldUnapproved.length>0&&(
           <button onClick={()=>setShowClearModal(true)} style={S.btn({background:"#7c3aed",color:"#fff",fontWeight:700,fontSize:12})}>
             🧹 Clear old unapproved ({oldUnapproved.length})
@@ -10405,7 +10443,7 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
         : (
         <div style={{overflowX:"auto",borderRadius:12,border:"1px solid #f1f5f9"}}>
           <CopyableTable>
-          <table style={{width:"100%",borderCollapse:"collapse",background:"#fff",fontSize:13}}>
+          <table className="admin-bk" style={{width:"100%",borderCollapse:"collapse",background:"#fff",fontSize:13}}>
             <thead>
               <tr style={{background:"#f8fafc"}}>
                 <th style={{padding:"8px 10px",textAlign:"center",width:32}}>
@@ -11271,6 +11309,7 @@ export default function App() {
     return aliasNames[primary] || primary.split("@")[0];
   }, [canonEmail, aliasNames]);
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [adminMenuOpen, setAdminMenuOpen] = useState(false);
   // Who's using this (possibly shared) login: first name + last initial, asked after sign-in
   // and editable from the user menu. Stamped on activity-log entries.
   const [actor, setActorState] = useState("");
@@ -13004,9 +13043,18 @@ export default function App() {
     ? allClashes.length
     : allClashes.filter(c => c.user.email?.toLowerCase() === loggedInEmail?.toLowerCase()).length;
 
-  function TabBtn({id,label,badge}){return(
-    <button onClick={()=>setTab(id)} style={{padding:"8px 12px",borderRadius:8,border:"none",cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",background:tab===id?"#0f172a":"transparent",color:tab===id?"#fff":"#64748b",display:"flex",alignItems:"center",gap:5,whiteSpace:"nowrap",flexShrink:0}}>
-      {label}{badge>0&&<span style={{background:"#f43f5e",color:"#fff",borderRadius:999,fontSize:10,fontWeight:700,padding:"1px 6px"}}>{badge}</span>}
+  // On phones every tab fits on screen: equal widths, icon over a short label.
+  function TabBtn({id,icon,label,short,badge}){
+    const on=tab===id;
+    return isMobile ? (
+    <button onClick={()=>setTab(id)} aria-label={label} title={label} style={{flex:"1 1 0",minWidth:0,padding:"5px 2px 4px",borderRadius:8,border:"none",cursor:"pointer",fontFamily:"inherit",background:on?"#0f172a":"transparent",color:on?"#fff":"#64748b",display:"flex",flexDirection:"column",alignItems:"center",gap:1,position:"relative"}}>
+      <span style={{fontSize:15,lineHeight:1.1}}>{icon}</span>
+      <span style={{fontSize:9,fontWeight:700,lineHeight:1.1,letterSpacing:"-0.02em",maxWidth:"100%",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{short||label}</span>
+      {badge>0&&<span style={{position:"absolute",top:1,right:"calc(50% - 20px)",background:"#f43f5e",color:"#fff",borderRadius:999,fontSize:9,fontWeight:700,padding:"0 4px",lineHeight:"14px"}}>{badge}</span>}
+    </button>
+    ) : (
+    <button onClick={()=>setTab(id)} style={{padding:"8px 12px",borderRadius:8,border:"none",cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",background:on?"#0f172a":"transparent",color:on?"#fff":"#64748b",display:"flex",alignItems:"center",gap:5,whiteSpace:"nowrap",flexShrink:0}}>
+      {icon} {label}{badge>0&&<span style={{background:"#f43f5e",color:"#fff",borderRadius:999,fontSize:10,fontWeight:700,padding:"1px 6px"}}>{badge}</span>}
     </button>
   );}
 
@@ -13124,42 +13172,52 @@ export default function App() {
                 {showUserMenu&&(
                   <>
                     <div onClick={()=>setShowUserMenu(false)} style={{position:"fixed",inset:0,zIndex:30}}/>
-                    <div style={{position:"absolute",right:0,top:"calc(100% + 6px)",zIndex:31,background:"#fff",border:"1.5px solid #e2e8f0",borderRadius:12,boxShadow:"0 8px 24px rgba(15,23,42,0.12)",minWidth:240,overflow:"hidden",fontSize:13}}>
-                      <div style={{padding:"10px 14px",borderBottom:"1px solid #f1f5f9",background:"#f8fafc"}}>
-                        <div style={{fontSize:11,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.05em",fontWeight:700}}>Signed in</div>
-                        <div style={{fontSize:12,color:"#0f172a",fontWeight:600,marginTop:2,wordBreak:"break-all"}}>{loggedInEmail}</div>
-                        {actor&&<div style={{fontSize:12,color:"#64748b",marginTop:2}}>as <b style={{color:"#0f172a"}}>{actor}</b></div>}
-                        <div style={{marginTop:6,display:"flex",alignItems:"center",gap:6}}>
-                          <span style={{fontSize:10,fontWeight:700,padding:"2px 7px",borderRadius:10,background:isAdmin?"#f3e8ff":"#f1f5f9",color:isAdmin?"#7c3aed":"#475569",border:`1px solid ${isAdmin?"#ddd6fe":"#e2e8f0"}`}}>{isAdmin?"👑 Admin":"👤 User"}</span>
+                    <div style={{position:"absolute",right:0,top:"calc(100% + 6px)",zIndex:31,background:"#fff",border:"1.5px solid #e2e8f0",borderRadius:12,boxShadow:"0 8px 24px rgba(15,23,42,0.12)",width:280,maxWidth:"calc(100vw - 24px)",overflow:"hidden",fontSize:13}}>
+                      {/* Who: account, the person using it (switch inline), role; admins' silent-mode switch. */}
+                      <div style={{padding:"10px 14px",borderBottom:"1px solid #f1f5f9",background:"#f8fafc",display:"flex",flexDirection:"column",gap:4}}>
+                        <div style={{display:"flex",alignItems:"center",gap:6}}>
+                          <span style={{fontSize:12,color:"#0f172a",fontWeight:700,wordBreak:"break-all",flex:1}}>{loggedInEmail}</span>
+                          <span style={{fontSize:10,fontWeight:700,padding:"2px 7px",borderRadius:10,background:isAdmin?"#f3e8ff":"#f1f5f9",color:isAdmin?"#7c3aed":"#475569",border:`1px solid ${isAdmin?"#ddd6fe":"#e2e8f0"}`,flexShrink:0}}>{isAdmin?"👑 Admin":"👤 User"}</span>
+                        </div>
+                        <div style={{display:"flex",alignItems:"center",gap:6,fontSize:12,color:"#64748b"}}>
+                          <span>as <b style={{color:"#0f172a"}}>{actor||"—"}</b></span>
+                          <button onClick={()=>{setShowUserMenu(false);ensureActor(true);}} style={{border:"none",background:"none",padding:0,color:"#4f46e5",fontWeight:600,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>Switch</button>
+                          {isAdmin&&<button onClick={()=>setSilentMode(v=>!v)} title={silentMode?"Silent mode on: no emails are sent":"Silent mode off: emails are sent"}
+                            style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:5,border:"none",background:"none",padding:0,cursor:"pointer",fontFamily:"inherit",fontSize:11,fontWeight:600,color:silentMode?"#92400e":"#64748b"}}>
+                            {silentMode?"🔇 Silent":"🔔 Emails"}
+                            <span style={{position:"relative",width:26,height:15,flexShrink:0}}>
+                              <span style={{position:"absolute",inset:0,borderRadius:8,background:silentMode?"#f59e0b":"#cbd5e1"}}/>
+                              <span style={{position:"absolute",top:2,left:silentMode?13:2,width:11,height:11,borderRadius:"50%",background:"#fff"}}/>
+                            </span>
+                          </button>}
                         </div>
                       </div>
+                      <div style={{padding:"4px 0"}}>
+                        <UserMenuItem icon="🗺" label="Council / Community fields" onClick={()=>{setShowUserMenu(false);window.open(import.meta.env.BASE_URL+"vetting.html","_blank","noopener");}}/>
+                        <UserMenuItem icon="📜" label="Activity log" onClick={()=>{setShowUserMenu(false);setShowActivityLog(true);}}/>
+                        <UserMenuItem icon="📇" label="My council contact" onClick={()=>{setShowUserMenu(false);setShowContactModal(true);}}/>
+                      </div>
+                      {/* Admin settings fold away: one line until opened. */}
                       {isAdmin&&(
-                        <div style={{padding:"6px 0",borderBottom:"1px solid #f1f5f9"}}>
-                          <div style={{padding:"4px 14px 6px",fontSize:10,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.05em",fontWeight:700}}>Admin</div>
-                          <button onClick={()=>setSilentMode(v=>!v)}
-                            style={{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"9px 14px",background:silentMode?"#fef3c7":"transparent",border:"none",fontFamily:"inherit",fontSize:13,color:silentMode?"#92400e":"#0f172a",textAlign:"left",cursor:"pointer",fontWeight:500}}>
-                            <span style={{fontSize:14,width:18,textAlign:"center"}}>{silentMode?"🔇":"🔔"}</span>
-                            <span style={{flex:1}}>{silentMode?"Silent mode ON":"Silent mode off"}</span>
-                            <span style={{position:"relative",width:30,height:18,flexShrink:0}}>
-                              <span style={{position:"absolute",inset:0,borderRadius:9,background:silentMode?"#f59e0b":"#cbd5e1",transition:"background 0.2s"}}/>
-                              <span style={{position:"absolute",top:2,left:silentMode?14:2,width:14,height:14,borderRadius:"50%",background:"#fff",boxShadow:"0 1px 2px rgba(0,0,0,0.2)",transition:"left 0.2s"}}/>
-                            </span>
-                          </button>
-                          <UserMenuItem icon="🧩" label="Install Extensions" onClick={()=>{setShowUserMenu(false);setShowExtensionModal(true);}}/>
-                          <UserMenuItem icon="💲" label="Facility Rates" onClick={()=>{setShowUserMenu(false);setShowRatesModal(true);}}/>
-                          <UserMenuItem icon="👥" label="Player Counts" onClick={()=>{setShowUserMenu(false);setShowPlayersModal(true);}}/>
-                          <UserMenuItem icon="🏛" label="Council application" onClick={()=>{setShowUserMenu(false);window.open(COUNCIL_APPLICATION_URL,"_blank","noopener");}}/>
-                          <UserMenuItem icon="🏢" label="AMUA details" onClick={()=>{setShowUserMenu(false);setShowAmuaModal(true);}}/>
-                          <UserMenuItem icon="👤" label="User Management" onClick={()=>{setShowUserMenu(false);setShowUserMgmtModal(true);}}/>
-                          <UserMenuItem icon="🗑" label="Log Retention" onClick={()=>{setShowUserMenu(false);setShowRetentionModal(true);}}/>
-                          <UserMenuItem icon="⬇" label="Reload from DB" onClick={()=>{setShowUserMenu(false);handleSyncDB();}}/>
+                        <div style={{borderTop:"1px solid #f1f5f9",padding:"4px 0"}}>
+                          <UserMenuItem icon="⚙" label={<span style={{display:"flex",flex:1}}>Admin settings<span style={{marginLeft:"auto",color:"#94a3b8"}}>{adminMenuOpen?"▴":"▾"}</span></span>} onClick={()=>setAdminMenuOpen(v=>!v)}/>
+                          {adminMenuOpen&&(
+                            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:2,padding:"0 8px 6px"}}>
+                              {[["💲","Rates",()=>setShowRatesModal(true)],["👥","Players",()=>setShowPlayersModal(true)],["👤","Users",()=>setShowUserMgmtModal(true)],
+                                ["🏢","AMUA details",()=>setShowAmuaModal(true)],["🗑","Log retention",()=>setShowRetentionModal(true)],["🧩","Extensions",()=>setShowExtensionModal(true)],
+                                ["🏛","Council form",()=>window.open(COUNCIL_APPLICATION_URL,"_blank","noopener")],["⬇","Reload data",()=>handleSyncDB()]].map(([ic,lbl,fn])=>(
+                                <button key={lbl} onClick={()=>{setShowUserMenu(false);fn();}}
+                                  style={{display:"flex",alignItems:"center",gap:6,padding:"7px 8px",border:"1px solid #f1f5f9",borderRadius:8,background:"#fff",fontFamily:"inherit",fontSize:12,color:"#0f172a",cursor:"pointer",textAlign:"left",fontWeight:500}}>
+                                  <span style={{width:16,textAlign:"center"}}>{ic}</span>{lbl}
+                                </button>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       )}
-                      <UserMenuItem icon="📜" label="Activity Log" onClick={()=>{setShowUserMenu(false);setShowActivityLog(true);}}/>
-                      <UserMenuItem icon="👥" label="Switch or edit names" onClick={()=>{setShowUserMenu(false);ensureActor(true);}}/>
-                      <UserMenuItem icon="🗺" label="Council / Community fields" onClick={()=>{setShowUserMenu(false);window.open(import.meta.env.BASE_URL+"vetting.html","_blank","noopener");}}/>
-                      <UserMenuItem icon="📇" label="My council contact" onClick={()=>{setShowUserMenu(false);setShowContactModal(true);}}/>
+                      <div style={{borderTop:"1px solid #f1f5f9",padding:"4px 0"}}>
                       <UserMenuItem icon="↪" label="Sign out" onClick={()=>{setShowUserMenu(false);handleLogout();}} danger/>
+                      </div>
                     </div>
                   </>
                 )}
@@ -13167,15 +13225,15 @@ export default function App() {
             </div>
           </div>
           {/* Bottom row: tabs (always visible, scrollable) */}
-          <div style={{display:"flex",gap:2,overflowX:"auto",paddingBottom:8,WebkitOverflowScrolling:"touch",scrollbarWidth:"none",msOverflowStyle:"none"}}>
-            <TabBtn id="about"    label={isMobile?"ℹ️":"ℹ️ About"}/>
-            <TabBtn id="calendar" label={isMobile?"📅 Week":"📅 Week"}/>
-            <TabBtn id="month"    label={isMobile?"🗓 Month":"🗓 Month"}/>
-            <TabBtn id="list"     label={isMobile?"📋 List":"📋 Bookings"} badge={myClashCount>0?myClashCount:undefined}/>
-            <TabBtn id="summary"  label={isMobile?"📊":"📊 Summary"}/>
-            {(isAdmin||!!loggedInEmail)&&<TabBtn id="billing" label={isMobile?"🧾":"🧾 Billing"}/>}
-            {isAdmin&&<TabBtn id="admin" label={isMobile?"⚙ Admin":"⚙ Admin"} badge={pendingCount}/>}
-            {isAdmin&&<TabBtn id="allocation" label={isMobile?"🏛":"🏛 Allocation"} badge={councilOpenCount||undefined}/>}
+          <div style={{display:"flex",gap:2,overflowX:"auto",paddingBottom:isMobile?6:8,WebkitOverflowScrolling:"touch",scrollbarWidth:"none",msOverflowStyle:"none"}}>
+            <TabBtn id="about"    icon="ℹ️" label="About"/>
+            <TabBtn id="calendar" icon="📅" label="Week"/>
+            <TabBtn id="month"    icon="🗓" label="Month"/>
+            <TabBtn id="list"     icon="📋" label="Bookings" short="List" badge={myClashCount>0?myClashCount:undefined}/>
+            <TabBtn id="summary"  icon="📊" label="Summary" short="Totals"/>
+            {(isAdmin||!!loggedInEmail)&&<TabBtn id="billing" icon="🧾" label="Billing"/>}
+            {isAdmin&&<TabBtn id="admin" icon="⚙" label="Admin" badge={pendingCount}/>}
+            {isAdmin&&<TabBtn id="allocation" icon="🏛" label="Allocation" short="Council" badge={councilOpenCount||undefined}/>}
           </div>
         </div>
       </div>
@@ -13275,7 +13333,64 @@ export default function App() {
                       <ScheduleSummaryModal bookings={bookings} isAdmin={isAdmin} loggedInEmail={loggedInEmail} onBulkApply={handleBulkApply} onBulkStatusChange={handleBulkStatusChange} aliasNames={aliasNames} emailAliases={emailAliases} inline onClose={()=>setShowScheduleModal(false)}/>
                     </div>
                   )}
-                  {visible.length===0
+                  {isMobile ? (
+                    // Phones: filters in a compact grid (bookers via the pills above), then one
+                    // card per booking — date, time, field and status on top, booker and purpose below.
+                    <>
+                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:8}}>
+                        <div style={{gridColumn:"1 / -1",position:"relative"}}><DateRangePicker from={listDateFrom} to={listDateTo} onApply={(f,t)=>{setListDateFrom(f);setListDateTo(t);}}/></div>
+                        <select value={listColFacility} onChange={e=>setListColFacility(e.target.value)} aria-label="Facility"
+                          style={{...S.inp,fontSize:12,padding:"6px 8px",minWidth:0}}>
+                          <option value="all">All facilities</option>
+                          {visibleFacilities().map(f=><option key={f.id} value={f.id}>{f.name}</option>)}
+                        </select>
+                        <select value={listStatusFilter} onChange={e=>setListStatusFilter(e.target.value)} aria-label="Status"
+                          style={{...S.inp,fontSize:12,padding:"6px 8px",minWidth:0}}>
+                          <option value="all">All statuses</option>
+                          {Object.entries(STATUS_META).filter(([k])=>!["pending","amua_submit"].includes(k)).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
+                        </select>
+                        <input placeholder="Search purpose…" value={listColPurpose} onChange={e=>setListColPurpose(e.target.value)}
+                          style={{...S.inp,fontSize:12,padding:"6px 8px",minWidth:0,gridColumn:anyListFilter?"auto":"1 / -1"}}/>
+                        {anyListFilter&&<button onClick={()=>{setListDateFrom("");setListDateTo("");setListStatusFilter("all");setListColPurpose("");setListColFacility("all");}}
+                          style={S.btn({background:"#fff",color:"#64748b",border:"1.5px solid #e2e8f0",fontSize:12,padding:"6px 8px"})}>✕ Clear filters</button>}
+                        <div style={{gridColumn:"1 / -1",display:"flex",gap:6,alignItems:"center",fontSize:11,color:"#64748b",overflowX:"auto",scrollbarWidth:"none"}}>
+                          Sort:{[["date","Date"],["booker","Booker"],["facility","Facility"],["status","Status"]].map(([col,label])=>(
+                            <button key={col} onClick={()=>lToggleSort(col)} style={{padding:"3px 9px",borderRadius:12,border:`1.5px solid ${listSortCol===col?"#0f172a":"#e2e8f0"}`,background:listSortCol===col?"#0f172a":"#fff",color:listSortCol===col?"#fff":"#475569",fontSize:11,fontWeight:600,fontFamily:"inherit",cursor:"pointer",whiteSpace:"nowrap"}}>{label}{lArrow(col)}</button>
+                          ))}
+                        </div>
+                      </div>
+                      {visible.length===0
+                        ? <div style={{textAlign:"center",padding:"40px 0",color:"#94a3b8",fontSize:14}}>No bookings match the current filters.</div>
+                        : <div style={{borderRadius:10,border:"1px solid #f1f5f9",overflow:"hidden"}}>
+                            {visible.map((b,ri)=>{
+                              const f=FACILITIES.find(x=>x.id===b.facility_id);
+                              const isClash=allClashIds.has(b.id), isAdmin_bk=isAdminBooking(b);
+                              return (
+                                <div key={b.id} onClick={()=>setViewing(b)} role="button" tabIndex={0}
+                                  style={{padding:"8px 10px",borderTop:ri>0?"1px solid #f1f5f9":"none",background:isClash?"#fff5f5":"#fff",cursor:"pointer",display:"flex",flexDirection:"column",gap:4,minWidth:0}}>
+                                  <div style={{display:"flex",alignItems:"center",gap:6,minWidth:0,fontSize:12,color:"#334155"}}>
+                                    <b style={{whiteSpace:"nowrap"}}>{fmtDateShort(b.date)}</b>
+                                    <span style={{whiteSpace:"nowrap",color:"#64748b"}}>{fmt24(b.start_hour)}–{fmt24(b.start_hour+b.duration)}</span>
+                                    <span style={{display:"inline-flex",alignItems:"center",gap:3,minWidth:0,overflow:"hidden"}}>
+                                      <span style={{width:7,height:7,borderRadius:"50%",background:f?.color,flexShrink:0}}/>
+                                      <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",color:"#475569"}}>{f?.name||"—"}</span>
+                                    </span>
+                                    {isClash&&<span style={{marginLeft:"auto",fontSize:10,fontWeight:700,color:"#ef4444",flexShrink:0}}>⚡clash</span>}
+                                  </div>
+                                  <div style={{display:"flex",alignItems:"center",gap:6,minWidth:0,flexWrap:"wrap"}}>
+                                    <Badge status={b.status} wf={workflowOf(b.facility_id)}/>
+                                    {isAdmin_bk
+                                      ? <span style={{fontSize:10,fontWeight:700,color:"#94a3b8",background:"#f1f5f9",borderRadius:10,padding:"2px 6px"}}>🔒</span>
+                                      : <span style={{padding:"1px 8px",borderRadius:10,background:emailColor(b.email),color:"#fff",fontSize:11,fontWeight:600,maxWidth:"100%",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{displayNameFor(b.email)}</span>}
+                                  </div>
+                                  {b.purpose&&<div style={{fontSize:11,color:"#64748b",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{b.purpose}</div>}
+                                </div>
+                              );
+                            })}
+                          </div>
+                      }
+                    </>
+                  ) : visible.length===0
                     ? <div style={{textAlign:"center",padding:"40px 0",color:"#94a3b8",fontSize:14}}>No bookings match the current filters.</div>
                     : <div style={{overflowX:"auto",borderRadius:10,border:"1px solid #f1f5f9"}}>
                         <CopyableTable>
@@ -13544,17 +13659,20 @@ export default function App() {
                     <span style={{fontSize:13,fontWeight:700,color:"#0f172a"}}>{fac.name}</span>
                     <span style={{fontSize:10,fontWeight:700,padding:"1px 6px",borderRadius:10,background:fac.kind==="social"?"#f3e8ff":"#dcfce7",color:fac.kind==="social"?"#7c3aed":"#166534",marginLeft:"auto"}}>{fac.kind==="social"?"Social":"Field"}</span>
                   </div>
-                  <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
-                    <span style={{fontSize:12,color:"#64748b"}}>Day $</span>
-                    <input type="number" min="0" step="0.5" value={r.day||""} placeholder="0"
-                      onChange={e=>updateFacilityRate(fac.id,"day",e.target.value)}
-                      style={{width:80,padding:"4px 8px",borderRadius:6,border:"1.5px solid #e2e8f0",fontSize:13,textAlign:"right",fontFamily:"inherit",outline:"none"}}/>
-                    <span style={{fontSize:12,color:"#64748b"}}>/hr</span>
-                    <span style={{fontSize:12,color:"#7c3aed",marginLeft:8}}>Evening $</span>
-                    <input type="number" min="0" step="0.5" value={r.evening||""} placeholder="0"
-                      onChange={e=>updateFacilityRate(fac.id,"evening",e.target.value)}
-                      style={{width:80,padding:"4px 8px",borderRadius:6,border:"1.5px solid #e2e8f0",fontSize:13,textAlign:"right",fontFamily:"inherit",outline:"none"}}/>
-                    <span style={{fontSize:12,color:"#64748b"}}>/hr</span>
+                  {/* Day and evening side by side; each label stays with its box. */}
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                    {[["day","☀ Day","#64748b"],["evening","🌙 Evening","#7c3aed"]].map(([k,lbl,c])=>(
+                      <label key={k} style={{display:"flex",alignItems:"center",gap:5,minWidth:0,fontSize:12,color:c,fontWeight:600}}>
+                        <span style={{whiteSpace:"nowrap"}}>{lbl}</span>
+                        <span style={{display:"flex",alignItems:"center",flex:1,minWidth:0,border:"1.5px solid #e2e8f0",borderRadius:6,padding:"0 6px",background:"#fff"}}>
+                          <span style={{color:"#94a3b8"}}>$</span>
+                          <input type="number" inputMode="decimal" min="0" step="0.5" value={r[k]||""} placeholder="0"
+                            onChange={e=>updateFacilityRate(fac.id,k,e.target.value)}
+                            style={{flex:1,minWidth:0,width:"100%",padding:"6px 2px",border:"none",fontSize:13,textAlign:"right",fontFamily:"inherit",outline:"none",background:"transparent"}}/>
+                          <span style={{color:"#94a3b8",fontWeight:500}}>/hr</span>
+                        </span>
+                      </label>
+                    ))}
                   </div>
                 </div>
               );
