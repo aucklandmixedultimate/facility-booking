@@ -616,3 +616,25 @@ body.aklzoom #field,body.aklzoom #centreWrap,body.aklzoom #fitPop,body.aklzoom .
   transform-origin:50% 100%;transform:translate(-50%,-100%) rotate(var(--dir,0deg));
   background:linear-gradient(to top,rgba(255,226,110,.85),rgba(255,226,110,0));clip-path:polygon(50% 100%,0 0,100% 0)}
 .lightpin.other .beam{opacity:.5}
+/* Vetting history (profile menu) */
+.hist-dlg{max-width:560px}
+.hist-filters{display:flex;gap:6px;margin:0 0 10px}
+.hist-filters button{border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 12px;font-size:13px;font-weight:600;color:var(--ink)}
+.hist-filters button[aria-pressed="true"]{background:var(--turf);border-color:var(--turf);color:#fff}
+.hist-list{list-style:none;margin:0 0 14px;padding:0;max-height:min(60vh,520px);overflow:auto;border-top:1px solid var(--line)}
+.hist-row{padding:9px 2px;border-bottom:1px solid var(--line);font-size:13px}
+.hist-row.rejected .hist-chg{text-decoration:line-through;opacity:.6}
+.hist-top{display:flex;align-items:center;gap:8px}
+.hist-park{border:0;background:none;padding:0;font:inherit;font-weight:700;color:var(--ink);cursor:pointer;text-align:left}
+.hist-park:hover{text-decoration:underline}
+.hist-kind{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.hist-st{margin-left:auto;font-size:12px;font-weight:600;color:#15803d;white-space:nowrap}
+.hist-st.rejected{color:#b91c1c}
+.hist-chg{margin:3px 0;color:var(--ink)}
+.hist-b{color:var(--muted)}
+.hist-meta{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12px}
+.hist-act{margin-left:auto;border:1px solid var(--line);background:var(--surface);border-radius:6px;padding:2px 8px;font-size:12px;font-weight:600;color:#b91c1c;cursor:pointer}
+.hist-row.rejected .hist-act{color:#15803d}
+.hist-empty{padding:14px 2px;color:var(--muted);font-size:13px}
+.pm-actor{font-size:12px;color:var(--muted,#64748b);margin:-2px 0 6px}
+.hist-acct{opacity:.7}

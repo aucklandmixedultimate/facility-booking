@@ -5,6 +5,7 @@ import logoUrl from "./assets/logo.jpg";
 import { driveConfigured, getDriveToken, ensureFolderPath, ensureFolder, uploadFile, renameFile, findChildFile, keepLatestRevisionForever, testDriveConnection, downloadDriveFile, disconnectDrive, DRIVE_ROOT_FOLDER } from "./drive-client.js";
 import { htmlToPdfBlob } from "./pdf-utils.js";
 import { gmailToken, fetchCouncilEmails, parseCouncilEmail } from "./councilMail.js";
+import { askActor, getActor, clearActor } from "./actor.js";
 
 // ─── LOGO ─────────────────────────────────────────────────────────────────────
 const LOGO_SRC = logoUrl;
@@ -49,7 +50,8 @@ async function logActivity(action, detail = {}) {
         action,
         // Stamp the actor's role so the log can be filtered by admin vs booker activity.
         // Lives inside detail (jsonb) so no schema migration is needed.
-        detail: { ...detail, by: _currentUser.role === "admin" ? "admin" : "booker" },
+        // actor: who on a shared login (first name, last initial), picked after sign-in.
+        detail: { ...detail, by: _currentUser.role === "admin" ? "admin" : "booker", ...(getActor(_currentUser.email) ? { actor: getActor(_currentUser.email) } : {}) },
       }),
     });
   } catch { /* silent */ }
@@ -1914,7 +1916,7 @@ function ActivityLogModal({onClose, inline=false, bookers=[]}) {
                             <span style={{display:"inline-flex",alignItems:"center",gap:4}}>
                               <span style={{fontSize:9,fontWeight:700,padding:"0 5px",borderRadius:8,background:isAdminActor?"#eef2ff":"#f0fdf4",color:isAdminActor?"#4338ca":"#15803d",border:`1px solid ${isAdminActor?"#c7d2fe":"#bbf7d0"}`}}>{isAdminActor?"Admin":"Booker"}</span>
                             </span>
-                            <span style={{color:"#64748b",maxWidth:160,overflow:"hidden",textOverflow:"ellipsis"}} title={r.user_email||""}>{r.user_email||"—"}</span>
+                            <span style={{color:"#64748b",maxWidth:160,overflow:"hidden",textOverflow:"ellipsis"}} title={r.user_email||""}>{r.detail?.actor?<b style={{color:"#334155"}}>{r.detail.actor} </b>:null}{r.user_email||"—"}</span>
                           </div>
                         </td>
                         <td style={{padding:"6px 10px",whiteSpace:"nowrap"}}><span style={{fontSize:11,fontWeight:700,padding:"1px 7px",borderRadius:10,background:st.bg,color:st.color,border:`1px solid ${st.border}`}}>{ACTIVITY_LABELS[r.action]||r.action}</span></td>
@@ -11239,6 +11241,29 @@ export default function App() {
     return aliasNames[primary] || primary.split("@")[0];
   }, [canonEmail, aliasNames]);
   const [showUserMenu, setShowUserMenu] = useState(false);
+  // Who's using this (possibly shared) login: first name + last initial, asked after sign-in
+  // and editable from the user menu. Stamped on activity-log entries.
+  const [actor, setActorState] = useState("");
+  const askingActor = useRef(false);
+  useEffect(() => {
+    const on = e => setActorState(e.detail || "");
+    window.addEventListener("amua-actor", on);
+    return () => window.removeEventListener("amua-actor", on);
+  }, []);
+  async function ensureActor(edit = false) {
+    const user = session?.user; if (!user || askingActor.current) return;
+    askingActor.current = true;
+    try {
+      if (edit) await askActor({ supabase, user, edit: true });
+      while (session?.user && !getActor(user.email)) {
+        if (await askActor({ supabase, user, onSignOut: handleLogout }) === null) break;
+      }
+    } finally { askingActor.current = false; setActorState(getActor(user.email)); }
+  }
+  useEffect(() => {
+    if (!session?.user) { setActorState(""); return; }
+    if (getActor(session.user.email)) setActorState(getActor(session.user.email)); else ensureActor();
+  }, [session?.user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const [silentMode, setSilentMode] = useState(true); // admin: suppress all outgoing emails
   // fb_profiles: { [primaryEmail]: { fullName, officialName, address, gstNumber,
   //               accountNumber, accountName, profileType: "user"|"admin"|"vendor" } }
@@ -12938,7 +12963,7 @@ export default function App() {
     setShowCart(false);
   }
 
-  function handleLogout(){supabase?.auth.signOut();setCart([]);}
+  function handleLogout(){clearActor(session?.user?.email);supabase?.auth.signOut();setCart([]);}
 
   const pendingCount=bookings.filter(b=>REVIEW_STATUSES.has(b.status)).length;
 
@@ -13063,7 +13088,7 @@ export default function App() {
                 <button onClick={()=>setShowUserMenu(v=>!v)} title={loggedInEmail}
                   style={{display:"flex",alignItems:"center",gap:6,background:showUserMenu?"#eef2ff":"#f8fafc",border:`1px solid ${showUserMenu?"#c7d2fe":"#e2e8f0"}`,borderRadius:20,padding:"4px 8px 4px 4px",cursor:"pointer",fontFamily:"inherit",fontSize:11,fontWeight:600,color:"#475569"}}>
                   <span style={{width:26,height:26,borderRadius:"50%",background:emailColor(loggedInEmail),display:"inline-flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:11,fontWeight:800}}>{(loggedInEmail||"?")[0]?.toUpperCase()}</span>
-                  {!isMobile&&<span style={{maxWidth:120,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{loggedInEmail?.split("@")[0]}</span>}
+                  {!isMobile&&<span style={{maxWidth:120,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{actor&&!viewAsEmail?actor:loggedInEmail?.split("@")[0]}</span>}
                   <span style={{fontSize:9,color:"#94a3b8"}}>▾</span>
                 </button>
                 {showUserMenu&&(
@@ -13073,6 +13098,7 @@ export default function App() {
                       <div style={{padding:"10px 14px",borderBottom:"1px solid #f1f5f9",background:"#f8fafc"}}>
                         <div style={{fontSize:11,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.05em",fontWeight:700}}>Signed in</div>
                         <div style={{fontSize:12,color:"#0f172a",fontWeight:600,marginTop:2,wordBreak:"break-all"}}>{loggedInEmail}</div>
+                        {actor&&<div style={{fontSize:12,color:"#64748b",marginTop:2}}>as <b style={{color:"#0f172a"}}>{actor}</b></div>}
                         <div style={{marginTop:6,display:"flex",alignItems:"center",gap:6}}>
                           <span style={{fontSize:10,fontWeight:700,padding:"2px 7px",borderRadius:10,background:isAdmin?"#f3e8ff":"#f1f5f9",color:isAdmin?"#7c3aed":"#475569",border:`1px solid ${isAdmin?"#ddd6fe":"#e2e8f0"}`}}>{isAdmin?"👑 Admin":"👤 User"}</span>
                         </div>
@@ -13100,6 +13126,7 @@ export default function App() {
                           <UserMenuItem icon="⬇" label="Reload from DB" onClick={()=>{setShowUserMenu(false);handleSyncDB();}}/>
                         </div>
                       )}
+                      <UserMenuItem icon="👥" label="Switch or edit names" onClick={()=>{setShowUserMenu(false);ensureActor(true);}}/>
                       <UserMenuItem icon="🗺" label="Council / Community fields" onClick={()=>{setShowUserMenu(false);window.open(import.meta.env.BASE_URL+"vetting.html","_blank","noopener");}}/>
                       <UserMenuItem icon="📇" label="My council contact" onClick={()=>{setShowUserMenu(false);setShowContactModal(true);}}/>
                       <UserMenuItem icon="↪" label="Sign out" onClick={()=>{setShowUserMenu(false);handleLogout();}} danger/>
