@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
 import { LEAGUE_SEASONS, seasonOfBooker } from "../seasons.js";
-import { PROVIDERS, PROVIDER_GROUPS, VENDOR_GTEC, providerGroupOf, providerLabel, ACTIVITY_LABELS, ACTIVITY_PUBLIC_ACTIONS, AMUA_CONTACT_ROLES, AMUA_DEFAULT_NAME, Badge, CopyableTable, EMAIL_COLORS, FACILITIES, Modal, S, SUPABASE_URL, activityActor, authHeaders, deriveRecipientCode, describeActivity, emailColor, fmtDate, fmtDateShort, fmtDateShortDow, fmtTime, isAdminBooking, sb, useMobile, workflowOf } from "./core.jsx";
+import { ACTIVITY_LABELS, ACTIVITY_PUBLIC_ACTIONS, AMUA_CONTACT_ROLES, AMUA_DEFAULT_NAME, Badge, CopyableTable, EMAIL_COLORS, FACILITIES, Modal, PROVIDERS, PROVIDER_GROUPS, S, SUPABASE_URL, VENDOR_GTEC, activityActor, authHeaders, deriveRecipientCode, describeActivity, emailColor, fmtDate, fmtDateShort, fmtDateShortDow, fmtTime, isAdminBooking, providerGroupOf, providerLabel, sb, useMobile, workflowOf } from "./core.jsx";
 export function ActivityLogModal({onClose, inline=false, bookers=[], isAdmin=true}) {
   const isMobile = useMobile();
   const [showFilters, setShowFilters] = useState(false);
