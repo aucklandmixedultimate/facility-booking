@@ -1,5 +1,6 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
+import './theme.css'
 import App from './booking-system.jsx'
 
 // A tab left open across a deploy can fail to fetch a lazily loaded chunk (PDF export

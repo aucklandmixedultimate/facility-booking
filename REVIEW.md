@@ -20,3 +20,5 @@ Also look for:
 - Components defined inside render (remount on every keystroke) and state set inside effects.
 - New `let` module state written outside `core.jsx` without `setModuleState`.
 - Interface wording: "vendor", not "provider"; vendor stages named via `statusLabelFor`.
+- Hand-written status lists instead of the `src/statuses.js` helpers; new hex colours in UI
+  styles where a `src/theme.css` token exists (emails excepted).

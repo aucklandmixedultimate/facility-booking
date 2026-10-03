@@ -7,6 +7,7 @@
 //    ultimate field centred in the frame, light poles placed by clicking the map, and
 //    decisions saved to Supabase (field_reviews, admin-only). See docs/council-field-vetting.md.
 import L from "leaflet";
+import "../theme.css";
 import "leaflet/dist/leaflet.css";
 import "./vetting.css";
 import { createClient } from "@supabase/supabase-js";

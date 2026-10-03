@@ -4,7 +4,7 @@ import { gmailToken, fetchCouncilEmails, parseCouncilEmail } from "./councilMail
 import { driveConfigured, getDriveToken, renameFile, ensureFolderPath, DRIVE_ROOT_FOLDER, ensureFolder, findChildFile, uploadFile, keepLatestRevisionForever } from "./drive-client.js";
 import { htmlToPdfBlob } from "./pdf-utils.js";
 import { currentLeagueSeason, LEAGUE_SEASONS, seasonOfBooker } from "./seasons.js";
-import { ALL_VENUES, Badge, COUNCIL_APPLICATION_FEE, COUNCIL_APPLICATION_URL, COUNCIL_APP_RE, CPSA_FIELD_IDS, CopyableTable, EmailLoginScreen, FACILITIES, LOGO_SRC, MOBILE_STYLE, MONTHS, Modal, PROVIDERS, ProviderMenu, REVIEW_STATUSES, S, STATUS_META, SUPABASE_ANON, SUPABASE_URL, TableViewToggle, VENUE_SEP, _emailAliases, activeVenueKeys, applyAmuaOrg, applyCouncilFacilities, authHeaders, buildApprovalEmailHtml, buildClashEmailHtml, buildInformCpsaEmailHtml, buildMismatchEmailHtml, buildOrderEmailHtml, buildRoomRequestEmailHtml, canSendToCouncil, clearSlotLink, councilFeeSplit, councilOverlaps, defaultProviderId, defaultVenueKey, defaultVenueSelection, emailColor, evenSlotShares, facShort, fmt24, fmtCost, fmtDate, fmtDateShort, fmtDateShortDow, fmtTime, fmtTimeShort, getBillingDrift, getClashes, inActiveVenue, isAdminBooking, linkCouncilChildren, listVenues, logActivity, newId, newSlotRef, parseClashPrevStatus, parseCouncilApp, parseCpsaOrig, parseCpsaRefs, parseCpsaResolution, parseMismatchNote, parseSlotLink, reachedGtecQueue, sb, sendApprovalEmail, sendEmail, setBilledSnapshot, setClashPrevStatus, setCpsaResolution, setGtecSnapshot, setMismatchNote, setModuleState, setSlotLink, slotGroupMembers, stripClashPrevStatus, stripMismatchNote, supabase, timeOverlaps, todayKey, useMobile, useTableView, venueFacilities, venueKeyOf, visibleFacilities, workflowOf } from "./booking/core.jsx";
+import { ALL_VENUES, Badge, COUNCIL_APPLICATION_FEE, COUNCIL_APPLICATION_URL, COUNCIL_APP_RE, CPSA_FIELD_IDS, CopyableTable, EmailLoginScreen, FACILITIES, LOGO_SRC, MOBILE_STYLE, MONTHS, Modal, PROVIDERS, ProviderMenu, REVIEW_STATUSES, S, STATUS_META, SUPABASE_ANON, SUPABASE_URL, T, TableViewToggle, VENUE_SEP, _emailAliases, activeVenueKeys, applyAmuaOrg, applyCouncilFacilities, authHeaders, buildApprovalEmailHtml, buildClashEmailHtml, buildInformCpsaEmailHtml, buildMismatchEmailHtml, buildOrderEmailHtml, buildRoomRequestEmailHtml, canSendToCouncil, clearSlotLink, councilFeeSplit, councilOverlaps, defaultProviderId, defaultVenueKey, defaultVenueSelection, emailColor, evenSlotShares, facShort, fmt24, fmtCost, fmtDate, fmtDateShort, fmtDateShortDow, fmtTime, fmtTimeShort, getBillingDrift, getClashes, inActiveVenue, isAdminBooking, linkCouncilChildren, listVenues, logActivity, newId, newSlotRef, parseClashPrevStatus, parseCouncilApp, parseCpsaOrig, parseCpsaRefs, parseCpsaResolution, parseMismatchNote, parseSlotLink, reachedGtecQueue, sb, sendApprovalEmail, sendEmail, setBilledSnapshot, setClashPrevStatus, setCpsaResolution, setGtecSnapshot, setMismatchNote, setModuleState, setSlotLink, slotGroupMembers, stripClashPrevStatus, stripMismatchNote, supabase, timeOverlaps, todayKey, useMobile, useTableView, venueFacilities, venueKeyOf, visibleFacilities, workflowOf } from "./booking/core.jsx";
 import { councilAppBookings, mergeCouncilOutcomes } from "./booking/councilData.jsx";
 import { fetchCJREvents, findMatchingUserBooking, gtecTeamKey, mapCJRFacility, parseCJRDate, parseCJRDateTime } from "./booking/gtec.jsx";
 import { DRIVE_SUBFOLDERS, billingDocBaseName, buildBillingDocHtml, driveBatchFolderName, drivePoFolderName } from "./booking/billingDocs.jsx";
@@ -2122,7 +2122,7 @@ export default function App() {
   const emailLegend = Object.keys(bookerGroups).sort();
 
   return (
-    <div style={{minHeight:"100vh",background:"#f8fafc",fontFamily:"'DM Sans','Segoe UI',system-ui,sans-serif"}}>
+    <div style={{minHeight:"100vh",background:T.surface2,fontFamily:T.font}}>
       <style>{MOBILE_STYLE}</style>
       {toast&&<div style={{position:"fixed",top:16,right:16,zIndex:2000,background:toast.type==="error"?"#f43f5e":"#22c55e",color:"#fff",padding:"10px 18px",borderRadius:10,fontWeight:600,fontSize:13,boxShadow:"0 4px 20px rgba(0,0,0,0.15)"}}>{toast.msg}</div>}
 
@@ -2140,13 +2140,13 @@ export default function App() {
       )}
 
       {/* Header */}
-      <div style={{background:"#fff",borderBottom:"1px solid #f1f5f9",padding:"0 16px"}}>
+      <div style={{background:T.surface,borderBottom:`1px solid ${T.lineSoft}`,padding:"0 16px"}}>
         <div style={{maxWidth:1300,margin:"0 auto"}}>
           {/* Top row: logo + user + action buttons */}
           <div style={{display:"flex",alignItems:"center",gap:10,height:56,flexWrap:"nowrap"}}>
             <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
               <img src={LOGO_SRC} alt="AMUA" style={{width:34,height:34,borderRadius:8,objectFit:"cover"}}/>
-              {!isMobile&&<span style={{fontSize:15,fontWeight:800,color:"#0f172a",letterSpacing:"-0.02em"}}>FacilityBook</span>}
+              {!isMobile&&<span style={{fontSize:15,fontWeight:800,color:T.ink,letterSpacing:"-0.02em"}}>FacilityBook</span>}
               {!configured&&<span style={{fontSize:10,background:"#fef3c7",color:"#92400e",padding:"2px 6px",borderRadius:6,fontWeight:600}}>Demo</span>}
               <nav className="appnav" aria-label="Apps">
                 {APPS.map(a=><a key={a.id} href={appHref(a)} title={a.title} aria-current={a.id==="bookings"?"page":undefined}><span className="ai" aria-hidden="true">{a.icon}</span><span className="al">{a.label}</span></a>)}
