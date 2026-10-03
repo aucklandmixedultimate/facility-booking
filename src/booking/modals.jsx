@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
 import { LEAGUE_SEASONS, seasonOfBooker } from "../seasons.js";
-import { ACTIVITY_LABELS, ACTIVITY_PUBLIC_ACTIONS, AMUA_CONTACT_ROLES, AMUA_DEFAULT_NAME, Badge, CopyableTable, EMAIL_COLORS, FACILITIES, Modal, S, SUPABASE_URL, activityActor, authHeaders, deriveRecipientCode, describeActivity, emailColor, fmtDate, fmtDateShort, fmtDateShortDow, fmtTime, isAdminBooking, sb, useMobile, workflowOf } from "./core.jsx";
+import { PROVIDERS, PROVIDER_GROUPS, VENDOR_GTEC, providerGroupOf, providerLabel, ACTIVITY_LABELS, ACTIVITY_PUBLIC_ACTIONS, AMUA_CONTACT_ROLES, AMUA_DEFAULT_NAME, Badge, CopyableTable, EMAIL_COLORS, FACILITIES, Modal, S, SUPABASE_URL, activityActor, authHeaders, deriveRecipientCode, describeActivity, emailColor, fmtDate, fmtDateShort, fmtDateShortDow, fmtTime, isAdminBooking, sb, useMobile, workflowOf } from "./core.jsx";
 export function ActivityLogModal({onClose, inline=false, bookers=[], isAdmin=true}) {
   const isMobile = useMobile();
   const [showFilters, setShowFilters] = useState(false);
@@ -225,6 +225,34 @@ export function ActivityLogModal({onClose, inline=false, bookers=[], isAdmin=tru
 }
 
 // Admin UI: map secondary emails into a primary profile + manage profile details.
+// A vendor profile's provider: set in User Management, else guessed from its email / name
+// (CPSA, Cornwall Park, Grammar or GTEC → GTEC / CPSA).
+export function vendorProviderOf(email, prof = {}) {
+  if (prof.providerId && PROVIDERS[prof.providerId]) return prof.providerId;
+  const hay = `${email} ${prof.fullName || ""}`.toLowerCase();
+  if (/cpsa|cornwall|gtec|grammar/.test(hay)) return "gtec";
+  const hit = Object.keys(PROVIDERS).find(pid => { const p = PROVIDERS[pid]; return [p.short, p.name].filter(Boolean).some(n => hay.includes(String(n).toLowerCase())); });
+  return hit || "other";
+}
+// Vendors grouped like the provider picker: GTEC / CPSA (with GTEC and CPSA as default
+// entries), St Cuthbert's, Auckland Council (and the clubs that run council fields),
+// Community / Schools, then anything else.
+export function groupVendors(vendors, profiles) {
+  const groups = new Map();
+  const add = (id, label, sub, pid) => { if (!groups.has(id)) groups.set(id, { id, label, sub, pid, members: [], defaults: [] }); return groups.get(id); };
+  add("gtec", providerLabel("gtec"), "Cornwall Park", "gtec");
+  vendors.forEach(em => {
+    const pid = vendorProviderOf(em, (profiles||{})[em]), g = PROVIDERS[pid] ? providerGroupOf(pid) : "other";
+    const grp = PROVIDER_GROUPS[g];
+    add(g, grp ? grp.label : pid === "other" ? "Other vendors" : providerLabel(pid), grp ? null : null, pid).members.push(em);
+  });
+  const gt = groups.get("gtec"), names = gt.members.map(em => `${em} ${(profiles||{})[em]?.fullName || ""}`.toLowerCase());
+  const has = re => names.some(n => re.test(n));
+  gt.defaults.push({ key: "gtec", name: "GTEC", note: `${VENDOR_GTEC.name} · GST ${VENDOR_GTEC.gstNumber} · PO recipient`, email: has(/gtec|grammar/) });
+  gt.defaults.push({ key: "cpsa", name: "CPSA", note: "Cornwall Park bookings and room requests", email: has(/cpsa|cornwall/) });
+  const rank = id => ({ gtec: 0, stcuthberts: 1, council: 2, community: 3, other: 9 })[id] ?? 5;
+  return [...groups.values()].sort((a, b) => rank(a.id) - rank(b.id));
+}
 export function UserMgmtModal({ bookings, aliases, aliasNames, aliasColors={}, bookerSeasons={}, onChangeSeasons, onChange, onChangeNames, onChangeColors, profiles, onUpdateProfile, adminEmail, onClose, onViewAs }) {
   const allEmails = useMemo(() => {
     const s = new Set();
@@ -321,11 +349,12 @@ export function UserMgmtModal({ bookings, aliases, aliasNames, aliasColors={}, b
   // Create-vendor form state
   const [newVendorEmail, setNewVendorEmail] = useState("");
   const [newVendorName, setNewVendorName] = useState("");
+  const [newVendorProvider, setNewVendorProvider] = useState("gtec");
   function createVendor() {
     const em = newVendorEmail.trim().toLowerCase();
     if (!em) return;
     const next = { ...(profiles||{}) };
-    next[em] = { ...(next[em]||{}), profileType:"vendor", fullName: newVendorName.trim() || next[em]?.fullName || "" };
+    next[em] = { ...(next[em]||{}), profileType:"vendor", fullName: newVendorName.trim() || next[em]?.fullName || "", providerId: newVendorProvider };
     onUpdateProfile(next);
     setNewVendorEmail(""); setNewVendorName("");
     setExpandedProfile(em);
@@ -356,15 +385,10 @@ export function UserMgmtModal({ bookings, aliases, aliasNames, aliasColors={}, b
         </div>
       </div>
 
-      {/* Vendor pre-config */}
-      <div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:8,padding:"8px 12px",marginBottom:12,fontSize:11,color:"#166534"}}>
-        <strong>Vendor (GTEC)</strong> — Grammar TEC Rugby Club Inc · GST 113-246-812 · PO BOX 42 210, Orakei, Auckland · pre-configured as PO recipient
-      </div>
-
       {/* Create standalone vendor profile (works without a linked Google login) */}
       <div style={{background:"#f8fafc",border:"1.5px solid #e2e8f0",borderRadius:10,padding:12,marginBottom:14}}>
         <div style={{fontSize:12,fontWeight:700,color:"#0f172a",marginBottom:6}}>Create vendor profile</div>
-        <div style={{fontSize:11,color:"#64748b",marginBottom:8}}>Vendor profiles can exist standalone — they show as a user before a Google account is linked.</div>
+        <div style={{fontSize:11,color:"#64748b",marginBottom:8}}>Vendor profiles can exist standalone (no Google login needed). Choose the vendor they're for.</div>
         <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
           <input value={newVendorEmail} onChange={e=>setNewVendorEmail(e.target.value)}
             placeholder="vendor email…"
@@ -372,6 +396,10 @@ export function UserMgmtModal({ bookings, aliases, aliasNames, aliasColors={}, b
           <input value={newVendorName} onChange={e=>setNewVendorName(e.target.value)}
             placeholder="display name (optional)"
             style={{flex:"1 1 180px",padding:"6px 8px",borderRadius:6,border:"1.5px solid #e2e8f0",fontSize:12,fontFamily:"inherit",background:"#fff"}}/>
+          <select value={newVendorProvider} onChange={e=>setNewVendorProvider(e.target.value)} aria-label="Vendor"
+            style={{flex:"0 1 170px",padding:"6px 8px",borderRadius:6,border:"1.5px solid #e2e8f0",fontSize:12,fontFamily:"inherit",background:"#fff"}}>
+            {Object.keys(PROVIDERS).map(pid=><option key={pid} value={pid}>{providerLabel(pid)}</option>)}
+          </select>
           <button onClick={createVendor} disabled={!newVendorEmail.trim()}
             style={S.btn({background:newVendorEmail.trim()?"#15803d":"#cbd5e1",color:"#fff",fontSize:12,cursor:newVendorEmail.trim()?"pointer":"not-allowed"})}>
             + Create
@@ -379,10 +407,9 @@ export function UserMgmtModal({ bookings, aliases, aliasNames, aliasColors={}, b
         </div>
       </div>
 
-      {/* Profile cards */}
-      <div style={{fontSize:12,fontWeight:700,color:"#0f172a",marginBottom:6}}>Profiles ({allPrimaries.length})</div>
-      <div style={{display:"flex",flexDirection:"column",gap:8,paddingRight:2}}>
-        {allPrimaries.map(primary => {
+      {/* Profile cards: users, then vendors grouped like the provider picker */}
+      {(()=>{
+        const renderCard = primary => {
           const secondaries = [...(groups[primary]||new Set())].filter(e=>e!==primary).sort();
           const dflt = primary.split("@")[0];
           const aliasName = (aliasNames||{})[primary] || "";
@@ -429,6 +456,12 @@ export function UserMgmtModal({ bookings, aliases, aliasNames, aliasColors={}, b
                         ))}
                       </div>
                     </div>
+                    {/* A vendor's provider: where it's listed, and which bookings it handles */}
+                    {ptype==="vendor" && fieldRow("Vendor",
+                      <select value={vendorProviderOf(primary, prof)} onChange={e=>upProfile(primary,"providerId",e.target.value)} style={{...si,width:"auto"}}>
+                        {Object.keys(PROVIDERS).map(pid=><option key={pid} value={pid}>{providerLabel(pid)}</option>)}
+                      </select>
+                    )}
                     {/* Alias / display name */}
                     {fieldRow("Alias",
                       <div style={{display:"flex",alignItems:"center",gap:6}}>
@@ -537,9 +570,36 @@ export function UserMgmtModal({ bookings, aliases, aliasNames, aliasColors={}, b
               )}
             </div>
           );
-        })}
-        {allPrimaries.length===0 && <div style={{color:"#94a3b8",fontSize:13,textAlign:"center",padding:20}}>No profiles yet.</div>}
-      </div>
+        };
+        const isVendor = em => (profiles||{})[em]?.profileType === "vendor";
+        const users = allPrimaries.filter(em => !isVendor(em)), vendors = allPrimaries.filter(isVendor);
+        const vendorGroups = groupVendors(vendors, profiles);
+        const hdr = { fontSize:12, fontWeight:700, color:"#0f172a", margin:"14px 0 6px" };
+        return (<>
+          <div style={{...hdr, marginTop:0}}>Users ({users.length})</div>
+          <div style={{display:"flex",flexDirection:"column",gap:8,paddingRight:2}}>
+            {users.map(renderCard)}
+            {users.length===0 && <div style={{color:"#94a3b8",fontSize:13,textAlign:"center",padding:20}}>No users yet.</div>}
+          </div>
+          <div style={hdr}>Vendors ({vendors.length})</div>
+          <div style={{fontSize:11,color:"#64748b",margin:"-2px 0 8px"}}>Grouped like the vendor picker. Vendor emails are never sent directly — they're drafted to AMUA's inbox.</div>
+          {vendorGroups.map(g => (
+            <div key={g.id} style={{marginBottom:10}}>
+              <div style={{fontSize:11,fontWeight:800,color:"#475569",textTransform:"uppercase",letterSpacing:"0.04em",margin:"0 0 5px"}}>{g.label}{g.sub?<span style={{fontWeight:500,textTransform:"none",letterSpacing:0,color:"#94a3b8"}}> · {g.sub}</span>:null}</div>
+              <div style={{display:"flex",flexDirection:"column",gap:6,paddingLeft:8,borderLeft:"3px solid #e2e8f0"}}>
+                {g.defaults.map(d => (
+                  <div key={d.key} style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",background:"#f8fafc",border:"1px dashed #cbd5e1",borderRadius:8,padding:"7px 10px",fontSize:12,color:"#475569"}}>
+                    <b style={{color:"#0f172a"}}>{d.name}</b><span>{d.note}</span>
+                    {!d.email && <button onClick={()=>{ setNewVendorName(d.name); setNewVendorProvider(g.pid||"gtec"); }}
+                      style={{marginLeft:"auto",border:"1px solid #bbf7d0",background:"#fff",color:"#15803d",borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>+ Add contact</button>}
+                  </div>
+                ))}
+                {g.members.map(renderCard)}
+              </div>
+            </div>
+          ))}
+        </>);
+      })()}
       <div style={{marginTop:12,display:"flex",justifyContent:"flex-end"}}>
         <button onClick={onClose} style={S.btn({background:"#0f172a",color:"#fff",fontSize:12})}>Done</button>
       </div>

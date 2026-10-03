@@ -1,5 +1,5 @@
 import { useState, useRef, Fragment } from "react";
-import { BILLED_RE, Badge, CAL_SLOTS, CAL_START, CAL_TOTAL, DAY_EVENING_CUTOFF, DURATIONS, EmailChip, FACILITIES, FACILITY_TINT, FLOODLIT_FIELD_ID, FacilityOptions, INVOICED_META, Modal, ProviderVenuePicker, REVIEW_STATUSES, S, SLOTS_PER_HOUR, SLOT_HOURS, START_TIMES, STATUS_META, addDays, councilContactOk, emailColor, facColLabel, facShort, fmtCost, fmtDate, fmtDuration, fmtLoggedAt, fmtRefDate, fmtTime, fmtTimeShort, getCrossFacilityOverlaps, getSameFacilityOverlaps, isAdminBooking, newGroupRef, newId, parseCouncilInfo, parseFunctionCost, parseGroupRef, parseGtecSnapshot, parseMismatchNote, parseSlotLink, parseSplit, setCouncilInfo, setFunctionCost, setGroupRef, setSplit, slotGroupMembers, slotGroupName, splitReason, stripMismatchNote, timeOverlaps, todayKey, useMobile, venueFacilities, workflowOf } from "./core.jsx";
+import { vendorShortFor, BILLED_RE, Badge, CAL_SLOTS, CAL_START, CAL_TOTAL, DAY_EVENING_CUTOFF, DURATIONS, EmailChip, FACILITIES, FACILITY_TINT, FLOODLIT_FIELD_ID, FacilityOptions, INVOICED_META, Modal, ProviderVenuePicker, REVIEW_STATUSES, S, SLOTS_PER_HOUR, SLOT_HOURS, START_TIMES, STATUS_META, addDays, councilContactOk, emailColor, facColLabel, facShort, fmtCost, fmtDate, fmtDuration, fmtLoggedAt, fmtRefDate, fmtTime, fmtTimeShort, getCrossFacilityOverlaps, getSameFacilityOverlaps, isAdminBooking, newGroupRef, newId, parseCouncilInfo, parseFunctionCost, parseGroupRef, parseGtecSnapshot, parseMismatchNote, parseSlotLink, parseSplit, setCouncilInfo, setFunctionCost, setGroupRef, setSplit, slotGroupMembers, slotGroupName, splitReason, stripMismatchNote, timeOverlaps, todayKey, useMobile, venueFacilities, workflowOf } from "./core.jsx";
 import { OverlapWarning } from "./modals.jsx";
 // ─── Single Booking Row Form ──────────────────────────────────────────────────
 // Used inside BookingForm to represent one item in the cart
@@ -527,7 +527,7 @@ export function CartModal({ cart, setCart, onClose, onSubmit, openNew, silentMod
                     <div style={{padding:'8px 14px',fontSize:12,color:'#64748b',background:'#fff'}}>
                       <span style={{fontWeight:600,color:'#0f172a',marginRight:6}}>{f?.name||b.facility_id}</span>{fmtDate(b.date)} · {fmtTime(b.start_hour)}–{fmtTime(b.start_hour+b.duration)}{b.purpose?` · ${b.purpose}`:''}
                       <span style={{marginLeft:8,fontFamily:'monospace',color:'#94a3b8'}}>{item.ref}</span>
-                      <div style={{marginTop:3,color:'#6d28d9'}}>On submit → Pending GTEC review</div>
+                      <div style={{marginTop:3,color:'#6d28d9'}}>On submit → Pending {vendorShortFor(b.facility_id)} review</div>
                     </div>
                   </div>
                 );

@@ -166,12 +166,12 @@ async function saveFlag(id, flag) {
     // Before the website/details columns exist (supabase-setup.sql v2), save without them.
     if (error && flag && /website|details/i.test(error.message || "")) {
       const { website: _w, details: _d, ...rest } = row; ({ error } = await supabase.from("field_flags").upsert(rest));
-      if (!error) setStatus("Saved the provider; its website and other info need the updated supabase-setup.sql — re-run it.", true);
+      if (!error) setStatus("Saved the vendor; its website and other info need the updated supabase-setup.sql — re-run it.", true);
     }
     // Before the kind/contact columns exist (supabase-setup.sql), keep the provider only.
     if (error && flag && /kind|contact|column/i.test(error.message || "")) {
       const { kind: _kind, contact: _contact, website: _w2, details: _d2, ...old } = row; ({ error } = await supabase.from("field_flags").upsert(old));
-      if (!error) setStatus("Saved the provider; its kind and contact person need supabase-setup.sql.", true);
+      if (!error) setStatus("Saved the vendor; its kind and contact person need supabase-setup.sql.", true);
     }
     if (error) { setStatus("Couldn't save the club flag (" + error.message + ").", true); return false; }
   }
@@ -285,14 +285,14 @@ async function setHistoryStatus(h, status) {
   if (p && view === "park" && current()?.id === p.id) render(); else renderRail();
   setStatus(`${status === "rejected" ? "Rejected" : "Accepted"} the ${HIST_KIND[h.kind].toLowerCase()} change to ${h.park}.`);
 }
-const HIST_KIND = { review: "Fields", flag: "Provider", rating: "Quality" };
+const HIST_KIND = { review: "Fields", flag: "Vendor", rating: "Quality" };
 // Who, as a first name and last initial: the name picked at sign-in, else from the email
 // ("rory.hughes@…" → "Rory H.").
 const personOf = (email, name) => name ? shortName(name) : personFromEmail(email);
 const DEC_WORD = { top: "Top pick", yes: "Shortlist", no: "Reject", rating: "Rating in progress" };
 const FIT_WORD = { reduced: "3v3 only", full: "1 × full 7v7", multi: "2 × full 7v7", no: "unusable" };
 function histValue(kind, v) {
-  if (!v) return kind === "review" ? "not rated" : kind === "flag" ? "no provider" : "no stars";
+  if (!v) return kind === "review" ? "not rated" : kind === "flag" ? "no vendor" : "no stars";
   if (kind === "rating") return "★".repeat(v.stars) + "☆".repeat(5 - v.stars);
   if (kind === "flag") return [v.club || "provider", v.contact && `contact ${shortName(v.contact)}`].filter(Boolean).join(", ");
   const fields = Object.values(v.placement?.fields || {});
@@ -1702,7 +1702,7 @@ async function saveCartActive() {
   const at = new Date().toISOString();
   bookLocs[who] = before.map(x => isActive(x) || isRetired(x) ? x : { ...x, status: "active", activated_at: at, ...activatedBy() });
   if (!(await saveBookLocs())) { bookLocs[who] = before; return; }
-  setStatus(`Saved ${n} field${n > 1 ? "s" : ""} as active bookings. They're now in the booking site under Provider → Location.`);
+  setStatus(`Saved ${n} field${n > 1 ? "s" : ""} as active bookings. They're now in the booking site under Vendor → Location.`);
   render(); renderTabs(); if (view === "book") renderBook();
 }
 // Add or remove one field (or "Whole park") of a park in the booker's cart; saves at once.
@@ -1840,7 +1840,7 @@ function renderBook() {
       <button id="mfRmClear">Clear</button><button class="danger" id="mfRmGo">Remove ${mfRemove.size}</button></div>` : ""}
     ${hidden ? `<p class="mf-hidden">${hidden} field${hidden === 1 ? " is" : "s are"} hidden by the region / review filters above. <button id="mfShowAll">Show all</button></p>` : ""}
     ${shown.length ? `<div class="mf-wrap"><table class="mf"><thead><tr><th>Field</th><th title="The booker, and who on the login added the field">Booker · by</th><th title="Added to the cart">Carted</th><th title="Saved as an active booking field">Active</th>
-      <th title="First booking the council / provider accepted">Started</th><th title="Field retired, or its last booking once none are upcoming">Ended</th><th title="Crowd quality rating">★</th><th></th></tr></thead><tbody>
+      <th title="First booking the council / vendor accepted">Started</th><th title="Field retired, or its last booking once none are upcoming">Ended</th><th title="Crowd quality rating">★</th><th></th></tr></thead><tbody>
       ${shown.map(r => { const { x, w } = r, t = mfTimeline(x, w), st = stageOf(r);
         return `<tr class="mf-${st}${mfRemove.has(x.id) ? " mf-rm" : ""}"><td class="mf-f"><span class="mf-st ${st}" title="${st === "cart" ? "In the cart" : st === "active" ? "Active" : "Ended"}"></span>${tag(x)}
             <span class="mf-n" title="${esc(x.park)} – ${esc(x.field)}">${esc(x.park)} <span class="muted">– ${esc(x.field)}</span></span></td>
@@ -2067,7 +2067,7 @@ async function syncCartWorkflows() {
 // Provider amendments: tag a park whose provider listing needs changing, e.g. Liston Park is
 // privately operated by Ellerslie AFC. Once tagged, the row asks for the provider's contact
 // person (first name and last initial only).
-const AMEND_KIND = { private: "Privately operated by", change: "Operator changed to", other: "Provider change" };
+const AMEND_KIND = { private: "Privately operated by", change: "Operator changed to", other: "Other vendor change" };
 let amendFor = null;
 const amendText = fl => `${AMEND_KIND[fl.kind || "private"]}${fl.club ? " " + fl.club : ""}${fl.contact ? " · contact " + fl.contact : ""}`;   // the park whose amendment row is open
 // What's already on record for a park's provider: its private operator (and the first
@@ -2081,10 +2081,10 @@ function knownProvider(p) {
 function renderFlag(p) {
   const fl = flags[p.id], known = knownProvider(p), d = fl || known || {};
   $("clubFlagBtn").setAttribute("aria-pressed", String(!!fl));
-  $("clubFlagBtn").textContent = fl ? "✎ " + amendText(fl) : known ? "✎ " + amendText(known) : "✎ Provider?";
-  $("clubFlagBtn").title = fl ? `Provider amendment${fl.by ? " by " + fl.by.split("@")[0] : ""}${fl.website ? " · " + fl.website : ""}${fl.details ? " · " + fl.details : ""}. Click to edit.`
-    : known ? "Provider on record. Click to amend it (the fields start from what's on record)."
-    : "Tag this park's provider for amendment, e.g. privately operated by a club that isn't listed yet";
+  $("clubFlagBtn").textContent = fl ? "✎ " + amendText(fl) : known ? "✎ " + amendText(known) : "✎ Vendor?";
+  $("clubFlagBtn").title = fl ? `Vendor amendment${fl.by ? " by " + fl.by.split("@")[0] : ""}${fl.website ? " · " + fl.website : ""}${fl.details ? " · " + fl.details : ""}. Click to edit.`
+    : known ? "Vendor on record. Click to amend it (the fields start from what's on record)."
+    : "Tag this park's vendor for amendment, e.g. privately operated by a club that isn't listed yet";
   $("amendRow").hidden = amendFor !== p.id;
   $("amendContact").hidden = $("amendWebsite").hidden = $("amendDetails").hidden = !fl && !known;
   $("amendClear").hidden = !fl;
@@ -2521,7 +2521,7 @@ function opCsv(o) {
     ev ? [ev.date, REL.tag[ev.tag] || ev.tag, ev.ref].filter(Boolean).join(" ") : ""];
 }
 function exportCsv() {
-  const rows = [["Region", "Park", "Decision", "Suitability", "Lights", "Light poles", "Fit", "Quality", "Fields", "Notes", "Field placement (lat, lon, angle°)", "Private operator", "Operator contact", "Ultimate club", "Provider amendment", "Reviewer", "Reviewed at", "Activity score",
+  const rows = [["Region", "Park", "Decision", "Suitability", "Lights", "Light poles", "Fit", "Quality", "Fields", "Notes", "Field placement (lat, lon, angle°)", "Private operator", "Operator contact", "Ultimate club", "Vendor amendment", "Reviewer", "Reviewed at", "Activity score",
     "Local board", "Tenure", "Tenure until", "Board links", "Council influence", "Relationship", "Last event"]];
   PARKS.forEach(p => { const r = reviews[p.id] || {}, fl = flags[p.id]; if (!reviews[p.id] && !fl && !ultimateOf(p).length) return; const pl = r.placement;
     rows.push([p.region, p.name, r.decision ? (r.decision === "top" ? "top pick" : r.decision === "yes" ? "shortlist" : r.decision === "rating" ? "rating in progress" : "reject") : "", r.decision ? suitWord(r) : "", r.lights || "", pl?.lights?.length || 0,

@@ -1861,11 +1861,13 @@ export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDel
                     <td style={{padding:"3px 8px"}} onClick={e=>e.stopPropagation()}>
                       <div style={{display:"flex",gap:3,justifyContent:"flex-end",flexWrap:"wrap"}}>
                         {isPending&&!isDeleteQueued&&<>
-                          {isAmuaStage&&providerOfFacility(b.facility_id)==="gtec"&&<button onClick={()=>queueAction(b.id,"queued_cpsa")} title="Queue for GTEC"
-                            style={S.btn({padding:"3px 7px",fontSize:10,background:queued?.newStatus==="queued_cpsa"?"#1d4ed8":"#3b82f6",color:"#fff",outline:queued?.newStatus==="queued_cpsa"?"2px solid #1d4ed8":"none"})}>GTEC →</button>}
-                          {/* Meeting / Function Room: email CPSA a room request (an AMUA draft), then Pending GTEC Review. */}
-                          {onRequestRoom&&isSocialFac(b.facility_id)&&(isAmuaStage||b.status==="queued_cpsa"||b.status==="amua_submit")&&<button onClick={()=>onRequestRoom(b)} title="Email CPSA a room booking request (it lands as a draft in AMUA's inbox)"
-                            style={S.btn({padding:"3px 7px",fontSize:10,background:"#7c3aed",color:"#fff"})}>📨 Room</button>}
+                          {/* One "<vendor> →" button: rooms send CPSA a room request (an AMUA draft) and go
+                              to Pending CPSA review; Cornwall Park fields queue for GTEC. */}
+                          {providerOfFacility(b.facility_id)==="gtec"&&(isSocialFac(b.facility_id)
+                            ? (onRequestRoom&&(isAmuaStage||b.status==="queued_cpsa"||b.status==="amua_submit")&&<button onClick={()=>onRequestRoom(b)} title={`Email ${vendorShortFor(b.facility_id)} a room request (it lands as a draft in AMUA's inbox)`}
+                                style={S.btn({padding:"3px 7px",fontSize:10,background:"#7c3aed",color:"#fff"})}>{vendorShortFor(b.facility_id)} →</button>)
+                            : isAmuaStage&&<button onClick={()=>queueAction(b.id,"queued_cpsa")} title={`Queue for ${vendorShortFor(b.facility_id)}`}
+                                style={S.btn({padding:"3px 7px",fontSize:10,background:queued?.newStatus==="queued_cpsa"?"#1d4ed8":"#3b82f6",color:"#fff",outline:queued?.newStatus==="queued_cpsa"?"2px solid #1d4ed8":"none"})}>{vendorShortFor(b.facility_id)} →</button>)}
                           {(b.status==="queued_cpsa"||b.status==="amua_submit")&&<button onClick={()=>queueAction(b.id,"pending_cpsa")} title="Mark as Pending GTEC Review (no email)"
                             style={S.btn({padding:"3px 7px",fontSize:10,background:queued?.newStatus==="pending_cpsa"?"#0369a1":"#0ea5e9",color:"#fff",outline:queued?.newStatus==="pending_cpsa"?"2px solid #0369a1":"none"})}>⏳</button>}
                           {/* Council workflows step through their stages one at a time. */}

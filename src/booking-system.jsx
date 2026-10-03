@@ -2038,7 +2038,7 @@ export default function App() {
               </span>); })}
           <ProviderMenu pids={pids} value={null} onPick={pickProvider} label="＋ Add" sites={pid=>venues.filter(v=>v.providerId===pid).map(v=>v.site)}
             facilitiesOf={pid=>visibleFacilities().filter(f=>(f.provider||defaultProviderId())===pid)} onPickFacility={pickFacility}
-            style={{...chip,padding:"4px 10px",borderStyle:"dashed",color:"#475569"}} extra={isAdmin?[{value:ALL_VENUES,label:"All providers & locations"}]:[]}/>
+            style={{...chip,padding:"4px 10px",borderStyle:"dashed",color:"#475569"}} extra={isAdmin?[{value:ALL_VENUES,label:"All vendors & locations"}]:[]}/>
         </>;
       })()}
       <button onClick={()=>setSelFac("all")} style={{padding:"5px 12px",borderRadius:20,border:"1.5px solid",cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",flexShrink:0,borderColor:selFac==="all"?"#0f172a":"#e2e8f0",background:selFac==="all"?"#0f172a":"#fff",color:selFac==="all"?"#fff":"#475569"}}>All</button>
@@ -2768,7 +2768,7 @@ export default function App() {
                   <div style={{fontWeight:700,marginBottom:4}}>{fac?.name||b.facility_id} · {fmtDate(b.date)}</div>
                   <div style={{color:"#475569"}}>{b.name} · {fmtTime(b.start_hour)}–{fmtTime(b.start_hour+b.duration)}{b.purpose?` · ${b.purpose}`:""}</div>
                 </div>
-                <div style={{fontSize:12,color:"#64748b"}}>This adds a room request to your cart. On submit it's saved as a <strong>draft in AMUA's inbox</strong> addressed to the vendor (vendor emails are never sent directly), and the booking moves to <strong>Pending GTEC Review</strong>.</div>
+                <div style={{fontSize:12,color:"#64748b"}}>This adds a room request to your cart. On submit it's saved as a <strong>draft in AMUA's inbox</strong> addressed to the vendor (vendor emails are never sent directly), and the booking moves to <strong>Pending CPSA review</strong>.</div>
                 {vendors.length===0
                   ? <div style={{fontSize:13,color:"#92400e",background:"#fffbeb",border:"1px solid #fde68a",borderRadius:8,padding:"10px 14px"}}>No vendor profiles yet. Create one (e.g. CPSA) in <strong>👤 User Management</strong> first.</div>
                   : <div style={{display:"flex",flexDirection:"column",gap:6}}>
