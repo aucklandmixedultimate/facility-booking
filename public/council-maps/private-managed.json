@@ -1,5 +1,6 @@
 {
   "_about": "Council-owned (or council-bookable) sports grounds where a private operator — a club, trust or council CCO — controls or sub-allocates the fields. Requests go through the operator first. Scope: the default Auckland view, North Harbour Stadium to Opaheke Sports Park. Researched 2026-09-30 from operators' public web pages; 'status' says how sure we are that the operator manages field use. Verify before relying on a contact.",
+  "_source_priority": "When sources disagree about who runs a ground, trust the local club's or venue's own website and council lease/board records over Wikipedia (e.g. Ngahue Reserve: Eastern Suburbs AFC, not OFC).",
   "workflow": [
     {
       "key": "permission",
@@ -1403,26 +1404,29 @@
       ]
     },
     {
-      "id": "ofc-ngahue",
+      "id": "esafc-ngahue",
       "park_id": "central-ngahue-reserve",
       "park": "Ngahue Reserve",
       "lat": -36.8832,
       "lon": 174.844,
-      "operator": "Oceania Football Confederation (OFC Home of Football)",
-      "short": "OFC",
-      "type": "association",
+      "operator": "Eastern Suburbs AFC",
+      "short": "Eastern Suburbs AFC",
+      "type": "club",
       "code": "football",
-      "manages": "Football stadium at Ngahue Reserve, home of the OFC",
+      "manages": "Ngahue Reserve football fields (Eastern Suburbs AFC ground)",
       "contact": {
-        "url": "https://en.wikipedia.org/wiki/Ngahue_Reserve"
+        "email": "tracey@esafc.org.nz",
+        "phone": "09 578 1375",
+        "address": "6 Baddeley Avenue, Kohimarama",
+        "url": "https://easternsuburbs.org.nz/about-us/our-grounds/"
       },
       "status": "likely",
       "sources": [
-        "https://en.wikipedia.org/wiki/Ngahue_Reserve",
+        "https://easternsuburbs.org.nz/about-us/our-grounds/",
         "https://infocouncil.aucklandcouncil.govt.nz/Open/2017/03/OR_20170316_AGN_7211_AT.htm",
         "https://www.oceaniafootball.com/ofc-and-orakei-local-board-strengthen-commitment/"
       ],
-      "notes": "",
+      "notes": "Corrected by AMUA: Eastern Suburbs AFC operates this ground (club website), not the OFC as Wikipedia suggested. Same club contacts as Madills Farm.",
       "local_board": "orakei",
       "tenure": {
         "kind": "unknown"
