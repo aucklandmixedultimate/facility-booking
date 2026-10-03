@@ -263,18 +263,19 @@ export function CartModal({ cart, setCart, onClose, onSubmit, openNew, silentMod
   const totalNew    = cart.filter(i=>!i.isEdit&&!i.isMultiEdit&&!i.notifyOnly&&!i.statusChange).reduce((s,i)=>s+i.drafts.length,0);
   const totalEdits  = cart.filter(i=>i.isEdit||i.isMultiEdit).reduce((s,i)=>s+i.drafts.length,0);
   const totalStatus = cart.filter(i=>i.statusChange).reduce((s,i)=>s+(i.ids?.length||i.drafts?.length||0),0);
-  const totalNotify = cart.filter(i=>i.notifyOnly&&!i.informCpsa&&!i.clashNotify&&!i.invoiceEmail).reduce((s,i)=>s+(i.drafts?.length||0),0);
+  const totalNotify = cart.filter(i=>i.notifyOnly&&!i.informCpsa&&!i.roomRequest&&!i.clashNotify&&!i.invoiceEmail).reduce((s,i)=>s+(i.drafts?.length||0),0);
   const totalInvoice = cart.filter(i=>i.invoiceEmail).reduce((s,i)=>s+(i.count||1),0);
   const totalSlot    = cart.filter(i=>i.slotChange).length;
   const totalClash  = cart.filter(i=>i.clashNotify).length;
   const totalInform = cart.filter(i=>i.informCpsa).reduce((s,i)=>s+(i.drafts?.length||0),0);
+  const totalRoom = cart.filter(i=>i.roomRequest).length;
   // Group CPSA status notify-only items by booker email so the cart doesn't explode
   // into one row per booking. Status-change, clash and inform-CPSA items are rendered
   // separately below (clash/inform have no drafts to group).
   const notifyByEmail = {};
   cart.forEach((item, gi) => {
     if (item.slotChange) return;
-    if (!item.notifyOnly || item.informCpsa || item.clashNotify || item.invoiceEmail) return;
+    if (!item.notifyOnly || item.informCpsa || item.roomRequest || item.clashNotify || item.invoiceEmail) return;
     const key = item.email;
     if (!notifyByEmail[key]) notifyByEmail[key] = { name: item.name, email: item.email, newStatus: item.newStatus, entries: [] };
     item.drafts.forEach((d, di) => notifyByEmail[key].entries.push({ d, gi, di }));
@@ -343,7 +344,7 @@ export function CartModal({ cart, setCart, onClose, onSubmit, openNew, silentMod
         : (
           <>
             <div style={{fontSize:13,color:'#64748b',marginBottom:12}}>
-              {[totalNew>0&&`${totalNew} new booking${totalNew>1?'s':''}`, totalEdits>0&&`${totalEdits} edit${totalEdits>1?'s':''}`, totalStatus>0&&`${totalStatus} status change${totalStatus>1?'s':''}`, totalClash>0&&`${totalClash} clash alert${totalClash>1?'s':''}`, totalNotify>0&&`${totalNotify} GTEC notification${totalNotify>1?'s':''}`, totalInform>0&&`${totalInform} Inform-GTEC email${totalInform>1?'s':''}`, totalInvoice>0&&`${totalInvoice} invoice email${totalInvoice>1?'s':''}`, totalSlot>0&&`${totalSlot} shared-slot change${totalSlot>1?'s':''}`].filter(Boolean).join(' · ')} ready to submit.
+              {[totalNew>0&&`${totalNew} new booking${totalNew>1?'s':''}`, totalEdits>0&&`${totalEdits} edit${totalEdits>1?'s':''}`, totalStatus>0&&`${totalStatus} status change${totalStatus>1?'s':''}`, totalClash>0&&`${totalClash} clash alert${totalClash>1?'s':''}`, totalNotify>0&&`${totalNotify} GTEC notification${totalNotify>1?'s':''}`, totalInform>0&&`${totalInform} Inform-GTEC email${totalInform>1?'s':''}`, totalRoom>0&&`${totalRoom} room request${totalRoom>1?'s':''}`, totalInvoice>0&&`${totalInvoice} invoice email${totalInvoice>1?'s':''}`, totalSlot>0&&`${totalSlot} shared-slot change${totalSlot>1?'s':''}`].filter(Boolean).join(' · ')} ready to submit.
             </div>
             <div style={{flex:1,minHeight:0,overflowY:'auto',display:'flex',flexDirection:'column',gap:10,paddingRight:2}}>
               {/* Regular (non-notify) cart items */}
@@ -506,6 +507,27 @@ export function CartModal({ cart, setCart, onClose, onSubmit, openNew, silentMod
                       <span>{item.count||1} document{(item.count||1)!==1?'s':''}</span>
                       <span style={{fontFamily:'monospace',color:'#475569'}}>{(item.refs||[]).join(', ')}</span>
                       <span style={{marginLeft:'auto',fontWeight:700,color:'#0f172a'}}>{fmtCost(item.total||0)}</span>
+                    </div>
+                  </div>
+                );
+              })}
+              {/* Room requests to CPSA — one card each; a draft to AMUA's inbox on submit */}
+              {cart.map((item,gi)=>{
+                if(!item.roomRequest) return null;
+                const b=item.drafts[0]; if(!b) return null;
+                const f=FACILITIES.find(x=>x.id===b.facility_id);
+                return (
+                  <div key={'room-'+gi} style={{border:'1.5px solid #c4b5fd',borderRadius:12,overflow:'hidden'}}>
+                    <div style={{background:'#f5f3ff',padding:'10px 14px',display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
+                      <EmailChip email={item.email}/>
+                      <span style={{fontSize:13,fontWeight:600,color:'#0f172a',flex:1}}>{item.name}</span>
+                      <span style={{fontSize:11,fontWeight:700,color:'#6d28d9',background:'#ede9fe',border:'1px solid #c4b5fd',borderRadius:4,padding:'1px 7px'}}>📨 Room request · draft to AMUA inbox</span>
+                      <button onClick={()=>removeDraft(gi,0)} title="Remove" style={{background:'none',border:'none',cursor:'pointer',color:'#f43f5e',fontSize:15,padding:'2px 4px',lineHeight:1}}>✕</button>
+                    </div>
+                    <div style={{padding:'8px 14px',fontSize:12,color:'#64748b',background:'#fff'}}>
+                      <span style={{fontWeight:600,color:'#0f172a',marginRight:6}}>{f?.name||b.facility_id}</span>{fmtDate(b.date)} · {fmtTime(b.start_hour)}–{fmtTime(b.start_hour+b.duration)}{b.purpose?` · ${b.purpose}`:''}
+                      <span style={{marginLeft:8,fontFamily:'monospace',color:'#94a3b8'}}>{item.ref}</span>
+                      <div style={{marginTop:3,color:'#6d28d9'}}>On submit → Pending GTEC Review</div>
                     </div>
                   </div>
                 );

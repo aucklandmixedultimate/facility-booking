@@ -4,7 +4,7 @@ import { gmailToken, fetchCouncilEmails, parseCouncilEmail } from "./councilMail
 import { driveConfigured, getDriveToken, renameFile, ensureFolderPath, DRIVE_ROOT_FOLDER, ensureFolder, findChildFile, uploadFile, keepLatestRevisionForever } from "./drive-client.js";
 import { htmlToPdfBlob } from "./pdf-utils.js";
 import { currentLeagueSeason, LEAGUE_SEASONS, seasonOfBooker } from "./seasons.js";
-import { ALL_VENUES, Badge, COUNCIL_APPLICATION_FEE, COUNCIL_APPLICATION_URL, COUNCIL_APP_RE, CPSA_FIELD_IDS, CopyableTable, EmailLoginScreen, FACILITIES, LOGO_SRC, MOBILE_STYLE, MONTHS, Modal, PROVIDERS, ProviderMenu, REVIEW_STATUSES, S, STATUS_META, SUPABASE_ANON, SUPABASE_URL, VENUE_SEP, _emailAliases, activeVenueKeys, applyAmuaOrg, applyCouncilFacilities, authHeaders, buildApprovalEmailHtml, buildClashEmailHtml, buildInformCpsaEmailHtml, buildMismatchEmailHtml, buildOrderEmailHtml, canSendToCouncil, clearSlotLink, councilFeeSplit, councilOverlaps, defaultProviderId, defaultVenueKey, defaultVenueSelection, emailColor, evenSlotShares, facShort, fmt24, fmtCost, fmtDate, fmtDateShort, fmtDateShortDow, fmtTime, fmtTimeShort, getBillingDrift, getClashes, isAdminBooking, linkCouncilChildren, listVenues, logActivity, newId, newSlotRef, parseClashPrevStatus, parseCouncilApp, parseCpsaOrig, parseCpsaRefs, parseCpsaResolution, parseMismatchNote, parseSlotLink, reachedGtecQueue, sb, sendApprovalEmail, sendEmail, setBilledSnapshot, setClashPrevStatus, setCpsaResolution, setGtecSnapshot, setMismatchNote, setModuleState, setSlotLink, slotGroupMembers, stripClashPrevStatus, stripMismatchNote, supabase, timeOverlaps, todayKey, useMobile, venueFacilities, venueKeyOf, visibleFacilities, workflowOf } from "./booking/core.jsx";
+import { ALL_VENUES, Badge, COUNCIL_APPLICATION_FEE, COUNCIL_APPLICATION_URL, COUNCIL_APP_RE, CPSA_FIELD_IDS, CopyableTable, EmailLoginScreen, FACILITIES, LOGO_SRC, MOBILE_STYLE, MONTHS, Modal, PROVIDERS, ProviderMenu, REVIEW_STATUSES, S, STATUS_META, SUPABASE_ANON, SUPABASE_URL, VENUE_SEP, _emailAliases, activeVenueKeys, applyAmuaOrg, applyCouncilFacilities, authHeaders, buildApprovalEmailHtml, buildClashEmailHtml, buildInformCpsaEmailHtml, buildMismatchEmailHtml, buildOrderEmailHtml, buildRoomRequestEmailHtml, canSendToCouncil, clearSlotLink, councilFeeSplit, councilOverlaps, defaultProviderId, defaultVenueKey, defaultVenueSelection, emailColor, evenSlotShares, facShort, fmt24, fmtCost, fmtDate, fmtDateShort, fmtDateShortDow, fmtTime, fmtTimeShort, getBillingDrift, getClashes, isAdminBooking, linkCouncilChildren, listVenues, logActivity, newId, newSlotRef, parseClashPrevStatus, parseCouncilApp, parseCpsaOrig, parseCpsaRefs, parseCpsaResolution, parseMismatchNote, parseSlotLink, reachedGtecQueue, sb, sendApprovalEmail, sendEmail, setBilledSnapshot, setClashPrevStatus, setCpsaResolution, setGtecSnapshot, setMismatchNote, setModuleState, setSlotLink, slotGroupMembers, stripClashPrevStatus, stripMismatchNote, supabase, timeOverlaps, todayKey, useMobile, venueFacilities, venueKeyOf, visibleFacilities, workflowOf } from "./booking/core.jsx";
 import { AdminPanel, CouncilAllocationTab, councilAppBookings, mergeCouncilOutcomes } from "./booking/admin.jsx";
 import { fetchCJREvents, findMatchingUserBooking, gtecTeamKey, mapCJRFacility, parseCJRDate, parseCJRDateTime } from "./booking/gtec.jsx";
 import { BillingTab, DRIVE_SUBFOLDERS, billingDocBaseName, buildBillingDocHtml, driveBatchFolderName, drivePoFolderName } from "./booking/billing.jsx";
@@ -73,6 +73,7 @@ export default function App() {
   const [showCart, setShowCart]       =useState(false);
   const [cart,     setCart]           =useState([]); // { drafts, name, email, isMultiEdit? }[]
   const [informCpsaFor, setInformCpsaFor] = useState(null); // booking awaiting vendor pick for "Inform CPSA"
+  const [roomRequestFor, setRoomRequestFor] = useState(null); // Meeting / Function Room booking awaiting a CPSA vendor pick
   const [deleteQueue,setDeleteQueue]  =useState([]); // bookings queued for removal
   const [showDeleteCart,setShowDeleteCart]=useState(false);
   const [editing,  setEditing]  =useState(null);
@@ -1774,6 +1775,15 @@ export default function App() {
     showToast("Inform-GTEC email added to cart.");
   }
 
+  // Room request to CPSA: cart an email (a draft to AMUA's inbox, since it's vendor mail) for the
+  // Meeting Room or Function Room; on submit the booking moves to Pending GTEC Review.
+  function addRoomRequestToCart(booking, vendorEmail, vendorName) {
+    const ref = "ROOM-" + Date.now().toString(36).toUpperCase();
+    setCart(c => [...c, { roomRequest: true, notifyOnly: true, drafts: [booking], name: vendorName || vendorEmail, email: vendorEmail, ref }]);
+    setRoomRequestFor(null);
+    showToast("Room request added to the cart.");
+  }
+
   // Generic outbox queue — admin notification actions (clash, mismatch, …) push
   // their email descriptors here instead of sending; the cart submit sends them.
   function queueNotifications(items, label) {
@@ -1840,6 +1850,16 @@ export default function App() {
       statusItems.forEach(it => logActivity("status_change", { ids: it.ids, to: it.newStatus, count: it.ids.length }));
     }
 
+    // Room requests move their bookings to Pending GTEC Review even in silent mode (only the
+    // email is suppressed then).
+    for (const item of notifyItems.filter(x => x.roomRequest)) {
+      const at = new Date().toISOString();
+      for (const d of item.drafts) {
+        const sys = `${(d.system_notes||"").trim()}${d.system_notes?"\n":""}[ROOM-REQ ${item.ref} ${at}]`;
+        if (configured) { try { await sb.update("bookings", d.id, { status: "pending_cpsa", system_notes: sys, updated_at: at }); } catch(e) { showToast("Couldn't update the booking: "+e.message, "error"); } }
+        else setBookings(prev => prev.map(x => x.id===d.id ? { ...x, status: "pending_cpsa", system_notes: sys } : x));
+      }
+    }
     if (!silentMode) {
       const noEmailStatuses = new Set(["pending_cpsa","op_permission","council_apply","council_action","op_confirm"]);
       // Status-change emails — grouped into one email per booker + status, so a booker
@@ -1865,6 +1885,13 @@ export default function App() {
         if (item.amuaDraft) {   // facility request: sendEmail turns it into a draft to AMUA's inbox
           await sendEmail({ to: item.email, subject: item.subject, html: item.html });
           logActivity("facility_request_drafted", { intended: item.email, subject: item.subject });
+          continue;
+        }
+        if (item.roomRequest) {
+          const b0 = item.drafts[0], fac = FACILITIES.find(x=>x.id===b0?.facility_id);
+          await sendEmail({ to: item.email, subject: `Room booking request — ${fac?.name||"room"}, ${fmtDate(b0.date)} (${item.ref})`,
+            html: buildRoomRequestEmailHtml({ vendorName: item.name, bookings: item.drafts, ref: item.ref, players: approxPlayers }) });
+          logActivity("room_request_drafted", { intended: item.email, ref: item.ref, ids: item.drafts.map(d=>d.id), items: item.drafts.map(d=>({ facility_id:d.facility_id, date:d.date, start_hour:d.start_hour, duration:d.duration })) });
           continue;
         }
         if (item.invoiceEmail) {
@@ -2524,7 +2551,7 @@ export default function App() {
         {tab==="about"&&<div style={{padding:"8px 0"}}><AboutTab/></div>}
         {tab==="allocation"&&isAdmin&&<div style={S.card}><CouncilAllocationTab outcomes={councilOutcomes} bookings={bookings} syncing={councilSyncing} syncLog={councilSyncLog} onSync={handleCouncilMailSync} onSaveOutcomes={saveCouncilOutcomes} onBulkStatusChange={handleBulkStatusChange} onQueueNotifications={queueNotifications} onLinkApp={handleLinkCouncilApp} aliasNames={aliasNames} loggedInEmail={loggedInEmail}/></div>}
         {tab==="admin"&&isAdmin&&<div style={S.card}>
-          {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onView={setViewing} onQueueDelete={queueForRemovalSilent} clashes={allClashes} deleteIds={new Set(deleteQueue.map(b=>b.id))} facilityRates={facilityRates} onUpdateFacilityRate={updateFacilityRate} onClearOldUnapproved={handleClearOldUnapproved} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onSyncDB={handleSyncDB} onBulkApply={handleBulkApply} onSaveMismatch={handleSaveMismatch} onInformCpsa={setInformCpsaFor} onQueueNotifications={queueNotifications} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} onLinkClash={handleLinkClashToGtec} loggedInEmail={loggedInEmail} syncResults={syncResults} onClearSyncResults={()=>setSyncResults([])} showSyncResults={showSyncPanel} onToggleSyncResults={()=>setShowSyncPanel(v=>!v)} bookerFilter={listBookerFilter} onToggleBooker={toggleBooker} onSetBookerFilter={setListBookerFilter} aliasNames={aliasNames} emailAliases={emailAliases} pricingConditions={pricingConditions} onAddPricingCondition={addPricingCondition} onUpdatePricingCondition={updatePricingCondition} onRemovePricingCondition={removePricingCondition} cpsaDeleteLog={cpsaDeleteLog} onClearDeleteLogEntry={id=>setCpsaDeleteLog(prev=>prev.filter(e=>e.id!==id))} onClearDeleteLog={()=>setCpsaDeleteLog([])} onSendToCouncil={handleSendToCouncil}/>}
+          {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onView={setViewing} onQueueDelete={queueForRemovalSilent} clashes={allClashes} deleteIds={new Set(deleteQueue.map(b=>b.id))} facilityRates={facilityRates} onUpdateFacilityRate={updateFacilityRate} onClearOldUnapproved={handleClearOldUnapproved} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onSyncDB={handleSyncDB} onBulkApply={handleBulkApply} onSaveMismatch={handleSaveMismatch} onInformCpsa={setInformCpsaFor} onRequestRoom={setRoomRequestFor} onQueueNotifications={queueNotifications} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} onLinkClash={handleLinkClashToGtec} loggedInEmail={loggedInEmail} syncResults={syncResults} onClearSyncResults={()=>setSyncResults([])} showSyncResults={showSyncPanel} onToggleSyncResults={()=>setShowSyncPanel(v=>!v)} bookerFilter={listBookerFilter} onToggleBooker={toggleBooker} onSetBookerFilter={setListBookerFilter} aliasNames={aliasNames} emailAliases={emailAliases} pricingConditions={pricingConditions} onAddPricingCondition={addPricingCondition} onUpdatePricingCondition={updatePricingCondition} onRemovePricingCondition={removePricingCondition} cpsaDeleteLog={cpsaDeleteLog} onClearDeleteLogEntry={id=>setCpsaDeleteLog(prev=>prev.filter(e=>e.id!==id))} onClearDeleteLog={()=>setCpsaDeleteLog([])} onSendToCouncil={handleSendToCouncil}/>}
         </div>}
       </div>
 
@@ -2726,6 +2753,37 @@ export default function App() {
       {showCart&&(
         <Modal title="🛒 Booking Cart" onClose={()=>setShowCart(false)} width={660}>
           <CartModal cart={cart} setCart={setCart} onClose={()=>setShowCart(false)} onSubmit={handleCartSubmit} openNew={openNew} silentMode={silentMode} onToggleSilent={isAdmin?setSilentMode:undefined}/>
+        </Modal>
+      )}
+      {roomRequestFor&&(
+        <Modal title="📨 Room request to CPSA — choose the recipient" onClose={()=>setRoomRequestFor(null)} width={520}>
+          {(()=>{
+            const b = roomRequestFor, fac = FACILITIES.find(x=>x.id===b.facility_id);
+            // Vendors, CPSA / GTEC first.
+            const isCpsa = ([e,p]) => /cpsa|cornwall|gtec|grammar/i.test(`${e} ${p.fullName||""}`);
+            const vendors = Object.entries(profiles||{}).filter(([,p])=>p?.profileType==="vendor").sort((a,c)=>isCpsa(c)-isCpsa(a));
+            return (
+              <div style={{display:"flex",flexDirection:"column",gap:14}}>
+                <div style={{background:"#f5f3ff",border:"1px solid #ddd6fe",borderRadius:10,padding:"10px 14px",fontSize:13,color:"#4c1d95"}}>
+                  <div style={{fontWeight:700,marginBottom:4}}>{fac?.name||b.facility_id} · {fmtDate(b.date)}</div>
+                  <div style={{color:"#475569"}}>{b.name} · {fmtTime(b.start_hour)}–{fmtTime(b.start_hour+b.duration)}{b.purpose?` · ${b.purpose}`:""}</div>
+                </div>
+                <div style={{fontSize:12,color:"#64748b"}}>This adds a room request to your cart. On submit it's saved as a <strong>draft in AMUA's inbox</strong> addressed to the vendor (vendor emails are never sent directly), and the booking moves to <strong>Pending GTEC Review</strong>.</div>
+                {vendors.length===0
+                  ? <div style={{fontSize:13,color:"#92400e",background:"#fffbeb",border:"1px solid #fde68a",borderRadius:8,padding:"10px 14px"}}>No vendor profiles yet. Create one (e.g. CPSA) in <strong>👤 User Management</strong> first.</div>
+                  : <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                      {vendors.map(([email,p],i)=>(
+                        <button key={email} onClick={()=>addRoomRequestToCart(b, email, p.fullName||email)} autoFocus={i===0}
+                          style={{display:"flex",flexDirection:"column",alignItems:"flex-start",gap:2,padding:"10px 14px",borderRadius:10,border:`1.5px solid ${i===0&&isCpsa([email,p])?"#a78bfa":"#e2e8f0"}`,background:"#fff",cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
+                          <span style={{fontSize:14,fontWeight:700,color:"#0f172a"}}>{p.fullName||email}{i===0&&isCpsa([email,p])?" · suggested":""}</span>
+                          <span style={{fontSize:12,color:"#64748b"}}>{email}</span>
+                        </button>
+                      ))}
+                    </div>
+                }
+              </div>
+            );
+          })()}
         </Modal>
       )}
       {informCpsaFor&&(
