@@ -1806,7 +1806,7 @@ export const ACTIVITY_LABELS = {
   drive_upload:"Saved to Drive", drive_attach:"GTEC invoice attached",
   email_sent:"Email sent", email_failed:"Email failed", sign_in:"Signed in", sign_out:"Signed out",
   settings_change:"Settings changed", council_fields:"Council fields", council_application_sent:"Sent to council",
-  vetting_change:"Vetting change", client_error:"App error", backup_downloaded:"Backup downloaded",
+  vetting_change:"Vetting change", client_error:"App error", backup_downloaded:"Backup taken",
 };
 // What non-admins see of the log: bookers' own activity (the activity_log select policy in
 // supabase-setup.sql allows the same), not sign-ins, emails or admin work.
