@@ -1756,6 +1756,31 @@ export function Badge({status, wf, fid, vendor}) {
   const m={...(STATUS_META[status]||STATUS_META.pending_amua), label: stepLabel(status, wf, fid, vendor)};
   return <span style={{display:"inline-flex",alignItems:"center",gap:5,padding:"2px 10px",borderRadius:999,background:m.bg,border:`1px solid ${m.border}`,color:m.text,fontSize:12,fontWeight:600,whiteSpace:"nowrap"}}><span style={{width:6,height:6,borderRadius:"50%",background:m.dot,display:"inline-block"}}/>{m.label}</span>;
 }
+// Grouped (the schedule summary) / Itemised (one row per booking) — the same switch on the
+// Bookings and Admin tables, styled like Billing's view switch. Remembered per table.
+export function useTableView(key) {
+  const [v, setV] = useState(() => { try { return localStorage.getItem(key) || "grouped"; } catch { return "grouped"; } });
+  return [v, nv => { setV(nv); try { localStorage.setItem(key, nv); } catch { /* ignore */ } }];
+}
+export function TableViewToggle({ value, onChange, children }) {
+  const opt = (k, l, t) => (
+    <button key={k} onClick={() => onChange(k)} title={t} aria-pressed={value === k}
+      style={{padding:"3px 10px",borderRadius:6,border:"1px solid",cursor:"pointer",fontSize:11,fontWeight:600,fontFamily:"inherit",
+        borderColor:value===k?"#0f172a":"#e2e8f0",background:value===k?"#0f172a":"#fff",color:value===k?"#fff":"#475569"}}>{l}</button>);
+  return (
+    <div style={{display:"flex",alignItems:"center",gap:6,padding:"6px 10px",background:"#f8fafc",borderRadius:8,fontSize:11,flexWrap:"wrap",marginBottom:10}}>
+      <span style={{color:"#64748b",fontWeight:600,whiteSpace:"nowrap"}}>View:</span>
+      {opt("grouped", "Grouped", "Bookings grouped by booker and recurring pattern (the schedule summary)")}
+      {opt("itemised", "Itemised", "Every booking as its own row")}
+      {children}
+    </div>
+  );
+}
+// Vendors present in a set of bookings (for a vendor filter), most common first.
+export function vendorsIn(bookings) {
+  const n = {}; bookings.forEach(b => { const v = vendorShortFor(b.facility_id); n[v] = (n[v] || 0) + 1; });
+  return Object.keys(n).sort((a, b) => n[b] - n[a] || a.localeCompare(b));
+}
 export function EmailChip({email}) {
   const c=emailColor(email);
   return <span style={{display:"inline-flex",alignItems:"center",gap:4,padding:"2px 8px",borderRadius:999,background:c+"18",border:`1px solid ${c}44`,color:c,fontSize:11,fontWeight:700,whiteSpace:"nowrap"}}>{email||"unknown"}</span>;

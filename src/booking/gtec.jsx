@@ -187,7 +187,19 @@ export function findMatchingUserBooking(allBookings, ev, facilityIds, gtecLinks=
 
   const identityOk = teamIsOurs || emailLinked || best.identityScore >= 3;
   const exact = reasons.length === 0 && identityOk;
-  return { booking: b, exact, reasons };
+  // The same booker's OTHER bookings this event overlaps (e.g. a 6:30–8:00 and an 8:00–9:15
+  // booking against one 6:30–8:30 GTEC entry). The event is matched to the best one; the
+  // rest aren't what GTEC holds either, so they're returned as mismatches too (the sync
+  // keeps an exact match from another event over these).
+  const also = scored.slice(1).filter(x => x.identityScore >= 3 || (detailEmail && canon(detailEmail) === canon(x.booking.email))).map(x => {
+    const ob = x.booking, rs = [];
+    if (ob.start_hour !== start_hour) rs.push(`Time: ${fmtTimeShort(ob.start_hour)} → ${fmtTimeShort(start_hour)}`);
+    if (ob.duration !== duration)     rs.push(`Dur: ${ob.duration}h → ${duration}h`);
+    if (!facilityIds.includes(ob.facility_id)) rs.push(`Field: ${facShort(ob.facility_id)} → ${facilityIds.map(facShort).join("/")}`);
+    rs.push(`GTEC entry ${fmtTimeShort(start_hour)}–${fmtTimeShort(start_hour + duration)} is matched to another of your bookings`);
+    return { booking: ob, exact: false, reasons: rs };
+  });
+  return { booking: b, exact, reasons, also };
 }
 
 // Maps facility mentions in EventName to internal facility IDs

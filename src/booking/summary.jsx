@@ -182,7 +182,8 @@ export function OneOffModal({ email, name, bkgs, onClose }) {
   );
 }
 
-export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkApply, onBulkStatusChange, onClose, inline=false, aliasNames={}, emailAliases={} }) {
+// embedded: rendered as a table view (Grouped) — no panel heading or close.
+export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkApply, onBulkStatusChange, onClose, inline=false, embedded=false, aliasNames={}, emailAliases={} }) {
   const [facSensitive, setFacSensitive] = useState(false);
   const [splitPatterns, setSplitPatterns] = useState(new Set());
   const [patternModal, setPatternModal] = useState(null);
@@ -302,7 +303,7 @@ export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkA
   }
 
   // A function (not a component) so the panel isn't remounted on every render.
-  const Wrapper = children => inline
+  const Wrapper = children => embedded ? <div>{children}</div> : inline
     ? <div style={{background:"#f0f9ff",border:"1.5px solid #bae6fd",borderRadius:12,padding:16}}><div style={{fontSize:14,fontWeight:700,color:"#0369a1",marginBottom:10}}>📅 Schedule Summary</div>{children}</div>
     : <Modal title="📅 Schedule Summary" onClose={onClose}>{children}</Modal>;
   const colCount = 5;
