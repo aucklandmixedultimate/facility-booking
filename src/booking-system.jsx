@@ -834,6 +834,9 @@ const MOBILE_STYLE = `
   @media (min-width: 768px) {
     .modal-backdrop { align-items: center !important; }
     .modal-backdrop > div { border-radius: 16px !important; max-height: 90vh !important; }
+    /* Side panel: full height on the right, lighter backdrop, no blur */
+    .modal-backdrop.side { justify-content: flex-end !important; align-items: stretch !important; background: rgba(15,23,42,0.18) !important; backdrop-filter: none !important; }
+    .modal-backdrop.side > div { border-radius: 0 !important; max-height: 100vh !important; height: 100vh; box-shadow: -8px 0 32px rgba(15,23,42,0.18) !important; }
   }
   ::-webkit-scrollbar { display: none; }
   /* Diagonal stripe overlay distinguishes social-space chips in week/month calendar */
@@ -1707,7 +1710,8 @@ function EmailChip({email}) {
   const c=emailColor(email);
   return <span style={{display:"inline-flex",alignItems:"center",gap:4,padding:"2px 8px",borderRadius:999,background:c+"18",border:`1px solid ${c}44`,color:c,fontSize:11,fontWeight:700,whiteSpace:"nowrap"}}>{email||"unknown"}</span>;
 }
-function Modal({title,onClose,children,width=560}) {
+// side: on desktop, open as a panel on the right (the list behind stays visible).
+function Modal({title,onClose,children,width=560,side=false}) {
   const isMobile = useMobile();
   useEffect(()=>{
     const onKey=e=>{ if(e.key==="Escape"){ e.stopPropagation(); onClose(); } };
@@ -1716,7 +1720,7 @@ function Modal({title,onClose,children,width=560}) {
   },[onClose]);
   return (
     <div style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.55)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:1000,padding:"0",backdropFilter:"blur(2px)"}}
-      className="modal-backdrop">
+      className={side?"modal-backdrop side":"modal-backdrop"} onMouseDown={e=>{ if(side&&e.target===e.currentTarget) onClose(); }}>
       <div style={{background:"#fff",borderRadius:"16px 16px 0 0",width:"100%",maxWidth:width,maxHeight:"92vh",display:"flex",flexDirection:"column",boxShadow:"0 -8px 40px rgba(0,0,0,0.2)"}}
         onClick={e=>e.stopPropagation()}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:isMobile?"12px 14px 10px":"20px 24px 16px",borderBottom:"1px solid #f1f5f9",flexShrink:0}}>
@@ -7705,7 +7709,7 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
       </div>
 
       {/* KPI cards */}
-      <div style={{ display:"grid", gridTemplateColumns:window.innerWidth<768?"repeat(3,minmax(0,1fr))":"repeat(auto-fit,minmax(150px,1fr))", gap:window.innerWidth<768?6:12 }}>
+      <div style={{ display:"grid", gridTemplateColumns:window.innerWidth<768?"repeat(3,minmax(0,1fr))":"repeat(auto-fit,minmax(140px,1fr))", gap:window.innerWidth<768?6:10 }}>
         {[
           { label:"Bookings",      value:active.length,         icon:"📋" },
           { label:"Total Hours",   value:fmtHrs(totalHrs),      icon:"⏱" },
@@ -7721,11 +7725,10 @@ function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingCondit
             <div style={{ fontSize:10.5, fontWeight:600, color:"#64748b", lineHeight:1.25 }}>{c.icon} {c.label}</div>
           </div>
           ) : (
-          <div key={c.label} style={{ background: c.highlight?"#f0fdf4":"#fff", border:`1px solid ${c.highlight?"#bbf7d0":"#f1f5f9"}`, borderRadius:12, padding:"16px 18px", boxShadow:"0 1px 4px rgba(0,0,0,0.04)" }}>
-            <div style={{ fontSize:22, marginBottom:6 }}>{c.icon}</div>
-            <div style={{ fontSize:22, fontWeight:800, color: c.highlight?"#15803d":"#0f172a", letterSpacing:"-0.03em" }}>{c.value}</div>
-            <div style={{ fontSize:12, fontWeight:600, color:"#64748b", marginTop:2 }}>{c.label}</div>
-            {c.sub&&<div style={{ fontSize:11, color:"#94a3b8" }}>{c.sub}</div>}
+          // Desktop: one compact row of figures (value, then icon + label).
+          <div key={c.label} title={c.sub||undefined} style={{ background: c.highlight?"#f0fdf4":"#fff", border:`1px solid ${c.highlight?"#bbf7d0":"#f1f5f9"}`, borderRadius:10, padding:"10px 14px", boxShadow:"0 1px 4px rgba(0,0,0,0.04)" }}>
+            <div style={{ fontSize:20, fontWeight:800, color: c.highlight?"#15803d":"#0f172a", letterSpacing:"-0.03em", whiteSpace:"nowrap" }}>{c.value}</div>
+            <div style={{ fontSize:12, fontWeight:600, color:"#64748b", whiteSpace:"nowrap" }}>{c.icon} {c.label}{c.sub&&<span style={{ fontWeight:400, color:"#94a3b8" }}> · {c.sub}</span>}</div>
           </div>
           )
         ))}
@@ -9298,12 +9301,13 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
     { open: showPricingRules,  set: v => setShowPricingRules(v) },
     { open: showDeleteLogPanel, set: v => setShowDeleteLogPanel(v) },
   ];
+  // Each section opens and closes on its own; Alt-click shows only that one.
   function toggleSection(idx, e) {
-    const additive = e && (e.ctrlKey || e.metaKey);
-    const willOpen = !sectionPanels[idx].open;
+    const only = e && e.altKey;
+    const willOpen = only ? true : !sectionPanels[idx].open;
     sectionPanels.forEach((p, i) => {
       if (i === idx) p.set(willOpen);
-      else if (!additive && p.open) p.set(false); // collapse the rest unless additive
+      else if (only && p.open) p.set(false);
     });
   }
 
@@ -9508,27 +9512,27 @@ function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,cla
             🧹 Clear old unapproved ({oldUnapproved.length})
           </button>
         )}
-        <button onClick={e=>toggleSection(0,e)} title="Ctrl/⌘-click to keep other sections open" style={S.btn({background:showSchedulePanel?"#f0f9ff":"#fff",color:"#0369a1",border:`1.5px solid ${showSchedulePanel?"#7dd3fc":"#bae6fd"}`,fontSize:12,fontWeight:700})}>
+        <button onClick={e=>toggleSection(0,e)} title="Open or close this section (Alt-click: show only this one)" style={S.btn({background:showSchedulePanel?"#f0f9ff":"#fff",color:"#0369a1",border:`1.5px solid ${showSchedulePanel?"#7dd3fc":"#bae6fd"}`,fontSize:12,fontWeight:700})}>
           📅 Schedule {showSchedulePanel?"▴":"▾"}
         </button>
-        <button onClick={e=>toggleSection(1,e)} title="Ctrl/⌘-click to keep other sections open" style={S.btn({background:showActivityPanel?"#f8fafc":"#fff",color:"#475569",border:`1.5px solid ${showActivityPanel?"#94a3b8":"#e2e8f0"}`,fontSize:12,fontWeight:700})}>
+        <button onClick={e=>toggleSection(1,e)} title="Open or close this section (Alt-click: show only this one)" style={S.btn({background:showActivityPanel?"#f8fafc":"#fff",color:"#475569",border:`1.5px solid ${showActivityPanel?"#94a3b8":"#e2e8f0"}`,fontSize:12,fontWeight:700})}>
           📜 Activity Log {showActivityPanel?"▴":"▾"}
         </button>
-        {<button onClick={e=>toggleSection(2,e)} title="Ctrl/⌘-click to keep other sections open" style={S.btn({background:showSyncResults?"#ecfeff":"#fff",color:syncResults.length>0?"#0e7490":"#94a3b8",border:`1.5px solid ${showSyncResults?"#a5f3fc":"#e2e8f0"}`,fontSize:12,fontWeight:syncResults.length>0?700:500})}>
+        {<button onClick={e=>toggleSection(2,e)} title="Open or close this section (Alt-click: show only this one)" style={S.btn({background:showSyncResults?"#ecfeff":"#fff",color:syncResults.length>0?"#0e7490":"#94a3b8",border:`1.5px solid ${showSyncResults?"#a5f3fc":"#e2e8f0"}`,fontSize:12,fontWeight:syncResults.length>0?700:500})}>
           🔄 Sync Results ({syncResults.length}) {showSyncResults?"▴":"▾"}
         </button>}
-        <button onClick={e=>toggleSection(3,e)} title="Ctrl/⌘-click to keep other sections open" style={S.btn({border:`1.5px solid ${visibleClashes.length>0?"#fda4af":"#e2e8f0"}`,background:showClashPanel?"#fff1f2":"#fff",color:visibleClashes.length>0?"#9f1239":"#94a3b8",fontSize:12,fontWeight:visibleClashes.length>0?700:500})}>
+        <button onClick={e=>toggleSection(3,e)} title="Open or close this section (Alt-click: show only this one)" style={S.btn({border:`1.5px solid ${visibleClashes.length>0?"#fda4af":"#e2e8f0"}`,background:showClashPanel?"#fff1f2":"#fff",color:visibleClashes.length>0?"#9f1239":"#94a3b8",fontSize:12,fontWeight:visibleClashes.length>0?700:500})}>
           ⚠️ Clashes ({visibleClashes.length}) {showClashPanel?"▴":"▾"}
         </button>
         {(()=>{ const mc=bookings.filter(b=>b.status==="cpsa_review_needed"&&!isAdminBooking(b)&&inBookerFilter(b.email)).length; return (
-        <button onClick={e=>toggleSection(4,e)} title="Ctrl/⌘-click to keep other sections open" style={S.btn({border:`1.5px solid ${mc>0?"#fde68a":"#e2e8f0"}`,background:showMismatchPanel?"#fffbeb":"#fff",color:mc>0?"#b45309":"#94a3b8",fontSize:12,fontWeight:mc>0?700:500})}>
+        <button onClick={e=>toggleSection(4,e)} title="Open or close this section (Alt-click: show only this one)" style={S.btn({border:`1.5px solid ${mc>0?"#fde68a":"#e2e8f0"}`,background:showMismatchPanel?"#fffbeb":"#fff",color:mc>0?"#b45309":"#94a3b8",fontSize:12,fontWeight:mc>0?700:500})}>
           ⚡ Mismatches ({mc}) {showMismatchPanel?"▴":"▾"}
         </button>
         );})()}
-        <button onClick={e=>toggleSection(5,e)} title="Ctrl/⌘-click to keep other sections open" style={S.btn({border:`1.5px solid ${trackedChanges.length>0?"#ddd6fe":"#e2e8f0"}`,background:showTrackChanges?"#f5f3ff":"#fff",color:trackedChanges.length>0?"#5b21b6":"#94a3b8",fontSize:12,fontWeight:trackedChanges.length>0?700:500})}>
+        <button onClick={e=>toggleSection(5,e)} title="Open or close this section (Alt-click: show only this one)" style={S.btn({border:`1.5px solid ${trackedChanges.length>0?"#ddd6fe":"#e2e8f0"}`,background:showTrackChanges?"#f5f3ff":"#fff",color:trackedChanges.length>0?"#5b21b6":"#94a3b8",fontSize:12,fontWeight:trackedChanges.length>0?700:500})}>
           🧾 Track Changes ({trackedChanges.length}) {showTrackChanges?"▴":"▾"}
         </button>
-        {onAddPricingCondition&&<button onClick={e=>toggleSection(6,e)} title="Ctrl/⌘-click to keep other sections open" style={S.btn({border:`1.5px solid ${pricingConditions.length>0?"#c7d2fe":"#e2e8f0"}`,background:showPricingRules?"#eef2ff":"#fff",color:pricingConditions.length>0?"#4338ca":"#94a3b8",fontSize:12,fontWeight:pricingConditions.length>0?700:500})}>
+        {onAddPricingCondition&&<button onClick={e=>toggleSection(6,e)} title="Open or close this section (Alt-click: show only this one)" style={S.btn({border:`1.5px solid ${pricingConditions.length>0?"#c7d2fe":"#e2e8f0"}`,background:showPricingRules?"#eef2ff":"#fff",color:pricingConditions.length>0?"#4338ca":"#94a3b8",fontSize:12,fontWeight:pricingConditions.length>0?700:500})}>
           💲 Pricing Rules ({pricingConditions.length}) {showPricingRules?"▴":"▾"}
         </button>}
         <button onClick={e=>toggleSection(7,e)} title="Cancellations of bookings already submitted to GTEC — request GTEC to purge these. Ctrl/⌘-click to keep other sections open" style={S.btn({border:`1.5px solid ${cpsaDeleteLog.length>0?"#fecaca":"#e2e8f0"}`,background:showDeleteLogPanel?"#fef2f2":"#fff",color:cpsaDeleteLog.length>0?"#b91c1c":"#94a3b8",fontSize:12,fontWeight:cpsaDeleteLog.length>0?700:500})}>
@@ -11280,8 +11284,11 @@ export default function App() {
   const [bookings, setBookings] =useState([]);
   const [loading,  setLoading]  =useState(true);
   const [dbError,  setDbError]  =useState("");
-  const [tab,      setTab]      =useState("about");
-  const [selFac,   setSelFac]   =useState("all");
+  // The tab, facility filter and booker filter are remembered between visits.
+  const remembered = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } };
+  const [tab,      setTab]      =useState(()=>remembered("fb_tab","about"));
+  const [selFac,   setSelFac]   =useState(()=>remembered("fb_sel_fac","all"));
+  useEffect(()=>{ try{ localStorage.setItem("fb_tab",JSON.stringify(tab)); localStorage.setItem("fb_sel_fac",JSON.stringify(selFac)); }catch{ /* ignore */ } },[tab,selFac]);
   // ?venue=<provider>|<site> (from the Council fields page's "book" links) picks the venue.
   const [venue, setVenueState] = useState(()=>{
     try{
@@ -11494,7 +11501,8 @@ export default function App() {
   const [pricingConditions, setPricingConditions] = useState(()=>{
     try{return JSON.parse(localStorage.getItem("fb_pricing_conditions")||"[]");}catch{return [];}
   });
-  const [listBookerFilter, setListBookerFilter] = useState(new Set()); // empty = all (additive multi-select)
+  const [listBookerFilter, setListBookerFilter] = useState(()=>{ try{ return new Set(JSON.parse(localStorage.getItem("fb_booker_filter")||"[]")); }catch{ return new Set(); } }); // empty = all (additive multi-select)
+  useEffect(()=>{ try{ localStorage.setItem("fb_booker_filter",JSON.stringify([...listBookerFilter])); }catch{ /* ignore */ } },[listBookerFilter]);
   const [showBookerPicker, setShowBookerPicker] = useState(false);
   // Toggle a booker; if it's a primary with linked secondaries, toggle the whole profile group.
   const toggleBooker = em => setListBookerFilter(prev => {
@@ -12134,6 +12142,23 @@ export default function App() {
   const openNew=useCallback((date,startHour,duration=1,facility=null)=>{setEditing(null);setPrefill({date,startHour,duration,facility});setDayPopupDate(null);setShowForm(true);},[]);
   // Open the booking form pre-seeded with one row per day (grouped multi-day booking).
   const openNewRange=useCallback((dates,startHour=9,duration=1,facility=null)=>{setEditing(null);setPrefill({dates,startHour,duration,facility});setDayPopupDate(null);setShowForm(true);},[]);
+  // Desktop keyboard shortcuts (ignored while typing or with a dialog open):
+  // 1–8 tabs · n new booking · [ ] previous / next week · t this week · ? list them.
+  useEffect(()=>{
+    const onKey = e => {
+      if (e.ctrlKey || e.metaKey || e.altKey || window.innerWidth < 768) return;
+      const t = e.target; if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+      if (document.querySelector(".modal-backdrop, .actor-ov")) return;
+      const tabs = ["about","calendar","month","list","summary", ...(loggedInEmail?["billing"]:[]), ...(isAdmin?["admin","allocation"]:[])];
+      if (/^[1-8]$/.test(e.key) && tabs[+e.key-1]) { setTab(tabs[+e.key-1]); e.preventDefault(); }
+      else if (e.key === "n") { openNew(todayKey(), 18, 1); e.preventDefault(); }
+      else if (e.key === "[" || e.key === "]") { setFocusedDate(d => { const nd = new Date(d); nd.setDate(nd.getDate() + (e.key === "]" ? 7 : -7)); return nd; }); if (tab !== "calendar") setTab("calendar"); }
+      else if (e.key === "t") { setFocusedDate(new Date()); }
+      else if (e.key === "?") showToast("Shortcuts: 1–8 tabs · n new booking · [ ] previous/next week · t this week");
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [isAdmin, loggedInEmail, tab, openNew]);
   const openDay=useCallback((dk,focusHour=null,duration=null)=>{setDayPopupDate(dk);setDayPopupFocus(focusHour);setDayPopupDur(focusHour!=null?duration:null);},[]);
   const openEdit=useCallback((b)=>{setEditing({...b});setViewing(null);setShowForm(true);},[]);
 
@@ -13939,7 +13964,7 @@ export default function App() {
       )}
 
       {viewing&&(
-        <Modal title="Booking Details" onClose={()=>setViewing(null)}>
+        <Modal title="Booking Details" onClose={()=>setViewing(null)} side>
           <BookingDetail booking={viewing} onEdit={()=>openEdit(viewing)} onClose={()=>setViewing(null)} onCancel={()=>queueForRemoval(viewing.id)} isAdmin={isAdmin} onStatusChange={status=>handleStatusChange(viewing,status)} onPatch={handlePatchBooking} loggedInEmail={loggedInEmail} allClashes={allClashes} bookers={knownBookers} onConvertAdmin={handleConvertAdminBooking} allBookings={bookings} onShareSlot={handleShareSlot} onMergeSlot={handleMergeSlots} onUnlinkSlot={handleUnlinkSlot}/>
         </Modal>
       )}
