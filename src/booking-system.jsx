@@ -1756,7 +1756,7 @@ const ACTIVITY_LABELS = {
   drive_upload:"Saved to Drive", drive_attach:"GTEC invoice attached",
   email_sent:"Email sent", email_failed:"Email failed", sign_in:"Signed in", sign_out:"Signed out",
   settings_change:"Settings changed", council_fields:"Council fields", council_application_sent:"Sent to council",
-  vetting_change:"Vetting change", client_error:"App error",
+  vetting_change:"Vetting change", client_error:"App error", backup_downloaded:"Backup downloaded",
 };
 // What non-admins see of the log: bookers' own activity (the activity_log select policy in
 // supabase-setup.sql allows the same), not sign-ins, emails or admin work.
@@ -13167,6 +13167,38 @@ export default function App() {
     setShowCart(false);
   }
 
+  // Admin → Back up database: every table in supabase-setup.sql (all rows, paged), plus this
+  // browser's device-only data (profiles, billing records, sync logs…), as one JSON file.
+  async function handleBackupDatabase() {
+    if (!configured) { showToast("No database configured.", "error"); return; }
+    showToast("Preparing the backup…");
+    const TABLES = ["bookings","settings","activity_log","mismatch_log","booker_contacts","field_reviews","field_flags","field_ratings","vetting_history","schema_version"];
+    const PAGE = 1000, tables = {}, problems = {};
+    for (const t of TABLES) {
+      const rows = [];
+      try {
+        for (let from = 0; ; from += PAGE) {
+          const r = await fetch(`${SUPABASE_URL}/rest/v1/${t}?select=*`, { headers: authHeaders({ "Range-Unit":"items", Range:`${from}-${from+PAGE-1}` }) });
+          if (!r.ok) throw new Error(`${r.status} ${(await r.text()).slice(0,120)}`);
+          const page = await r.json(); rows.push(...page);
+          if (page.length < PAGE) break;
+        }
+        tables[t] = rows;
+      } catch(e) { problems[t] = e.message; }
+    }
+    const device = {};
+    try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith("fb_")) { try { device[k] = JSON.parse(localStorage.getItem(k)); } catch { device[k] = localStorage.getItem(k); } } } } catch { /* storage blocked */ }
+    const counts = Object.fromEntries(Object.entries(tables).map(([k,v]) => [k, v.length]));
+    const backup = { app:"FacilityBook", exported_at:new Date().toISOString(), exported_by:realLoggedInEmail, ...(actor?{exported_by_name:actor}:{}),
+      schema_version: tables.schema_version?.[0]?.version ?? null, counts, ...(Object.keys(problems).length?{problems}:{}), tables,
+      device_note:"This browser's device-only data (not stored in the database): profiles, billing records, sync logs, filters.", device };
+    const url = URL.createObjectURL(new Blob([JSON.stringify(backup, null, 1)], { type:"application/json" }));
+    const a = document.createElement("a"); a.href = url; a.download = `facilitybook-backup-${new Date().toISOString().slice(0,16).replace(/[:T]/g,"-")}.json`;
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 5000);
+    logActivity("backup_downloaded", { counts, ...(Object.keys(problems).length ? { problems: Object.keys(problems) } : {}) });
+    const total = Object.values(counts).reduce((a,b)=>a+b,0);
+    showToast(Object.keys(problems).length ? `Backup saved (${total} rows). Not included: ${Object.keys(problems).join(", ")}.` : `Backup saved: ${total} rows from ${Object.keys(counts).length} tables.`, Object.keys(problems).length ? "error" : "success");
+  }
   function handleLogout(){clearActor(session?.user?.email);supabase?.auth.signOut();setCart([]);}
 
   const pendingCount=bookings.filter(b=>REVIEW_STATUSES.has(b.status)).length;
@@ -13348,7 +13380,7 @@ export default function App() {
                             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:2,padding:"0 8px 6px"}}>
                               {[["💲","Rates",()=>setShowRatesModal(true)],["👥","Players",()=>setShowPlayersModal(true)],["👤","Users",()=>setShowUserMgmtModal(true)],
                                 ["🏢","AMUA details",()=>setShowAmuaModal(true)],["🗑","Log retention",()=>setShowRetentionModal(true)],["🧩","Extensions",()=>setShowExtensionModal(true)],
-                                ["🏛","Council form",()=>window.open(COUNCIL_APPLICATION_URL,"_blank","noopener")],["⬇","Reload data",()=>handleSyncDB()]].map(([ic,lbl,fn])=>(
+                                ["🏛","Council form",()=>window.open(COUNCIL_APPLICATION_URL,"_blank","noopener")],["⬇","Reload data",()=>handleSyncDB()],["💾","Back up database",()=>handleBackupDatabase()]].map(([ic,lbl,fn])=>(
                                 <button key={lbl} onClick={()=>{setShowUserMenu(false);fn();}}
                                   style={{display:"flex",alignItems:"center",gap:6,padding:"7px 8px",border:"1px solid #f1f5f9",borderRadius:8,background:"#fff",fontFamily:"inherit",fontSize:12,color:"#0f172a",cursor:"pointer",textAlign:"left",fontWeight:500}}>
                                   <span style={{width:16,textAlign:"center"}}>{ic}</span>{lbl}
