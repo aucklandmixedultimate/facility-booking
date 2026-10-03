@@ -555,23 +555,28 @@ function defaultVenueKey() {
   const pid = defaultProviderId();
   return `${pid}|${PROVIDERS[pid]?.defaultSite || ""}`;
 }
-function activeVenueKey() {
+// The calendars show one or more venues together (e.g. GTEC Cornwall Park alongside a
+// council park): _activeVenue holds their keys joined by newlines, or ALL_VENUES (admins).
+const VENUE_SEP = "\n";
+function activeVenueKeys() {
   if (_activeVenue === ALL_VENUES && _isAdminView) return ALL_VENUES;
-  const vs = listVenues();
-  if (vs.some(v => v.key === _activeVenue)) return _activeVenue;
-  return vs.find(v => v.key === defaultVenueKey())?.key || vs[0]?.key || ALL_VENUES;
+  const vs = listVenues(), picked = String(_activeVenue || "").split(VENUE_SEP).filter(k => vs.some(v => v.key === k));
+  if (picked.length) return picked;
+  const d = vs.find(v => v.key === defaultVenueKey())?.key || vs[0]?.key;
+  return d ? [d] : ALL_VENUES;
 }
+function activeVenueKey() { const ks = activeVenueKeys(); return ks === ALL_VENUES ? ALL_VENUES : ks[0]; }
 function inActiveVenue(facilityId) {
-  const k = activeVenueKey();
-  if (k === ALL_VENUES) return true;
+  const ks = activeVenueKeys();
+  if (ks === ALL_VENUES) return true;
   const f = FACILITIES.find(x => x.id === facilityId);
-  return !f || venueKeyOf(f) === k;
+  return !f || ks.includes(venueKeyOf(f));
 }
 // Facilities for venue-scoped views. `keepId` keeps a booking's current facility listed
 // even when it belongs to another venue, so editing never silently drops it.
 function venueFacilities(keepId) {
-  const k = activeVenueKey();
-  return visibleFacilities().filter(f => k === ALL_VENUES || venueKeyOf(f) === k || f.id === keepId);
+  const ks = activeVenueKeys();
+  return visibleFacilities().filter(f => ks === ALL_VENUES || ks.includes(venueKeyOf(f)) || f.id === keepId);
 }
 // The booking form picks a facility in three steps: provider → venue (a provider's site) →
 // facility. Every facility the viewer can book is offered (council fields added on the
@@ -610,8 +615,11 @@ const providerMemberLabel = pid => pid === "akl_council" ? "Council-operated" : 
 // A cascading provider menu: groups first; hovering (or clicking) a group shows its
 // providers, each with the venues it runs (all of them in the tooltip). `sites(pid)` lists a
 // provider's venues; `extra` adds rows at the end (e.g. All providers).
-function ProviderMenu({ pids, value, onPick, sites, style, extra = [] }) {
-  const [open, setOpen] = useState(null), [hover, setHover] = useState(null), ref = useRef(null), btnRef = useRef(null);
+// `facilitiesOf(pid)` (optional) adds a third level for council providers: the specific
+// fields (the booker's shortlisted / active council fields), picked with `onPickFacility`.
+// `label` overrides the button text.
+function ProviderMenu({ pids, value, onPick, sites, style, extra = [], facilitiesOf, onPickFacility, label }) {
+  const [open, setOpen] = useState(null), [hover, setHover] = useState(null), [hover2, setHover2] = useState(null), ref = useRef(null), btnRef = useRef(null);
   useEffect(() => { if (!open) return;
     const off = e => { if (ref.current && !ref.current.contains(e.target)) { setOpen(null); setHover(null); } };
     document.addEventListener("mousedown", off); document.addEventListener("touchstart", off);
@@ -627,8 +635,10 @@ function ProviderMenu({ pids, value, onPick, sites, style, extra = [] }) {
   const order = pid => pid === "akl_council" ? 0 : 1;
   groups.forEach(g => g.pids.sort((a, b) => order(a) - order(b) || providerLabel(a).localeCompare(providerLabel(b))));
   const curExtra = extra.find(x => x.value === value), curGroup = PROVIDER_GROUPS[providerGroupOf(value)];
-  const shown = curExtra ? curExtra.label : curGroup ? `${curGroup.label} › ${providerMemberLabel(value)}` : providerLabel(value);
-  const pick = v => { setOpen(null); setHover(null); onPick(v); };
+  const shown = label || (curExtra ? curExtra.label : curGroup ? `${curGroup.label} › ${providerMemberLabel(value)}` : providerLabel(value));
+  const pick = v => { setOpen(null); setHover(null); setHover2(null); onPick(v); };
+  const pickFac = id => { setOpen(null); setHover(null); setHover2(null); onPickFacility(id); };
+  const facsOf = pid => facilitiesOf && PROVIDER_GROUPS[providerGroupOf(pid)] ? facilitiesOf(pid) : [];
   // Fixed to the button so a scrolling row can't clip it; on a narrow screen the providers
   // of a group open beneath it instead of beside it.
   const toggleOpen = () => { if (open) { setOpen(null); setHover(null); return; }
@@ -652,11 +662,20 @@ function ProviderMenu({ pids, value, onPick, sites, style, extra = [] }) {
               <span style={{ fontSize: 11, color: "#64748b" }}>{g.pids.map(providerMemberLabel).slice(0, 3).join(" · ")}{g.pids.length > 3 ? ` +${g.pids.length - 3}` : ""}</span>
             </button>
             {hover === g.id && <div role="menu" style={open.narrow ? { borderLeft: "3px solid #e2e8f0", marginLeft: 12 } : { ...menu, top: -4, left: "100%", maxHeight: 360, overflowY: "auto" }}>
-              {g.pids.map(pid => (
-                <button key={pid} type="button" role="menuitem" title={`${providerLabel(pid)} — venues: ${sites(pid).join(", ") || "none yet"}`} onClick={() => pick(pid)} style={row(pid === value)}>
-                  <b>{providerMemberLabel(pid)}{pid === value ? " ✓" : ""}</b>
+              {g.pids.map(pid => { const fs = facsOf(pid); return (
+                <div key={pid} style={{ position: "relative" }} onMouseEnter={() => setHover2(fs.length ? pid : null)}>
+                <button type="button" role="menuitem" title={`${providerLabel(pid)} — venues: ${sites(pid).join(", ") || "none yet"}`} onClick={() => pick(pid)} style={row(pid === value)}>
+                  <span style={{ display: "flex", width: "100%", gap: 8 }}><b style={{ flex: 1 }}>{providerMemberLabel(pid)}{pid === value ? " ✓" : ""}</b>{fs.length > 0 && <span style={{ color: "#94a3b8" }}>{fs.length} ▸</span>}</span>
                   {siteLine(pid) && <span style={{ fontSize: 11, color: "#64748b" }}>📍 {siteLine(pid)}</span>}
-                </button>))}
+                </button>
+                {/* Third level: the specific fields */}
+                {hover2 === pid && fs.length > 0 && <div role="menu" style={open.narrow ? { borderLeft: "3px solid #e2e8f0", marginLeft: 12 } : { ...menu, top: -4, left: "100%", maxHeight: 360, overflowY: "auto" }}>
+                  {fs.map(f => (
+                    <button key={f.id} type="button" role="menuitem" title={f.name} onClick={() => pickFac(f.id)} style={row(false)}>
+                      <span style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ width: 8, height: 8, borderRadius: "50%", background: f.color, flexShrink: 0 }}/><b style={{ fontWeight: 600 }}>{f.name}</b></span>
+                    </button>))}
+                </div>}
+                </div>); })}
             </div>}
           </div>
         ) : (
@@ -681,7 +700,8 @@ function ProviderVenuePicker({ facilityId, onPick, small }) {
       <div>
         <label style={S.lbl}>Provider</label>
         <ProviderMenu pids={pids} value={curPid} onPick={pid => pickVenue(venues.find(v => v.pid === pid)?.key)}
-          sites={pid => venues.filter(v => v.pid === pid).map(v => v.site)} style={{ ...st, width: "100%" }}/>
+          sites={pid => venues.filter(v => v.pid === pid).map(v => v.site)} style={{ ...st, width: "100%" }}
+          facilitiesOf={pid => venues.filter(v => v.pid === pid).flatMap(v => v.facs)} onPickFacility={onPick}/>
       </div>
       <div>
         <label style={S.lbl}>Location</label>
@@ -13137,22 +13157,30 @@ export default function App() {
   const FacilityPills=()=>(
     <div style={{display:"flex",gap:6,marginBottom:16,alignItems:"center",overflowX:"auto",WebkitOverflowScrolling:"touch",scrollbarWidth:"none",msOverflowStyle:"none",paddingBottom:2}}>
       {/* Provider + 📍 location: shown only when the viewer can see more than one location. */}
+      {/* Locations shown (additive): one chip per venue, ✕ to drop it; ＋ adds a provider's
+          venue, or (third level) a specific council field, alongside what's already shown. */}
       {venues.length>1&&(()=>{
-        const cur=activeVenueKey(), curPid=cur===ALL_VENUES?ALL_VENUES:cur.split("|")[0];
+        const ks=activeVenueKeys(), all=ks===ALL_VENUES;
         const pids=[...new Set(venues.map(v=>v.providerId))];
-        const sel={padding:"5px 8px",borderRadius:20,border:"1.5px solid #0f172a",fontSize:12,fontWeight:700,fontFamily:"inherit",background:"#fff",color:"#0f172a",flexShrink:0,cursor:"pointer"};
-        const go=k=>setVenue(k===defaultVenueKey()?null:k);
+        const chip={padding:"4px 6px 4px 10px",borderRadius:20,border:"1.5px solid #0f172a",fontSize:12,fontWeight:700,fontFamily:"inherit",background:"#fff",color:"#0f172a",flexShrink:0,display:"inline-flex",alignItems:"center",gap:4,whiteSpace:"nowrap"};
+        const save=list=>setVenue(list.length===1&&list[0]===defaultVenueKey()?null:list.join(VENUE_SEP));
+        const add=k=>{ if(!k) return; const cur=all?[]:ks; if(!cur.includes(k)) save([...cur,k]); };
+        const drop=k=>save(ks.filter(x=>x!==k));
         const pickProvider=pid=>{ if(pid===ALL_VENUES) return setVenue(ALL_VENUES);
-          const site=cur===ALL_VENUES?"":cur.split("|")[1], vs=venues.filter(v=>v.providerId===pid);
-          go((vs.find(v=>v.site===site)||vs.find(v=>v.key===`${pid}|${PROVIDERS[pid]?.defaultSite||""}`)||vs[0]).key); };
+          const vs=venues.filter(v=>v.providerId===pid);
+          add((vs.find(v=>v.key===`${pid}|${PROVIDERS[pid]?.defaultSite||""}`)||vs[0])?.key); };
+        const pickFacility=id=>{ const f=FACILITIES.find(x=>x.id===id); if(!f) return; add(venueKeyOf(f)); setSelFac(id); };
+        const siteOf=k=>venues.find(v=>v.key===k);
         return <>
-          <ProviderMenu pids={pids} value={curPid} onPick={pickProvider} sites={pid=>venues.filter(v=>v.providerId===pid).map(v=>v.site)}
-            style={{...sel,maxWidth:280}} extra={isAdmin?[{value:ALL_VENUES,label:"All providers & locations"}]:[]}/>
-          {cur!==ALL_VENUES&&(
-            <select value={cur} onChange={e=>go(e.target.value)} title="Location" aria-label="Location" style={sel}>
-              {venues.filter(v=>v.providerId===curPid).map(v=><option key={v.key} value={v.key}>📍 {v.site}</option>)}
-            </select>
-          )}
+          {all
+            ? <span style={chip}>All locations<button onClick={()=>setVenue(null)} title="Back to the default location" style={{border:"none",background:"none",cursor:"pointer",color:"#64748b",fontSize:12,padding:"0 2px"}}>✕</button></span>
+            : ks.map(k=>{ const v=siteOf(k); return (
+              <span key={k} style={chip} title={v?`${v.providerName} — ${v.site}`:k}>📍 {v?.site||k}
+                {ks.length>1&&<button onClick={()=>drop(k)} title="Stop showing this location" style={{border:"none",background:"none",cursor:"pointer",color:"#64748b",fontSize:12,padding:"0 2px"}}>✕</button>}
+              </span>); })}
+          <ProviderMenu pids={pids} value={null} onPick={pickProvider} label="＋ Add" sites={pid=>venues.filter(v=>v.providerId===pid).map(v=>v.site)}
+            facilitiesOf={pid=>visibleFacilities().filter(f=>(f.provider||defaultProviderId())===pid)} onPickFacility={pickFacility}
+            style={{...chip,padding:"4px 10px",borderStyle:"dashed",color:"#475569"}} extra={isAdmin?[{value:ALL_VENUES,label:"All providers & locations"}]:[]}/>
         </>;
       })()}
       <button onClick={()=>setSelFac("all")} style={{padding:"5px 12px",borderRadius:20,border:"1.5px solid",cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",flexShrink:0,borderColor:selFac==="all"?"#0f172a":"#e2e8f0",background:selFac==="all"?"#0f172a":"#fff",color:selFac==="all"?"#fff":"#475569"}}>All</button>
