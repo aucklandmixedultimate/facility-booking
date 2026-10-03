@@ -780,6 +780,11 @@ function fmtLoggedAt(s) {
     : d.toLocaleDateString("en-NZ", { day:"numeric", month:"short", year:"numeric" });
 }
 function fmtCost(n) { return "$" + Number(n).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g,","); }
+// "pirates.team" → "PT", "Auckland Uni Ultimate" → "AU", "auultimateclub" → "AU".
+function initialsOf(name) {
+  const w = String(name||"").split(/[\s._@-]+/).filter(Boolean);
+  return (w.length > 1 ? w[0][0] + w[1][0] : (w[0]||"?").slice(0, 2)).toUpperCase();
+}
 function fmtTimeShort(h) {
   const hh=Math.floor(h), m=Math.round((h%1)*60), dh=hh>12?hh-12:hh===0?12:hh;
   return `${dh}${m?":"+String(m).padStart(2,"0"):""}${hh>=12?"p":"a"}`;
@@ -3992,6 +3997,9 @@ function WeekCalendar({ bookings, onNewBooking, onNewBookingRange, onBookingClic
     return aliasNames[primary] || primary.split("@")[0];
   }
   const [localBase, setLocalBase] = useState(new Date());
+  // Phones: the whole week fits the screen (no sideways scroll) — narrow time axis, compact
+  // day headers and booking blocks that show just the booker.
+  const narrow = useMobile(), axisW = narrow ? 30 : 52;
   const weekBase    = focusedDate || localBase;
   const setWeekBase = setFocusedDate || setLocalBase;
   // dragState tracks the active drag; dragMoved tracks whether mouse moved
@@ -4045,15 +4053,16 @@ function WeekCalendar({ bookings, onNewBooking, onNewBookingRange, onBookingClic
     const startHour = slotToHour(loSlot);
     const duration = moved ? (hiSlot - loSlot + 1) * SLOT_HOURS : 1;
     if (loCol === hiCol) {
+      // The day view opens with this time band already chosen (tap = one hour).
       const dk = dateKey(days[loCol]);
-      if (onOpenDay) onOpenDay(dk, startHour); else onNewBooking(dk, startHour, duration);
+      if (onOpenDay) onOpenDay(dk, startHour, duration); else onNewBooking(dk, startHour, duration);
       return;
     }
     // Multi-day span → grouped booking (skip past days).
     const dates = [];
     for (let c=loCol; c<=hiCol; c++) { const dk = dateKey(days[c]); if (dk >= today) dates.push(dk); }
     if (dates.length > 1 && onNewBookingRange) onNewBookingRange(dates, startHour, duration);
-    else if (dates.length === 1) (onOpenDay ? onOpenDay(dates[0], startHour) : onNewBooking(dates[0], startHour, duration));
+    else if (dates.length === 1) (onOpenDay ? onOpenDay(dates[0], startHour, duration) : onNewBooking(dates[0], startHour, duration));
   }
   const dragSpan = dragState?.active ? {
     loCol: Math.min(dragState.startCol, dragState.endCol),
@@ -4080,18 +4089,18 @@ function WeekCalendar({ bookings, onNewBooking, onNewBookingRange, onBookingClic
         <span style={{ fontSize:15, fontWeight:700, color:"#0f172a", marginLeft:4, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", minWidth:0 }}>{days[0].toLocaleDateString("en-NZ",{month:window.innerWidth<768?"short":"long",year:"numeric"})}</span>
         {window.innerWidth>=768&&<span style={{ fontSize:12, color:"#94a3b8", marginLeft:8 }}>Click or drag a day; drag across days for a grouped booking</span>}
       </div>
-      <div style={{ overflowX:"auto" }} ref={gridRef} onMouseLeave={()=>{ dragMoved.current=false; setDragState(null); }}>
-        <div style={{ minWidth:680 }}>
+      <div style={{ overflowX:narrow?"hidden":"auto" }} ref={gridRef} onMouseLeave={()=>{ dragMoved.current=false; setDragState(null); }}>
+        <div style={{ minWidth:narrow?0:680 }}>
           {/* Day headers */}
-          <div style={{ display:"flex", marginLeft:52 }}>
+          <div style={{ display:"flex", marginLeft:axisW }}>
             {days.map(d=>{
               const dk=dateKey(d), isToday=dk===today;
               return (
-                <div key={dk} style={{ flex:1, textAlign:"center", padding:"6px 0 10px" }}>
-                  <div style={{ fontSize:11, fontWeight:600, color:"#94a3b8", textTransform:"uppercase", letterSpacing:"0.08em" }}>{d.toLocaleDateString("en-NZ",{weekday:"short"})}</div>
+                <div key={dk} style={{ flex:1, minWidth:0, textAlign:"center", padding:narrow?"4px 0 6px":"6px 0 10px" }}>
+                  <div style={{ fontSize:narrow?10:11, fontWeight:600, color:"#94a3b8", textTransform:"uppercase", letterSpacing:narrow?0:"0.08em" }}>{d.toLocaleDateString("en-NZ",{weekday:"short"}).slice(0, narrow?2:3)}</div>
                   <div onClick={()=>onOpenDay&&onOpenDay(dk)} title="Open day view"
-                    style={{ width:32, height:32, borderRadius:"50%", margin:"4px auto 0", background:isToday?"#0f172a":"transparent", display:"flex", alignItems:"center", justifyContent:"center", fontSize:15, fontWeight:isToday?700:500, color:isToday?"#fff":"#0f172a", cursor:onOpenDay?"pointer":"default" }}>{d.getDate()}</div>
-                  {onOpenDay&&<button onClick={()=>onOpenDay(dk)} title="Open day view"
+                    style={{ width:narrow?28:32, height:narrow?28:32, borderRadius:"50%", margin:"4px auto 0", background:isToday?"#0f172a":"transparent", display:"flex", alignItems:"center", justifyContent:"center", fontSize:15, fontWeight:isToday?700:500, color:isToday?"#fff":"#0f172a", cursor:onOpenDay?"pointer":"default" }}>{d.getDate()}</div>
+                  {onOpenDay&&!narrow&&<button onClick={()=>onOpenDay(dk)} title="Open day view"
                     style={{ marginTop:3, fontSize:9, fontWeight:700, color:"#4f46e5", background:"#eef2ff", border:"1px solid #c7d2fe", borderRadius:6, padding:"1px 6px", cursor:"pointer", fontFamily:"inherit" }}>⤢ day</button>}
                 </div>
               );
@@ -4102,10 +4111,10 @@ function WeekCalendar({ bookings, onNewBooking, onNewBookingRange, onBookingClic
             {/* Hour labels — border-box so paddingTop doesn't inflate rows past HOUR_H
                 (a 3px/hour drift that pushed labels progressively below their gridlines) */}
             {/* Sticky so the times stay in view while the days scroll sideways on a phone. */}
-            <div style={{ width:52, flexShrink:0, position:"sticky", left:0, zIndex:4, background:"#fff" }}>
+            <div style={{ width:axisW, flexShrink:0, position:"sticky", left:0, zIndex:4, background:"#fff" }}>
               {Array.from({length:CAL_TOTAL+1},(_,i)=>CAL_START+i).map(h=>(
-                <div key={h} style={{ height:HOUR_H, boxSizing:"border-box", display:"flex", alignItems:"flex-start", justifyContent:"flex-end", paddingRight:8, paddingTop:3 }}>
-                  <span style={{ fontSize:10, color:"#94a3b8", whiteSpace:"nowrap" }}>{fmtTime(h)}</span>
+                <div key={h} style={{ height:HOUR_H, boxSizing:"border-box", display:"flex", alignItems:"flex-start", justifyContent:"flex-end", paddingRight:narrow?4:8, paddingTop:3 }}>
+                  <span style={{ fontSize:10, color:"#94a3b8", whiteSpace:"nowrap" }}>{narrow?fmtTimeShort(h):fmtTime(h)}</span>
                 </div>
               ))}
             </div>
@@ -4128,7 +4137,7 @@ function WeekCalendar({ bookings, onNewBooking, onNewBookingRange, onBookingClic
                 const dayBkgs=visible.filter(b=>b.date===dk);
                 return (
                   <div key={dk}
-                    style={{ flex:1, position:"relative", borderLeft:"1px solid #f1f5f9" }}
+                    style={{ flex:1, minWidth:0, position:"relative", borderLeft:"1px solid #f1f5f9" }}
                   >
                     {/* Hour cells */}
                     {Array.from({length:CAL_TOTAL},(_,i)=>i).map(i=>(
@@ -4156,8 +4165,8 @@ function WeekCalendar({ bookings, onNewBooking, onNewBookingRange, onBookingClic
                           onMouseDown={e=>e.stopPropagation()}
                           title={(()=>{const r=parseMismatchNote(b.system_notes,b.notes);return `${b.name} – ${fac?.name}`+(b.status==="cpsa_review_needed"&&r.length?`\n⚠ GTEC inconsistencies:\n${r.join("\n")}`:b.status==="cpsa_confirmed"?"\n🌐 GTEC confirmed":"");})()}
                           className={facSocial?(bkTxt==="#fff"?"fac-social-tex":"fac-social-tex-dark"):undefined}
-                          style={{ position:"absolute", top:(b.start_hour-CAL_START)*HOUR_H, height:Math.max(b.duration*HOUR_H-2,20), background:bkBg, borderRadius:6, padding:"3px 6px", cursor:isDimmed?"default":"pointer", overflow:"hidden", opacity:isDimmed?dimOpacity:REVIEW_STATUSES.has(b.status)?0.75:1, pointerEvents:isDimmed?"none":"auto", border:deleteIds.has(b.id)?"2.5px solid #ef4444":cartSourceIds.has(b.id)?"2.5px solid #f59e0b":b.status==="clash"?"2px dashed #d97706":REVIEW_STATUSES.has(b.status)?`2px dashed ${bkTxt==="#fff"?"rgba(255,255,255,0.6)":"rgba(113,63,18,0.5)"}`:b.status==="rejected"?"2px solid rgba(244,63,94,0.8)":"none", boxShadow:deleteIds.has(b.id)?"0 0 0 3px rgba(239,68,68,0.25)":cartSourceIds.has(b.id)?"0 0 0 3px rgba(245,158,11,0.25)":"0 1px 4px rgba(0,0,0,0.15)", zIndex:2, borderLeft:bkBorderLeft, ...stk }}>
-                          {!isAdmin_bk&&b.email&&(
+                          style={{ position:"absolute", top:(b.start_hour-CAL_START)*HOUR_H, height:Math.max(b.duration*HOUR_H-2,20), background:bkBg, borderRadius:narrow?4:6, padding:narrow?"2px 2px 2px 3px":"3px 6px", cursor:isDimmed?"default":"pointer", overflow:"hidden", opacity:isDimmed?dimOpacity:REVIEW_STATUSES.has(b.status)?0.75:1, pointerEvents:isDimmed?"none":"auto", border:deleteIds.has(b.id)?"2.5px solid #ef4444":cartSourceIds.has(b.id)?"2.5px solid #f59e0b":b.status==="clash"?"2px dashed #d97706":REVIEW_STATUSES.has(b.status)?`2px dashed ${bkTxt==="#fff"?"rgba(255,255,255,0.6)":"rgba(113,63,18,0.5)"}`:b.status==="rejected"?"2px solid rgba(244,63,94,0.8)":"none", boxShadow:deleteIds.has(b.id)?"0 0 0 3px rgba(239,68,68,0.25)":cartSourceIds.has(b.id)?"0 0 0 3px rgba(245,158,11,0.25)":"0 1px 4px rgba(0,0,0,0.15)", zIndex:2, borderLeft:bkBorderLeft, ...stk }}>
+                          {!isAdmin_bk&&b.email&&!narrow&&(
                             <div style={{fontSize:9,fontWeight:700,color:bkTxt,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:3,opacity:0.92}}>
                               <span style={{width:6,height:6,borderRadius:"50%",background:ec,flexShrink:0,boxShadow:"0 0 0 1px rgba(255,255,255,0.4)",display:"inline-block"}}/>
                               {calAlias(b.email)}
@@ -4166,15 +4175,16 @@ function WeekCalendar({ bookings, onNewBooking, onNewBookingRange, onBookingClic
                           <div style={{display:"flex",alignItems:"center",gap:3,overflow:"hidden"}}>
                             {b.status==="cpsa_review_needed"&&<span style={{fontSize:9,flexShrink:0,lineHeight:1}}>⚠</span>}
                             {b.status==="cpsa_confirmed"&&<span style={{fontSize:9,flexShrink:0,lineHeight:1}}>🌐</span>}
-                            <div style={{ fontSize:11, fontWeight:700, color:bkTxt, lineHeight:1.3, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                              {b.purpose||b.name}
+                            {narrow&&!isAdmin_bk&&b.email&&<span style={{width:5,height:5,borderRadius:"50%",background:ec,flexShrink:0,display:"inline-block",alignSelf:"flex-start",marginTop:3}}/>}
+                            <div style={{ fontSize:narrow?9:11, fontWeight:700, color:bkTxt, lineHeight:1.25, overflow:"hidden", textOverflow:narrow?"clip":"ellipsis", whiteSpace:"nowrap" }}>
+                              {narrow ? (isAdmin_bk ? "GTEC" : initialsOf(calAlias(b.email)||b.name)) : b.purpose||b.name}
                             </div>
                           </div>
-                          {b.duration*HOUR_H>22&&!isAdmin_bk&&<div style={{ fontSize:9, color:bkTxtMuted, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", paddingLeft:0 }}>{b.name}</div>}
-                          {b.duration*HOUR_H>32&&<div style={{display:"flex",alignItems:"center",gap:3,marginTop:1,paddingLeft:10}}>
+                          {!narrow&&b.duration*HOUR_H>22&&!isAdmin_bk&&<div style={{ fontSize:9, color:bkTxtMuted, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", paddingLeft:0 }}>{b.name}</div>}
+                          {!narrow&&b.duration*HOUR_H>32&&<div style={{display:"flex",alignItems:"center",gap:3,marginTop:1,paddingLeft:10}}>
                             {b.invoiced&&<span style={{fontSize:9,fontWeight:700,color:bkTxt==="#fff"?"rgba(255,255,255,0.9)":bkTxt,background:bkTxt==="#fff"?"rgba(124,58,237,0.5)":"rgba(124,58,237,0.15)",borderRadius:3,padding:"1px 4px",whiteSpace:"nowrap"}}>🧾</span>}
                           </div>}
-                          {b.duration*HOUR_H>44&&<div style={{display:"flex",alignItems:"center",gap:4,paddingLeft:10,marginTop:1}}>
+                          {!narrow&&b.duration*HOUR_H>44&&<div style={{display:"flex",alignItems:"center",gap:4,paddingLeft:10,marginTop:1}}>
                             <span style={{width:6,height:6,borderRadius:2,background:fac?.color||"#4a90d9",flexShrink:0,display:"inline-block"}}/>
                             <span style={{ fontSize:9, color:bkTxtMuted, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{fac?.name}</span>
                           </div>}
@@ -4440,8 +4450,12 @@ function MonthCalendar({ bookings, onBookingClick, onNewBooking, onNewBookingRan
 // Bookings render as blocks; a plain click opens a booking, a click-drag (even
 // starting on a block) passes through to create a new booking — so overlapping /
 // same-facility bookings (e.g. for merges) are easy to create.
-function DayTimelinePopup({ date, bookings, onClose, onBookingClick, onNewBooking, cartNewDrafts=[], focusHour=null }) {
+function DayTimelinePopup({ date, bookings, onClose, onBookingClick, onNewBooking, cartNewDrafts=[], focusHour=null, focusDuration=null }) {
   const [dragState, setDragState] = useState(null); // {facility, startSlot, endSlot}
+  // The time chosen in the week view: shown across every column, and a tap on a column (or a
+  // "free" chip below) books it — no need to pick the time again.
+  const carried = focusHour!=null && focusDuration ? (() => { const lo = Math.max(0, Math.round((focusHour-CAL_START)/SLOT_HOURS));
+    return { lo, hi: Math.min(CAL_SLOTS-1, lo + Math.max(1, Math.round(focusDuration/SLOT_HOURS)) - 1) }; })() : null;
   const [pendingSel, setPendingSel] = useState(null); // {facility, lo, hi} staged for the Create button
   const dragMoved   = useRef(false);
   const justDragged = useRef(false);
@@ -4494,7 +4508,9 @@ function DayTimelinePopup({ date, bookings, onClose, onBookingClick, onNewBookin
       justDragged.current = true;
       setPendingSel({ facility:facId, lo:ndUp.lo, hi:ndUp.hi });
     } else if (!wasOnBooking) {
-      setPendingSel({ facility:facId, lo:ndUp.lo, hi:Math.min(ndUp.lo+SLOTS_PER_HOUR-1, CAL_SLOTS-1) });
+      // A tap inside the carried band selects the whole band for this facility.
+      if (carried && ndUp.lo >= carried.lo && ndUp.lo <= carried.hi) setPendingSel({ facility:facId, lo:carried.lo, hi:carried.hi });
+      else setPendingSel({ facility:facId, lo:ndUp.lo, hi:Math.min(ndUp.lo+SLOTS_PER_HOUR-1, CAL_SLOTS-1) });
     }
   }
 
@@ -4529,7 +4545,9 @@ function DayTimelinePopup({ date, bookings, onClose, onBookingClick, onNewBookin
 
   return (
     <Modal title={`📅 ${dObj.toLocaleDateString("en-NZ",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}`} onClose={onClose} width={dayModalW}>
-      <div style={{fontSize:12,color:"#94a3b8",marginBottom:8}}>Click a booking — or its <strong>⤢</strong> handle — to view it · click or drag an empty area to select a time, then press Create booking.</div>
+      <div style={{fontSize:12,color:"#94a3b8",marginBottom:8}}>{carried
+        ? <>Your time from the week view is selected — tap a free facility below (or its column) to book it, or drag a different time.</>
+        : <>Click a booking — or its <strong>⤢</strong> handle — to view it · click or drag an empty area to select a time, then press Create booking.</>}</div>
       <div ref={scrollRef} style={{overflow:"auto",maxHeight:"60vh"}}>
         <div style={{display:"flex",minWidth:dayGridW}}>
           {hourAxis("left")}
@@ -4553,6 +4571,10 @@ function DayTimelinePopup({ date, bookings, onClose, onBookingClick, onNewBookin
                       <div style={{height:"50%",borderBottom:"1px dashed #f8fafc"}}/>
                     </div>
                   ))}
+                  {/* The time carried from the week view, in every column until one is picked */}
+                  {carried && !pendingSel && !isDragging && (
+                    <div style={{position:"absolute",left:2,right:2,top:carried.lo*SLOT_H,height:(carried.hi-carried.lo+1)*SLOT_H,background:"rgba(99,102,241,0.07)",border:"1.5px dashed rgba(99,102,241,0.45)",borderRadius:6,pointerEvents:"none",zIndex:2}}/>
+                  )}
                   {/* Drag / staged-selection preview */}
                   {colSel && (
                     <div style={{position:"absolute",left:2,right:2,top:colSel.lo*SLOT_H,height:(colSel.hi-colSel.lo+1)*SLOT_H,background:"rgba(99,102,241,0.15)",border:"2px solid rgba(99,102,241,0.6)",borderRadius:6,pointerEvents:"none",zIndex:4}}>
@@ -4599,6 +4621,23 @@ function DayTimelinePopup({ date, bookings, onClose, onBookingClick, onNewBookin
           {hourAxis("right")}
         </div>
       </div>
+      {carried && !pendingSel && (() => {
+        const sH = slotToHour(carried.lo), eH = slotToHour(carried.hi+1), dur = +(eH-sH).toFixed(2);
+        const free = venueFacilities().filter(f => !dayBkgs.some(b => b.facility_id===f.id && b.start_hour < eH && b.start_hour+b.duration > sH));
+        return (
+          <div style={{display:"flex",alignItems:"center",gap:8,marginTop:12,padding:"10px 14px",background:"#eef2ff",border:"1.5px solid #c7d2fe",borderRadius:10,flexWrap:"wrap"}}>
+            <div style={{fontSize:13,color:"#0f172a"}}><strong>{fmtTime(sH)}–{fmtTime(eH)}</strong> <span style={{color:"#64748b"}}>({+dur.toFixed(1)}h) · {free.length?"free:":"nothing free — pick another time above"}</span></div>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+              {free.map(f=>(
+                <button key={f.id} onClick={()=>onNewBooking(dk, sH, dur, f.id)} title={`Book ${f.name}, ${fmtTime(sH)}–${fmtTime(eH)}`}
+                  style={S.btn({display:"inline-flex",alignItems:"center",gap:5,background:"#fff",color:"#0f172a",border:"1.5px solid #c7d2fe",fontSize:12,padding:"5px 10px"})}>
+                  <span style={{width:8,height:8,borderRadius:"50%",background:f.color}}/>{facColLabel(f)}
+                </button>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
       {pendingSel && (() => {
         const f = FACILITIES.find(x=>x.id===pendingSel.facility);
         const sH = slotToHour(pendingSel.lo), eH = slotToHour(pendingSel.hi+1);
@@ -11230,6 +11269,7 @@ export default function App() {
   const [focusedDate, setFocusedDate] = useState(new Date());
   const [dayPopupDate, setDayPopupDate] = useState(null);
   const [dayPopupFocus, setDayPopupFocus] = useState(null);
+  const [dayPopupDur, setDayPopupDur] = useState(null);   // hours chosen in the week view, carried into the day view
   const [showCart, setShowCart]       =useState(false);
   const [cart,     setCart]           =useState([]); // { drafts, name, email, isMultiEdit? }[]
   const [informCpsaFor, setInformCpsaFor] = useState(null); // booking awaiting vendor pick for "Inform CPSA"
@@ -12059,7 +12099,7 @@ export default function App() {
   const openNew=useCallback((date,startHour,duration=1,facility=null)=>{setEditing(null);setPrefill({date,startHour,duration,facility});setDayPopupDate(null);setShowForm(true);},[]);
   // Open the booking form pre-seeded with one row per day (grouped multi-day booking).
   const openNewRange=useCallback((dates,startHour=9,duration=1,facility=null)=>{setEditing(null);setPrefill({dates,startHour,duration,facility});setDayPopupDate(null);setShowForm(true);},[]);
-  const openDay=useCallback((dk,focusHour=null)=>{setDayPopupDate(dk);setDayPopupFocus(focusHour);},[]);
+  const openDay=useCallback((dk,focusHour=null,duration=null)=>{setDayPopupDate(dk);setDayPopupFocus(focusHour);setDayPopupDur(focusHour!=null?duration:null);},[]);
   const openEdit=useCallback((b)=>{setEditing({...b});setViewing(null);setShowForm(true);},[]);
 
   bookings.forEach(b=>emailColor(b.email));
@@ -13862,7 +13902,7 @@ export default function App() {
       )}
 
       {dayPopupDate&&(
-        <DayTimelinePopup date={dayPopupDate} focusHour={dayPopupFocus} bookings={bookings} onClose={()=>{setDayPopupDate(null);setDayPopupFocus(null);}}
+        <DayTimelinePopup date={dayPopupDate} focusHour={dayPopupFocus} focusDuration={dayPopupDur} bookings={bookings} onClose={()=>{setDayPopupDate(null);setDayPopupFocus(null);setDayPopupDur(null);}}
           onBookingClick={b=>{ setDayPopupDate(null);setDayPopupFocus(null); setViewing(b); }}
           onNewBooking={openNew}
           cartNewDrafts={cart.flatMap(i=>!i.notifyOnly&&!i.statusChange&&(i.sourceIds||[]).length===0?i.drafts:[])}
