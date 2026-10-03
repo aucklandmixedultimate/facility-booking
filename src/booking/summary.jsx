@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, Fragment } from "react";
-import { AMUA_INFO, Badge, COUNCIL_APPLICATION_FEE, CopyableTable, DURATIONS, FACILITIES, PROVIDERS, RECIPIENT_CODE_AMUA, S, cleanRecipientCode, deriveRecipientCode, emailColor, facCellLabel, fmt24, fmtCost, fmtDate, fmtDateShort, fmtTime, genBankRef, isAdminBooking, parseBilledSnapshot, parseCouncilApp, parseCpsaResolution, parseFunctionCost, parseSlotLink, parseSplit, providerOfFacility, todayKey, visibleFacilities, workflowOf } from "./core.jsx";
+import { AMUA_INFO, Badge, vendorVarianceText, COUNCIL_APPLICATION_FEE, CopyableTable, DURATIONS, FACILITIES, PROVIDERS, RECIPIENT_CODE_AMUA, S, cleanRecipientCode, deriveRecipientCode, emailColor, facCellLabel, fmt24, fmtCost, fmtDate, fmtDateShort, fmtTime, genBankRef, isAdminBooking, parseBilledSnapshot, parseCouncilApp, parseCpsaResolution, parseFunctionCost, parseSlotLink, parseSplit, providerOfFacility, todayKey, visibleFacilities, workflowOf } from "./core.jsx";
 import { OneOffModal, PatternModal, PricingConditionsManager, buildOverlapPatternMap, defaultFacRates, resolveRates } from "./schedule.jsx";
 import { InvoiceOptionRow, InvoicePill, invLineLabel, renderInvoiceDocHtml } from "./billingDocs.jsx";
 import { isClosed } from "../statuses.js";
@@ -76,6 +76,7 @@ export function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricin
   const [invMarkInvoiced, setInvMarkInvoiced] = useState(false);       // flag exported bookings as invoiced
   const [invIncludeInvoiced, setInvIncludeInvoiced] = useState(true); // include previously-invoiced bookings (default on — summary always shows them)
   const [invIncludeAdjustments, setInvIncludeAdjustments] = useState(true); // include mismatch billing adjustments
+  const [invVendorNotes, setInvVendorNotes] = useState(false); // asterisk bookings with a vendor mismatch on record
   const [invSelectedEmails, setInvSelectedEmails] = useState(new Set()); // empty = all
   // Schedule Summary state
   const [scheduleFacSensitive,setScheduleFacSensitive]= useState(false);
@@ -391,6 +392,8 @@ export function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricin
     return [...buildInvoiceLinesCore(bkgs, detail), ...feeLines];
   }
   function buildInvoiceLinesCore(bkgs, detail) {
+    // Opt-in footnote for a vendor mismatch kept on record: "* GTEC booking (…) did not match request (…)".
+    const vnote = b => invVendorNotes && vendorVarianceText(b) ? { date: b.date, text: vendorVarianceText(b) } : null;
     const special = bkgs.filter(isSpecialLine);
     const plain   = bkgs.filter(b => !isSpecialLine(b));
     const specialLines = special.map(specialLineFor);
@@ -403,13 +406,15 @@ export function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricin
         const facName = fac?.name || b.facility_id;
         if (day > 0) {
           const key = b.facility_id + ":day";
-          if (!groups[key]) groups[key] = { desc:`${facName} – Daytime`, facilityId:b.facility_id, hours:0, rate:rates.day, cost:0 };
+          if (!groups[key]) groups[key] = { desc:`${facName} – Daytime`, facilityId:b.facility_id, hours:0, rate:rates.day, cost:0, vendorNotes:[] };
           groups[key].hours += day; groups[key].cost += day * rates.day;
+          if (vnote(b)) groups[key].vendorNotes.push(vnote(b));
         }
         if (evening > 0) {
           const key = b.facility_id + ":evening";
-          if (!groups[key]) groups[key] = { desc:`${facName} – Evening`, facilityId:b.facility_id, hours:0, rate:rates.evening, cost:0 };
+          if (!groups[key]) groups[key] = { desc:`${facName} – Evening`, facilityId:b.facility_id, hours:0, rate:rates.evening, cost:0, vendorNotes:[] };
           groups[key].hours += evening; groups[key].cost += evening * rates.evening;
+          if (vnote(b) && !(day > 0)) groups[key].vendorNotes.push(vnote(b));
         }
       });
       const groupedLines = Object.values(groups).map(g => ({
@@ -419,6 +424,7 @@ export function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricin
         hours: g.hours,
         rate:  g.rate,
         cost:  g.cost,
+        ...(g.vendorNotes.length ? { vendorNotes: g.vendorNotes.sort((a,b)=>a.date.localeCompare(b.date)) } : {}),
       }));
       return [...groupedLines, ...specialLines];
     } else {
@@ -437,6 +443,7 @@ export function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricin
           hours:  day + evening,
           rate:   day + evening ? cost / (day + evening) : null,
           cost,
+          ...(vnote(b) ? { vendorNotes: [vnote(b)] } : {}),
         };
       });
       return [...indiv, ...specialLines].sort((a,b)=>(a.date||"").localeCompare(b.date||"") || a.desc.localeCompare(b.desc));
@@ -1905,6 +1912,13 @@ export function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricin
                         <input type="checkbox" checked={invMarkInvoiced} onChange={e=>setInvMarkInvoiced(e.target.checked)} style={{accentColor:"#7c3aed"}}/>
                         Mark {allBkgs.length} booking{allBkgs.length!==1?"s":""} as <strong>invoiced</strong> on export
                       </label>
+                      {(()=>{ const n=allBkgs.filter(b=>vendorVarianceText(b)).length; return n>0&&(
+                        <label title="Adds a * to those lines and a footnote: '<vendor> booking (vendor times) did not match request (requested times)'"
+                          style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"#713f12",cursor:"pointer",background:"#fefce8",border:"1px solid #fde047",borderRadius:8,padding:"8px 12px"}}>
+                          <input type="checkbox" checked={invVendorNotes} onChange={e=>setInvVendorNotes(e.target.checked)} style={{accentColor:"#a16207"}}/>
+                          Asterisk {n} booking{n!==1?"s":""} with a vendor mismatch on record
+                        </label>
+                      ); })()}
                       {mismatchAdjustments.length>0&&(
                         <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"#92400e",cursor:"pointer",background:"#fffbeb",border:"1px solid #fde68a",borderRadius:8,padding:"8px 12px"}}>
                           <input type="checkbox" checked={invIncludeAdjustments} onChange={e=>setInvIncludeAdjustments(e.target.checked)} style={{accentColor:"#f59e0b"}}/>

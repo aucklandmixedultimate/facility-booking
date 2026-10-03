@@ -37,7 +37,17 @@ export const INV_ROWS_PAGE_1 = 28, INV_ROWS_PAGE_N = 34, INV_ROWS_FOR_TOTALS = 2
 export const INV_ROWS_PER_BANNER = 2;
 
 // A shared line also prints a footnote on its sheet, so it costs a second row.
-export const invLineRows = l => l.sharedNote ? 2 : 1;
+// A line's footnotes: a shared-field cost note, and vendor mismatches kept on record
+// (vendorNotes: [{date, text}], added when the invoice option to asterisk them is on).
+export function invLineFootnotes(l) {
+  const desc = l.desc || l.description || l.label || "";
+  const day = d => d ? `${fmtDateShortDow(d)} — ` : "";
+  return [
+    ...(l.sharedNote ? [`${day(l.date)}${l.sharedNote} · ${desc}`] : []),
+    ...(l.vendorNotes || []).map(n => `${day(n.date)}${n.text}`),
+  ];
+}
+export const invLineRows = l => 1 + invLineFootnotes(l).length;
 
 export function paginateInvoiceLines(lines, { bannerRows = 0 } = {}) {
   if (!lines.length) return [[]];
@@ -171,7 +181,7 @@ export function renderInvoiceDocHtml({
     const rows = pageLines.map(l => `
       <tr>
         <td style="${tdDate}">${l.date ? fmtDateShortDow(l.date) : ""}</td>
-        <td style="${tdDesc}">${l.desc || l.description || l.label || "—"}</td>
+        <td style="${tdDesc}">${l.desc || l.description || l.label || "—"}${l.vendorNotes?.length ? " *" : ""}</td>
         ${l.hours == null && l.rate == null && !l.fixedPrice && l.detail
           ? `<td colspan="2" style="${cellBase};color:#64748b;font-size:10.5px"><div style="${clip};max-width:200px">${l.detail}</div></td>`
           : `<td style="${tdAmt};color:#475569">${invLineRate(l)}</td><td style="${tdAmt};color:#475569">${invLineDuration(l)}</td>`}
@@ -179,10 +189,10 @@ export function renderInvoiceDocHtml({
       </tr>`).join("");
     // Footnotes wrap rather than clip: a nowrap line here would set the table's minimum
     // width and push Rate/Duration/Amount off the sheet.
-    const shared = pageLines.filter(l => l.sharedNote);
-    const footnotes = shared.length ? `
+    const notes = pageLines.flatMap(invLineFootnotes);
+    const footnotes = notes.length ? `
       <tr><td colspan="5" style="padding:6px 28px 2px;font-size:10px;line-height:14px;color:#64748b">
-        ${shared.map(l => `<div>* ${l.date ? `${fmtDateShortDow(l.date)} — ` : ""}${l.sharedNote} · ${l.desc || l.description || l.label || ""}</div>`).join("")}
+        ${notes.map(n => `<div>* ${n}</div>`).join("")}
       </td></tr>` : "";
 
     // Per-sheet figures cover only the rows printed above them. The whole-invoice figure

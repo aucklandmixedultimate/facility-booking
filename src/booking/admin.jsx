@@ -3,7 +3,7 @@ import { AMUA_INBOX, AMUA_INFO, Badge, bareStatusLabel, groupStatusLabel, COUNCI
 import { councilAppBookings } from "./councilData.jsx";
 import { ActivityLogModal, DateRangePicker } from "./modals.jsx";
 import { PatternModal, PricingConditionsManager, ScheduleSummaryModal } from "./schedule.jsx";
-import { InlineDayPicker } from "./forms.jsx";
+import { InlineDayPicker, VendorTimesFields, vendorTimesDefault } from "./forms.jsx";
 import { isClosed } from "../statuses.js";
 // One newly-synced CPSA field booking, expandable to reveal the AMUA bookings it
 // clashes with (same facility / same time), any simultaneous use of a different
@@ -313,7 +313,7 @@ export function ContactReviewModal({ booking, onClose, onConfirm }) {
       </div>
     </Modal>);
 }
-export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,clashes=[],deleteIds=new Set(),facilityRates={},onClearOldUnapproved,onBulkApply,onSaveMismatch,onInformCpsa,onRequestRoom,onQueueNotifications,onMarkAdjustmentSettled,onLinkClash,loggedInEmail,syncResults=[],onClearSyncResults,showSyncResults=false,onToggleSyncResults,bookerFilter=new Set(),onToggleBooker,onSetBookerFilter,aliasNames={},emailAliases={},pricingConditions=[],onAddPricingCondition,onUpdatePricingCondition,onRemovePricingCondition,cpsaDeleteLog=[],onClearDeleteLogEntry,onClearDeleteLog,onSendToCouncil,approxPlayers={}}) {
+export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,clashes=[],deleteIds=new Set(),facilityRates={},onResolveOldUnapproved,onBulkApply,onSaveMismatch,onInformCpsa,onRequestRoom,onQueueNotifications,onMarkAdjustmentSettled,onLinkClash,loggedInEmail,syncResults=[],onClearSyncResults,showSyncResults=false,onToggleSyncResults,bookerFilter=new Set(),onToggleBooker,onSetBookerFilter,aliasNames={},emailAliases={},pricingConditions=[],onAddPricingCondition,onUpdatePricingCondition,onRemovePricingCondition,cpsaDeleteLog=[],onClearDeleteLogEntry,onClearDeleteLog,onSendToCouncil,approxPlayers={}}) {
   const [showSchedulePanel, setShowSchedulePanel] = useState(false);
   // The bookings table: Grouped (schedule summary, the default) or Itemised; and a vendor filter.
   const [adminView, setAdminView] = useTableView("fb_admin_view");
@@ -373,8 +373,9 @@ export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDel
   const [actionNote,setActionNote]=useState("");
   const [actionSkipEmail,setActionSkipEmail]=useState(false);
   const [actionSending,setActionSending]=useState(false);
-  // Clear old unapproved modal
+  // Resolve old unapproved modal: per-booking decision {action, variance}
   const [showClearModal,setShowClearModal]=useState(false);
+  const [resolveDec,setResolveDec]=useState({});
   const [clashGrouped,setClashGrouped]=useState(true);
   const [clashPatternModal,setClashPatternModal]=useState(null);
   const [showClashPanel,setShowClashPanel]=useState(false);
@@ -612,8 +613,8 @@ export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDel
       {/* Top action bar: on phones an even two-column grid of section toggles. */}
       <div style={window.innerWidth<768?{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:6}:{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
         {oldUnapproved.length>0&&(
-          <button onClick={()=>setShowClearModal(true)} style={S.btn({background:"#7c3aed",color:"#fff",fontWeight:700,fontSize:12})}>
-            🧹 Clear old unapproved ({oldUnapproved.length})
+          <button onClick={()=>{setResolveDec({});setShowClearModal(true);}} style={S.btn({background:"#7c3aed",color:"#fff",fontWeight:700,fontSize:12})}>
+            🧭 Resolve old unapproved ({oldUnapproved.length})
           </button>
         )}
         <button onClick={e=>toggleSection(1,e)} title="Open or close this section (Alt-click: show only this one)" style={S.btn({background:showActivityPanel?"#f8fafc":"#fff",color:"#475569",border:`1.5px solid ${showActivityPanel?"#94a3b8":"#e2e8f0"}`,fontSize:12,fontWeight:700})}>
@@ -1900,36 +1901,66 @@ export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDel
         </div>
       )}
 
-      {/* Clear old unapproved confirmation modal */}
-      {showClearModal&&(
+      {/* Resolve old unapproved: past bookings still awaiting approval — remove each, or record
+          that the vendor approved it (optionally with a mismatch, kept for invoice footnotes). */}
+      {showClearModal&&(()=>{
+        const ACTIONS=[["","— leave —"],["remove","🗑 Remove (removal queue)"],["vendor","✓ Vendor approved"],["vendor_var","⚠ Vendor approved (with mismatch)"]];
+        const decOf=b=>resolveDec[b.id]||{action:""};
+        const setDec=(b,d)=>setResolveDec(prev=>({...prev,[b.id]:{...decOf(b),...d}}));
+        const setAll=action=>setResolveDec(Object.fromEntries(oldUnapproved.map(b=>[b.id,{...decOf(b),action,variance:decOf(b).variance||vendorTimesDefault(b)}])));
+        const chosen=oldUnapproved.filter(b=>decOf(b).action);
+        const count=a=>chosen.filter(b=>decOf(b).action===a).length;
+        const si={border:"1px solid #e2e8f0",borderRadius:6,padding:"3px 6px",fontSize:12,fontFamily:"inherit",background:"#fff"};
+        return (
         <div onClick={e=>e.target===e.currentTarget&&setShowClearModal(false)}
           style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.55)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:2000,backdropFilter:"blur(2px)"}}>
-          <div style={{background:"#fff",borderRadius:16,padding:28,maxWidth:520,width:"90%",maxHeight:"85vh",overflowY:"auto",boxShadow:"0 8px 40px rgba(0,0,0,0.2)"}}>
-            <h2 style={{margin:"0 0 8px",fontSize:18,fontWeight:700,color:"#0f172a"}}>🧹 Clear Old Unapproved Bookings</h2>
-            <p style={{margin:"0 0 16px",fontSize:13,color:"#64748b"}}>The following past pending bookings will be permanently deleted:</p>
-            <div style={{display:"flex",flexDirection:"column",gap:6,maxHeight:"35vh",overflowY:"auto",marginBottom:16}}>
+          <div style={{background:"#fff",borderRadius:16,padding:24,maxWidth:640,width:"94%",maxHeight:"88vh",overflowY:"auto",boxShadow:"0 8px 40px rgba(0,0,0,0.2)"}}>
+            <h2 style={{margin:"0 0 6px",fontSize:18,fontWeight:700,color:"#0f172a"}}>🧭 Resolve Old Unapproved Bookings</h2>
+            <p style={{margin:"0 0 12px",fontSize:13,color:"#64748b"}}>Past bookings still awaiting approval. Choose what happened to each — remove it, or record that the vendor approved it (with the vendor's times if they differed from the request).</p>
+            <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:10,fontSize:12,color:"#475569"}}>
+              Set all to
+              <select value="" onChange={e=>e.target.value&&setAll(e.target.value==="none"?"":e.target.value)} style={si}>
+                <option value="">…</option>
+                {ACTIONS.map(([k,l])=><option key={k||"none"} value={k||"none"}>{l}</option>)}
+              </select>
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:6,maxHeight:"48vh",overflowY:"auto",marginBottom:12}}>
               {oldUnapproved.map(b=>{
-                const f=FACILITIES.find(x=>x.id===b.facility_id);
+                const f=FACILITIES.find(x=>x.id===b.facility_id); const d=decOf(b);
                 return(
-                  <div key={b.id} style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:"8px 12px",fontSize:12}}>
-                    <div style={{fontWeight:600,color:"#0f172a"}}>{b.name} — {f?.name}</div>
-                    <div style={{color:"#64748b"}}>{fmtDate(b.date)} · {fmtTime(b.start_hour)}–{fmtTime(b.start_hour+b.duration)} · {b.purpose}</div>
-                    <div style={{color:"#94a3b8"}}>{b.email}</div>
+                  <div key={b.id} style={{background:d.action==="remove"?"#fff1f2":d.action?"#f0fdf4":"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:"8px 12px",fontSize:12,display:"flex",flexDirection:"column",gap:6}}>
+                    <div style={{display:"flex",gap:8,alignItems:"flex-start",flexWrap:"wrap"}}>
+                      <div style={{flex:"1 1 220px",minWidth:0}}>
+                        <div style={{fontWeight:600,color:"#0f172a"}}>{b.name} — {f?.name}</div>
+                        <div style={{color:"#64748b"}}>{fmtDate(b.date)} · {fmtTime(b.start_hour)}–{fmtTime(b.start_hour+b.duration)} · {b.purpose}</div>
+                        <div style={{marginTop:3}}><Badge status={b.status} fid={b.facility_id}/></div>
+                      </div>
+                      <select aria-label={`Resolve ${fmtDate(b.date)}`} value={d.action} onChange={e=>setDec(b,{action:e.target.value,variance:d.variance||vendorTimesDefault(b)})} style={si}>
+                        {ACTIONS.map(([k,l])=><option key={k} value={k}>{l}</option>)}
+                      </select>
+                    </div>
+                    {d.action==="vendor_var"&&<VendorTimesFields booking={b} value={d.variance||vendorTimesDefault(b)} onChange={v=>setDec(b,{variance:v})}/>}
                   </div>
                 );
               })}
             </div>
-            <div style={{fontSize:12,color:"#64748b",marginBottom:16}}>These move to the 🗑 Removal Queue — the actual deletion and any booker emails happen when you submit that queue.</div>
-            <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
+            <div style={{fontSize:12,color:"#64748b",marginBottom:14}}>
+              Removals go to the 🗑 Removal Queue; approvals are queued in the cart without emailing the booker (they're in the past) and apply when you submit it. A recorded mismatch stays on the booking and can be asterisked on invoices.
+            </div>
+            <div style={{display:"flex",gap:10,justifyContent:"flex-end",flexWrap:"wrap"}}>
               <button onClick={()=>setShowClearModal(false)} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#475569"})}>Cancel</button>
-              <button onClick={()=>{onClearOldUnapproved(oldUnapproved.map(b=>b.id)); setShowClearModal(false);}}
-                style={S.btn({background:"#7c3aed",color:"#fff",fontWeight:700})}>
-                🧹 Move {oldUnapproved.length} to removal queue
+              <button disabled={!chosen.length} onClick={()=>{
+                  onResolveOldUnapproved(chosen.map(b=>{const d=decOf(b);return {id:b.id,action:d.action,
+                    variance:d.action==="vendor_var"?{...(d.variance||vendorTimesDefault(b)),reqStart:b.start_hour,reqDur:b.duration}:null};}));
+                  setShowClearModal(false);}}
+                style={S.btn({background:chosen.length?"#7c3aed":"#cbd5e1",color:"#fff",fontWeight:700,cursor:chosen.length?"pointer":"not-allowed"})}>
+                Resolve {chosen.length}{chosen.length?` (${[count("remove")&&`${count("remove")} remove`,(count("vendor")+count("vendor_var"))&&`${count("vendor")+count("vendor_var")} approve`].filter(Boolean).join(", ")})`:""}
               </button>
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* Clash notify modal */}
       {showClashNotify&&(()=>{
