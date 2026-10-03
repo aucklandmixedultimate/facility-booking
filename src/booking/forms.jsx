@@ -527,7 +527,7 @@ export function CartModal({ cart, setCart, onClose, onSubmit, openNew, silentMod
                     <div style={{padding:'8px 14px',fontSize:12,color:'#64748b',background:'#fff'}}>
                       <span style={{fontWeight:600,color:'#0f172a',marginRight:6}}>{f?.name||b.facility_id}</span>{fmtDate(b.date)} · {fmtTime(b.start_hour)}–{fmtTime(b.start_hour+b.duration)}{b.purpose?` · ${b.purpose}`:''}
                       <span style={{marginLeft:8,fontFamily:'monospace',color:'#94a3b8'}}>{item.ref}</span>
-                      <div style={{marginTop:3,color:'#6d28d9'}}>On submit → Pending GTEC Review</div>
+                      <div style={{marginTop:3,color:'#6d28d9'}}>On submit → Pending GTEC review</div>
                     </div>
                   </div>
                 );
@@ -1228,7 +1228,7 @@ export function BookingDetail({booking,onEdit,onClose,onCancel,isAdmin,onStatusC
               </select>
             </label>
           ) : (
-            <Badge status={booking.status} wf={workflowOf(booking.facility_id)}/>
+            <Badge status={booking.status} wf={workflowOf(booking.facility_id)} fid={booking.facility_id}/>
           )}
           {booking.invoiced&&<span style={{fontSize:12,fontWeight:700,background:INVOICED_META.bg,color:INVOICED_META.text,border:`1px solid ${INVOICED_META.border}`,borderRadius:8,padding:"3px 9px"}}>🧾 Invoiced</span>}
           {REVIEW_STATUSES.has(booking.status)&&<p style={{margin:0,fontSize:13,color:m.text}}>Awaiting admin review.</p>}

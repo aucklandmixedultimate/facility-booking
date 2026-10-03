@@ -1871,7 +1871,7 @@ export function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricin
                                         {credit<0&&<span style={{fontSize:9,color:"#16a34a",marginLeft:3,fontWeight:700}}>(−{fmtCost(Math.abs(credit))})</span>}
                                         {deficit>0&&<span style={{fontSize:9,color:"#b45309",marginLeft:3,fontWeight:700}}>(+{fmtCost(deficit)})</span>}
                                       </td>
-                                      <td style={{padding:"3px 8px"}}><Badge status={b.status} wf={workflowOf(b.facility_id)}/>{b.invoiced&&<span style={{marginLeft:3,fontSize:9,fontWeight:700,color:"#5b21b6"}}>🧾</span>}</td>
+                                      <td style={{padding:"3px 8px"}}><Badge status={b.status} wf={workflowOf(b.facility_id)} fid={b.facility_id}/>{b.invoiced&&<span style={{marginLeft:3,fontSize:9,fontWeight:700,color:"#5b21b6"}}>🧾</span>}</td>
                                     </tr>
                                   );
                                 })}

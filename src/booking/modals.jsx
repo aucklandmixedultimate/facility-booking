@@ -694,7 +694,7 @@ export function OverlapWarning({title,description,bookings:bkgs,onProceed,onCanc
               </div>
               <div style={{fontSize:12,color:"#64748b"}}>{b.purpose} · {fmtTime(b.start_hour)}–{fmtTime(b.start_hour+b.duration)} · {b.name}</div>
             </div>
-            <Badge status={b.status} wf={workflowOf(b.facility_id)}/>
+            <Badge status={b.status} wf={workflowOf(b.facility_id)} fid={b.facility_id}/>
           </div>
         );})}
       </div>

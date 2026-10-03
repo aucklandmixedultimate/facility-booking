@@ -2367,7 +2367,7 @@ export default function App() {
                                     {isClash&&<span style={{marginLeft:"auto",fontSize:10,fontWeight:700,color:"#ef4444",flexShrink:0}}>⚡clash</span>}
                                   </div>
                                   <div style={{display:"flex",alignItems:"center",gap:6,minWidth:0,flexWrap:"wrap"}}>
-                                    <Badge status={b.status} wf={workflowOf(b.facility_id)}/>
+                                    <Badge status={b.status} wf={workflowOf(b.facility_id)} fid={b.facility_id}/>
                                     {isAdmin_bk
                                       ? <span style={{fontSize:10,fontWeight:700,color:"#94a3b8",background:"#f1f5f9",borderRadius:10,padding:"2px 6px"}}>🔒</span>
                                       : <span style={{padding:"1px 8px",borderRadius:10,background:emailColor(b.email),color:"#fff",fontSize:11,fontWeight:600,maxWidth:"100%",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{displayNameFor(b.email)}</span>}
@@ -2499,7 +2499,7 @@ export default function App() {
                                     </span>
                                   </td>
                                   <td style={{padding:"3px 6px"}}>
-                                    <Badge status={b.status} wf={workflowOf(b.facility_id)}/>
+                                    <Badge status={b.status} wf={workflowOf(b.facility_id)} fid={b.facility_id}/>
                                     {isClash&&<span style={{display:"block",fontSize:9,fontWeight:700,color:"#ef4444"}}>⚡clash</span>}
                                   </td>
                                   <td style={{padding:"3px 6px",whiteSpace:"nowrap",color:"#475569",fontSize:11}}>{fmt24(b.start_hour)}–{fmt24(b.start_hour+b.duration)}</td>
