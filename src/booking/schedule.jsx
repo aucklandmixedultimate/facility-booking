@@ -1,5 +1,5 @@
 import { useState, Fragment } from "react";
-import { COUNCIL_STAGE_STATUSES, CopyableTable, DURATIONS, FACILITIES, Modal, S, STATUS_META, emailColor, fmtCost, fmtDate, fmtDateShort, fmtTime, isAdminBooking, newId, parseGroupRef, todayKey, venueFacilities, visibleFacilities } from "./core.jsx";
+import { Badge, COUNCIL_STAGE_STATUSES, CopyableTable, DURATIONS, FACILITIES, Modal, S, STATUS_META, T, emailColor, fmtCost, fmtDate, fmtDateShort, fmtTime, isAdminBooking, newId, parseGroupRef, todayKey, venueFacilities, visibleFacilities } from "./core.jsx";
 import { DateRangePicker } from "./modals.jsx";
 import { isLive, isLegacyStatus } from "../statuses.js";
 // `canon` folds a (lowercased) email onto its canonical primary so linked
@@ -37,157 +37,158 @@ export function buildOverlapPatternMap(active, facSensitive, canon) {
   return patternMap;
 }
 
-export function PatternModal({ email, name, pk, bkgs, isAdmin, canEdit: canEditProp, onClose, onBulkApply }) {
+// A set of bookings (a recurring pattern, a booker's status group, their one-offs…) shown
+// itemised, with ticks to choose which ones the actions apply to. The same panel opens
+// inline in the Grouped view and inside PatternModal / OneOffModal elsewhere.
+//   onBulkStatusChange(ids, status)  admin: set the status of the ticked bookings
+//   onBulkApply({email, pk, bkgs, bulkTime, bulkDur, bulkFac, cancelFrom})  change time /
+//     duration / facility (undefined = keep each booking's own) or cancel from a date
+export function BookingSubsetPanel({ title, subtitle, email, pk, bkgs, isAdmin, canEdit, onBulkApply, onBulkStatusChange, onView, onClose, maxHeight=260 }) {
+  const sorted = [...bkgs].sort((a,b)=>a.date.localeCompare(b.date)||a.start_hour-b.start_hour);
+  const [unticked, setUnticked] = useState(()=>new Set());
+  const ticked = sorted.filter(b=>!unticked.has(b.id));
+  const uniform = k => { const v = [...new Set(sorted.map(b=>b[k]))]; return v.length===1 ? String(v[0]) : ""; };
+  const [bulkTime, setBulkTime] = useState(()=>uniform("start_hour"));
+  const [bulkDur, setBulkDur] = useState(()=>uniform("duration"));
+  const [bulkFac, setBulkFac] = useState(()=>uniform("facility_id"));
+  const [cancelFrom, setCancelFrom] = useState("");
+  const [statusTarget, setStatusTarget] = useState("approved");
+  const canStatus = isAdmin && onBulkStatusChange;
+  const canBulk = (isAdmin || canEdit) && onBulkApply;
+  const toggle = id => setUnticked(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const allTicked = ticked.length === sorted.length;
+  const th = {textAlign:"left",padding:"5px 8px",fontWeight:600,color:T.muted,fontSize:11,whiteSpace:"nowrap"};
+  const td = {padding:"4px 8px",fontSize:12,borderTop:`1px solid ${T.lineSoft}`,whiteSpace:"nowrap"};
+  const si = {border:`1px solid ${T.line}`,borderRadius:T.rSm,padding:"3px 6px",fontSize:12,fontFamily:"inherit",background:T.surface,color:T.ink};
+  const lbl = {fontSize:11,color:T.muted,fontWeight:600};
+  const facs = [...new Map([...sorted.map(b=>FACILITIES.find(f=>f.id===b.facility_id)).filter(Boolean), ...venueFacilities(sorted[0]?.facility_id)].map(f=>[f.id,f])).values()];
+  const n = ticked.length, nCancel = cancelFrom ? ticked.filter(b=>b.date>=cancelFrom).length : 0;
+  const editing = bulkTime!==uniform("start_hour") || bulkDur!==uniform("duration") || bulkFac!==uniform("facility_id");
+  return (
+    <div style={{background:T.surface,border:`1px solid ${T.line}`,borderRadius:T.rLg,padding:"8px 10px",boxShadow:T.shadow2}}>
+      {(title||onClose)&&<div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+        <div style={{minWidth:0}}>
+          <div style={{fontSize:13,fontWeight:700,color:T.ink}}>{title}</div>
+          {subtitle&&<div style={{fontSize:11,color:T.muted}}>{subtitle}</div>}
+        </div>
+        {onClose&&<button onClick={onClose} aria-label="Collapse" title="Collapse" style={{marginLeft:"auto",border:"none",background:"none",cursor:"pointer",color:T.faint,fontSize:15,padding:2}}>▴</button>}
+      </div>}
+      <div style={{overflow:"auto",maxHeight}}>
+        <CopyableTable>
+        <table style={{width:"100%",borderCollapse:"collapse"}}>
+          <thead><tr style={{background:T.surface2}}>
+            <th style={{...th,width:24}}><input type="checkbox" checked={allTicked} aria-label="Tick all"
+              onChange={()=>setUnticked(allTicked?new Set(sorted.map(b=>b.id)):new Set())}/></th>
+            <th style={th}>Date</th><th style={th}>Facility</th><th style={{...th,textAlign:"right"}}>Time</th><th style={{...th,textAlign:"right"}}>Dur</th><th style={th}>Status</th>
+          </tr></thead>
+          <tbody>
+            {sorted.map(b=>{
+              const f=FACILITIES.find(x=>x.id===b.facility_id); const on=!unticked.has(b.id);
+              return (
+                <tr key={b.id} style={{opacity:on?1:0.5}}>
+                  <td style={td}><input type="checkbox" checked={on} onChange={()=>toggle(b.id)} aria-label={`Tick ${fmtDate(b.date)}`}/></td>
+                  <td style={td}>{onView
+                    ? <button onClick={()=>onView(b)} title="Open booking" style={{border:"none",background:"none",padding:0,cursor:"pointer",color:T.focus,fontFamily:"inherit",fontSize:12,textDecoration:"underline dotted"}}>{fmtDate(b.date)}</button>
+                    : fmtDate(b.date)}</td>
+                  <td style={td}><span style={{fontSize:11,background:(f?.color||"#94a3b8")+"22",color:f?.color,borderRadius:4,padding:"1px 5px"}}>{f?.name.split("–")[0].trim()||b.facility_id}</span></td>
+                  <td style={{...td,textAlign:"right"}}>{fmtTime(b.start_hour)}</td>
+                  <td style={{...td,textAlign:"right"}}>{b.duration}h</td>
+                  <td style={td}><Badge status={b.status} fid={b.facility_id}/></td>
+                </tr>
+              );
+            })}
+            {sorted.length===0&&<tr><td colSpan={6} style={{...td,textAlign:"center",color:T.faint}}>No bookings left in this group.</td></tr>}
+          </tbody>
+        </table>
+        </CopyableTable>
+      </div>
+      {(canStatus||canBulk)&&sorted.length>0&&(
+        <div style={{marginTop:8,padding:"8px 10px",background:T.surface2,borderRadius:T.rMd,display:"flex",flexDirection:"column",gap:8}}>
+          <div style={{fontSize:11,fontWeight:700,color:T.ink2}}>⚙ Actions for {n} ticked booking{n!==1?"s":""}</div>
+          {canStatus&&(
+            <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+              <span style={lbl}>Set status</span>
+              <select value={statusTarget} onChange={e=>setStatusTarget(e.target.value)} style={si}>
+                {Object.entries(STATUS_META).filter(([k])=>!isLegacyStatus(k)&&k!=="clash").map(([k,v])=><option key={k} value={k}>{v.label.replace(/^\(\d\/\d\) /,"")}</option>)}
+              </select>
+              <button disabled={!n} onClick={()=>onBulkStatusChange(ticked.map(b=>b.id),statusTarget)}
+                style={S.btn({padding:"4px 12px",fontSize:12,background:n?T.ink:T.faint,color:"#fff",cursor:n?"pointer":"not-allowed"})}>✓ Apply status</button>
+            </div>
+          )}
+          {canBulk&&(<>
+            <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+              <label style={{display:"flex",alignItems:"center",gap:5}}><span style={lbl}>Start</span>
+                <select value={bulkTime} onChange={e=>setBulkTime(e.target.value)} style={si}>
+                  {!uniform("start_hour")&&<option value="">— keep each —</option>}
+                  {Array.from({length:48},(_,i)=>i/2).map(h=><option key={h} value={String(h)}>{fmtTime(h)}</option>)}
+                </select></label>
+              <label style={{display:"flex",alignItems:"center",gap:5}}><span style={lbl}>Duration</span>
+                <select value={bulkDur} onChange={e=>setBulkDur(e.target.value)} style={si}>
+                  {!uniform("duration")&&<option value="">— keep each —</option>}
+                  {DURATIONS.map(d=><option key={d.value} value={String(d.value)}>{d.label}</option>)}
+                </select></label>
+              <label style={{display:"flex",alignItems:"center",gap:5}}><span style={lbl}>Facility</span>
+                <select value={bulkFac} onChange={e=>setBulkFac(e.target.value)} style={si}>
+                  {!uniform("facility_id")&&<option value="">— keep each —</option>}
+                  {facs.map(f=><option key={f.id} value={f.id}>{f.name}</option>)}
+                </select></label>
+            </div>
+            <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+              <span style={{...lbl,color:T.danger}}>Cancel from</span>
+              <input type="date" value={cancelFrom} onChange={e=>setCancelFrom(e.target.value)} style={{...si,width:140}}/>
+              <span style={{fontSize:11,color:T.faint}}>(optional: ticked bookings on or after it go to the removal cart)</span>
+            </div>
+            <div>
+              <button disabled={!n||(!editing&&!cancelFrom)} onClick={()=>onBulkApply({email,pk,bkgs:ticked,
+                  bulkTime:bulkTime===""?undefined:parseFloat(bulkTime), bulkDur:bulkDur===""?undefined:parseFloat(bulkDur), bulkFac:bulkFac||undefined, cancelFrom})}
+                style={S.btn({padding:"5px 14px",fontSize:12,background:n&&(editing||cancelFrom)?T.ink:T.faint,color:"#fff",cursor:n&&(editing||cancelFrom)?"pointer":"not-allowed"})}>
+                Apply to {n-nCancel} booking{n-nCancel!==1?"s":""}{nCancel?` · cancel ${nCancel}`:""}
+              </button>
+            </div>
+          </>)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// A recurring pattern or grouped booking in a modal (Summary tab, admin clash list).
+export function PatternModal({ email, name, pk, bkgs, isAdmin, canEdit: canEditProp, onClose, onBulkApply, onBulkStatusChange, onView }) {
   const canEdit = canEditProp !== undefined ? canEditProp : isAdmin;
-  const isGroup = pk.startsWith("grp:"); // a grouped booking (multi-day/multi-facility/etc.)
+  const isGroup = pk.startsWith("grp:");
   const parts = pk.split("_");
   const startH = parseFloat(parts[parts.length-1]);
   const dn = parts[parts.length-2]||"";
   const facId = !isGroup && parts.length>2 ? parts[0] : null;
   const fac = facId ? FACILITIES.find(f=>f.id===facId) : null;
-
-  const [bulkTime, setBulkTime] = useState(Number.isNaN(startH)?(bkgs[0]?.start_hour??9):startH);
-  const [bulkDur, setBulkDur] = useState(bkgs[0]?.duration ?? 2);
-  const [bulkFac, setBulkFac] = useState(bkgs[0]?.facility_id ?? "");
-  const [cancelFrom, setCancelFrom] = useState("");
-
-  const sorted = [...bkgs].sort((a,b)=>a.date.localeCompare(b.date));
-
-  const si = {border:"1px solid #e2e8f0",borderRadius:6,padding:"4px 8px",fontSize:13,fontFamily:"inherit",background:"#fff"};
-
   return (
     <Modal title={isGroup?`🔗 Grouped booking — ${name}`:`Pattern: ${dn} ${fmtTime(startH)} — ${name}`} onClose={onClose}>
-      <div style={{fontSize:12,color:"#64748b",marginBottom:12}}>
-        {bkgs.length} booking{bkgs.length!==1?"s":""} · {email}
-        {fac && <span> · {fac.name}</span>}
-        {isGroup && <span> · created together</span>}
-      </div>
-
-      <div style={{overflowY:"auto",maxHeight:280,marginBottom:16}}>
-        <CopyableTable>
-        <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
-          <thead>
-            <tr style={{background:"#f8fafc",borderBottom:"1px solid #e2e8f0"}}>
-              <th style={{textAlign:"left",padding:"6px 8px",fontWeight:600,color:"#64748b"}}>Date</th>
-              <th style={{textAlign:"left",padding:"6px 8px",fontWeight:600,color:"#64748b"}}>Facility</th>
-              <th style={{textAlign:"right",padding:"6px 8px",fontWeight:600,color:"#64748b"}}>Time</th>
-              <th style={{textAlign:"right",padding:"6px 8px",fontWeight:600,color:"#64748b"}}>Dur</th>
-              <th style={{textAlign:"left",padding:"6px 8px",fontWeight:600,color:"#64748b"}}>Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sorted.map(b=>{
-              const f=FACILITIES.find(x=>x.id===b.facility_id);
-              const sm=STATUS_META[b.status];
-              return (
-                <tr key={b.id} style={{borderBottom:"1px solid #f1f5f9"}}>
-                  <td style={{padding:"5px 8px"}}>{fmtDate(b.date)}</td>
-                  <td style={{padding:"5px 8px"}}><span style={{fontSize:11,background:f?.color+"22",color:f?.color,borderRadius:4,padding:"1px 5px"}}>{f?.name.split("–")[0].trim()}</span></td>
-                  <td style={{padding:"5px 8px",textAlign:"right"}}>{fmtTime(b.start_hour)}</td>
-                  <td style={{padding:"5px 8px",textAlign:"right"}}>{b.duration}h</td>
-                  <td style={{padding:"5px 8px"}}><span style={{fontSize:11,background:sm?.bg,color:sm?.text,border:`1px solid ${sm?.border}`,borderRadius:4,padding:"1px 5px"}}>{sm?.label||b.status}</span></td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-        </CopyableTable>
-      </div>
-
-      {(isAdmin || canEdit) && (
-        <div style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:"10px 12px"}}>
-          <div style={{fontWeight:700,fontSize:13,color:"#0f172a",marginBottom:8}}>Bulk Edit (apply to all in pattern)</div>
-          <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center",marginBottom:8}}>
-            <div style={{display:"flex",alignItems:"center",gap:5}}>
-              <span style={{fontSize:12,color:"#64748b"}}>Start time</span>
-              <input type="number" min="0" max="23" step="0.5" value={bulkTime}
-                onChange={e=>setBulkTime(parseFloat(e.target.value)||0)}
-                style={{...si,width:64}}/>
-            </div>
-            <div style={{display:"flex",alignItems:"center",gap:5}}>
-              <span style={{fontSize:12,color:"#64748b"}}>Duration</span>
-              <select value={bulkDur} onChange={e=>setBulkDur(parseFloat(e.target.value))} style={si}>
-                {DURATIONS.map(d=><option key={d.value} value={d.value}>{d.label}</option>)}
-              </select>
-            </div>
-            <div style={{display:"flex",alignItems:"center",gap:5}}>
-              <span style={{fontSize:12,color:"#64748b"}}>Facility</span>
-              <select value={bulkFac} onChange={e=>setBulkFac(e.target.value)} style={si}>
-                {venueFacilities(bulkFac).map(f=><option key={f.id} value={f.id}>{f.name}</option>)}
-              </select>
-            </div>
-          </div>
-          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
-            <span style={{fontSize:12,color:"#e11d48"}}>Cancel from date</span>
-            <input type="date" value={cancelFrom} onChange={e=>setCancelFrom(e.target.value)} style={{...si,width:140}}/>
-            <span style={{fontSize:11,color:"#94a3b8"}}>(leave blank to skip)</span>
-          </div>
-          <div style={{display:"flex",gap:8}}>
-            <button onClick={()=>{
-              onBulkApply({email,pk,bkgs:sorted,bulkTime,bulkDur,bulkFac,cancelFrom});
-              onClose();
-            }} style={S.btn({background:"#0f172a",color:"#fff",fontSize:12})}>
-              Apply to all ({sorted.filter(b=>!cancelFrom||b.date>=cancelFrom).length} bookings)
-            </button>
-            <button onClick={onClose} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#64748b",fontSize:12})}>Close</button>
-          </div>
-        </div>
-      )}
-      {!(isAdmin || canEdit) && (
-        <button onClick={onClose} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#64748b",fontSize:12})}>Close</button>
-      )}
+      <BookingSubsetPanel subtitle={`${bkgs.length} booking${bkgs.length!==1?"s":""} · ${email}${fac?` · ${fac.name}`:""}${isGroup?" · created together":""}`}
+        email={email} pk={pk} bkgs={bkgs} isAdmin={isAdmin} canEdit={canEdit} onView={onView} maxHeight={320}
+        onBulkStatusChange={onBulkStatusChange&&((ids,st)=>{onBulkStatusChange(ids,st);onClose();})}
+        onBulkApply={onBulkApply&&(args=>{onBulkApply(args);onClose();})}/>
     </Modal>
   );
 }
 
-export function OneOffModal({ email, name, bkgs, onClose }) {
-  const sorted = [...bkgs].sort((a,b)=>a.date.localeCompare(b.date));
+export function OneOffModal({ email, name, bkgs, onClose, onView }) {
   return (
     <Modal title={`One-off Bookings — ${name}`} onClose={onClose}>
-      <div style={{fontSize:12,color:"#64748b",marginBottom:10}}>{sorted.length} one-off booking{sorted.length!==1?"s":""} · {email}</div>
-      <div style={{overflowY:"auto",maxHeight:360}}>
-        <CopyableTable>
-        <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
-          <thead>
-            <tr style={{background:"#f8fafc",borderBottom:"1px solid #e2e8f0"}}>
-              <th style={{textAlign:"left",padding:"6px 8px",fontWeight:600,color:"#64748b"}}>Date</th>
-              <th style={{textAlign:"left",padding:"6px 8px",fontWeight:600,color:"#64748b"}}>Facility</th>
-              <th style={{textAlign:"right",padding:"6px 8px",fontWeight:600,color:"#64748b"}}>Time</th>
-              <th style={{textAlign:"right",padding:"6px 8px",fontWeight:600,color:"#64748b"}}>Dur</th>
-              <th style={{textAlign:"left",padding:"6px 8px",fontWeight:600,color:"#64748b"}}>Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sorted.map(b=>{
-              const f=FACILITIES.find(x=>x.id===b.facility_id);
-              const sm=STATUS_META[b.status];
-              return (
-                <tr key={b.id} style={{borderBottom:"1px solid #f1f5f9"}}>
-                  <td style={{padding:"5px 8px"}}>{fmtDate(b.date)}</td>
-                  <td style={{padding:"5px 8px"}}><span style={{fontSize:11,background:f?.color+"22",color:f?.color,borderRadius:4,padding:"1px 5px"}}>{f?.name.split("–")[0].trim()}</span></td>
-                  <td style={{padding:"5px 8px",textAlign:"right"}}>{fmtTime(b.start_hour)}</td>
-                  <td style={{padding:"5px 8px",textAlign:"right"}}>{b.duration}h</td>
-                  <td style={{padding:"5px 8px"}}><span style={{fontSize:11,background:sm?.bg,color:sm?.text,border:`1px solid ${sm?.border}`,borderRadius:4,padding:"1px 5px"}}>{sm?.label||b.status}</span></td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-        </CopyableTable>
-      </div>
-      <div style={{marginTop:12}}>
-        <button onClick={onClose} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#64748b",fontSize:12})}>Close</button>
-      </div>
+      <BookingSubsetPanel subtitle={`${bkgs.length} one-off booking${bkgs.length!==1?"s":""} · ${email}`} email={email} pk="oneoff" bkgs={bkgs} onView={onView} maxHeight={360}/>
     </Modal>
   );
 }
 
 // embedded: rendered as a table view (Grouped) — no panel heading or close.
-export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkApply, onBulkStatusChange, onClose, inline=false, embedded=false, aliasNames={}, emailAliases={} }) {
+export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkApply, onBulkStatusChange, onView, onClose, inline=false, embedded=false, aliasNames={}, emailAliases={} }) {
   const [facSensitive, setFacSensitive] = useState(false);
   const [splitPatterns, setSplitPatterns] = useState(new Set());
-  const [patternModal, setPatternModal] = useState(null);
-  const [oneOffModalData, setOneOffModalData] = useState(null);
+  // The group expanded inline into its itemised bookings (BookingSubsetPanel) — one at a time:
+  // {email, kind:"pattern"|"status"|"oneoff"|"selected", pk?, sh?, status?, title}.
+  const [expanded, setExpanded] = useState(null);
+  const sameGroup = (a, b) => !!a && !!b && a.email===b.email && a.kind===b.kind && a.pk===b.pk && a.sh===b.sh && a.status===b.status;
+  const toggleExpand = d => setExpanded(prev => sameGroup(prev, d) ? null : d);
+  const openRing = d => sameGroup(expanded, d) ? {boxShadow:`0 0 0 2px ${T.ink}`} : null;
   // Date-range table filters default to "today onwards" — the common case is upcoming
   // bookings, and past ones are a deliberate lookup. Clear the From field (or pick "Any
   // date" in the picker) to see history again.
@@ -239,7 +240,6 @@ export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkA
 
   function renderChips(email, nameDisplay, recurring) {
     const ec = emailColor(email);
-    const canEdit = isAdmin || email.toLowerCase() === loggedInEmail?.toLowerCase();
     const chips = [];
     for (const [pk, bkgs] of recurring) {
       if (pk.startsWith("grp:")) {
@@ -249,8 +249,8 @@ export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkA
         const facLabel=facIds.map(fid=>{const f=FACILITIES.find(x=>x.id===fid);return f?(f.name.includes("Field")?f.name.replace("Field ","Fld "):f.name.split("–")[0].trim().slice(0,6)):fid;}).join(", ");
         const uniform=bkgs.every(b=>b.start_hour===bkgs[0].start_hour&&b.duration===bkgs[0].duration&&b.facility_id===bkgs[0].facility_id);
         chips.push(
-          <span key={pk} title="Grouped booking" onClick={()=>setPatternModal({email,name:nameDisplay,pk,bkgs,canEdit})}
-            style={{display:"inline-flex",alignItems:"center",gap:3,background:ec+"22",color:ec,border:`1px solid ${ec}55`,borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:600,whiteSpace:"nowrap",cursor:"pointer"}}>
+          <span key={pk} title="Grouped booking — click to itemise" onClick={()=>toggleExpand({email,kind:"pattern",pk,title:`🔗 Grouped booking — ${nameDisplay}`})}
+            style={{display:"inline-flex",alignItems:"center",gap:3,background:ec+"22",color:ec,border:`1px solid ${ec}55`,borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:600,whiteSpace:"nowrap",cursor:"pointer",...openRing({email,kind:"pattern",pk})}}>
             🔗 {fmtDateShort(dates[0])}–{fmtDateShort(dates[dates.length-1])} · {facLabel}{uniform?` · ${fmtTime(bkgs[0].start_hour)}`:""} ×{bkgs.length}
           </span>
         );
@@ -269,8 +269,8 @@ export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkA
           const facIds=[...new Set(subBkgs.map(b=>b.facility_id))];
           const facLabel=facIds.map(fid=>{const f=FACILITIES.find(x=>x.id===fid);return f?(f.name.includes("Field")?f.name.replace("Field ","Fld "):f.name.split("–")[0].trim().slice(0,6)):fid;}).join(", ");
           chips.push(
-            <span key={`${pk}::${sh}`} onClick={()=>setPatternModal({email,name:nameDisplay,pk:`${dn}_${sh}`,bkgs:subBkgs,canEdit})}
-              style={{display:"inline-flex",alignItems:"center",gap:3,background:ec+"22",color:ec,border:`1px solid ${ec}55`,borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:600,whiteSpace:"nowrap",cursor:"pointer"}}>
+            <span key={`${pk}::${sh}`} title="Click to itemise" onClick={()=>toggleExpand({email,kind:"pattern",pk,sh,title:`${dn} ${fmtTime(sh)} — ${nameDisplay}`})}
+              style={{display:"inline-flex",alignItems:"center",gap:3,background:ec+"22",color:ec,border:`1px solid ${ec}55`,borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:600,whiteSpace:"nowrap",cursor:"pointer",...openRing({email,kind:"pattern",pk,sh})}}>
               {dn} {fmtTime(sh)} · {durLabel} · {facLabel} ×{subBkgs.length}
             </span>
           );
@@ -289,8 +289,8 @@ export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkA
         const facIds=[...new Set(bkgs.map(b=>b.facility_id))];
         const facLabel=facIds.map(fid=>{const f=FACILITIES.find(x=>x.id===fid);return f?(f.name.includes("Field")?f.name.replace("Field ","Fld "):f.name.split("–")[0].trim().slice(0,6)):fid;}).join(", ");
         chips.push(
-          <span key={pk} onClick={()=>setPatternModal({email,name:nameDisplay,pk,bkgs,canEdit})}
-            style={{display:"inline-flex",alignItems:"center",gap:3,background:ec+"22",color:ec,border:`1px solid ${ec}55`,borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:600,whiteSpace:"nowrap",cursor:"pointer"}}>
+          <span key={pk} title="Click to itemise" onClick={()=>toggleExpand({email,kind:"pattern",pk,title:`${dn} ${fmtTime(startH)} — ${nameDisplay}`})}
+            style={{display:"inline-flex",alignItems:"center",gap:3,background:ec+"22",color:ec,border:`1px solid ${ec}55`,borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:600,whiteSpace:"nowrap",cursor:"pointer",...openRing({email,kind:"pattern",pk})}}>
             {dn} {fmtTime(startH)} · {durLabel} · {facLabel} ×{bkgs.length}
             {isMixed&&<span title="Mixed start times — click ↕ to split"
               onClick={e=>{e.stopPropagation();setSplitPatterns(prev=>{const ns=new Set(prev);ns.add(splitKey);return ns;});}}
@@ -315,6 +315,23 @@ export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkA
       if (s.has(k)) s.delete(k); else s.add(k);
       return s;
     });
+  }
+  // The bookings of an expanded group, from the current data (so they refresh after an action).
+  function groupBkgs(row, d) {
+    if (d.kind === "status") return row.filteredBkgs.filter(b => b.status === d.status);
+    if (d.kind === "oneoff") return row.oneOffs;
+    const pat = (row.recurring.find(([pk]) => pk === d.pk) || [])[1] || [];
+    return d.sh != null ? pat.filter(b => b.start_hour === d.sh) : pat;
+  }
+  function panelFor(d, bkgs, row) {
+    const email = row ? row.email : "";
+    const canEdit = isAdmin || (!!email && email.toLowerCase() === loggedInEmail?.toLowerCase());
+    return (
+      <BookingSubsetPanel key={`${d.email}|${d.kind}|${d.pk}|${d.sh}|${d.status}`} title={d.title}
+        subtitle={`${bkgs.length} booking${bkgs.length!==1?"s":""}${email?` · ${email}`:""}`}
+        email={email} pk={d.pk||d.kind} bkgs={bkgs} isAdmin={isAdmin} canEdit={canEdit} onView={onView}
+        onBulkApply={onBulkApply} onBulkStatusChange={onBulkStatusChange} onClose={()=>setExpanded(null)}/>
+    );
   }
   // Resolve selected groups → all matching bookings
   const selectedBkgs = (()=>{
@@ -358,7 +375,7 @@ export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkA
         </div>
         {isAdmin&&onBulkStatusChange&&(
           <div style={{fontSize:11,color:"#64748b",marginBottom:8,fontStyle:"italic"}}>
-            Tip: click status chips below to select groups, then apply a bulk action.
+            Tip: click status chips to select groups for a bulk action, or ▾ (and patterns) to itemise them with their actions.
           </div>
         )}
         <div style={{overflowY:"auto",maxHeight:"60vh",overflowX:"auto"}}>
@@ -367,14 +384,14 @@ export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkA
             <thead>
               <tr style={{background:"#f8fafc"}}>
                 <th style={thS2}>Booker</th>
-                <th style={thS2}>Recurring Patterns <span style={{fontWeight:400,fontSize:11,color:"#94a3b8"}}>(click to edit)</span></th>
+                <th style={thS2}>Recurring Patterns <span style={{fontWeight:400,fontSize:11,color:"#94a3b8"}}>(click to itemise)</span></th>
                 <th style={{...thS2,minWidth:100}}>
                   <div style={{display:"flex",alignItems:"center",gap:4}}>
                     Date Range
                     {(schedDateFrom||schedDateTo)&&<span style={{fontSize:9,background:"#0f172a",color:"#fff",borderRadius:4,padding:"0 3px"}}>filtered</span>}
                   </div>
                 </th>
-                <th style={{...thS2,minWidth:110}}>Status {groupSelectable&&<span style={{fontWeight:400,fontSize:11,color:"#94a3b8"}}>(click to select)</span>}</th>
+                <th style={{...thS2,minWidth:110}}>Status <span style={{fontWeight:400,fontSize:11,color:"#94a3b8"}}>({groupSelectable?"click to select · ▾ itemise":"click to itemise"})</span></th>
                 <th style={{...thS2,textAlign:"right"}}>One-offs</th>
                 <th style={{...thS2,textAlign:"right"}}>Total</th>
               </tr>
@@ -382,8 +399,10 @@ export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkA
             <tbody>
               {rows.map(row=>{
                 const ec = emailColor(row.email);
+                const open = expanded && expanded.email===row.email && expanded.kind!=="selected" ? expanded : null;
                 return (
-                  <tr key={row.email} style={{borderBottom:"1px solid #f1f5f9"}}>
+                  <Fragment key={row.email}>
+                  <tr style={{borderBottom:open?"none":"1px solid #f1f5f9"}}>
                     <td style={tdS2}>
                       <span style={{display:"inline-block",padding:"3px 10px",borderRadius:12,background:ec,color:"#fff",fontSize:12,fontWeight:700}}>
                         {schedAlias(row.email)}
@@ -406,15 +425,22 @@ export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkA
                         {Object.entries(row.statusCounts).map(([st,cnt])=>{
                           const m=STATUS_META[st]||STATUS_META.pending_amua;
                           const sel=selectedGroups.has(`${row.email}::${st}`);
-                          const Tag = groupSelectable ? "button" : "span";
+                          const short=m.label.replace(/^\(\d\/\d\) /,"");
+                          const desc={email:row.email,kind:"status",status:st,title:`${short} — ${row.nameDisplay}`};
+                          const chip={display:"inline-flex",alignItems:"center",gap:3,padding:"2px 7px",background:sel?m.dot:m.bg,color:sel?"#fff":m.text,border:`1.5px solid ${sel?m.dot:m.border}`,fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit",outline:"none"};
                           return(
-                            <Tag key={st} title={groupSelectable?`Click to select ${cnt} ${m.label.replace(/^\(\d\/\d\) /,"")}`:m.label}
-                              onClick={groupSelectable?()=>toggleGroup(row.email,st):undefined}
-                              style={{display:"inline-flex",alignItems:"center",gap:3,padding:"2px 7px",borderRadius:8,background:sel?m.dot:m.bg,color:sel?"#fff":m.text,border:`1.5px solid ${sel?m.dot:m.border}`,fontSize:10,fontWeight:700,cursor:groupSelectable?"pointer":"default",fontFamily:"inherit",outline:"none",boxShadow:sel?`0 0 0 2px ${m.dot}33`:"none"}}>
-                              {sel&&<span style={{fontSize:9}}>✓</span>}
-                              <span style={{width:5,height:5,borderRadius:"50%",background:sel?"#fff":m.dot,flexShrink:0}}/>
-                              {m.label.replace(/^\(\d\/\d\) /,"").slice(0,10)} ×{cnt}
-                            </Tag>
+                            <span key={st} style={{display:"inline-flex",borderRadius:8,boxShadow:sel?`0 0 0 2px ${m.dot}33`:"none",...openRing(desc)}}>
+                              <button title={groupSelectable?`Click to select ${cnt} ${short}`:`Show ${cnt} ${short}`}
+                                onClick={groupSelectable?()=>toggleGroup(row.email,st):()=>toggleExpand(desc)}
+                                style={{...chip,borderRadius:"8px 0 0 8px",borderRight:"none"}}>
+                                {sel&&<span style={{fontSize:9}}>✓</span>}
+                                <span style={{width:5,height:5,borderRadius:"50%",background:sel?"#fff":m.dot,flexShrink:0}}/>
+                                {short.slice(0,10)} ×{cnt}
+                              </button>
+                              <button title={sameGroup(expanded,desc)?"Collapse":`Itemise ${cnt} ${short}${groupSelectable?" with actions":""}`} aria-expanded={sameGroup(expanded,desc)}
+                                onClick={()=>toggleExpand(desc)}
+                                style={{...chip,borderRadius:"0 8px 8px 0",padding:"2px 5px",borderLeft:`1px solid ${sel?"#ffffff66":m.border}`}}>{sameGroup(expanded,desc)?"▴":"▾"}</button>
+                            </span>
                           );
                         })}
                         {Object.keys(row.statusCounts).length===0&&<span style={{color:"#94a3b8",fontSize:12}}>—</span>}
@@ -422,14 +448,21 @@ export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkA
                     </td>
                     <td style={{...tdS2,textAlign:"right"}}>
                       {row.oneOffs.length>0
-                        ? <span style={{cursor:"pointer",color:"#6366f1",textDecoration:"underline dotted",fontSize:13}}
-                            onClick={()=>setOneOffModalData({email:row.email,name:row.nameDisplay,bkgs:row.oneOffs,isAdmin})}>
+                        ? <span title="Click to itemise" style={{cursor:"pointer",color:"#6366f1",textDecoration:"underline dotted",fontSize:13,borderRadius:6,padding:"0 4px",...openRing({email:row.email,kind:"oneoff"})}}
+                            onClick={()=>toggleExpand({email:row.email,kind:"oneoff",title:`One-off bookings — ${row.nameDisplay}`})}>
                             {row.oneOffs.length}
                           </span>
                         : <span style={{color:"#94a3b8"}}>—</span>}
                     </td>
                     <td style={{...tdS2,textAlign:"right",fontWeight:700}}>{row.totalBkgs}</td>
                   </tr>
+                  {open&&(
+                    <tr style={{borderBottom:"1px solid #f1f5f9"}}><td colSpan={6} style={{padding:"0 8px 10px"}}>
+                      {/* Pinned to the visible width when the wide table scrolls sideways (phones). */}
+                      <div style={{position:"sticky",left:0,maxWidth:"calc(100vw - 110px)"}}>{panelFor(open, groupBkgs(row, open), row)}</div>
+                    </td></tr>
+                  )}
+                  </Fragment>
                 );
               })}
               {rows.length===0&&<tr><td colSpan={colCount} style={{...tdS2,textAlign:"center",color:"#94a3b8"}}>No active bookings.</td></tr>}
@@ -437,6 +470,9 @@ export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkA
           </table>
           </CopyableTable>
         </div>
+        {groupSelectable && selectedGroups.size>0 && expanded?.kind==="selected" && (
+          <div style={{marginTop:10}}>{panelFor(expanded, selectedBkgs, null)}</div>
+        )}
         {groupSelectable && selectedGroups.size>0 && (
           <div style={{marginTop:10,padding:"10px 14px",background:"#0f172a",borderRadius:10,display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",color:"#fff"}}>
             <span style={{fontSize:12,fontWeight:700}}>
@@ -445,6 +481,10 @@ export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkA
             <button onClick={()=>setSelectedGroups(new Set())}
               style={{padding:"3px 9px",fontSize:11,borderRadius:6,border:"1.5px solid #334155",background:"transparent",color:"#cbd5e1",cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>
               Clear
+            </button>
+            <button onClick={()=>toggleExpand({email:"",kind:"selected",title:"Selected bookings"})} aria-expanded={expanded?.kind==="selected"}
+              style={{padding:"3px 9px",fontSize:11,borderRadius:6,border:"1.5px solid #334155",background:expanded?.kind==="selected"?"#334155":"transparent",color:"#cbd5e1",cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>
+              {expanded?.kind==="selected"?"▴ Hide itemised":"▾ Itemised"}
             </button>
             <div style={{marginLeft:"auto",display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
               <span style={{fontSize:11,color:"#94a3b8"}}>Set status to:</span>
@@ -466,14 +506,6 @@ export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkA
           </div>
         )}
       </>)}
-      {patternModal&&(
-        <PatternModal {...patternModal} isAdmin={isAdmin}
-          onClose={()=>setPatternModal(null)}
-          onBulkApply={args=>{onBulkApply&&onBulkApply(args);setPatternModal(null);}}/>
-      )}
-      {oneOffModalData&&(
-        <OneOffModal {...oneOffModalData} onClose={()=>setOneOffModalData(null)}/>
-      )}
     </>
   );
 }
