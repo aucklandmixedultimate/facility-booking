@@ -468,6 +468,7 @@ export function DayTimelinePopup({ date, bookings, onClose, onBookingClick, onNe
   // "free" chip below) books it — no need to pick the time again.
   const carried = focusHour!=null && focusDuration ? (() => { const lo = Math.max(0, Math.round((focusHour-CAL_START)/SLOT_HOURS));
     return { lo, hi: Math.min(CAL_SLOTS-1, lo + Math.max(1, Math.round(focusDuration/SLOT_HOURS)) - 1) }; })() : null;
+  const slotToHourC = s => CAL_START + s*SLOT_HOURS;
   const [pendingSel, setPendingSel] = useState(null); // {facility, lo, hi} staged for the Create button
   const dragMoved   = useRef(false);
   const justDragged = useRef(false);
@@ -484,6 +485,9 @@ export function DayTimelinePopup({ date, bookings, onClose, onBookingClick, onNe
   const dk = typeof date === "string" ? date : dateKey(date);
   const dObj = typeof date === "string" ? new Date(date+"T00:00:00") : date;
   const dayBkgs = bookings.filter(b=>b.date===dk && !isClosed(b.status));
+  // A field is free for the carried time when nothing on it overlaps that time.
+  const freeForCarried = facId => !!carried && !dayBkgs.some(b => b.facility_id===facId
+    && b.start_hour < slotToHourC(carried.hi+1) && b.start_hour+b.duration > slotToHourC(carried.lo));
 
   const yToSlot   = y => Math.max(0, Math.min(Math.floor(y/SLOT_H), CAL_SLOTS-1));
   const slotToHour= s => CAL_START + s*SLOT_HOURS;
@@ -521,7 +525,7 @@ export function DayTimelinePopup({ date, bookings, onClose, onBookingClick, onNe
       setPendingSel({ facility:facId, lo:ndUp.lo, hi:ndUp.hi });
     } else if (!wasOnBooking) {
       // A tap inside the carried band selects the whole band for this facility.
-      if (carried && ndUp.lo >= carried.lo && ndUp.lo <= carried.hi) setPendingSel({ facility:facId, lo:carried.lo, hi:carried.hi });
+      if (carried && freeForCarried(facId) && ndUp.lo >= carried.lo && ndUp.lo <= carried.hi) setPendingSel({ facility:facId, lo:carried.lo, hi:carried.hi });
       else setPendingSel({ facility:facId, lo:ndUp.lo, hi:Math.min(ndUp.lo+SLOTS_PER_HOUR-1, CAL_SLOTS-1) });
     }
   }
@@ -583,8 +587,8 @@ export function DayTimelinePopup({ date, bookings, onClose, onBookingClick, onNe
                       <div style={{height:"50%",borderBottom:"1px dashed #f8fafc"}}/>
                     </div>
                   ))}
-                  {/* The time carried from the week view, in every column until one is picked */}
-                  {carried && !pendingSel && !isDragging && (
+                  {/* The time carried from the week view, in each free column until one is picked */}
+                  {carried && !pendingSel && !isDragging && freeForCarried(fac.id) && (
                     <div style={{position:"absolute",left:2,right:2,top:carried.lo*SLOT_H,height:(carried.hi-carried.lo+1)*SLOT_H,background:"rgba(99,102,241,0.07)",border:"1.5px dashed rgba(99,102,241,0.45)",borderRadius:6,pointerEvents:"none",zIndex:2}}/>
                   )}
                   {/* Drag / staged-selection preview */}
