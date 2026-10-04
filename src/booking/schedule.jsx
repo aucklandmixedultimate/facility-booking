@@ -37,6 +37,29 @@ export function buildOverlapPatternMap(active, facSensitive, canon) {
   return patternMap;
 }
 
+// Admin: move bookings to another booker — pick from the roster or type a new email.
+// onReassign({email, name}); bookers = [{email, name}].
+export function ReassignControl({ count, bookers=[], onReassign, dark=false }) {
+  const [to, setTo] = useState("");
+  const [name, setName] = useState("");
+  const em = to.trim().toLowerCase(), known = bookers.find(b => b.email === em);
+  const ok = count > 0 && /\S+@\S+\.\S+/.test(em);
+  const si = { border:`1px solid ${dark?"#334155":T.line}`, borderRadius:T.rSm, padding:"3px 6px", fontSize:12, fontFamily:"inherit", background:dark?"#1e293b":T.surface, color:dark?"#fff":T.ink };
+  return (
+    <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+      <span style={{fontSize:11,fontWeight:600,color:dark?"#94a3b8":T.muted}}>👤 Reassign to</span>
+      <input list="reassign-bookers" value={to} onChange={e=>{ setTo(e.target.value); const k=bookers.find(b=>b.email===e.target.value.trim().toLowerCase()); if(k) setName(k.name); }}
+        placeholder="booker email" aria-label="Reassign to booker" style={{...si,width:200}}/>
+      <datalist id="reassign-bookers">{bookers.map(b=><option key={b.email} value={b.email}>{b.name}</option>)}</datalist>
+      {!known&&em&&<input value={name} onChange={e=>setName(e.target.value)} placeholder="their name / team" aria-label="New booker name" style={{...si,width:150}}/>}
+      <button disabled={!ok} onClick={()=>{ onReassign({ email: em, name: known?.name || name.trim() }); setTo(""); setName(""); }}
+        style={S.btn({padding:"4px 12px",fontSize:12,background:ok?(dark?"#6366f1":T.ink):T.faint,color:"#fff",cursor:ok?"pointer":"not-allowed"})}>
+        Reassign {count}{known?` to ${known.name}`:""}
+      </button>
+    </div>
+  );
+}
+
 // A set of bookings (a recurring pattern, a booker's status group, their one-offs…) shown
 // itemised, with ticks to choose which ones the actions apply to. The same panel opens
 // inline in the Grouped view and inside PatternModal / OneOffModal elsewhere.
@@ -44,7 +67,8 @@ export function buildOverlapPatternMap(active, facSensitive, canon) {
 //   onBulkApply({email, pk, bkgs, bulkTime, bulkDur, bulkFac, cancelFrom})  change time /
 //     duration / facility (undefined = keep each booking's own) or cancel from a date
 //   onRemove(ids)  send the ticked bookings to the removal queue (deleted when it's submitted)
-export function BookingSubsetPanel({ title, subtitle, email, pk, bkgs, isAdmin, canEdit, onBulkApply, onBulkStatusChange, onRemove, onView, onClose, maxHeight=260 }) {
+//   onReassign(ids, {email, name})  admin: move the ticked bookings to another booker
+export function BookingSubsetPanel({ title, subtitle, email, pk, bkgs, isAdmin, canEdit, onBulkApply, onBulkStatusChange, onRemove, onReassign, bookers=[], onView, onClose, maxHeight=260 }) {
   const sorted = [...bkgs].sort((a,b)=>a.date.localeCompare(b.date)||a.start_hour-b.start_hour);
   const [unticked, setUnticked] = useState(()=>new Set());
   const ticked = sorted.filter(b=>!unticked.has(b.id));
@@ -57,6 +81,7 @@ export function BookingSubsetPanel({ title, subtitle, email, pk, bkgs, isAdmin, 
   const canStatus = isAdmin && onBulkStatusChange;
   const canBulk = (isAdmin || canEdit) && onBulkApply;
   const canRemove = (isAdmin || canEdit) && onRemove;
+  const canReassign = isAdmin && onReassign;
   const toggle = id => setUnticked(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const allTicked = ticked.length === sorted.length;
   const th = {textAlign:"left",padding:"5px 8px",fontWeight:600,color:T.muted,fontSize:11,whiteSpace:"nowrap"};
@@ -104,7 +129,7 @@ export function BookingSubsetPanel({ title, subtitle, email, pk, bkgs, isAdmin, 
         </table>
         </CopyableTable>
       </div>
-      {(canStatus||canBulk||canRemove)&&sorted.length>0&&(
+      {(canStatus||canBulk||canRemove||canReassign)&&sorted.length>0&&(
         <div style={{marginTop:8,padding:"8px 10px",background:T.surface2,borderRadius:T.rMd,display:"flex",flexDirection:"column",gap:8}}>
           <div style={{fontSize:11,fontWeight:700,color:T.ink2}}>⚙ Actions for {n} ticked booking{n!==1?"s":""}</div>
           {canStatus&&(
@@ -148,6 +173,7 @@ export function BookingSubsetPanel({ title, subtitle, email, pk, bkgs, isAdmin, 
               </button>
             </div>
           </>)}
+          {canReassign&&<ReassignControl count={n} bookers={bookers.filter(b=>b.email!==(email||"").toLowerCase())} onReassign={to=>onReassign(ticked.map(b=>b.id), to)}/>}
           {canRemove&&(
             <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap",borderTop:canBulk||canStatus?`1px dashed ${T.line}`:"none",paddingTop:canBulk||canStatus?8:0}}>
               <button disabled={!n} onClick={()=>onRemove(ticked.map(b=>b.id))}
@@ -191,7 +217,7 @@ export function OneOffModal({ email, name, bkgs, isAdmin, canEdit, onClose, onVi
 }
 
 // embedded: rendered as a table view (Grouped) — no panel heading or close.
-export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkApply, onBulkStatusChange, onRemove, onView, onClose, inline=false, embedded=false, aliasNames={}, emailAliases={} }) {
+export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkApply, onBulkStatusChange, onRemove, onReassign, bookers=[], onView, onClose, inline=false, embedded=false, aliasNames={}, emailAliases={} }) {
   const [facSensitive, setFacSensitive] = useState(false);
   const [splitPatterns, setSplitPatterns] = useState(new Set());
   // The group expanded inline into its itemised bookings (BookingSubsetPanel) — one at a time:
@@ -341,7 +367,7 @@ export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkA
       <BookingSubsetPanel key={`${d.email}|${d.kind}|${d.pk}|${d.sh}|${d.status}`} title={d.title}
         subtitle={`${bkgs.length} booking${bkgs.length!==1?"s":""}${email?` · ${email}`:""}`}
         email={email} pk={d.pk||d.kind} bkgs={bkgs} isAdmin={isAdmin} canEdit={canEdit} onView={onView}
-        onBulkApply={onBulkApply} onBulkStatusChange={onBulkStatusChange} onRemove={onRemove} onClose={()=>setExpanded(null)}/>
+        onBulkApply={onBulkApply} onBulkStatusChange={onBulkStatusChange} onRemove={onRemove} onReassign={onReassign} bookers={bookers} onClose={()=>setExpanded(null)}/>
     );
   }
   // Resolve selected groups → all matching bookings

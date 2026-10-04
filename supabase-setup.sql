@@ -100,6 +100,28 @@ create trigger on_auth_user_created_link_bookings
   after insert on auth.users
   for each row execute function public.link_bookings_to_new_user();
 
+-- v4: a booking belongs to the account of its email. When an admin reassigns a booking to
+-- another booker (or books on someone's behalf without a user_id), link it to that
+-- booker's account, so they can manage it and the previous booker no longer can.
+create or replace function public.bookings_link_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if tg_op = 'INSERT' and new.user_id is not null then return new; end if;
+  if tg_op = 'UPDATE' and lower(coalesce(new.email, '')) = lower(coalesce(old.email, '')) then return new; end if;
+  new.user_id := (select u.id from auth.users u
+                  where coalesce(new.email, '') <> 'admin' and lower(u.email) = lower(new.email) limit 1);
+  return new;
+end;
+$$;
+drop trigger if exists bookings_link_user on public.bookings;
+create trigger bookings_link_user
+  before insert or update of email on public.bookings
+  for each row execute function public.bookings_link_user();
+
 alter table public.bookings enable row level security;
 drop policy if exists "bookings select authenticated" on public.bookings;
 create policy "bookings select authenticated" on public.bookings for select to authenticated using (true);
@@ -473,7 +495,7 @@ revoke all on function public.settings_merge(text, jsonb, text[]) from public, a
 grant execute on function public.settings_merge(text, jsonb, text[]) to authenticated;
 
 -- ── Version stamp ───────────────────────────────────────────────────────────────
-insert into public.schema_version (id, version, applied_at) values (1, 3, now())
+insert into public.schema_version (id, version, applied_at) values (1, 4, now())
 on conflict (id) do update set version = excluded.version, applied_at = now();
 
 -- ── 6. Making someone an admin ──────────────────────────────────────────────────
