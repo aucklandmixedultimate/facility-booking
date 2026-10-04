@@ -1757,6 +1757,25 @@ export default function App() {
 
   // Move old unapproved (past pending) bookings into the removal queue — the actual
   // delete and the booker email happen when the removal cart is submitted.
+  // Reassign bookings to another booker (admin). Applied straight away, without emailing;
+  // user_id is cleared so the previous booker can no longer manage them — the database
+  // (supabase-setup.sql v4) links them to the new booker's account from the email.
+  async function handleBulkReassign(ids, { email, name }) {
+    const to = (email||"").trim().toLowerCase(); if (!/\S+@\S+\.\S+/.test(to)) return;
+    ids = ids.filter(id => (bookings.find(b=>b.id===id)?.email||"").toLowerCase() !== to);
+    if (!ids.length) { showToast("Those bookings are already with that booker."); return; }
+    const patch = { email: to, name: name || to.split("@")[0], user_id: null, updated_at: new Date().toISOString() };
+    const from = [...new Set(bookings.filter(b=>ids.includes(b.id)).map(b=>b.email))];
+    if (configured) {
+      try { for (const id of ids) await sb.update("bookings", id, patch); await loadBookings(); }
+      catch(e){ showToast("Reassign failed: "+e.message, "error"); return; }
+    } else {
+      const set = new Set(ids); setBookings(prev => prev.map(b => set.has(b.id) ? { ...b, ...patch } : b));
+    }
+    logActivity("booking_edit", { ids, reassigned_from: from, reassigned_to: to });
+    showToast(`${ids.length} booking${ids.length!==1?"s":""} reassigned to ${patch.name}.`);
+  }
+
   // Resolve past bookings still awaiting approval. decisions: [{id, action, variance?}] with
   // action "remove" (→ removal queue), "vendor" (the vendor did approve it) or "vendor_var"
   // (approved, but the vendor's times differed — kept on record for invoice footnotes).
@@ -2401,7 +2420,7 @@ export default function App() {
                   {/* Grouped (schedule summary, the default) or Itemised (one row per booking). */}
                   <TableViewToggle value={listView} onChange={setListView}/>
                   {listView==="grouped" ? (
-                    <ScheduleSummaryModal bookings={bookings.filter(b=>inActiveVenue(b.facility_id)&&(selFac==="all"||b.facility_id===selFac)&&(listBookerFilter.size===0||listBookerFilter.has(b.email?.toLowerCase()))&&(!listShowClashes||allClashIds.has(b.id)))} isAdmin={isAdmin} loggedInEmail={loggedInEmail} onBulkApply={handleBulkApply} onBulkStatusChange={handleBulkStatusChange} onRemove={queueMultiForRemoval} onView={setViewing} aliasNames={aliasNames} emailAliases={emailAliases} embedded/>
+                    <ScheduleSummaryModal bookings={bookings.filter(b=>inActiveVenue(b.facility_id)&&(selFac==="all"||b.facility_id===selFac)&&(listBookerFilter.size===0||listBookerFilter.has(b.email?.toLowerCase()))&&(!listShowClashes||allClashIds.has(b.id)))} isAdmin={isAdmin} loggedInEmail={loggedInEmail} onBulkApply={handleBulkApply} onBulkStatusChange={handleBulkStatusChange} onRemove={queueMultiForRemoval} onReassign={isAdmin?handleBulkReassign:undefined} bookers={knownBookers} onView={setViewing} aliasNames={aliasNames} emailAliases={emailAliases} embedded/>
                   ) : isMobile ? (
                     // Phones: filters in a compact grid (bookers via the pills above), then one
                     // card per booking — date, time, field and status on top, booker and purpose below.
@@ -2631,12 +2650,12 @@ export default function App() {
         {tab==="about"&&<div style={{padding:"8px 0"}}><Suspense fallback={<TabLoading/>}><AboutTab/></Suspense></div>}
         {tab==="allocation"&&isAdmin&&<div style={S.card}><Suspense fallback={<TabLoading/>}><CouncilAllocationTab outcomes={councilOutcomes} bookings={bookings} syncing={councilSyncing} syncLog={councilSyncLog} onSync={handleCouncilMailSync} onSaveOutcomes={saveCouncilOutcomes} onBulkStatusChange={handleBulkStatusChange} onQueueNotifications={queueNotifications} onLinkApp={handleLinkCouncilApp} aliasNames={aliasNames} loggedInEmail={loggedInEmail}/></Suspense></div>}
         {tab==="admin"&&isAdmin&&<div style={S.card}>
-          {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<Suspense fallback={<TabLoading/>}><AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onView={setViewing} onQueueDelete={queueForRemovalSilent} clashes={allClashes} deleteIds={new Set(deleteQueue.map(b=>b.id))} facilityRates={facilityRates} onUpdateFacilityRate={updateFacilityRate} onResolveOldUnapproved={handleResolveOldUnapproved} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onSyncDB={handleSyncDB} onBulkApply={handleBulkApply} onSaveMismatch={handleSaveMismatch} onInformCpsa={setInformCpsaFor} onRequestRoom={setRoomRequestFor} onQueueNotifications={queueNotifications} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} onLinkClash={handleLinkClashToGtec} loggedInEmail={loggedInEmail} syncResults={syncResults} onClearSyncResults={()=>setSyncResults([])} showSyncResults={showSyncPanel} onToggleSyncResults={()=>setShowSyncPanel(v=>!v)} bookerFilter={listBookerFilter} onToggleBooker={toggleBooker} onSetBookerFilter={setListBookerFilter} aliasNames={aliasNames} emailAliases={emailAliases} pricingConditions={pricingConditions} onAddPricingCondition={addPricingCondition} onUpdatePricingCondition={updatePricingCondition} onRemovePricingCondition={removePricingCondition} cpsaDeleteLog={cpsaDeleteLog} onClearDeleteLogEntry={id=>setCpsaDeleteLog(prev=>prev.filter(e=>e.id!==id))} onClearDeleteLog={()=>setCpsaDeleteLog([])} onSendToCouncil={handleSendToCouncil}/></Suspense>}
+          {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<Suspense fallback={<TabLoading/>}><AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onView={setViewing} onQueueDelete={queueForRemovalSilent} clashes={allClashes} deleteIds={new Set(deleteQueue.map(b=>b.id))} facilityRates={facilityRates} onUpdateFacilityRate={updateFacilityRate} onResolveOldUnapproved={handleResolveOldUnapproved} onReassign={handleBulkReassign} bookers={knownBookers} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onSyncDB={handleSyncDB} onBulkApply={handleBulkApply} onSaveMismatch={handleSaveMismatch} onInformCpsa={setInformCpsaFor} onRequestRoom={setRoomRequestFor} onQueueNotifications={queueNotifications} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} onLinkClash={handleLinkClashToGtec} loggedInEmail={loggedInEmail} syncResults={syncResults} onClearSyncResults={()=>setSyncResults([])} showSyncResults={showSyncPanel} onToggleSyncResults={()=>setShowSyncPanel(v=>!v)} bookerFilter={listBookerFilter} onToggleBooker={toggleBooker} onSetBookerFilter={setListBookerFilter} aliasNames={aliasNames} emailAliases={emailAliases} pricingConditions={pricingConditions} onAddPricingCondition={addPricingCondition} onUpdatePricingCondition={updatePricingCondition} onRemovePricingCondition={removePricingCondition} cpsaDeleteLog={cpsaDeleteLog} onClearDeleteLogEntry={id=>setCpsaDeleteLog(prev=>prev.filter(e=>e.id!==id))} onClearDeleteLog={()=>setCpsaDeleteLog([])} onSendToCouncil={handleSendToCouncil}/></Suspense>}
         </div>}
       </div>
 
       {/* Modals */}
-      {showAdminScheduleModal && <ScheduleSummaryModal bookings={bookings} isAdmin={true} loggedInEmail={loggedInEmail} onBulkApply={handleBulkApply} onBulkStatusChange={handleBulkStatusChange} onRemove={queueMultiForRemoval} onView={b=>{setShowAdminScheduleModal(false);setViewing(b);}} aliasNames={aliasNames} emailAliases={emailAliases} onClose={()=>setShowAdminScheduleModal(false)}/>}
+      {showAdminScheduleModal && <ScheduleSummaryModal bookings={bookings} isAdmin={true} loggedInEmail={loggedInEmail} onBulkApply={handleBulkApply} onBulkStatusChange={handleBulkStatusChange} onRemove={queueMultiForRemoval} onReassign={isAdmin?handleBulkReassign:undefined} bookers={knownBookers} onView={b=>{setShowAdminScheduleModal(false);setViewing(b);}} aliasNames={aliasNames} emailAliases={emailAliases} onClose={()=>setShowAdminScheduleModal(false)}/>}
       {showExtensionModal&&(
         <Modal title="🧩 Install AMUA Extensions" onClose={()=>setShowExtensionModal(false)} width={560}>
           <div style={{display:"flex",flexDirection:"column",gap:16,fontSize:14,color:"#0f172a"}}>
