@@ -2130,7 +2130,8 @@ export default function App() {
           {all
             ? <span style={chip}>All locations<button onClick={()=>setVenue(null)} title="Back to the default location" style={{border:"none",background:"none",cursor:"pointer",color:"#64748b",fontSize:12,padding:"0 2px"}}>✕</button></span>
             : ks.map(k=>{ const v=siteOf(k); return (
-              <span key={k} style={chip} title={v?`${v.providerName} — ${v.site}`:k}>📍 {v?.site||k}
+              // Vendor first: several vendors can share a site (GTEC / CPSA and St Cuthberts at Cornwall Park).
+              <span key={k} style={chip} title={v?`${v.providerName} — ${v.site}`:k}>📍 {v?`${PROVIDERS[v.providerId]?.label||PROVIDERS[v.providerId]?.short||v.providerName} · ${v.site}`:k}
                 {ks.length>1&&<button onClick={()=>drop(k)} title="Stop showing this location" style={{border:"none",background:"none",cursor:"pointer",color:"#64748b",fontSize:12,padding:"0 2px"}}>✕</button>}
               </span>); })}
           <ProviderMenu pids={pids} value={null} onPick={pickProvider} label="＋ Add" sites={pid=>venues.filter(v=>v.providerId===pid).map(v=>v.site)}
