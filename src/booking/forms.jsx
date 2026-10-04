@@ -1,6 +1,7 @@
 import { useState, useRef, Fragment } from "react";
 import { T, parseVendorVariance, setVendorVariance, vendorVarianceText, stepLabel, BILLED_RE, Badge, CAL_SLOTS, CAL_START, CAL_TOTAL, DAY_EVENING_CUTOFF, DURATIONS, EmailChip, FACILITIES, FACILITY_TINT, FLOODLIT_FIELD_ID, FacilityOptions, INVOICED_META, Modal, ProviderVenuePicker, REVIEW_STATUSES, S, SLOTS_PER_HOUR, SLOT_HOURS, START_TIMES, STATUS_META, addDays, councilContactOk, emailColor, facColLabel, facShort, fmtCost, fmtDate, fmtDuration, fmtLoggedAt, fmtRefDate, fmtTime, fmtTimeShort, getCrossFacilityOverlaps, getSameFacilityOverlaps, isAdminBooking, newGroupRef, newId, parseCouncilInfo, parseFunctionCost, parseGroupRef, parseGtecSnapshot, parseMismatchNote, parseSlotLink, parseSplit, setCouncilInfo, setFunctionCost, setGroupRef, setSplit, slotGroupMembers, slotGroupName, splitReason, stripMismatchNote, timeOverlaps, todayKey, useMobile, vendorShortFor, venueFacilities, workflowOf } from "./core.jsx";
 import { OverlapWarning } from "./modals.jsx";
+import { GUEST } from "../actor.js";
 import { isClosed, isLegacyStatus } from "../statuses.js";
 // ─── Single Booking Row Form ──────────────────────────────────────────────────
 // Used inside BookingForm to represent one item in the cart
@@ -827,7 +828,7 @@ export function MultiEditForm({ bookings: srcBookings, onAddToCart, onClose, all
 }
 
 
-export function BookingForm({ booking, allBookings, onAddToCart, onClose, isAdmin, loggedInEmail, bookers=[], onEditContact }) {
+export function BookingForm({ booking, allBookings, onAddToCart, onClose, isAdmin, loggedInEmail, actorName="", bookers=[], onEditContact }) {
   const isMobile = useMobile();
   const isEditing  = !!booking?.id && !booking?._multiEdit;
   const isMultiEdit = !!booking?._multiEdit;
@@ -845,7 +846,10 @@ export function BookingForm({ booking, allBookings, onAddToCart, onClose, isAdmi
           ? [blankSlot({ facility_id:booking.facility_id||(venueFacilities()[0]||FACILITIES[0]).id, date:booking.date, start_hour:booking.start_hour||9, duration:booking.duration||1 })]
           : []);
 
-  const [name,  setName]  = useState(booking?.name  || "");
+  // New requests are in the signed-in person's name (their sign-in name, "Rory H."), unless
+  // they chose Guest — then they type one.
+  const ownName = actorName && actorName !== GUEST ? actorName : "";
+  const [name,  setName]  = useState(booking?.name  || ownName);
   const [email, setEmail] = useState(booking?.email || loggedInEmail || "");
   const [purpose, setPurpose] = useState(booking?.purpose || "");
   const [notes,   setNotes]   = useState(booking?.notes || "");
@@ -991,7 +995,8 @@ export function BookingForm({ booking, allBookings, onAddToCart, onClose, isAdmi
       <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:14}}>
         <div>
           <label style={S.lbl}>Your Name *</label>
-          <input style={S.inp} value={name} onChange={e=>setName(e.target.value)} placeholder="Full name"/>
+          <input style={S.inp} value={name} onChange={e=>setName(e.target.value)} placeholder={actorName===GUEST?"Signed in as Guest — enter your name":"Full name"}/>
+          {!isEditing&&ownName&&name===ownName&&<div style={{fontSize:11,color:T.muted,marginTop:3}}>Your sign-in name</div>}
         </div>
         <div>
           <label style={S.lbl}>Email *</label>
@@ -1014,7 +1019,8 @@ export function BookingForm({ booking, allBookings, onAddToCart, onClose, isAdmi
               // A booker already in the roster fills their name too; for an address with
               // no bookings yet the name field is left for the admin to type.
               const r = rosterFor(bk.email);
-              if (r) setName(r.name);
+              if (bk.self && ownName) setName(ownName);
+              else if (r) setName(r.name);
             };
             return (<>
               <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:6}}>
