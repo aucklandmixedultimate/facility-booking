@@ -261,7 +261,10 @@ export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkA
 
   // Everything in the table (patterns, one-offs, totals) covers the chosen date range.
   const inRange = b => (!schedDateFrom || b.date >= schedDateFrom) && (!schedDateTo || b.date <= schedDateTo);
-  const active = bookings.filter(b=>(isLive(b.status)||b.invoiced)&&!isAdminBooking(b)&&inRange(b));
+  const pool = bookings.filter(b=>(isLive(b.status)||b.invoiced)&&!isAdminBooking(b)&&inRange(b));
+  // The status filter applies to everything in a row (patterns, one-offs, status chips,
+  // totals), not just which bookers are listed.
+  const active = schedStatusFilter.size ? pool.filter(b=>schedStatusFilter.has(b.status)) : pool;
   const canonEmail = em => (emailAliases[(em||"").toLowerCase()] || (em||"").toLowerCase());
   const patternMap = buildOverlapPatternMap(active, facSensitive, canonEmail);
 
@@ -289,7 +292,7 @@ export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkA
   }).filter(Boolean).sort((a,b)=>b.totalBkgs-a.totalBkgs);
 
   // All unique statuses present in the active pool for the status filter chips
-  const allStatuses = [...new Set(active.map(b=>b.status))];
+  const allStatuses = [...new Set(pool.map(b=>b.status))];
 
   const thS2={textAlign:"left",padding:"6px 8px",fontWeight:600,color:"#64748b",fontSize:12,borderBottom:"1px solid #e2e8f0"};
   const tdS2={padding:"6px 8px",verticalAlign:"top",fontSize:13};
@@ -421,7 +424,7 @@ export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkA
                 return(
                   <button key={st} onClick={()=>setSchedStatusFilter(prev=>{const s=new Set(prev);on?s.delete(st):s.add(st);return s;})}
                     style={{padding:"2px 7px",borderRadius:8,fontSize:10,fontWeight:600,cursor:"pointer",fontFamily:"inherit",border:`1.5px solid ${on?m.border:"#e2e8f0"}`,background:on?m.bg:"#fff",color:on?m.text:"#64748b"}}>
-                    {groupStatusLabel(st, active.filter(b=>b.status===st))}
+                    {groupStatusLabel(st, pool.filter(b=>b.status===st))}
                   </button>
                 );
               })}
