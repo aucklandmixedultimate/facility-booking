@@ -2817,6 +2817,7 @@ export default function App() {
             onClose={()=>{setShowForm(false);setEditing(null);}}
             isAdmin={isAdmin}
             loggedInEmail={loggedInEmail}
+            actorName={viewAsEmail?"":actor}
             bookers={knownBookers}
             onEditContact={session ? (em)=>{ setContactFor((em||"").toLowerCase()); setShowContactModal(true); } : undefined}
           />
