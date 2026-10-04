@@ -49,10 +49,12 @@ export function InlineDayPicker({ date, bookings, onPick, onConfirm, multi=false
     if (multi) {
       // One pick per facility column the drag spans — same time in several fields at once.
       const added = [];
-      for (let c=loC; c<=hiC; c++) added.push({ facility_id:FACILITIES[c].id, start_hour, duration });
+      // Columns are the current venue's facilities, not the master list.
+      const cols = venueFacilities();
+      for (let c=loC; c<=hiC; c++) if (cols[c]) added.push({ facility_id:cols[c].id, start_hour, duration });
       setPicks(ps => [...ps, ...added]);
-    } else {
-      onPick(FACILITIES[loC].id, start_hour, duration);
+    } else if (venueFacilities()[loC]) {
+      onPick(venueFacilities()[loC].id, start_hour, duration);
     }
   }
   function removePick(i) { setPicks(ps => ps.filter((_,k)=>k!==i)); }
@@ -1146,7 +1148,7 @@ export function BookingForm({ booking, allBookings, onAddToCart, onClose, isAdmi
         </div>
 
         {showPicker && (
-          <Modal title={`📅 Pick slots — ${pickDate?fmtDate(pickDate):"choose a day"}`} onClose={()=>setShowPicker(false)} width={760}>
+          <Modal title={`📅 Day grid — ${pickDate?fmtDate(pickDate):"choose a day"}`} onClose={()=>setShowPicker(false)} width={760}>
             {pickDate
               ? <InlineDayPicker date={pickDate} bookings={allBookings} multi onConfirm={addPickedSlots} onPick={(f,s,d)=>addPickedSlots([{facility_id:f,start_hour:s,duration:d}])}/>
               : <div style={{padding:24,textAlign:"center",color:"#94a3b8",fontSize:13}}>Choose a day first.</div>}
