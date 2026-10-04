@@ -14,7 +14,10 @@ test("bookers default to NZMUC, Groot to NZUC, admin settings win", () => {
   assert.equal(seasonOfBooker("someone@x.com", { "someone@x.com": "nzuc" }), "nzuc");
   assert.equal(seasonOfBooker("grootultimateclub@gmail.com", { "grootultimateclub@gmail.com": "nzmuc" }), "nzmuc");
 });
-test("NZU/AU is a booker category but never the current season", () => {
+test("NZU/AU is a continuous, collapsed booker category, never the current season", async () => {
+  const { LEAGUE_SEASONS } = await import("../src/seasons.js");
+  const u = LEAGUE_SEASONS.find(x => x.id === "nzuau");
+  assert.ok(u.continuous && u.collapsed);
   for (let m = 0; m < 12; m++) assert.notEqual(currentLeagueSeason(new Date(2026, m, 15)), "nzuau");
   assert.equal(seasonOfBooker("uni@x.com", { "uni@x.com": "nzuau" }), "nzuau");
 });
