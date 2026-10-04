@@ -1800,6 +1800,20 @@ export function Badge({status, wf, fid, vendor}) {
   const m={...(STATUS_META[status]||STATUS_META.pending_amua), label: stepLabel(status, wf, fid, vendor)};
   return <span style={{display:"inline-flex",alignItems:"center",gap:5,padding:"2px 10px",borderRadius:999,background:m.bg,border:`1px solid ${m.border}`,color:m.text,fontSize:12,fontWeight:600,whiteSpace:"nowrap"}}><span style={{width:6,height:6,borderRadius:"50%",background:m.dot,display:"inline-block"}}/>{m.label}</span>;
 }
+// Table row selection like a file list: Shift-click sets every row from the last clicked one
+// to this one (to this row's new state); Ctrl/⌘-click (or a plain checkbox click) toggles one.
+// ids = the selectable ids in display order; anchorRef = a useRef kept by the table.
+export function rowSelect(e, id, ids, selected, anchorRef) {
+  const next = new Set(selected), on = !selected.has(id);
+  const a = anchorRef.current != null ? ids.indexOf(anchorRef.current) : -1, b = ids.indexOf(id);
+  if (e?.shiftKey && a >= 0 && b >= 0) {
+    for (let i = Math.min(a, b); i <= Math.max(a, b); i++) on ? next.add(ids[i]) : next.delete(ids[i]);
+    try { window.getSelection()?.removeAllRanges(); } catch { /* ignore */ }
+  } else on ? next.add(id) : next.delete(id);
+  anchorRef.current = id;
+  return next;
+}
+export const isMultiSelectClick = e => !!(e && (e.shiftKey || e.ctrlKey || e.metaKey));
 // Grouped (the schedule summary) / Itemised (one row per booking) — the same switch on the
 // Bookings and Admin tables, styled like Billing's view switch. Remembered per table.
 export function useTableView(key) {

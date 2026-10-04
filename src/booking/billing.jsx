@@ -1,7 +1,7 @@
-import { useState, useMemo, Fragment } from "react";
+import { useState, useMemo, useRef, Fragment } from "react";
 import { downloadDriveFile, DRIVE_ROOT_FOLDER, testDriveConnection, disconnectDrive } from "../drive-client.js";
 import { billingDocFields, buildBillingDocHtml, invLineLabel, renderInvoiceDocHtml } from "./billingDocs.jsx";
-import { AMUA_INFO, CopyableTable, Modal, PROVIDERS, S, VENDOR_GTEC, deriveRecipientCode, fmtCost, genBankRef, todayKey } from "./core.jsx";
+import { AMUA_INFO, rowSelect, CopyableTable, Modal, PROVIDERS, S, VENDOR_GTEC, deriveRecipientCode, fmtCost, genBankRef, todayKey } from "./core.jsx";
 export const PIPELINE_STATES = [
   { key:"draft",         label:"Draft",           color:"#94a3b8", description:"Invoice created, not yet submitted" },
   { key:"submitted",     label:"Submitted",        color:"#f59e0b", description:"Sent to Grammar TEC" },
@@ -87,6 +87,7 @@ export function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, 
   const [emailSendMode, setEmailSendMode] = useState("grouped"); // "grouped" = one email per booker | "individual" = one per invoice
   const [emailExportMode, setEmailExportMode] = useState("grouped"); // "grouped" = summary lines | "individual" = itemised — mirrors the Billing list's Export
   const [emailSelIds, setEmailSelIds] = useState(new Set()); // record ids staged to send
+  const emailAnchor = useRef(null); // last ticked invoice, for Shift-click ranges
   const [emailNote, setEmailNote] = useState("");
   const [emailBusy, setEmailBusy] = useState(false);
 
@@ -678,7 +679,6 @@ export function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, 
         const outgoing = perInvoice ? selectedRecs.map(r=>[r]) : Object.values(byBooker);
 
         const setIds = ids => setEmailSelIds(new Set(ids));
-        const toggle = id => setEmailSelIds(prev => { const n=new Set(prev); n.has(id)?n.delete(id):n.add(id); return n; });
         const toggleMany = recs => setEmailSelIds(prev => {
           const n=new Set(prev); const all=recs.every(r=>n.has(r.id));
           recs.forEach(r => all ? n.delete(r.id) : n.add(r.id));
@@ -694,8 +694,10 @@ export function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, 
         const accent = preview ? "#b45309" : "#0369a1";
 
         const invoiceRow = (r, indent) => (
-          <label key={r.id} style={{display:"flex",alignItems:"center",gap:8,padding:`5px 12px 5px ${indent}px`,borderTop:"1px solid #f1f5f9",cursor:"pointer",fontSize:12}}>
-            <input type="checkbox" checked={emailSelIds.has(r.id)} onChange={()=>toggle(r.id)} style={{accentColor:accent}}/>
+          <label key={r.id} onClick={e=>{ e.preventDefault(); setEmailSelIds(rowSelect(e, r.id, [...emailBatches.flatMap(x=>x.recs), ...emailSingles].map(x=>x.id), emailSelIds, emailAnchor)); }}
+            onMouseDown={e=>{ if(e.shiftKey) e.preventDefault(); }}
+            style={{display:"flex",alignItems:"center",gap:8,padding:`5px 12px 5px ${indent}px`,borderTop:"1px solid #f1f5f9",cursor:"pointer",fontSize:12}}>
+            <input type="checkbox" checked={emailSelIds.has(r.id)} readOnly style={{accentColor:accent}}/>
             <span style={{fontFamily:"monospace",color:"#0f172a"}}>{r.id}</span>
             <span style={{color:"#475569",fontWeight:600}}>{displayName(r.bookerEmail)}</span>
             <span style={{color:"#94a3b8"}}>{r.dateFrom?fmtDate(r.dateFrom):""}{r.dateTo&&r.dateTo!==r.dateFrom?` – ${fmtDate(r.dateTo)}`:""}</span>
