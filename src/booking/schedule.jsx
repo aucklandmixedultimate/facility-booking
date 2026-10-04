@@ -78,6 +78,7 @@ export function BookingSubsetPanel({ title, subtitle, email, pk, bkgs, isAdmin, 
   const [bulkFac, setBulkFac] = useState(()=>uniform("facility_id"));
   const [cancelFrom, setCancelFrom] = useState("");
   const [statusTarget, setStatusTarget] = useState("approved");
+  const [actTab, setActTab] = useState(null); // the action category shown (one at a time)
   const canStatus = isAdmin && onBulkStatusChange;
   const canBulk = (isAdmin || canEdit) && onBulkApply;
   const canRemove = (isAdmin || canEdit) && onRemove;
@@ -129,60 +130,72 @@ export function BookingSubsetPanel({ title, subtitle, email, pk, bkgs, isAdmin, 
         </table>
         </CopyableTable>
       </div>
-      {(canStatus||canBulk||canRemove||canReassign)&&sorted.length>0&&(
-        <div style={{marginTop:8,padding:"8px 10px",background:T.surface2,borderRadius:T.rMd,display:"flex",flexDirection:"column",gap:8}}>
-          <div style={{fontSize:11,fontWeight:700,color:T.ink2}}>⚙ Actions for {n} ticked booking{n!==1?"s":""}</div>
-          {canStatus&&(
-            <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
-              <span style={lbl}>Set status</span>
-              <select value={statusTarget} onChange={e=>setStatusTarget(e.target.value)} style={si}>
-                {Object.keys(STATUS_META).filter(k=>!isLegacyStatus(k)&&k!=="clash").map(k=><option key={k} value={k}>{groupStatusLabel(k, ticked)}</option>)}
-              </select>
-              <button disabled={!n} onClick={()=>onBulkStatusChange(ticked.map(b=>b.id),statusTarget)}
-                style={S.btn({padding:"4px 12px",fontSize:12,background:n?T.ink:T.faint,color:"#fff",cursor:n?"pointer":"not-allowed"})}>✓ Apply status</button>
+      {(canStatus||canBulk||canRemove||canReassign)&&sorted.length>0&&(()=>{
+        // One category at a time: a row of buttons, and only the chosen one's controls below.
+        const cats = [
+          canStatus   && ["status",   "✓ Status"],
+          canBulk     && ["edit",     "🕑 Time & field"],
+          canReassign && ["reassign", "👤 Reassign"],
+          (canRemove || canBulk) && ["remove", "🗑 Remove"],
+        ].filter(Boolean);
+        const tab = (k, l) => (
+          <button key={k} type="button" aria-pressed={actTab===k} onClick={()=>setActTab(t=>t===k?null:k)}
+            style={{padding:"3px 10px",borderRadius:T.rPill,border:`1.5px solid ${actTab===k?T.ink:T.line}`,background:actTab===k?T.ink:T.surface,
+              color:actTab===k?T.surface:T.ink2,fontSize:11,fontWeight:700,fontFamily:"inherit",cursor:"pointer",whiteSpace:"nowrap"}}>{l}</button>);
+        const go = (ok, label, onClick, bg=T.ink) => (
+          <button disabled={!ok} onClick={onClick} style={S.btn({padding:"4px 12px",fontSize:12,background:ok?bg:T.faint,color:"#fff",cursor:ok?"pointer":"not-allowed"})}>{label}</button>);
+        return (
+          <div style={{marginTop:8,padding:"6px 8px",background:T.surface2,borderRadius:T.rMd,display:"flex",flexDirection:"column",gap:8}}>
+            <div style={{display:"flex",gap:5,alignItems:"center",flexWrap:"wrap"}}>
+              <span style={{fontSize:11,fontWeight:700,color:T.muted,marginRight:2}}>⚙ {n} ticked:</span>
+              {cats.map(([k,l])=>tab(k,l))}
             </div>
-          )}
-          {canBulk&&(<>
-            <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
-              <label style={{display:"flex",alignItems:"center",gap:5}}><span style={lbl}>Start</span>
-                <select value={bulkTime} onChange={e=>setBulkTime(e.target.value)} style={si}>
-                  {!uniform("start_hour")&&<option value="">— keep each —</option>}
-                  {Array.from({length:48},(_,i)=>i/2).map(h=><option key={h} value={String(h)}>{fmtTime(h)}</option>)}
-                </select></label>
-              <label style={{display:"flex",alignItems:"center",gap:5}}><span style={lbl}>Duration</span>
-                <select value={bulkDur} onChange={e=>setBulkDur(e.target.value)} style={si}>
-                  {!uniform("duration")&&<option value="">— keep each —</option>}
-                  {DURATIONS.map(d=><option key={d.value} value={String(d.value)}>{d.label}</option>)}
-                </select></label>
-              <label style={{display:"flex",alignItems:"center",gap:5}}><span style={lbl}>Facility</span>
-                <select value={bulkFac} onChange={e=>setBulkFac(e.target.value)} style={si}>
-                  {!uniform("facility_id")&&<option value="">— keep each —</option>}
-                  {facs.map(f=><option key={f.id} value={f.id}>{f.name}</option>)}
-                </select></label>
-            </div>
-            <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
-              <span style={{...lbl,color:T.danger}}>Cancel from</span>
-              <input type="date" value={cancelFrom} onChange={e=>setCancelFrom(e.target.value)} style={{...si,width:140}}/>
-              <span style={{fontSize:11,color:T.faint}}>(optional: ticked bookings on or after it go to the removal cart)</span>
-            </div>
-            <div>
-              <button disabled={!n||(!editing&&!cancelFrom)} onClick={()=>onBulkApply({email,pk,bkgs:ticked,
-                  bulkTime:bulkTime===""?undefined:parseFloat(bulkTime), bulkDur:bulkDur===""?undefined:parseFloat(bulkDur), bulkFac:bulkFac||undefined, cancelFrom})}
-                style={S.btn({padding:"5px 14px",fontSize:12,background:n&&(editing||cancelFrom)?T.ink:T.faint,color:"#fff",cursor:n&&(editing||cancelFrom)?"pointer":"not-allowed"})}>
-                Apply to {n-nCancel} booking{n-nCancel!==1?"s":""}{nCancel?` · cancel ${nCancel}`:""}
-              </button>
-            </div>
-          </>)}
-          {canReassign&&<ReassignControl count={n} bookers={bookers.filter(b=>b.email!==(email||"").toLowerCase())} onReassign={to=>onReassign(ticked.map(b=>b.id), to)}/>}
-          {canRemove&&(
-            <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap",borderTop:canBulk||canStatus?`1px dashed ${T.line}`:"none",paddingTop:canBulk||canStatus?8:0}}>
-              <button disabled={!n} onClick={()=>onRemove(ticked.map(b=>b.id))}
-                style={S.btn({padding:"5px 14px",fontSize:12,background:n?T.danger:T.faint,color:"#fff",cursor:n?"pointer":"not-allowed"})}>🗑 Remove {n} ticked</button>
-              <span style={{fontSize:11,color:T.faint}}>Goes to the 🗑 removal queue — deleted (and the booker emailed) when you submit it.</span>
-            </div>
-          )}
-        </div>
-      )}
+            {actTab==="status"&&canStatus&&(
+              <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+                <select value={statusTarget} onChange={e=>setStatusTarget(e.target.value)} aria-label="New status" style={si}>
+                  {Object.keys(STATUS_META).filter(k=>!isLegacyStatus(k)&&k!=="clash").map(k=><option key={k} value={k}>{groupStatusLabel(k, ticked)}</option>)}
+                </select>
+                {go(n, `Set ${n}`, ()=>onBulkStatusChange(ticked.map(b=>b.id),statusTarget))}
+              </div>
+            )}
+            {actTab==="edit"&&canBulk&&(
+              <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                <label style={{display:"flex",alignItems:"center",gap:4}}><span style={lbl}>Start</span>
+                  <select value={bulkTime} onChange={e=>setBulkTime(e.target.value)} style={si}>
+                    {!uniform("start_hour")&&<option value="">— keep each —</option>}
+                    {Array.from({length:48},(_,i)=>i/2).map(h=><option key={h} value={String(h)}>{fmtTime(h)}</option>)}
+                  </select></label>
+                <label style={{display:"flex",alignItems:"center",gap:4}}><span style={lbl}>Duration</span>
+                  <select value={bulkDur} onChange={e=>setBulkDur(e.target.value)} style={si}>
+                    {!uniform("duration")&&<option value="">— keep each —</option>}
+                    {DURATIONS.map(d=><option key={d.value} value={String(d.value)}>{d.label}</option>)}
+                  </select></label>
+                <label style={{display:"flex",alignItems:"center",gap:4}}><span style={lbl}>Facility</span>
+                  <select value={bulkFac} onChange={e=>setBulkFac(e.target.value)} style={si}>
+                    {!uniform("facility_id")&&<option value="">— keep each —</option>}
+                    {facs.map(f=><option key={f.id} value={f.id}>{f.name}</option>)}
+                  </select></label>
+                {go(n&&editing, `Apply to ${n}`, ()=>onBulkApply({email,pk,bkgs:ticked,
+                  bulkTime:bulkTime===""?undefined:parseFloat(bulkTime), bulkDur:bulkDur===""?undefined:parseFloat(bulkDur), bulkFac:bulkFac||undefined, cancelFrom:""}))}
+              </div>
+            )}
+            {actTab==="reassign"&&canReassign&&<ReassignControl count={n} bookers={bookers.filter(b=>b.email!==(email||"").toLowerCase())} onReassign={to=>onReassign(ticked.map(b=>b.id), to)}/>}
+            {actTab==="remove"&&(
+              <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+                  {canRemove&&go(n, `Remove ${n} ticked`, ()=>onRemove(ticked.map(b=>b.id)), T.danger)}
+                  {canBulk&&<>
+                    <span style={lbl}>{canRemove?"or from":"From"}</span>
+                    <input type="date" value={cancelFrom} onChange={e=>setCancelFrom(e.target.value)} aria-label="Remove from date" style={{...si,width:140}}/>
+                    {go(nCancel, `Remove ${nCancel} from then`, ()=>onBulkApply({email,pk,bkgs:ticked,cancelFrom}), T.danger)}
+                  </>}
+                </div>
+                <span style={{fontSize:11,color:T.faint}}>They go to the 🗑 removal queue — deleted (and the booker emailed) when you submit it.</span>
+              </div>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -242,7 +255,9 @@ export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkA
     return aliasNames[primary] || primary.split("@")[0];
   };
 
-  const active = bookings.filter(b=>(isLive(b.status)||b.invoiced)&&!isAdminBooking(b));
+  // Everything in the table (patterns, one-offs, totals) covers the chosen date range.
+  const inRange = b => (!schedDateFrom || b.date >= schedDateFrom) && (!schedDateTo || b.date <= schedDateTo);
+  const active = bookings.filter(b=>(isLive(b.status)||b.invoiced)&&!isAdminBooking(b)&&inRange(b));
   const canonEmail = em => (emailAliases[(em||"").toLowerCase()] || (em||"").toLowerCase());
   const patternMap = buildOverlapPatternMap(active, facSensitive, canonEmail);
 
