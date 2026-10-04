@@ -2,6 +2,7 @@ import { useState } from "react";
 import { councilState, allPhases, fmtDay, fmtRange, COUNCIL_LINKS, COUNCIL_CONTACTS } from "../councilSeasons.js";
 import { Badge, COUNCIL_APPLICATION_FEE, STATUS_META, venueFacilities } from "./core.jsx";
 import { isLegacyStatus } from "../statuses.js";
+import cornwallMap from "../assets/cornwall-park-fields.webp";
 // One numbered step in About → How to Book.
 export function AboutStep({ n, col, title, children }) {
   return (
@@ -64,7 +65,7 @@ export function AboutTab() {
       <div style={card}>
         <h2 style={h2}>How to Book</h2>
         <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>
-          {tabBtn("gtec","CPSA / GTEC · Cornwall Park")}
+          {tabBtn("gtec","Cornwall Park · CPSA / GTEC · St Cuthberts")}
           {tabBtn("council","🏛 Council fields")}
           {tabBtn("private","◆ Council + private operator")}
           {tabBtn("community","🏫 Community facilities")}
@@ -141,6 +142,22 @@ export function AboutTab() {
           AMUA (Auckland Mixed Ultimate Association) acts as a facilitating body and can submit booking requests on your behalf.
           You can also submit directly using the{" "}
           <a href="https://www.grammartec.co.nz/viewform/499414" target="_blank" rel="noopener noreferrer" style={link}>GTEC field hire form</a>.
+        </p>
+        <figure style={{margin:"0 0 12px"}}>
+          <a href={cornwallMap} target="_blank" rel="noopener noreferrer" title="Open the map full size">
+            <img src={cornwallMap} alt="Map of the Cornwall Park fields: CPSA fields #1–#3 with pitch spots 1–6, St Cuthbert's College field 10, and the ARL lower area 7–9"
+              style={{width:"100%",height:"auto",borderRadius:10,border:"1px solid #e2e8f0",display:"block"}}/>
+          </a>
+          <figcaption style={{fontSize:12,color:"#475569",marginTop:6,lineHeight:1.6}}>
+            <b style={{color:"#15803d"}}>Green — CPSA fields #1–#3</b> (booked through GTEC), with the numbered pitch spots 1–6 marked inside them.{" "}
+            <b style={{color:"#c2410c"}}>10 — St Cuthbert&apos;s College</b> field, next to the CPSA fields.{" "}
+            <b style={{color:"#a16207"}}>7–9 — ARL</b>, the privately run lower field area.
+          </figcaption>
+        </figure>
+        <p style={{margin:"0 0 12px",fontSize:13,color:"#475569"}}>
+          <b>St Cuthbert&apos;s College</b> (field 10 on the map) is hired by AMUA directly from the school, not through GTEC:
+          it has its own purchase order and doesn&apos;t go through the GTEC steps below. AMUA arranges bookings there with the
+          school — ask AMUA if you&apos;d like a slot.
         </p>
         <h3 style={{margin:"12px 0 8px",fontSize:14,fontWeight:700,color:"#0f172a"}}>Approval Process</h3>
         <div style={step}>
