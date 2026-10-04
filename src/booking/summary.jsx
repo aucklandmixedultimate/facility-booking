@@ -3,7 +3,7 @@ import { AMUA_INFO, Badge, vendorVarianceText, COUNCIL_APPLICATION_FEE, Copyable
 import { OneOffModal, PatternModal, PricingConditionsManager, buildOverlapPatternMap, defaultFacRates, resolveRates } from "./schedule.jsx";
 import { InvoiceOptionRow, InvoicePill, invLineLabel, renderInvoiceDocHtml } from "./billingDocs.jsx";
 import { isClosed } from "../statuses.js";
-export function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricingConditions = [], onAddPricingCondition, onUpdatePricingCondition, onRemovePricingCondition, isAdmin = false, approxPlayers = {}, onUpdateApproxPlayers, approxDurations = {}, onUpdateApproxDuration, onUpdateFacilityRate, pricingMode = "hourly", onSetPricingMode, onProposeMerge, onBulkApply, onMarkInvoiced, onMarkAdjustmentSettled, bookerFilter=new Set(), profiles={}, emailAliases={}, aliasNames={}, onCreateOfficialInvoice, onEmailInvoice, onFilterChange=null, loadRequest=null }) {
+export function SummaryTab({ bookings, loggedInEmail, onRemoveBookings, facilityRates = {}, pricingConditions = [], onAddPricingCondition, onUpdatePricingCondition, onRemovePricingCondition, isAdmin = false, approxPlayers = {}, onUpdateApproxPlayers, approxDurations = {}, onUpdateApproxDuration, onUpdateFacilityRate, pricingMode = "hourly", onSetPricingMode, onProposeMerge, onBulkApply, onMarkInvoiced, onMarkAdjustmentSettled, bookerFilter=new Set(), profiles={}, emailAliases={}, aliasNames={}, onCreateOfficialInvoice, onEmailInvoice, onFilterChange=null, loadRequest=null }) {
   const now = new Date();
   const thisYear = now.getFullYear();
 
@@ -1769,17 +1769,21 @@ export function SummaryTab({ bookings, loggedInEmail, facilityRates = {}, pricin
         <PatternModal
           {...patternModal}
           isAdmin={isAdmin}
+          canEdit={isAdmin || (patternModal.email||"").toLowerCase()===(loggedInEmail||"").toLowerCase()}
           facilityRates={facilityRates}
           pricingMode={pricingMode}
           approxDurations={approxDurations}
           onClose={()=>setPatternModal(null)}
           onBulkApply={args=>{onBulkApply&&onBulkApply(args);}}
+          onRemove={onRemoveBookings}
         />
       )}
       {oneOffModal && (
         <OneOffModal
           {...oneOffModal}
           isAdmin={isAdmin}
+          canEdit={isAdmin || (oneOffModal.email||"").toLowerCase()===(loggedInEmail||"").toLowerCase()}
+          onRemove={onRemoveBookings}
           onClose={()=>setOneOffModal(null)}
         />
       )}

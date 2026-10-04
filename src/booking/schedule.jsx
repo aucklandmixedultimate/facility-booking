@@ -43,7 +43,8 @@ export function buildOverlapPatternMap(active, facSensitive, canon) {
 //   onBulkStatusChange(ids, status)  admin: set the status of the ticked bookings
 //   onBulkApply({email, pk, bkgs, bulkTime, bulkDur, bulkFac, cancelFrom})  change time /
 //     duration / facility (undefined = keep each booking's own) or cancel from a date
-export function BookingSubsetPanel({ title, subtitle, email, pk, bkgs, isAdmin, canEdit, onBulkApply, onBulkStatusChange, onView, onClose, maxHeight=260 }) {
+//   onRemove(ids)  send the ticked bookings to the removal queue (deleted when it's submitted)
+export function BookingSubsetPanel({ title, subtitle, email, pk, bkgs, isAdmin, canEdit, onBulkApply, onBulkStatusChange, onRemove, onView, onClose, maxHeight=260 }) {
   const sorted = [...bkgs].sort((a,b)=>a.date.localeCompare(b.date)||a.start_hour-b.start_hour);
   const [unticked, setUnticked] = useState(()=>new Set());
   const ticked = sorted.filter(b=>!unticked.has(b.id));
@@ -55,6 +56,7 @@ export function BookingSubsetPanel({ title, subtitle, email, pk, bkgs, isAdmin, 
   const [statusTarget, setStatusTarget] = useState("approved");
   const canStatus = isAdmin && onBulkStatusChange;
   const canBulk = (isAdmin || canEdit) && onBulkApply;
+  const canRemove = (isAdmin || canEdit) && onRemove;
   const toggle = id => setUnticked(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const allTicked = ticked.length === sorted.length;
   const th = {textAlign:"left",padding:"5px 8px",fontWeight:600,color:T.muted,fontSize:11,whiteSpace:"nowrap"};
@@ -102,7 +104,7 @@ export function BookingSubsetPanel({ title, subtitle, email, pk, bkgs, isAdmin, 
         </table>
         </CopyableTable>
       </div>
-      {(canStatus||canBulk)&&sorted.length>0&&(
+      {(canStatus||canBulk||canRemove)&&sorted.length>0&&(
         <div style={{marginTop:8,padding:"8px 10px",background:T.surface2,borderRadius:T.rMd,display:"flex",flexDirection:"column",gap:8}}>
           <div style={{fontSize:11,fontWeight:700,color:T.ink2}}>⚙ Actions for {n} ticked booking{n!==1?"s":""}</div>
           {canStatus&&(
@@ -146,6 +148,13 @@ export function BookingSubsetPanel({ title, subtitle, email, pk, bkgs, isAdmin, 
               </button>
             </div>
           </>)}
+          {canRemove&&(
+            <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap",borderTop:canBulk||canStatus?`1px dashed ${T.line}`:"none",paddingTop:canBulk||canStatus?8:0}}>
+              <button disabled={!n} onClick={()=>onRemove(ticked.map(b=>b.id))}
+                style={S.btn({padding:"5px 14px",fontSize:12,background:n?T.danger:T.faint,color:"#fff",cursor:n?"pointer":"not-allowed"})}>🗑 Remove {n} ticked</button>
+              <span style={{fontSize:11,color:T.faint}}>Goes to the 🗑 removal queue — deleted (and the booker emailed) when you submit it.</span>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -153,7 +162,7 @@ export function BookingSubsetPanel({ title, subtitle, email, pk, bkgs, isAdmin, 
 }
 
 // A recurring pattern or grouped booking in a modal (Summary tab, admin clash list).
-export function PatternModal({ email, name, pk, bkgs, isAdmin, canEdit: canEditProp, onClose, onBulkApply, onBulkStatusChange, onView }) {
+export function PatternModal({ email, name, pk, bkgs, isAdmin, canEdit: canEditProp, onClose, onBulkApply, onBulkStatusChange, onRemove, onView }) {
   const canEdit = canEditProp !== undefined ? canEditProp : isAdmin;
   const isGroup = pk.startsWith("grp:");
   const parts = pk.split("_");
@@ -166,21 +175,23 @@ export function PatternModal({ email, name, pk, bkgs, isAdmin, canEdit: canEditP
       <BookingSubsetPanel subtitle={`${bkgs.length} booking${bkgs.length!==1?"s":""} · ${email}${fac?` · ${fac.name}`:""}${isGroup?" · created together":""}`}
         email={email} pk={pk} bkgs={bkgs} isAdmin={isAdmin} canEdit={canEdit} onView={onView} maxHeight={320}
         onBulkStatusChange={onBulkStatusChange&&((ids,st)=>{onBulkStatusChange(ids,st);onClose();})}
-        onBulkApply={onBulkApply&&(args=>{onBulkApply(args);onClose();})}/>
+        onBulkApply={onBulkApply&&(args=>{onBulkApply(args);onClose();})}
+        onRemove={onRemove&&(ids=>{onRemove(ids);onClose();})}/>
     </Modal>
   );
 }
 
-export function OneOffModal({ email, name, bkgs, onClose, onView }) {
+export function OneOffModal({ email, name, bkgs, isAdmin, canEdit, onClose, onView, onRemove }) {
   return (
     <Modal title={`One-off Bookings — ${name}`} onClose={onClose}>
-      <BookingSubsetPanel subtitle={`${bkgs.length} one-off booking${bkgs.length!==1?"s":""} · ${email}`} email={email} pk="oneoff" bkgs={bkgs} onView={onView} maxHeight={360}/>
+      <BookingSubsetPanel subtitle={`${bkgs.length} one-off booking${bkgs.length!==1?"s":""} · ${email}`} email={email} pk="oneoff" bkgs={bkgs} onView={onView} maxHeight={360}
+        isAdmin={isAdmin} canEdit={canEdit} onRemove={onRemove&&(ids=>{onRemove(ids);onClose();})}/>
     </Modal>
   );
 }
 
 // embedded: rendered as a table view (Grouped) — no panel heading or close.
-export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkApply, onBulkStatusChange, onView, onClose, inline=false, embedded=false, aliasNames={}, emailAliases={} }) {
+export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkApply, onBulkStatusChange, onRemove, onView, onClose, inline=false, embedded=false, aliasNames={}, emailAliases={} }) {
   const [facSensitive, setFacSensitive] = useState(false);
   const [splitPatterns, setSplitPatterns] = useState(new Set());
   // The group expanded inline into its itemised bookings (BookingSubsetPanel) — one at a time:
@@ -330,7 +341,7 @@ export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkA
       <BookingSubsetPanel key={`${d.email}|${d.kind}|${d.pk}|${d.sh}|${d.status}`} title={d.title}
         subtitle={`${bkgs.length} booking${bkgs.length!==1?"s":""}${email?` · ${email}`:""}`}
         email={email} pk={d.pk||d.kind} bkgs={bkgs} isAdmin={isAdmin} canEdit={canEdit} onView={onView}
-        onBulkApply={onBulkApply} onBulkStatusChange={onBulkStatusChange} onClose={()=>setExpanded(null)}/>
+        onBulkApply={onBulkApply} onBulkStatusChange={onBulkStatusChange} onRemove={onRemove} onClose={()=>setExpanded(null)}/>
     );
   }
   // Resolve selected groups → all matching bookings

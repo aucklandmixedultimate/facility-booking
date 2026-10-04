@@ -271,6 +271,8 @@ export default function App() {
   const [pricingConditions, setPricingConditions] = useState(()=>{
     try{return JSON.parse(localStorage.getItem("fb_pricing_conditions")||"[]");}catch{return [];}
   });
+  // Collapsed booker categories (NZU/AU) opened in the filter bar this session — always start shut.
+  const [openSeasons, setOpenSeasons] = useState(()=>new Set());
   const [listBookerFilter, setListBookerFilter] = useState(()=>{ try{ return new Set(JSON.parse(localStorage.getItem("fb_booker_filter")||"[]")); }catch{ return new Set(); } }); // empty = all (additive multi-select)
   useEffect(()=>{ try{ localStorage.setItem("fb_booker_filter",JSON.stringify([...listBookerFilter])); }catch{ /* ignore */ } },[listBookerFilter]);
   const [showBookerPicker, setShowBookerPicker] = useState(false);
@@ -2315,11 +2317,19 @@ export default function App() {
                 const on=listBookerFilter.size===addrs.length&&addrs.every(e=>listBookerFilter.has(e));
                 return [
                   <button key={"season-"+sid} onClick={()=>setListBookerFilter(on?new Set():new Set(addrs))}
-                    title={`${x.name} (${x.span})${sid===curSeason?" — current season":x.months.length?" — next season":""}: select its ${members.length} booker${members.length!==1?"s":""}`}
+                    title={`${x.name} (${x.span})${sid===curSeason?" — current season":x.continuous?" — continuous":" — next season"}: select its ${members.length} booker${members.length!==1?"s":""}`}
                     style={{padding:"4px 10px",borderRadius:8,border:`1.5px dashed ${on?"#0f172a":"#94a3b8"}`,cursor:"pointer",fontSize:11,fontWeight:800,fontFamily:"inherit",flexShrink:0,marginLeft:4,background:on?"#0f172a":"#f8fafc",color:on?"#fff":"#334155",letterSpacing:"0.02em"}}>
-                    {x.name}{x.months.length>0&&<span style={{fontWeight:500,opacity:.75,marginLeft:4}}>{sid===curSeason?"now":"next"}</span>}
+                    {x.name}{!x.continuous&&<span style={{fontWeight:500,opacity:.75,marginLeft:4}}>{sid===curSeason?"now":"next"}</span>}
+                    {x.collapsed&&<span style={{fontWeight:500,opacity:.75,marginLeft:4}}>×{members.length}</span>}
                   </button>,
-                  ...members.map(primary=>{
+                  // A collapsed category shows only its chip; ▸ lists its bookers for this session.
+                  ...(x.collapsed?[
+                    <button key={"season-open-"+sid} aria-expanded={openSeasons.has(sid)} title={openSeasons.has(sid)?`Hide ${x.name} bookers`:`Show ${x.name} bookers`}
+                      onClick={()=>setOpenSeasons(prev=>{const n=new Set(prev);n.has(sid)?n.delete(sid):n.add(sid);return n;})}
+                      style={{padding:"4px 7px",borderRadius:8,border:"1.5px dashed #94a3b8",cursor:"pointer",fontSize:11,fontWeight:800,fontFamily:"inherit",flexShrink:0,marginLeft:-2,background:"#f8fafc",color:"#334155"}}>
+                      {openSeasons.has(sid)?"◂":"▸"}
+                    </button>]:[]),
+                  ...(x.collapsed&&!openSeasons.has(sid)?[]:members).map(primary=>{
                 const group=bookerGroups[primary];
                 const active=[...group].every(em=>listBookerFilter.has(em));
                 const c=emailColor(primary);
@@ -2391,7 +2401,7 @@ export default function App() {
                   {/* Grouped (schedule summary, the default) or Itemised (one row per booking). */}
                   <TableViewToggle value={listView} onChange={setListView}/>
                   {listView==="grouped" ? (
-                    <ScheduleSummaryModal bookings={bookings.filter(b=>inActiveVenue(b.facility_id)&&(selFac==="all"||b.facility_id===selFac)&&(listBookerFilter.size===0||listBookerFilter.has(b.email?.toLowerCase()))&&(!listShowClashes||allClashIds.has(b.id)))} isAdmin={isAdmin} loggedInEmail={loggedInEmail} onBulkApply={handleBulkApply} onBulkStatusChange={handleBulkStatusChange} onView={setViewing} aliasNames={aliasNames} emailAliases={emailAliases} embedded/>
+                    <ScheduleSummaryModal bookings={bookings.filter(b=>inActiveVenue(b.facility_id)&&(selFac==="all"||b.facility_id===selFac)&&(listBookerFilter.size===0||listBookerFilter.has(b.email?.toLowerCase()))&&(!listShowClashes||allClashIds.has(b.id)))} isAdmin={isAdmin} loggedInEmail={loggedInEmail} onBulkApply={handleBulkApply} onBulkStatusChange={handleBulkStatusChange} onRemove={queueMultiForRemoval} onView={setViewing} aliasNames={aliasNames} emailAliases={emailAliases} embedded/>
                   ) : isMobile ? (
                     // Phones: filters in a compact grid (bookers via the pills above), then one
                     // card per booking — date, time, field and status on top, booker and purpose below.
@@ -2616,7 +2626,7 @@ export default function App() {
           </div>
         )}
 
-        {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<Suspense fallback={<TabLoading/>}><SummaryTab bookings={bookings} loggedInEmail={loggedInEmail} facilityRates={facilityRates} pricingConditions={pricingConditions} onAddPricingCondition={addPricingCondition} onUpdatePricingCondition={updatePricingCondition} onRemovePricingCondition={removePricingCondition} isAdmin={isAdmin} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onUpdateFacilityRate={updateFacilityRate} pricingMode={pricingMode} onSetPricingMode={setPricingMode} onProposeMerge={handleProposeMerge} onBulkApply={handleBulkApply} onMarkInvoiced={handleMarkInvoiced} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} bookerFilter={listBookerFilter} profiles={profiles} emailAliases={emailAliases} aliasNames={aliasNames} onCreateOfficialInvoice={handleCreateOfficialInvoice} onEmailInvoice={handleEmailInvoicePreview} onFilterChange={s=>setListBookerFilter(s)} loadRequest={summaryLoadRequest}/></Suspense>}</div>}
+        {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<Suspense fallback={<TabLoading/>}><SummaryTab bookings={bookings} loggedInEmail={loggedInEmail} onRemoveBookings={queueMultiForRemoval} facilityRates={facilityRates} pricingConditions={pricingConditions} onAddPricingCondition={addPricingCondition} onUpdatePricingCondition={updatePricingCondition} onRemovePricingCondition={removePricingCondition} isAdmin={isAdmin} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onUpdateFacilityRate={updateFacilityRate} pricingMode={pricingMode} onSetPricingMode={setPricingMode} onProposeMerge={handleProposeMerge} onBulkApply={handleBulkApply} onMarkInvoiced={handleMarkInvoiced} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} bookerFilter={listBookerFilter} profiles={profiles} emailAliases={emailAliases} aliasNames={aliasNames} onCreateOfficialInvoice={handleCreateOfficialInvoice} onEmailInvoice={handleEmailInvoicePreview} onFilterChange={s=>setListBookerFilter(s)} loadRequest={summaryLoadRequest}/></Suspense>}</div>}
         {tab==="billing"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<Suspense fallback={<TabLoading/>}><BillingTab billingRecords={billingRecords} onUpdateRecord={handleUpdateBillingRecord} onDeleteRecord={id=>setBillingRecords(prev=>prev.filter(r=>r.id!==id))} onCreateReceipt={handleCreateReceipt} onLoadToSummary={handleLoadBillingToSummary} isAdmin={isAdmin} loggedInEmail={loggedInEmail} emailAliases={emailAliases} aliasNames={aliasNames} profiles={profiles} driveEnabled={driveConfigured()} onDriveSync={handleDriveSync} onRenameBatch={handleRenameBatch} onDriveAttach={handleDriveAttachGtec} onEmailOfficial={handleEmailOfficialInvoices} onQueueInvoiceEmails={handleQueueInvoiceEmails} silentMode={silentMode} onToggleSilent={isAdmin?setSilentMode:undefined}/></Suspense>}</div>}
         {tab==="about"&&<div style={{padding:"8px 0"}}><Suspense fallback={<TabLoading/>}><AboutTab/></Suspense></div>}
         {tab==="allocation"&&isAdmin&&<div style={S.card}><Suspense fallback={<TabLoading/>}><CouncilAllocationTab outcomes={councilOutcomes} bookings={bookings} syncing={councilSyncing} syncLog={councilSyncLog} onSync={handleCouncilMailSync} onSaveOutcomes={saveCouncilOutcomes} onBulkStatusChange={handleBulkStatusChange} onQueueNotifications={queueNotifications} onLinkApp={handleLinkCouncilApp} aliasNames={aliasNames} loggedInEmail={loggedInEmail}/></Suspense></div>}
@@ -2626,7 +2636,7 @@ export default function App() {
       </div>
 
       {/* Modals */}
-      {showAdminScheduleModal && <ScheduleSummaryModal bookings={bookings} isAdmin={true} loggedInEmail={loggedInEmail} onBulkApply={handleBulkApply} onBulkStatusChange={handleBulkStatusChange} onView={b=>{setShowAdminScheduleModal(false);setViewing(b);}} aliasNames={aliasNames} emailAliases={emailAliases} onClose={()=>setShowAdminScheduleModal(false)}/>}
+      {showAdminScheduleModal && <ScheduleSummaryModal bookings={bookings} isAdmin={true} loggedInEmail={loggedInEmail} onBulkApply={handleBulkApply} onBulkStatusChange={handleBulkStatusChange} onRemove={queueMultiForRemoval} onView={b=>{setShowAdminScheduleModal(false);setViewing(b);}} aliasNames={aliasNames} emailAliases={emailAliases} onClose={()=>setShowAdminScheduleModal(false)}/>}
       {showExtensionModal&&(
         <Modal title="🧩 Install AMUA Extensions" onClose={()=>setShowExtensionModal(false)} width={560}>
           <div style={{display:"flex",flexDirection:"column",gap:16,fontSize:14,color:"#0f172a"}}>
