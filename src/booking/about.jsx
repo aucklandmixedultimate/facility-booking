@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { councilState, allPhases, fmtDay, fmtRange, COUNCIL_LINKS, COUNCIL_CONTACTS } from "../councilSeasons.js";
-import { Badge, COUNCIL_APPLICATION_FEE, STATUS_META, venueFacilities } from "./core.jsx";
-import { isLegacyStatus } from "../statuses.js";
+import { Badge, COUNCIL_APPLICATION_FEE, STATUS_META, stepLabel, venueFacilities } from "./core.jsx";
+import { WORKFLOW_STEPS } from "../statuses.js";
 import cornwallMap from "../assets/cornwall-park-fields.webp";
 // One numbered step in About → How to Book.
 export function AboutStep({ n, col, title, children }) {
@@ -225,17 +225,31 @@ export function AboutTab() {
       </div>
 
       <div style={card}>
-        <h2 style={h2}>Status Guide</h2>
-        <p style={{fontSize:13,color:"#475569",margin:"0 0 10px"}}>Every booking moves through the same kinds of stage. Where a stage involves the facility's vendor it's named on the booking — e.g. <Badge status="pending_cpsa" vendor="GTEC"/> for Cornwall Park, or <Badge status="pending_cpsa" vendor="St Cuthbert's"/> — and reads "vendor" here.</p>
-        <div style={{display:"flex",flexDirection:"column",gap:8}}>
-          {Object.entries(STATUS_META).filter(([k])=>!isLegacyStatus(k)).map(([k,v])=>(
+        {(()=>{
+          // The guide follows the How to Book tab: that workflow's steps in order, then the
+          // statuses outside the steps that can apply to it.
+          const wf = { gtec:"gtec", council:"council", private:"council_private", community:"community" }[howTab] || "gtec";
+          const vendor = wf==="gtec" ? "GTEC" : undefined;
+          const title = { gtec:"Cornwall Park · CPSA / GTEC", council:"Council fields", council_private:"Council + private operator", community:"Community facilities" }[wf];
+          const others = [...(wf==="gtec" ? ["cpsa_confirmed","cpsa_review_needed"] : []), "rejected", "cancelled", "clash"];
+          const row = (k, label) => { const v = STATUS_META[k]; return (
             <div key={k} style={{display:"flex",alignItems:"center",gap:10,padding:"6px 10px",background:v.bg,border:`1px solid ${v.border}`,borderRadius:8,flexWrap:"wrap"}}>
               <span style={{width:8,height:8,borderRadius:"50%",background:v.dot,flexShrink:0}}/>
-              <span style={{fontWeight:600,fontSize:13,color:v.text}}>{v.label}</span>
+              <span style={{fontWeight:600,fontSize:13,color:v.text}}>{label}</span>
               {v.desc&&<span style={{fontSize:12,color:"#475569"}}>— {v.desc}</span>}
+            </div>); };
+          return (<>
+            <h2 style={h2}>Status Guide <span style={{fontSize:13,fontWeight:600,color:"#64748b"}}>· {title}</span></h2>
+            <p style={{fontSize:13,color:"#475569",margin:"0 0 10px"}}>The stages a booking moves through {wf==="gtec"?"at Cornwall Park":`for ${title.toLowerCase()}`}, in order — switch the tab above for another kind of facility.{wf==="gtec"?<> Stages with the vendor name it, e.g. <Badge status="pending_cpsa" wf="gtec" vendor="GTEC"/> (CPSA for the rooms).</>:null}</p>
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              {WORKFLOW_STEPS[wf].map(k=>row(k, stepLabel(k, wf, null, vendor)))}
             </div>
-          ))}
-        </div>
+            <div style={{fontSize:11,fontWeight:700,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.05em",margin:"14px 0 6px"}}>Can also happen</div>
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              {others.map(k=>row(k, stepLabel(k, wf, null, vendor)))}
+            </div>
+          </>);
+        })()}
       </div>
     </div>
   );
