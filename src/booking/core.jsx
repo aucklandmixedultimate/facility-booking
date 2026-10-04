@@ -846,11 +846,13 @@ export const MOBILE_STYLE = `
   .fac-social-tex {
     background-image: repeating-linear-gradient(45deg, rgba(255,255,255,0.20) 0 4px, rgba(255,255,255,0) 4px 9px);
   }
-  /* Facility pills on desktop: all one width, names cut with … and shown in full on hover. */
+  /* Location and facility pills on desktop: one row that never overflows — the pills share
+     the width (up to 150px each, shrinking evenly), names cut with … and in full on hover. */
   @media (min-width: 768px) {
-    .facpills .facpill { width: 150px; transition: width .15s ease; }
-    .facpills .facpill .facpill-n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .facpills .facpill:hover { width: auto; max-width: 420px; }
+    .facpills { flex-wrap: nowrap !important; overflow-x: auto !important; scrollbar-width: none; }
+    .facpills .facpill { flex: 0 1 150px !important; min-width: 40px; transition: flex-basis .15s ease; }
+    .facpills .facpill .facpill-n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+    .facpills .facpill:hover { flex: 0 0 auto !important; max-width: 420px; }
   }
   .facpills .facpill .facpill-n { white-space: nowrap; }
   .fac-social-tex-dark {
@@ -1465,18 +1467,15 @@ export async function sendApprovalEmail({ to, subject, html }) {
   return sendEmail({ to, subject, html, kind: "approval" });
 }
 
-// Public links surfaced to bookers (the live GTEC field calendar and the GTEC field
-// hire request form). Also shown in the in-app Help tab.
+// Public link surfaced to bookers: the live GTEC field calendar.
 export const GTEC_CALENDAR_URL = "https://www.carltonjuniorsrugby.co.nz/venue-hire-fields-1/field-calendar";
-export const GTEC_FORM_URL = "https://www.grammartec.co.nz/viewform/499414";
-// Reusable "useful links" block for booker-facing emails — links the GTEC calendar
-// and the field hire request form so bookers can cross-check and self-serve.
+// Reusable "useful links" block for booker-facing emails — links the GTEC calendar so
+// bookers can cross-check. (No field hire request form: bookings go through AMUA.)
 export function emailLinksBlock() {
   return `<div style="margin-top:20px;padding:14px 16px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px">
     <div style="font-size:10px;font-weight:700;color:#0369a1;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px">Useful links</div>
     <div style="font-size:13px;line-height:2">
-      <a href="${GTEC_CALENDAR_URL}" target="_blank" style="color:#0369a1;font-weight:600;text-decoration:none">📅 GTEC field calendar ↗</a><br/>
-      <a href="${GTEC_FORM_URL}" target="_blank" style="color:#0369a1;font-weight:600;text-decoration:none">📝 GTEC field hire request form ↗</a>
+      <a href="${GTEC_CALENDAR_URL}" target="_blank" style="color:#0369a1;font-weight:600;text-decoration:none">📅 GTEC field calendar ↗</a>
     </div>
   </div>`;
 }
