@@ -1,5 +1,5 @@
-import { useState, Fragment } from "react";
-import { Badge, COUNCIL_STAGE_STATUSES, groupStatusLabel, CopyableTable, DURATIONS, FACILITIES, Modal, S, STATUS_META, T, emailColor, fmtCost, fmtDate, fmtDateShort, fmtTime, isAdminBooking, newId, parseGroupRef, todayKey, venueFacilities, visibleFacilities } from "./core.jsx";
+import { useState, useRef, Fragment } from "react";
+import { Badge, rowSelect, isMultiSelectClick, COUNCIL_STAGE_STATUSES, groupStatusLabel, CopyableTable, DURATIONS, FACILITIES, Modal, S, STATUS_META, T, emailColor, fmtCost, fmtDate, fmtDateShort, fmtTime, isAdminBooking, newId, parseGroupRef, todayKey, venueFacilities, visibleFacilities } from "./core.jsx";
 import { DateRangePicker } from "./modals.jsx";
 import { isLive, isLegacyStatus } from "../statuses.js";
 // `canon` folds a (lowercased) email onto its canonical primary so linked
@@ -83,7 +83,10 @@ export function BookingSubsetPanel({ title, subtitle, email, pk, bkgs, isAdmin, 
   const canBulk = (isAdmin || canEdit) && onBulkApply;
   const canRemove = (isAdmin || canEdit) && onRemove;
   const canReassign = isAdmin && onReassign;
-  const toggle = id => setUnticked(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const tickAnchor = useRef(null);
+  // Shift-click ticks/unticks a range; Ctrl/⌘-click a row toggles it (rowSelect).
+  const select = (e, id) => { const t = rowSelect(e, id, sorted.map(b=>b.id), new Set(ticked.map(b=>b.id)), tickAnchor);
+    setUnticked(new Set(sorted.filter(b=>!t.has(b.id)).map(b=>b.id))); };
   const allTicked = ticked.length === sorted.length;
   const th = {textAlign:"left",padding:"5px 8px",fontWeight:600,color:T.muted,fontSize:11,whiteSpace:"nowrap"};
   const td = {padding:"4px 8px",fontSize:12,borderTop:`1px solid ${T.lineSoft}`,whiteSpace:"nowrap"};
@@ -113,8 +116,9 @@ export function BookingSubsetPanel({ title, subtitle, email, pk, bkgs, isAdmin, 
             {sorted.map(b=>{
               const f=FACILITIES.find(x=>x.id===b.facility_id); const on=!unticked.has(b.id);
               return (
-                <tr key={b.id} style={{opacity:on?1:0.5}}>
-                  <td style={td}><input type="checkbox" checked={on} onChange={()=>toggle(b.id)} aria-label={`Tick ${fmtDate(b.date)}`}/></td>
+                <tr key={b.id} style={{opacity:on?1:0.5}} onClick={e=>{ if(isMultiSelectClick(e)&&!e.target.closest("button,input")) select(e,b.id); }}
+                  onMouseDown={e=>{ if(e.shiftKey) e.preventDefault(); }}>
+                  <td style={td}><input type="checkbox" checked={on} readOnly onClick={e=>select(e,b.id)} aria-label={`Tick ${fmtDate(b.date)}`} title="Shift-click: tick a range"/></td>
                   <td style={td}>{onView
                     ? <button onClick={()=>onView(b)} title="Open booking" style={{border:"none",background:"none",padding:0,cursor:"pointer",color:T.focus,fontFamily:"inherit",fontSize:12,textDecoration:"underline dotted"}}>{fmtDate(b.date)}</button>
                     : fmtDate(b.date)}</td>

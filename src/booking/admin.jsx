@@ -1,5 +1,5 @@
-import { useState, Fragment } from "react";
-import { AMUA_INBOX, AMUA_INFO, Badge, venueKeyOf, bareStatusLabel, groupStatusLabel, COUNCIL_APPLICATION_FEE, ClashPair, CopyableTable, EmailChip, FACILITIES, INVOICED_META, Modal, PROVIDERS, REVIEW_STATUSES, S, STATUS_META, SUPABASE_URL, TableViewToggle, _contactReviews, _currentUser, _sessionStartIso, authHeaders, bookingCost, buildCouncilPayload, canSendToCouncil, councilFeeSplit, councilOverlaps, emailColor, extractCpsaAmendValues, facCellLabel, fmt24, fmtCost, fmtDate, fmtDateShort, fmtDateShortDow, fmtDuration, fmtGtecEvent, fmtLoggedAt, fmtTime, getBillingDrift, getCrossFacilityOverlaps, getSameFacilityOverlaps, isAdminBooking, isCouncilBooking, isSocialFac, nextWorkflowStatus, parseClashPrevStatus, parseCouncilApp, parseCpsaRefs, parseCpsaResolution, parseGtecSnapshot, parseMismatchNote, parseSlotLink, providerOfFacility, sb, setCpsaOrig, setCpsaResolution, setModuleState, stripMismatchNote, todayKey, useTableView, vendorShortFor, vendorsIn, visibleFacilities, workflowOf, workflowStep } from "./core.jsx";
+import { useState, useRef, Fragment } from "react";
+import { AMUA_INBOX, AMUA_INFO, Badge, rowSelect, isMultiSelectClick, venueKeyOf, bareStatusLabel, groupStatusLabel, COUNCIL_APPLICATION_FEE, ClashPair, CopyableTable, EmailChip, FACILITIES, INVOICED_META, Modal, PROVIDERS, REVIEW_STATUSES, S, STATUS_META, SUPABASE_URL, TableViewToggle, _contactReviews, _currentUser, _sessionStartIso, authHeaders, bookingCost, buildCouncilPayload, canSendToCouncil, councilFeeSplit, councilOverlaps, emailColor, extractCpsaAmendValues, facCellLabel, fmt24, fmtCost, fmtDate, fmtDateShort, fmtDateShortDow, fmtDuration, fmtGtecEvent, fmtLoggedAt, fmtTime, getBillingDrift, getCrossFacilityOverlaps, getSameFacilityOverlaps, isAdminBooking, isCouncilBooking, isSocialFac, nextWorkflowStatus, parseClashPrevStatus, parseCouncilApp, parseCpsaRefs, parseCpsaResolution, parseGtecSnapshot, parseMismatchNote, parseSlotLink, providerOfFacility, sb, setCpsaOrig, setCpsaResolution, setModuleState, stripMismatchNote, todayKey, useTableView, vendorShortFor, vendorsIn, visibleFacilities, workflowOf, workflowStep } from "./core.jsx";
 import { councilAppBookings } from "./councilData.jsx";
 import { ActivityLogModal, DateRangePicker } from "./modals.jsx";
 import { PatternModal, PricingConditionsManager, ReassignControl, ScheduleSummaryModal } from "./schedule.jsx";
@@ -362,6 +362,7 @@ export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDel
   const [adminColPurpose,setAdminColPurpose]=useState("");
   const [sortCol,setSortCol]=useState("date"), [sortDir,setSortDir]=useState("asc");
   const [selected,setSelected]=useState(new Set());
+  const selAnchor=useRef(null);
   const [bulkNote,setBulkNote]=useState("");
   const [bulkSending,setBulkSending]=useState(false);
   const [bulkStatus,setBulkStatus]=useState("queued_cpsa");
@@ -521,9 +522,6 @@ export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDel
   const pendingList = list.filter(b=>REVIEW_STATUSES.has(b.status));
   const allSelected = pendingList.length>0 && pendingList.every(b=>selected.has(b.id));
 
-  function toggleSelect(id) {
-    setSelected(s=>{ const ns=new Set(s); ns.has(id)?ns.delete(id):ns.add(id); return ns; });
-  }
   function toggleAll() {
     if(allSelected) setSelected(s=>{ const ns=new Set(s); pendingList.forEach(b=>ns.delete(b.id)); return ns; });
     else setSelected(s=>{ const ns=new Set(s); pendingList.forEach(b=>ns.add(b.id)); return ns; });
@@ -1838,11 +1836,13 @@ export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDel
                 const opHint=(opContact&&(nxt==="op_permission"||nxt==="op_confirm")?` — ${[opContact.contact_name||opContact.name,opContact.email,opContact.phone].filter(Boolean).join(" · ")}`:"")
                   +(nxt==="council_apply"?` — council application fee $${COUNCIL_APPLICATION_FEE} per field (pay later)`:"");
                 return (
-                  <tr key={b.id} onClick={()=>onView&&onView(b)} style={{background:rowBg,borderTop:ri>0?"1px solid #f1f5f9":"none",transition:"background 0.1s",cursor:"pointer"}}
+                  <tr key={b.id} onClick={e=>{ if(isPending&&isMultiSelectClick(e)){ setSelected(rowSelect(e,b.id,list.filter(x=>REVIEW_STATUSES.has(x.status)).map(x=>x.id),selected,selAnchor)); return; } onView&&onView(b); }}
+                    onMouseDown={e=>{ if(e.shiftKey) e.preventDefault(); }} style={{background:rowBg,borderTop:ri>0?"1px solid #f1f5f9":"none",transition:"background 0.1s",cursor:"pointer"}}
                     onMouseEnter={e=>{if(!rowBg||rowBg==="#fff")e.currentTarget.style.background="#f8fafc";}}
                     onMouseLeave={e=>e.currentTarget.style.background=rowBg}>
                     <td style={{padding:"3px 8px",textAlign:"center"}} onClick={e=>e.stopPropagation()}>
-                      {isPending&&<input type="checkbox" checked={selected.has(b.id)} onChange={()=>toggleSelect(b.id)} style={{width:13,height:13,accentColor:"#6366f1"}}/>}
+                      {isPending&&<input type="checkbox" checked={selected.has(b.id)} readOnly title="Shift-click: select a range · Ctrl/⌘-click a row: add it"
+                        onClick={e=>setSelected(rowSelect(e,b.id,list.filter(x=>REVIEW_STATUSES.has(x.status)).map(x=>x.id),selected,selAnchor))} style={{width:13,height:13,accentColor:"#6366f1"}}/>}
                     </td>
                     <td style={{padding:"3px 6px",whiteSpace:"nowrap",fontSize:11,color:"#475569"}}>{fmtDateShortDow(b.date)}</td>
                     <td style={{padding:"3px 6px"}}>
