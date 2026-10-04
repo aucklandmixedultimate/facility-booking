@@ -3,7 +3,7 @@ import { AMUA_INFO, Badge, vendorVarianceText, COUNCIL_APPLICATION_FEE, Copyable
 import { OneOffModal, PatternModal, PricingConditionsManager, buildOverlapPatternMap, defaultFacRates, resolveRates } from "./schedule.jsx";
 import { InvoiceOptionRow, InvoicePill, invLineLabel, renderInvoiceDocHtml } from "./billingDocs.jsx";
 import { isClosed } from "../statuses.js";
-export function SummaryTab({ bookings, loggedInEmail, onRemoveBookings, facilityRates = {}, pricingConditions = [], onAddPricingCondition, onUpdatePricingCondition, onRemovePricingCondition, isAdmin = false, approxPlayers = {}, onUpdateApproxPlayers, approxDurations = {}, onUpdateApproxDuration, onUpdateFacilityRate, pricingMode = "hourly", onSetPricingMode, onProposeMerge, onBulkApply, onMarkInvoiced, onMarkAdjustmentSettled, bookerFilter=new Set(), profiles={}, emailAliases={}, aliasNames={}, onCreateOfficialInvoice, onEmailInvoice, onFilterChange=null, loadRequest=null }) {
+export function SummaryTab({ bookings, loggedInEmail, onRemoveBookings, facilityRates = {}, pricingConditions = [], onAddPricingCondition, onUpdatePricingCondition, onRemovePricingCondition, isAdmin = false, approxPlayers = {}, onUpdateApproxPlayers, approxDurations = {}, onUpdateApproxDuration, onUpdateFacilityRate, pricingMode = "hourly", onSetPricingMode, onProposeMerge, onBulkApply, onMarkInvoiced, onMarkAdjustmentSettled, bookerFilter=new Set(), profiles={}, emailAliases={}, aliasNames={}, onCreateOfficialInvoice, onEmailInvoice, loadRequest=null }) {
   const now = new Date();
   const thisYear = now.getFullYear();
 
@@ -26,14 +26,6 @@ export function SummaryTab({ bookings, loggedInEmail, onRemoveBookings, facility
       return prev;
     });
   },[bookerFilter]);
-  const toggleEmailFilter = em => {
-    setEmailFilterSet(prev=>{
-      const s=new Set(prev); const lk=em.toLowerCase();
-      if(s.has(lk)) s.delete(lk); else s.add(lk);
-      if(onFilterChange) onFilterChange(new Set(s));
-      return s;
-    });
-  };
   // Honour load-from-billing requests: switch to custom preset and stamp the
   // record's date range. Tracked by version so re-loading the same record works.
   const lastLoadVersionRef = useRef(null);
@@ -830,31 +822,8 @@ export function SummaryTab({ bookings, loggedInEmail, onRemoveBookings, facility
               style={{ padding:"5px 10px", borderRadius:8, border:"1.5px solid #e2e8f0", fontSize:13, fontFamily:"inherit", background:"#f8fafc", color:"#0f172a", outline:"none" }}/>
           </div>
         )}
-        {/* Booker filter chips — additive multi-select, mirrors global pills */}
+        {/* Bookers are filtered by the shared booker pill bar above (grouped by category). */}
         <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
-          <div style={{display:"flex",gap:6,alignItems:"center",minWidth:0,...(narrow?{...chipRow,width:"100%"}:{display:"contents"})}}>
-          <button onClick={()=>{
-            setEmailFilterSet(prev=>{
-              const next=prev.size===0?new Set(allEmails.map(e=>e.toLowerCase())):new Set();
-              if(onFilterChange) onFilterChange(new Set(next));
-              return next;
-            });
-          }}
-            title={emailFilterSet.size===0?"Select all bookers":"Clear selection"}
-            style={{padding:"5px 12px",borderRadius:20,border:"1.5px solid",cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",flexShrink:0,borderColor:emailFilterSet.size===0?"#0f172a":"#e2e8f0",background:emailFilterSet.size===0?"#0f172a":"#fff",color:emailFilterSet.size===0?"#fff":"#475569"}}>
-            {emailFilterSet.size===0?"All":"None"}
-          </button>
-          {allEmails.map(e=>{
-            const active=emailFilterSet.has(e.toLowerCase());
-            const c=emailColor(e);
-            return(
-              <button key={e} onClick={()=>toggleEmailFilter(e)}
-                style={{padding:"5px 12px",borderRadius:20,border:`1.5px solid ${active?c:"#e2e8f0"}`,cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",flexShrink:0,background:active?c:"#fff",color:active?"#fff":"#475569"}}>
-                {summaryAlias(e)}
-              </button>
-            );
-          })}
-          </div>
           <div style={{marginLeft:"auto",display:"flex",gap:6,...(narrow?{width:"100%"}:{})}}>
             <button onClick={exportCSV} style={S.btn({ background:"#0f172a", color:"#fff", display:"flex", alignItems:"center", gap:6, ...(narrow?{flex:1,justifyContent:"center"}:{}) })}>
               ⬇ Export All Data (CSV)

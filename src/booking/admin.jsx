@@ -1,5 +1,5 @@
 import { useState, Fragment } from "react";
-import { AMUA_INBOX, AMUA_INFO, Badge, bareStatusLabel, groupStatusLabel, COUNCIL_APPLICATION_FEE, ClashPair, CopyableTable, EmailChip, FACILITIES, INVOICED_META, Modal, PROVIDERS, REVIEW_STATUSES, S, STATUS_META, SUPABASE_URL, TableViewToggle, _contactReviews, _currentUser, _sessionStartIso, authHeaders, bookingCost, buildCouncilPayload, canSendToCouncil, councilFeeSplit, councilOverlaps, emailColor, extractCpsaAmendValues, facCellLabel, fmt24, fmtCost, fmtDate, fmtDateShort, fmtDateShortDow, fmtDuration, fmtGtecEvent, fmtLoggedAt, fmtTime, getBillingDrift, getCrossFacilityOverlaps, getSameFacilityOverlaps, isAdminBooking, isCouncilBooking, isSocialFac, nextWorkflowStatus, parseClashPrevStatus, parseCouncilApp, parseCpsaRefs, parseCpsaResolution, parseGtecSnapshot, parseMismatchNote, parseSlotLink, providerOfFacility, sb, setCpsaOrig, setCpsaResolution, setModuleState, stripMismatchNote, todayKey, useTableView, vendorShortFor, vendorsIn, visibleFacilities, workflowOf, workflowStep } from "./core.jsx";
+import { AMUA_INBOX, AMUA_INFO, Badge, venueKeyOf, bareStatusLabel, groupStatusLabel, COUNCIL_APPLICATION_FEE, ClashPair, CopyableTable, EmailChip, FACILITIES, INVOICED_META, Modal, PROVIDERS, REVIEW_STATUSES, S, STATUS_META, SUPABASE_URL, TableViewToggle, _contactReviews, _currentUser, _sessionStartIso, authHeaders, bookingCost, buildCouncilPayload, canSendToCouncil, councilFeeSplit, councilOverlaps, emailColor, extractCpsaAmendValues, facCellLabel, fmt24, fmtCost, fmtDate, fmtDateShort, fmtDateShortDow, fmtDuration, fmtGtecEvent, fmtLoggedAt, fmtTime, getBillingDrift, getCrossFacilityOverlaps, getSameFacilityOverlaps, isAdminBooking, isCouncilBooking, isSocialFac, nextWorkflowStatus, parseClashPrevStatus, parseCouncilApp, parseCpsaRefs, parseCpsaResolution, parseGtecSnapshot, parseMismatchNote, parseSlotLink, providerOfFacility, sb, setCpsaOrig, setCpsaResolution, setModuleState, stripMismatchNote, todayKey, useTableView, vendorShortFor, vendorsIn, visibleFacilities, workflowOf, workflowStep } from "./core.jsx";
 import { councilAppBookings } from "./councilData.jsx";
 import { ActivityLogModal, DateRangePicker } from "./modals.jsx";
 import { PatternModal, PricingConditionsManager, ReassignControl, ScheduleSummaryModal } from "./schedule.jsx";
@@ -334,7 +334,9 @@ export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDel
     const primary = (emailAliases[em.toLowerCase()] || em).toLowerCase();
     return aliasNames[primary] || primary.split("@")[0];
   };
-  const [ff,setFf]=useState("all"), [q]=useState("");
+  const [ff,setFf]=useState("all"), [vf,setVf]=useState("all"), [q]=useState("");
+  // The venue (site) a facility is at, e.g. "Cornwall Park", "GTEC Orakei".
+  const venueOf = fid => { const f=FACILITIES.find(x=>x.id===fid); if(!f) return ""; return venueKeyOf(f).split("|")[1] || PROVIDERS[f.provider]?.short || ""; };
   // Status filter as an EXCLUSION set: empty shows everything, and unticking a status
   // hides it. The old single-value select could only ever isolate one status, so
   // "everything except cancelled and rejected" was impossible to express.
@@ -493,6 +495,7 @@ export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDel
     if(!vendorOk(b)) return false;
     if(sfHidden.has(b.status)) return false;
     if(ff!=="all"&&b.facility_id!==ff) return false;
+    if(vf!=="all"&&venueOf(b.facility_id)!==vf) return false;
     if(adminBookerFilter.size>0&&!adminBookerFilter.has(b.email?.toLowerCase())) return false;
     if(adminDateFrom&&b.date<adminDateFrom) return false;
     if(adminDateTo&&b.date>adminDateTo) return false;
@@ -503,6 +506,8 @@ export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDel
     if(sortCol==="date") return dir*(a.date.localeCompare(b.date)||a.start_hour-b.start_hour);
     if(sortCol==="name") return dir*(a.name||"").localeCompare(b.name||"");
     if(sortCol==="facility") return dir*(a.facility_id||"").localeCompare(b.facility_id||"");
+    if(sortCol==="venue") return dir*(venueOf(a.facility_id).localeCompare(venueOf(b.facility_id))||a.date.localeCompare(b.date));
+    if(sortCol==="vendor") return dir*(vendorShortFor(a.facility_id).localeCompare(vendorShortFor(b.facility_id))||a.date.localeCompare(b.date));
     if(sortCol==="status") return dir*(a.status||"").localeCompare(b.status||"");
     return dir*(new Date(b.created_at)-new Date(a.created_at));
   });
@@ -1665,7 +1670,7 @@ export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDel
                 <th style={{padding:"8px 10px",textAlign:"center",width:32}}>
                   <input type="checkbox" checked={allSelected} onChange={toggleAll} style={{width:14,height:14,accentColor:"#6366f1"}}/>
                 </th>
-                {[["date","Date",null],["name","Booker",null],["facility","Fac",90],["status","Status",100]].map(([col,label,w])=>(
+                {[["date","Date",null],["name","Booker",null],["facility","Fac",90],["venue","Venue",110],["vendor","Vendor",80],["status","Status",100]].map(([col,label,w])=>(
                   <th key={col} onClick={()=>toggleSort(col)} style={{padding:"5px 8px",textAlign:"left",cursor:"pointer",userSelect:"none",fontWeight:700,color:"#475569",whiteSpace:"nowrap",fontSize:11,...(w?{width:w}:{})}}>
                     {label}{sortArrow(col)}
                   </th>
@@ -1726,6 +1731,20 @@ export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDel
                     style={{padding:"3px 4px",fontSize:10,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",width:"100%"}}>
                     <option value="all">All</option>
                     {visibleFacilities().map(f=><option key={f.id} value={f.id}>{facCellLabel(f)}</option>)}
+                  </select>
+                </th>
+                <th style={{padding:"3px 4px",width:110}}>
+                  <select value={vf} onChange={e=>setVf(e.target.value)} aria-label="Venue filter"
+                    style={{padding:"3px 4px",fontSize:10,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",width:"100%"}}>
+                    <option value="all">All</option>
+                    {[...new Set(bookings.filter(b=>!isAdminBooking(b)).map(b=>venueOf(b.facility_id)).filter(Boolean))].sort().map(v=><option key={v} value={v}>{v}</option>)}
+                  </select>
+                </th>
+                <th style={{padding:"3px 4px",width:80}}>
+                  <select value={adminVendor} onChange={e=>setAdminVendor(e.target.value)} aria-label="Vendor filter"
+                    style={{padding:"3px 4px",fontSize:10,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",width:"100%"}}>
+                    <option value="all">All</option>
+                    {vendorsIn(bookings.filter(b=>!isAdminBooking(b))).map(v=><option key={v} value={v}>{v}</option>)}
                   </select>
                 </th>
                 <th style={{padding:"3px 4px",width:100,position:"relative"}}>
@@ -1795,8 +1814,8 @@ export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDel
                     style={{padding:"3px 6px",fontSize:11,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",width:"100%"}}/>
                 </th>
                 <th style={{padding:"3px 4px"}}>
-                  {(adminBookerFilter.size>0||sfHidden.size>0||ff!=="all"||adminDateFrom||adminDateTo||adminColPurpose)&&(
-                    <button onClick={()=>{setAdminBookerFilter(new Set());setSfHidden(new Set());setFf("all");setAdminDateFrom("");setAdminDateTo("");setAdminColPurpose("");}}
+                  {(adminBookerFilter.size>0||sfHidden.size>0||ff!=="all"||vf!=="all"||adminVendor!=="all"||adminDateFrom||adminDateTo||adminColPurpose)&&(
+                    <button onClick={()=>{setAdminBookerFilter(new Set());setSfHidden(new Set());setFf("all");setVf("all");setAdminVendor("all");setAdminDateFrom("");setAdminDateTo("");setAdminColPurpose("");}}
                       style={{padding:"2px 7px",fontSize:10,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",color:"#64748b",cursor:"pointer",whiteSpace:"nowrap"}}>
                       ✕ Clear
                     </button>
@@ -1838,6 +1857,8 @@ export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDel
                         <span style={{color:"#0f172a"}}>{f ? (f.name.includes("Field") ? f.name.replace("Field ","F") : f.name.split(" ")[0]) : "—"}</span>
                       </span>
                     </td>
+                    <td style={{padding:"3px 6px",fontSize:11,color:"#475569",whiteSpace:"nowrap"}}>{venueOf(b.facility_id)||"—"}</td>
+                    <td style={{padding:"3px 6px",fontSize:11,color:"#475569",whiteSpace:"nowrap"}}>{vendorShortFor(b.facility_id)}</td>
                     <td style={{padding:"3px 6px"}}>
                       <Badge status={b.status} wf={workflowOf(b.facility_id)} fid={b.facility_id}/>
                       {workflowStep(b)&&<span title="Step in the council workflow" style={{fontSize:9,fontWeight:700,color:"#0f766e",marginLeft:3}}>{workflowStep(b)}</span>}
