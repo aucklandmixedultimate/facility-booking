@@ -1026,7 +1026,7 @@ export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDel
               }
             </div>
             {clashPatternModal&&(
-              <PatternModal {...clashPatternModal} isAdmin={true} onView={onView} onBulkStatusChange={onBulkStatusChange} onRemove={ids=>ids.forEach(id=>onQueueDelete&&onQueueDelete(id))}
+              <PatternModal {...clashPatternModal} isAdmin={true} onView={onView} onBulkStatusChange={onBulkStatusChange} onAddPricingRule={onAddPricingCondition} onRemove={ids=>ids.forEach(id=>onQueueDelete&&onQueueDelete(id))}
                 onClose={()=>setClashPatternModal(null)}
                 onBulkApply={args=>{onBulkApply&&onBulkApply(args);setClashPatternModal(null);}}/>
             )}
@@ -1656,7 +1656,7 @@ export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDel
         </select>
       </TableViewToggle>
       {adminView==="grouped"
-        ? <ScheduleSummaryModal bookings={bookings.filter(b=>inBookerFilter(b.email)&&vendorOk(b))} isAdmin={true} loggedInEmail={loggedInEmail} onBulkApply={onBulkApply} onBulkStatusChange={onBulkStatusChange} onRemove={ids=>ids.forEach(id=>onQueueDelete&&onQueueDelete(id))} onReassign={onReassign} bookers={bookers} onView={onView} aliasNames={aliasNames} emailAliases={emailAliases} embedded/>
+        ? <ScheduleSummaryModal bookings={bookings.filter(b=>inBookerFilter(b.email)&&vendorOk(b))} isAdmin={true} loggedInEmail={loggedInEmail} onBulkApply={onBulkApply} onBulkStatusChange={onBulkStatusChange} onRemove={ids=>ids.forEach(id=>onQueueDelete&&onQueueDelete(id))} onReassign={onReassign} onAddPricingRule={onAddPricingCondition} bookers={bookers} onView={onView} aliasNames={aliasNames} emailAliases={emailAliases} embedded/>
       : list.length===0
         ? <div style={{textAlign:"center",padding:"40px 0",color:"#94a3b8",fontSize:14}}>No bookings found.</div>
         : (

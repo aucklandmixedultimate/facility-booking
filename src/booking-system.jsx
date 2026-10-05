@@ -2427,7 +2427,7 @@ export default function App() {
                   {/* Grouped (schedule summary, the default) or Itemised (one row per booking). */}
                   <TableViewToggle value={listView} onChange={setListView}/>
                   {listView==="grouped" ? (
-                    <ScheduleSummaryModal bookings={bookings.filter(b=>inActiveVenue(b.facility_id)&&(selFac==="all"||b.facility_id===selFac)&&(listBookerFilter.size===0||listBookerFilter.has(b.email?.toLowerCase()))&&(!listShowClashes||allClashIds.has(b.id)))} isAdmin={isAdmin} loggedInEmail={loggedInEmail} onBulkApply={handleBulkApply} onBulkStatusChange={handleBulkStatusChange} onRemove={queueMultiForRemoval} onReassign={isAdmin?handleBulkReassign:undefined} bookers={knownBookers} onView={setViewing} aliasNames={aliasNames} emailAliases={emailAliases} embedded/>
+                    <ScheduleSummaryModal bookings={bookings.filter(b=>inActiveVenue(b.facility_id)&&(selFac==="all"||b.facility_id===selFac)&&(listBookerFilter.size===0||listBookerFilter.has(b.email?.toLowerCase()))&&(!listShowClashes||allClashIds.has(b.id)))} isAdmin={isAdmin} loggedInEmail={loggedInEmail} onBulkApply={handleBulkApply} onBulkStatusChange={handleBulkStatusChange} onRemove={queueMultiForRemoval} onReassign={isAdmin?handleBulkReassign:undefined} onAddPricingRule={isAdmin?addPricingCondition:undefined} bookers={knownBookers} onView={setViewing} aliasNames={aliasNames} emailAliases={emailAliases} embedded/>
                   ) : isMobile ? (
                     // Phones: filters in a compact grid (bookers via the pills above), then one
                     // card per booking — date, time, field and status on top, booker and purpose below.
@@ -2662,7 +2662,7 @@ export default function App() {
       </div>
 
       {/* Modals */}
-      {showAdminScheduleModal && <ScheduleSummaryModal bookings={bookings} isAdmin={true} loggedInEmail={loggedInEmail} onBulkApply={handleBulkApply} onBulkStatusChange={handleBulkStatusChange} onRemove={queueMultiForRemoval} onReassign={isAdmin?handleBulkReassign:undefined} bookers={knownBookers} onView={b=>{setShowAdminScheduleModal(false);setViewing(b);}} aliasNames={aliasNames} emailAliases={emailAliases} onClose={()=>setShowAdminScheduleModal(false)}/>}
+      {showAdminScheduleModal && <ScheduleSummaryModal bookings={bookings} isAdmin={true} loggedInEmail={loggedInEmail} onBulkApply={handleBulkApply} onBulkStatusChange={handleBulkStatusChange} onRemove={queueMultiForRemoval} onReassign={isAdmin?handleBulkReassign:undefined} onAddPricingRule={isAdmin?addPricingCondition:undefined} bookers={knownBookers} onView={b=>{setShowAdminScheduleModal(false);setViewing(b);}} aliasNames={aliasNames} emailAliases={emailAliases} onClose={()=>setShowAdminScheduleModal(false)}/>}
       {showExtensionModal&&(
         <Modal title="🧩 Install AMUA Extensions" onClose={()=>setShowExtensionModal(false)} width={560}>
           <div style={{display:"flex",flexDirection:"column",gap:16,fontSize:14,color:"#0f172a"}}>
