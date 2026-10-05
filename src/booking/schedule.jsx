@@ -679,6 +679,7 @@ export function PricingConditionsManager({ conditions = [], bookers = [], onAdd,
   const [bkrSel,   setBkrSel]   = useState([]); // lowercased emails
   const [facSel,   setFacSel]   = useState([]); // facility ids
   const [period,   setPeriod]   = useState("both");
+  const [allFacs,  setAllFacs]  = useState(false); // show facilities outside the current locations
   const [dayRate,  setDayRate]  = useState("");
   const [eveRate,  setEveRate]  = useState("");
   const [from,     setFrom]     = useState("");
@@ -742,7 +743,12 @@ export function PricingConditionsManager({ conditions = [], bookers = [], onAdd,
           <div>
             <div style={lblBlock}>Facilities <span style={{color:"#94a3b8",fontWeight:500}}>· pick one or more</span></div>
             <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
-              {visibleFacilities().map(f=><Fragment key={f.id}>{chip(facSel.includes(f.id),()=>toggle(facSel,setFacSel,f.id),f.name,f.color,"#fff")}</Fragment>)}
+              {/* The current locations' facilities (and any already picked); the rest on request. */}
+              {(()=>{ const shown=new Set(venueFacilities().map(f=>f.id)); facSel.forEach(id=>shown.add(id));
+                const all=visibleFacilities(), list=allFacs?all:all.filter(f=>shown.has(f.id)), more=all.length-all.filter(f=>shown.has(f.id)).length;
+                return <>{list.map(f=><Fragment key={f.id}>{chip(facSel.includes(f.id),()=>toggle(facSel,setFacSel,f.id),f.name,f.color,"#fff")}</Fragment>)}
+                  {more>0&&<button type="button" onClick={()=>setAllFacs(v=>!v)} style={{fontFamily:"inherit",fontSize:11,fontWeight:600,cursor:"pointer",borderRadius:999,padding:"2px 9px",border:"1.5px dashed #cbd5e1",background:"#fff",color:"#64748b"}}>
+                    {allFacs?"Only these locations":`+ ${more} more`}</button>}</>; })()}
             </div>
           </div>
           <div style={{display:"flex",flexWrap:"wrap",gap:8,alignItems:"center"}}>
