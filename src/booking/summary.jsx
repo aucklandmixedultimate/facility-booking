@@ -938,7 +938,8 @@ export function SummaryTab({ bookings, loggedInEmail, onRemoveBookings, facility
                 conditions={pricingConditions}
                 bookers={[...new Map(allInvoiceEmails.map(em=>[em.toLowerCase(),{email:em.toLowerCase(),label:summaryAlias(em)}])).values()]}
                 onAdd={onAddPricingCondition} onUpdate={onUpdatePricingCondition} onRemove={onRemovePricingCondition}
-                aliasFor={summaryAlias}/>
+                aliasFor={summaryAlias}
+                facilityIds={[...new Set(bookings.filter(b=>!isAdminBooking(b)&&!isClosed(b.status)&&(!dateFrom||b.date>=dateFrom)&&(!dateTo||b.date<=dateTo)).map(b=>b.facility_id))]}/>
             </div>
           )}
           {/* Only facilities used in the period; the rest (unused council fields etc.) on request. */}
