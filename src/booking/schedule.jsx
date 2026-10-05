@@ -673,7 +673,9 @@ export function resolveRates(facilityRates, conditions, facId, bookerEmail, date
 // Add / edit / list pricing rules. Self-contained (manages its own form state) so it
 // can be dropped into both the Summary tab and the Admin view. A rule targets any
 // number of bookers and facilities, a period (day/evening/both) and a date range.
-export function PricingConditionsManager({ conditions = [], bookers = [], onAdd, onUpdate, onRemove, aliasFor }) {
+// facilityIds: the facilities to offer first (e.g. those used in the Summary's range);
+// defaults to the current locations' facilities. Others are behind "+ N more".
+export function PricingConditionsManager({ conditions = [], bookers = [], onAdd, onUpdate, onRemove, aliasFor, facilityIds }) {
   const [showForm, setShowForm] = useState(false);
   const [editId,   setEditId]   = useState(null);
   const [bkrSel,   setBkrSel]   = useState([]); // lowercased emails
@@ -743,8 +745,8 @@ export function PricingConditionsManager({ conditions = [], bookers = [], onAdd,
           <div>
             <div style={lblBlock}>Facilities <span style={{color:"#94a3b8",fontWeight:500}}>· pick one or more</span></div>
             <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
-              {/* The current locations' facilities (and any already picked); the rest on request. */}
-              {(()=>{ const shown=new Set(venueFacilities().map(f=>f.id)); facSel.forEach(id=>shown.add(id));
+              {/* The facilities in use (or the current locations'), plus any already picked; the rest on request. */}
+              {(()=>{ const shown=new Set(facilityIds||venueFacilities().map(f=>f.id)); facSel.forEach(id=>shown.add(id));
                 const all=visibleFacilities(), list=allFacs?all:all.filter(f=>shown.has(f.id)), more=all.length-all.filter(f=>shown.has(f.id)).length;
                 return <>{list.map(f=><Fragment key={f.id}>{chip(facSel.includes(f.id),()=>toggle(facSel,setFacSel,f.id),f.name,f.color,"#fff")}</Fragment>)}
                   {more>0&&<button type="button" onClick={()=>setAllFacs(v=>!v)} style={{fontFamily:"inherit",fontSize:11,fontWeight:600,cursor:"pointer",borderRadius:999,padding:"2px 9px",border:"1.5px dashed #cbd5e1",background:"#fff",color:"#64748b"}}>
