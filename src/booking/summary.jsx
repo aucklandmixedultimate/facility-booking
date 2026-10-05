@@ -1745,6 +1745,7 @@ export function SummaryTab({ bookings, loggedInEmail, onRemoveBookings, facility
           onClose={()=>setPatternModal(null)}
           onBulkApply={args=>{onBulkApply&&onBulkApply(args);}}
           onRemove={onRemoveBookings}
+          onAddPricingRule={isAdmin?onAddPricingCondition:undefined}
         />
       )}
       {oneOffModal && (
@@ -1753,6 +1754,7 @@ export function SummaryTab({ bookings, loggedInEmail, onRemoveBookings, facility
           isAdmin={isAdmin}
           canEdit={isAdmin || (oneOffModal.email||"").toLowerCase()===(loggedInEmail||"").toLowerCase()}
           onRemove={onRemoveBookings}
+          onAddPricingRule={isAdmin?onAddPricingCondition:undefined}
           onClose={()=>setOneOffModal(null)}
         />
       )}

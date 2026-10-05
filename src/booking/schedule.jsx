@@ -60,6 +60,49 @@ export function ReassignControl({ count, bookers=[], onReassign, dark=false }) {
   );
 }
 
+// Admin: a pricing rule from a set of bookings — their bookers and facilities over their
+// first–last dates (editable), at a day and/or evening $/hr. Like every rule it then applies
+// to all of those bookers' bookings on those facilities in that range.
+export function PricingRuleControl({ ticked, onAdd }) {
+  const dates = ticked.map(b=>b.date).sort();
+  const [from, setFrom] = useState(dates[0]||"");
+  const [to, setTo] = useState(dates[dates.length-1]||"");
+  const [period, setPeriod] = useState("both");
+  const [dayRate, setDayRate] = useState("");
+  const [eveRate, setEveRate] = useState("");
+  const [done, setDone] = useState(false);
+  const bkrs = [...new Set(ticked.map(b=>(b.email||"").toLowerCase()).filter(Boolean))];
+  const facIds = [...new Set(ticked.map(b=>b.facility_id))];
+  const facNames = facIds.map(id=>FACILITIES.find(f=>f.id===id)?.name||id);
+  const si = {border:`1px solid ${T.line}`,borderRadius:T.rSm,padding:"3px 6px",fontSize:12,fontFamily:"inherit",background:T.surface,color:T.ink};
+  const lbl = {fontSize:11,color:T.muted,fontWeight:600};
+  const ok = ticked.length && from && to && from<=to &&
+    (period==="day" ? dayRate!=="" : period==="evening" ? eveRate!=="" : (dayRate!==""||eveRate!==""));
+  if (done) return <div style={{fontSize:12,color:T.turf,fontWeight:600}}>✓ Pricing rule added — see ⚙ Pricing rules (Admin / Summary) to edit or remove it.</div>;
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:6}}>
+      <div style={{fontSize:11,color:T.ink2}}>
+        For <b>{bkrs.length} booker{bkrs.length!==1?"s":""}</b> on <b>{facNames.join(", ")}</b> — applies to all their bookings there in the dates below, not only the ticked ones.
+      </div>
+      <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+        <span style={lbl}>From</span><input type="date" value={from} onChange={e=>setFrom(e.target.value)} aria-label="Rule from" style={{...si,width:140}}/>
+        <span style={lbl}>to</span><input type="date" value={to} onChange={e=>setTo(e.target.value)} aria-label="Rule to" style={{...si,width:140}}/>
+        <select value={period} onChange={e=>setPeriod(e.target.value)} aria-label="Rule period" style={si}>
+          <option value="both">Day & evening</option><option value="day">Day only</option><option value="evening">Evening only</option>
+        </select>
+        {period!=="evening"&&<label style={{display:"flex",alignItems:"center",gap:4}}><span style={lbl}>Day $/hr</span>
+          <input type="number" min="0" step="0.5" value={dayRate} onChange={e=>setDayRate(e.target.value)} aria-label="Day rate" style={{...si,width:70}}/></label>}
+        {period!=="day"&&<label style={{display:"flex",alignItems:"center",gap:4}}><span style={lbl}>Evening $/hr</span>
+          <input type="number" min="0" step="0.5" value={eveRate} onChange={e=>setEveRate(e.target.value)} aria-label="Evening rate" style={{...si,width:70}}/></label>}
+        <button disabled={!ok} onClick={()=>{ onAdd({ id:newId(), bookerEmails:bkrs, facilityIds:facIds, period,
+            dayRate: period==="evening"?null:(dayRate===""?null:Number(dayRate)), eveningRate: period==="day"?null:(eveRate===""?null:Number(eveRate)),
+            dateFrom:from, dateTo:to, locked:false, source:"group", createdAt:new Date().toISOString() }); setDone(true); }}
+          style={S.btn({padding:"4px 12px",fontSize:12,background:ok?T.ink:T.faint,color:"#fff",cursor:ok?"pointer":"not-allowed"})}>Add rule</button>
+      </div>
+    </div>
+  );
+}
+
 // A set of bookings (a recurring pattern, a booker's status group, their one-offs…) shown
 // itemised, with ticks to choose which ones the actions apply to. The same panel opens
 // inline in the Grouped view and inside PatternModal / OneOffModal elsewhere.
@@ -68,7 +111,9 @@ export function ReassignControl({ count, bookers=[], onReassign, dark=false }) {
 //     duration / facility (undefined = keep each booking's own) or cancel from a date
 //   onRemove(ids)  send the ticked bookings to the removal queue (deleted when it's submitted)
 //   onReassign(ids, {email, name})  admin: move the ticked bookings to another booker
-export function BookingSubsetPanel({ title, subtitle, email, pk, bkgs, isAdmin, canEdit, onBulkApply, onBulkStatusChange, onRemove, onReassign, bookers=[], onView, onClose, maxHeight=260 }) {
+//   onAddPricingRule(rule)  admin: a pricing rule (PricingConditionsManager's shape) for the
+//     ticked bookings' bookers and facilities over their date range
+export function BookingSubsetPanel({ title, subtitle, email, pk, bkgs, isAdmin, canEdit, onBulkApply, onBulkStatusChange, onRemove, onReassign, onAddPricingRule, bookers=[], onView, onClose, maxHeight=260 }) {
   const sorted = [...bkgs].sort((a,b)=>a.date.localeCompare(b.date)||a.start_hour-b.start_hour);
   const [unticked, setUnticked] = useState(()=>new Set());
   const ticked = sorted.filter(b=>!unticked.has(b.id));
@@ -83,6 +128,7 @@ export function BookingSubsetPanel({ title, subtitle, email, pk, bkgs, isAdmin, 
   const canBulk = (isAdmin || canEdit) && onBulkApply;
   const canRemove = (isAdmin || canEdit) && onRemove;
   const canReassign = isAdmin && onReassign;
+  const canPrice = isAdmin && onAddPricingRule;
   const tickAnchor = useRef(null);
   // Shift-click ticks/unticks a range; Ctrl/⌘-click a row toggles it (rowSelect).
   const select = (e, id) => { const t = rowSelect(e, id, sorted.map(b=>b.id), new Set(ticked.map(b=>b.id)), tickAnchor);
@@ -134,12 +180,13 @@ export function BookingSubsetPanel({ title, subtitle, email, pk, bkgs, isAdmin, 
         </table>
         </CopyableTable>
       </div>
-      {(canStatus||canBulk||canRemove||canReassign)&&sorted.length>0&&(()=>{
+      {(canStatus||canBulk||canRemove||canReassign||canPrice)&&sorted.length>0&&(()=>{
         // One category at a time: a row of buttons, and only the chosen one's controls below.
         const cats = [
           canStatus   && ["status",   "✓ Status"],
           canBulk     && ["edit",     "🕑 Time & field"],
           canReassign && ["reassign", "👤 Reassign"],
+          canPrice    && ["price",    "💲 Pricing"],
           (canRemove || canBulk) && ["remove", "🗑 Remove"],
         ].filter(Boolean);
         const tab = (k, l) => (
@@ -183,6 +230,7 @@ export function BookingSubsetPanel({ title, subtitle, email, pk, bkgs, isAdmin, 
                   bulkTime:bulkTime===""?undefined:parseFloat(bulkTime), bulkDur:bulkDur===""?undefined:parseFloat(bulkDur), bulkFac:bulkFac||undefined, cancelFrom:""}))}
               </div>
             )}
+            {actTab==="price"&&canPrice&&<PricingRuleControl ticked={ticked} onAdd={onAddPricingRule}/>}
             {actTab==="reassign"&&canReassign&&<ReassignControl count={n} bookers={bookers.filter(b=>b.email!==(email||"").toLowerCase())} onReassign={to=>onReassign(ticked.map(b=>b.id), to)}/>}
             {actTab==="remove"&&(
               <div style={{display:"flex",flexDirection:"column",gap:6}}>
@@ -205,7 +253,7 @@ export function BookingSubsetPanel({ title, subtitle, email, pk, bkgs, isAdmin, 
 }
 
 // A recurring pattern or grouped booking in a modal (Summary tab, admin clash list).
-export function PatternModal({ email, name, pk, bkgs, isAdmin, canEdit: canEditProp, onClose, onBulkApply, onBulkStatusChange, onRemove, onView }) {
+export function PatternModal({ email, name, pk, bkgs, isAdmin, canEdit: canEditProp, onClose, onBulkApply, onBulkStatusChange, onRemove, onAddPricingRule, onView }) {
   const canEdit = canEditProp !== undefined ? canEditProp : isAdmin;
   const isGroup = pk.startsWith("grp:");
   const parts = pk.split("_");
@@ -219,22 +267,22 @@ export function PatternModal({ email, name, pk, bkgs, isAdmin, canEdit: canEditP
         email={email} pk={pk} bkgs={bkgs} isAdmin={isAdmin} canEdit={canEdit} onView={onView} maxHeight={320}
         onBulkStatusChange={onBulkStatusChange&&((ids,st)=>{onBulkStatusChange(ids,st);onClose();})}
         onBulkApply={onBulkApply&&(args=>{onBulkApply(args);onClose();})}
-        onRemove={onRemove&&(ids=>{onRemove(ids);onClose();})}/>
+        onRemove={onRemove&&(ids=>{onRemove(ids);onClose();})} onAddPricingRule={onAddPricingRule}/>
     </Modal>
   );
 }
 
-export function OneOffModal({ email, name, bkgs, isAdmin, canEdit, onClose, onView, onRemove }) {
+export function OneOffModal({ email, name, bkgs, isAdmin, canEdit, onClose, onView, onRemove, onAddPricingRule }) {
   return (
     <Modal title={`One-off Bookings — ${name}`} onClose={onClose}>
       <BookingSubsetPanel subtitle={`${bkgs.length} one-off booking${bkgs.length!==1?"s":""} · ${email}`} email={email} pk="oneoff" bkgs={bkgs} onView={onView} maxHeight={360}
-        isAdmin={isAdmin} canEdit={canEdit} onRemove={onRemove&&(ids=>{onRemove(ids);onClose();})}/>
+        isAdmin={isAdmin} canEdit={canEdit} onRemove={onRemove&&(ids=>{onRemove(ids);onClose();})} onAddPricingRule={onAddPricingRule}/>
     </Modal>
   );
 }
 
 // embedded: rendered as a table view (Grouped) — no panel heading or close.
-export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkApply, onBulkStatusChange, onRemove, onReassign, bookers=[], onView, onClose, inline=false, embedded=false, aliasNames={}, emailAliases={} }) {
+export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkApply, onBulkStatusChange, onRemove, onReassign, onAddPricingRule, bookers=[], onView, onClose, inline=false, embedded=false, aliasNames={}, emailAliases={} }) {
   const [facSensitive, setFacSensitive] = useState(false);
   const [splitPatterns, setSplitPatterns] = useState(new Set());
   // The group expanded inline into its itemised bookings (BookingSubsetPanel) — one at a time:
@@ -389,7 +437,7 @@ export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkA
       <BookingSubsetPanel key={`${d.email}|${d.kind}|${d.pk}|${d.sh}|${d.status}`} title={d.title}
         subtitle={`${bkgs.length} booking${bkgs.length!==1?"s":""}${email?` · ${email}`:""}`}
         email={email} pk={d.pk||d.kind} bkgs={bkgs} isAdmin={isAdmin} canEdit={canEdit} onView={onView}
-        onBulkApply={onBulkApply} onBulkStatusChange={onBulkStatusChange} onRemove={onRemove} onReassign={onReassign} bookers={bookers} onClose={()=>setExpanded(null)}/>
+        onBulkApply={onBulkApply} onBulkStatusChange={onBulkStatusChange} onRemove={onRemove} onReassign={onReassign} onAddPricingRule={onAddPricingRule} bookers={bookers} onClose={()=>setExpanded(null)}/>
     );
   }
   // Resolve selected groups → all matching bookings
