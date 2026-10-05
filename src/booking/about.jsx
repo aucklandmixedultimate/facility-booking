@@ -3,6 +3,19 @@ import { councilState, allPhases, fmtDay, fmtRange, COUNCIL_LINKS, COUNCIL_CONTA
 import { Badge, COUNCIL_APPLICATION_FEE, STATUS_META, stepLabel, venueFacilities } from "./core.jsx";
 import { WORKFLOW_STEPS } from "../statuses.js";
 import cornwallMap from "../assets/cornwall-park-fields.webp";
+import councilMap from "../assets/council-fields-map.webp";
+import communityMap from "../assets/community-facility-map.webp";
+// An annotated map in About → How to Book; opens full size on click.
+function AboutMap({ src, alt, maxWidth, children }) {
+  return (
+    <figure style={{margin:"0 auto 12px",maxWidth:maxWidth||"none"}}>
+      <a href={src} target="_blank" rel="noopener noreferrer" title="Open the map full size">
+        <img src={src} alt={alt} style={{width:"100%",height:"auto",borderRadius:10,border:"1px solid #e2e8f0",display:"block"}}/>
+      </a>
+      {children&&<figcaption style={{fontSize:12,color:"#475569",marginTop:6,lineHeight:1.6}}>{children}</figcaption>}
+    </figure>
+  );
+}
 // One numbered step in About → How to Book.
 export function AboutStep({ n, col, title, children }) {
   return (
@@ -77,6 +90,10 @@ export function AboutTab() {
             <a href={import.meta.env.BASE_URL+"vetting.html"} style={link}>Council / Community fields</a> page (📅 Book → save them as 📌 Active bookings); they then appear here under
             Provider → 📍 Location.
           </p>
+          <AboutMap src={councilMap} alt="The Council / Community fields page's Auckland map with its markers labelled: rated parks coloured by suitability with lights shown as a bolt, grey not rated, red rejected, purple diamonds privately managed, round club or venue logos, and red pins for your active fields">
+            The Council / Community fields page&apos;s Auckland view: each marker is a park. Tap one, switch to <b>📅 Book</b> and add its fields to your cart;
+            once saved as <b>📌 Active</b> they can be booked here. <b>◆</b> parks are privately managed — see the next tab.
+          </AboutMap>
           <h3 style={{margin:"12px 0 8px",fontSize:14,fontWeight:700,color:"#0f172a"}}>Approval Process</h3>
           <p style={{margin:"0 0 12px",fontSize:13,color:"#475569"}}>
             AMUA applies as the organisation, and each application names the bookers and teams using the fields, with their player numbers. <b>You're the key holder</b> for
@@ -126,6 +143,10 @@ export function AboutTab() {
             Add the field on the <a href={import.meta.env.BASE_URL+"vetting.html"} style={link}>Council / Community fields</a> map (📅 Book → save it as a 📌 Active booking),
             then book dates here under Provider → 📍 Location. These are <b>booked only through AMUA</b>.
           </p>
+          <AboutMap src={communityMap} maxWidth={440} alt="A school with its two playing fields outlined and a community field marker labelled">
+            A community facility (here a school with two fields). Its field markers work like council fields: add them to your cart on the
+            Council / Community fields page, and AMUA asks the school by email for you.
+          </AboutMap>
           <h3 style={{margin:"12px 0 8px",fontSize:14,fontWeight:700,color:"#0f172a"}}>Approval Process</h3>
           <AboutStep n="1/4" col="#6366f1" title="Submit booking request">Book the dates and times on your active community field. Status <Badge status="pending_amua" wf="community"/>.</AboutStep>
           <div style={arrow}>↓</div>
