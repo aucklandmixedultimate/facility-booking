@@ -496,6 +496,7 @@ export function UserMgmtModal({ bookings, aliases, aliasNames, aliasColors={}, b
                         </div>
                         {aliasColors[primary] && <button onClick={()=>setAliasColor(primary,"")}
                           style={{fontSize:10,color:"#64748b",background:"none",border:"1px solid #e2e8f0",borderRadius:6,padding:"2px 6px",cursor:"pointer",fontFamily:"inherit"}}>Reset</button>}
+                        <span style={{fontSize:10,color:"#94a3b8",flexBasis:"100%"}}>Your colour for this booker — only this login sees it.</span>
                       </div>
                     )}
                     {/* Full / official name */}

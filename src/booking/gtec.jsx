@@ -1,5 +1,5 @@
 import { COUNCIL_STAGE_STATUSES, facShort, fmtTimeShort } from "./core.jsx";
-import { isLive } from "../statuses.js";
+import { isClosed, isLive } from "../statuses.js";
 // ─── Main App ─────────────────────────────────────────────────────────────────
 // ─── CARLTON JUNIORS RUGBY SYNC ──────────────────────────────────────────────
 // (sync bookings use empty email/name and are deduped by date+facility+time+purpose)
@@ -349,4 +349,24 @@ export async function fetchCJREvents(year, month) {
     }
   }
   throw new Error("All proxies failed: " + errs.slice(-proxies.length).join("; "));
+}
+// GTEC purge requests (bookings cancelled after reaching GTEC) go stale: the booker re-books
+// the slot, or GTEC's schedule (as of the last sync) doesn't hold it for them. purgeHolder is
+// the booker's GTEC entry still holding the slot; purgeObsolete says why a request isn't needed.
+// The deleted booking itself is gone from `bookings`, so its id never counts as a re-booking.
+export function purgeHolder(r, syncFeed, canon) {
+  const s0 = r.start_hour || 0, e0 = s0 + (r.duration || 0);
+  return (syncFeed?.byDate?.[r.date] || []).find(ev => (ev.facilityIds || []).includes(r.facility_id)
+    && (ev.allDay || ((ev.start_hour || 0) < e0 && (ev.start_hour || 0) + (ev.duration || 0) > s0))
+    && (ev.email ? canon(ev.email) === canon(r.email)
+      : gtecIdentityScore(ev.team ?? extractCPSATeam(ev.name || ""), { email: r.email, name: r.name, purpose: r.purpose || "" },
+          { detailEmail: "", gtecLinks: {}, canon }) >= 2)) || null;
+}
+export function purgeObsolete(r, bookings, syncFeed, canon) {
+  const s0 = r.start_hour || 0, e0 = s0 + (r.duration || 0);
+  if (bookings.some(b => b.id !== r.id && b.email !== "admin" && !isClosed(b.status) && b.date === r.date
+    && b.facility_id === r.facility_id && canon(b.email) === canon(r.email)
+    && (b.start_hour || 0) < e0 && (b.start_hour || 0) + (b.duration || 0) > s0)) return "rebooked";
+  if (syncFeed?.at && (syncFeed.months || []).includes((r.date || "").slice(0, 7)) && !purgeHolder(r, syncFeed, canon)) return "not_on_gtec";
+  return null;
 }
