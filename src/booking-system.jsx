@@ -6,7 +6,7 @@ import { htmlToPdfBlob } from "./pdf-utils.js";
 import { currentLeagueSeason, LEAGUE_SEASONS, seasonOfBooker } from "./seasons.js";
 import { ALL_VENUES, Badge, COUNCIL_APPLICATION_FEE, COUNCIL_APPLICATION_URL, COUNCIL_APP_RE, CPSA_FIELD_IDS, CopyableTable, EmailLoginScreen, FACILITIES, LOGO_SRC, MOBILE_STYLE, MONTHS, Modal, PROVIDERS, ProviderMenu, REVIEW_STATUSES, S, STATUS_META, SUPABASE_ANON, SUPABASE_URL, T, TableViewToggle, groupStatusLabel, VENUE_SEP, _emailAliases, activeVenueKeys, applyAmuaOrg, applyCouncilFacilities, authHeaders, buildApprovalEmailHtml, buildClashEmailHtml, buildInformCpsaEmailHtml, buildMismatchEmailHtml, buildOrderEmailHtml, buildRoomRequestEmailHtml, canSendToCouncil, clearSlotLink, councilFeeSplit, councilOverlaps, defaultProviderId, defaultVenueKey, defaultVenueSelection, emailColor, evenSlotShares, facShort, fmt24, fmtCost, fmtDate, fmtDateShort, fmtDateShortDow, fmtTime, fmtTimeShort, getBillingDrift, getClashes, inActiveVenue, isAdminBooking, linkCouncilChildren, listVenues, logActivity, newId, newSlotRef, parseClashPrevStatus, parseCouncilApp, parseCpsaOrig, parseCpsaRefs, parseCpsaResolution, parseMismatchNote, parseSlotLink, reachedGtecQueue, sb, sendApprovalEmail, sendEmail, setBilledSnapshot, setClashPrevStatus, setCpsaResolution, setGtecSnapshot, setMismatchNote, setModuleState, setSlotLink, setVendorVariance, slotGroupMembers, stripClashPrevStatus, stripMismatchNote, supabase, timeOverlaps, todayKey, useMobile, useTableView, venueFacilities, venueKeyOf, visibleFacilities, workflowOf } from "./booking/core.jsx";
 import { councilAppBookings, mergeCouncilOutcomes } from "./booking/councilData.jsx";
-import { fetchCJREvents, findMatchingUserBooking, gtecTeamKey, mapCJRFacility, parseCJRDate, parseCJRDateTime } from "./booking/gtec.jsx";
+import { extractCPSATeam, extractEventDetailsEmail, fetchCJREvents, findMatchingUserBooking, purgeObsolete, gtecTeamKey, mapCJRFacility, parseCJRDate, parseCJRDateTime } from "./booking/gtec.jsx";
 import { DRIVE_SUBFOLDERS, billingDocBaseName, buildBillingDocHtml, driveBatchFolderName, drivePoFolderName } from "./booking/billingDocs.jsx";
 import { ScheduleSummaryModal, resolveRates } from "./booking/schedule.jsx";
 import { ActivityLogModal, AmuaDetailsModal, Banner, CouncilContactModal, DateRangePicker, UserMenuItem, UserMgmtModal } from "./booking/modals.jsx";
@@ -111,7 +111,8 @@ export default function App() {
   useEffect(()=>{ try{ localStorage.setItem("fb_council_sync_log", JSON.stringify(councilSyncLog.slice(0,30))); }catch{ /* ignore */ } }, [councilSyncLog]);
   // What the last sync received from the GTEC feed, by date (admins see it on a booking's
   // details): { at, byDate: { "YYYY-MM-DD": [{ name, when, fields, start_hour, duration, facilityIds, matched }] } }.
-  const [syncFeed, setSyncFeed] = useState({ at: null, months: [], byDate: {} });
+  const [syncFeed, setSyncFeed] = useState(()=>{ try { const v = JSON.parse(localStorage.getItem("fb_sync_feed")||"null"); if (v && v.byDate) return { at: v.at||null, months: v.months||[], byDate: v.byDate }; } catch { /* ignore */ } return { at: null, months: [], byDate: {} }; });
+  useEffect(()=>{ try { localStorage.setItem("fb_sync_feed", JSON.stringify(syncFeed)); } catch { /* ignore */ } }, [syncFeed]);
   const [syncResults, setSyncResults] = useState(()=>{
     try{ return JSON.parse(localStorage.getItem("fb_sync_results")||"[]"); }catch{ return []; }
   });
@@ -166,15 +167,26 @@ export default function App() {
       setModuleState({ _bookerContacts: map }); setBookerContacts(map);
     } catch { /* offline */ }
   }
+  // Booker chip colours belong to the signed-in profile, not the whole app: each login picks
+  // its own (kept in its Supabase user metadata, so every device that login uses sees them,
+  // with a per-login copy in this browser). Until a login has picked any, it starts from the
+  // colours this browser last showed (the old shared set), and otherwise the auto palette.
+  const colorKey = em => "fb_alias_colors:" + (em||"").toLowerCase();
   const [aliasColors, setAliasColors] = useState(()=>{
     let init = {}; try{ init = JSON.parse(localStorage.getItem("fb_alias_colors")||"{}"); }catch{ /* ignore */ }
     setModuleState({ _emailColorOverrides: init }); // make available to module-level emailColor on first render
     return init;
   });
   // Mirror into the module-level map synchronously so emailColor() reflects edits
-  // on the very next render (no one-frame lag), plus persist to localStorage.
+  // on the very next render (no one-frame lag).
   setModuleState({ _emailColorOverrides: aliasColors });
-  useEffect(()=>{ try{ localStorage.setItem("fb_alias_colors", JSON.stringify(aliasColors)); }catch{ /* ignore */ } }, [aliasColors]);
+  useEffect(()=>{
+    const u = session?.user; if (!u?.email) return;
+    const meta = u.user_metadata?.booker_colors;
+    let mine = meta && typeof meta === "object" ? meta : null;
+    if (!mine) { try { mine = JSON.parse(localStorage.getItem(colorKey(u.email)) || "null"); } catch { /* ignore */ } }
+    if (mine) setAliasColors(mine);
+  }, [session?.user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   // Always-current refs for the data the GTEC sync's matcher depends on. A deferred /
   // auto-triggered sync would otherwise close over stale mount-time values (before
   // loadSettings populated DB aliases), flagging false mismatches that a later manual
@@ -245,6 +257,14 @@ export default function App() {
     try{ return JSON.parse(localStorage.getItem("fb_cpsa_delete_log")||"[]"); }catch{ return []; }
   });
   useEffect(()=>{ try{ localStorage.setItem("fb_cpsa_delete_log", JSON.stringify(cpsaDeleteLog)); }catch{ /* ignore */ } }, [cpsaDeleteLog]);
+  // Drop purge requests that no longer need sending: the booker re-booked the slot, or the
+  // last sync shows GTEC doesn't hold it for them. Waits for bookings to load.
+  useEffect(()=>{
+    if (!bookings.length || !cpsaDeleteLog.length) return;
+    const canon = em => (emailAliases[(em||"").toLowerCase()] || (em||"").toLowerCase());
+    const keep = cpsaDeleteLog.filter(r => !purgeObsolete(r, bookings, syncFeed, canon));
+    if (keep.length !== cpsaDeleteLog.length) setCpsaDeleteLog(keep);
+  }, [bookings, syncFeed, emailAliases, cpsaDeleteLog]);
   // The details panel holds the booking it was opened with; follow reloads (a sync confirming
   // it, a status change) so it never shows a stale status beside the live feed note.
   useEffect(()=>{ setViewing(v => { if (!v) return v; const cur = bookings.find(b => b.id === v.id);
@@ -492,10 +512,8 @@ export default function App() {
         setBookerSeasons(map.booker_seasons);
         try{localStorage.setItem("fb_booker_seasons",JSON.stringify(map.booker_seasons));}catch{ /* ignore */ }
       }
-      if (map.alias_colors && typeof map.alias_colors === "object") {
-        setAliasColors(map.alias_colors); setModuleState({ _emailColorOverrides: map.alias_colors });
-        try{localStorage.setItem("fb_alias_colors",JSON.stringify(map.alias_colors));}catch{ /* ignore */ }
-      }
+      // alias_colors is no longer shared: chip colours are per profile (see aliasColors).
+
       // Council fields added per booker from the Council fields page.
       if (map.provider_contact_reviews && typeof map.provider_contact_reviews === "object") setModuleState({ _contactReviews: map.provider_contact_reviews });
       if (map.council_facilities && typeof map.council_facilities === "object") {
@@ -643,6 +661,38 @@ export default function App() {
         }
       }
 
+      // Duplicates: a booker's booking on another field at exactly the time of one GTEC confirmed,
+      // when no entry holds that other field (e.g. a Monday Field #1 session copied onto Field #2).
+      // It only matched as a leftover of the confirmed one's entry; flag it as a duplicate and queue
+      // it for removal (the admin still submits the removal cart). A booking the admin marked
+      // confirmed is kept.
+      {
+        const canonE = e => { const x = (e||"").toLowerCase(); return (emailAliasesRef.current[x] || x); };
+        const entries = [...bestByBooking.values()];
+        const dupes = [];
+        for (const d of entries) {
+          const x = d.match.booking;
+          if (d.effectiveExact || d.rank >= 1000) continue;
+          if (parseCpsaResolution(x.system_notes)?.resolution === "confirmed") continue;
+          const twin = entries.find(o => o.effectiveExact && o.match.booking.id !== x.id && o.match.booking.date === x.date
+            && o.match.booking.start_hour === x.start_hour && o.match.booking.duration === x.duration
+            && o.match.booking.facility_id !== x.facility_id && canonE(o.match.booking.email) === canonE(x.email)
+            && !(o.gtecSnap.facilityIds || []).includes(x.facility_id));
+          if (!twin) continue;
+          const fieldHeld = events.some(ev => parseCJRDate(ev.EventStartDate) === x.date && mapCJRFacility(ev.EventName || "", ev).includes(x.facility_id)
+            && (() => { const t = parseCJRDateTime(ev.EventDateTime); return t.allDay || (t.start_hour < x.start_hour + x.duration && t.start_hour + t.duration > x.start_hour); })()
+            && findMatchingUserBooking([x], ev, mapCJRFacility(ev.EventName || "", ev), gtecLinksRef.current, emailAliasesRef.current));
+          if (fieldHeld) continue;
+          d.match = { ...d.match, reasons: [`Duplicate of the GTEC-confirmed ${facShort(twin.match.booking.facility_id)} booking — GTEC holds ${(twin.gtecSnap.facilityIds||[]).map(facShort).join("/")} only; queued for removal`] };
+          dupes.push(x);
+        }
+        if (dupes.length) {
+          setDeleteQueue(prev => [...prev, ...dupes.filter(x => !prev.some(p => p.id === x.id))]);
+          logActivity("cpsa_duplicates_queued", { ids: dupes.map(x => x.id) });
+          showToast(`${dupes.length} duplicate booking${dupes.length !== 1 ? "s" : ""} (another field, same time as a GTEC-confirmed one) queued for removal — review the removal cart.`, "info");
+        }
+      }
+
       // Remember what the feed held for each day (shown on bookings' details for admins).
       {
         const byDate = {};
@@ -651,7 +701,8 @@ export default function App() {
           const { start_hour, duration, allDay } = parseCJRDateTime(ev.EventDateTime);
           const facilityIds = mapCJRFacility(ev.EventName || "", ev);
           const m = findMatchingUserBooking(currentBookings, ev, facilityIds, gtecLinksRef.current, emailAliasesRef.current);
-          (byDate[date] ||= []).push({ name: ev.EventName || "", when: ev.EventDateTime || ev.EventStartDate || "", start_hour, duration, allDay: !!allDay, facilityIds,
+          (byDate[date] ||= []).push({ name: ev.EventName || "", team: extractCPSATeam(ev.EventName || ""), email: extractEventDetailsEmail(ev.EventDetails),
+            when: ev.EventDateTime || ev.EventStartDate || "", start_hour, duration, allDay: !!allDay, facilityIds,
             matched: m ? { id: m.booking.id, exact: m.exact, reasons: m.reasons || [] } : null });
         }
         setSyncFeed(prev => ({ at: new Date().toISOString(), months: [...new Set([...(prev.months || []), monthStr])],
@@ -1333,7 +1384,12 @@ export default function App() {
   // names, chip colours and profiles persist across devices/sessions.
   function saveEmailAliases(next) { setEmailAliases(next); persistSetting("email_aliases", next); }
   function saveAliasNames(next)   { setAliasNames(next);   persistSetting("alias_names", next); }
-  function saveAliasColors(next)  { setAliasColors(next);  persistSetting("alias_colors", next); }
+  function saveAliasColors(next)  {
+    setAliasColors(next);
+    const u = session?.user;
+    try{ localStorage.setItem(colorKey(u?.email), JSON.stringify(next)); }catch{ /* ignore */ }
+    if (u) { u.user_metadata = { ...(u.user_metadata||{}), booker_colors: next }; supabase.auth.updateUser({ data: { booker_colors: next } }).catch(()=>{}); }
+  }
   function saveBookerSeasons(next) { setBookerSeasons(next); try{localStorage.setItem("fb_booker_seasons",JSON.stringify(next));}catch{ /* ignore */ } persistSetting("booker_seasons", next); }
   function saveAmuaOrg(next) {
     applyAmuaOrg(next); setAmuaOrg(next);
@@ -1353,7 +1409,6 @@ export default function App() {
     await persistSetting("log_retention_months", logRetentionMonths);
     await persistSetting("email_aliases", emailAliases);
     await persistSetting("alias_names", aliasNames);
-    await persistSetting("alias_colors", aliasColors);
     await persistSetting("booker_seasons", bookerSeasons);
     showToast("Synced with database.");
   }

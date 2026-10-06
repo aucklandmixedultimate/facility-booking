@@ -5,6 +5,7 @@ import { ActivityLogModal, DateRangePicker } from "./modals.jsx";
 import { PatternModal, PricingConditionsManager, ReassignControl, ScheduleSummaryModal } from "./schedule.jsx";
 import { InlineDayPicker, VendorTimesFields, vendorTimesDefault } from "./forms.jsx";
 import { isClosed } from "../statuses.js";
+import { purgeHolder as gtecPurgeHolder, purgeObsolete as gtecPurgeObsolete } from "./gtec.jsx";
 // One newly-synced CPSA field booking, expandable to reveal the AMUA bookings it
 // clashes with (same facility / same time), any simultaneous use of a different
 // facility, and the CPSA-review/mismatch status of clashing bookings. Detail is
@@ -314,24 +315,11 @@ export function ContactReviewModal({ booking, onClose, onConfirm }) {
     </Modal>);
 }
 export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,clashes=[],deleteIds=new Set(),facilityRates={},onResolveOldUnapproved,onReassign,bookers=[],onBulkApply,onSaveMismatch,onInformCpsa,onRequestRoom,onQueueNotifications,onMarkAdjustmentSettled,onLinkClash,loggedInEmail,syncResults=[],onClearSyncResults,showSyncResults=false,onToggleSyncResults,bookerFilter=new Set(),onToggleBooker,onSetBookerFilter,aliasNames={},emailAliases={},pricingConditions=[],onAddPricingCondition,onUpdatePricingCondition,onRemovePricingCondition,cpsaDeleteLog=[],onClearDeleteLogEntry,onClearDeleteLog,onSendToCouncil,approxPlayers={},syncFeed=null}) {
-  // Purge requests are logged when a booking is cancelled, so they go stale: the booker may have
-  // re-booked the same slot, or GTEC's schedule (as of the last sync) doesn't hold it at all.
-  const purgeObsolete = r => {
-    const canonP = em => (emailAliases[(em||"").toLowerCase()] || (em||"").toLowerCase());
-    const s0 = r.start_hour||0, e0 = s0+(r.duration||0);
-    const overlaps = (s,d) => s < e0 && s+(d||0) > s0;
-    const rebooked = bookings.some(b => b.id!==r.id && !isAdminBooking(b) && !isClosed(b.status) && b.date===r.date
-      && b.facility_id===r.facility_id && canonP(b.email)===canonP(r.email) && overlaps(b.start_hour||0,b.duration));
-    if (rebooked) return "Re-booked — still on the schedule, no purge needed";
-    const month = (r.date||"").slice(0,7);
-    if (syncFeed?.at && (syncFeed.months||[]).includes(month)) {
-      const onGtec = (syncFeed.byDate?.[r.date]||[]).some(ev => (ev.facilityIds||[]).includes(r.facility_id)
-        && (ev.allDay || overlaps(ev.start_hour||0, ev.duration)));
-      if (!onGtec) return "Not on GTEC's schedule at the last sync — nothing to purge";
-    }
-    return null;
-  };
-  const purgeNeeded = cpsaDeleteLog.filter(r => !purgeObsolete(r));
+  // Stale purge requests are pruned as bookings and the synced feed change (booking-system.jsx);
+  // this only filters any not yet pruned.
+  const canonPurge = em => (emailAliases[(em||"").toLowerCase()] || (em||"").toLowerCase());
+  const purgeHolder = r => gtecPurgeHolder(r, syncFeed, canonPurge);
+  const purgeNeeded = cpsaDeleteLog.filter(r => !gtecPurgeObsolete(r, bookings, syncFeed, canonPurge));
   const [showSchedulePanel, setShowSchedulePanel] = useState(false);
   // The bookings table: Grouped (schedule summary, the default) or Itemised; and a vendor filter.
   const [adminView, setAdminView] = useTableView("fb_admin_view");
@@ -857,7 +845,6 @@ export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDel
         const facName = id => FACILITIES.find(f=>f.id===id)?.name || id;
         const byWhen = (a,b)=>(a.date||"").localeCompare(b.date||"")||(a.start_hour||0)-(b.start_hour||0);
         const rows = [...purgeNeeded].sort(byWhen);
-        const stale = cpsaDeleteLog.map(r=>({r,why:purgeObsolete(r)})).filter(x=>x.why).sort((a,b)=>byWhen(a.r,b.r));
         return (
           <div style={{background:"#fef2f2",border:"1.5px solid #fecaca",borderRadius:12,padding:16,display:"flex",flexDirection:"column",gap:10}}>
             <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
@@ -898,19 +885,11 @@ export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDel
                   </table>
                 </CopyableTable>
               )}
-            {stale.length>0&&(
-              <div style={{background:"#fff",border:"1px dashed #fecaca",borderRadius:8,padding:10,display:"flex",flexDirection:"column",gap:6}}>
-                <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-                  <span style={{fontWeight:700,fontSize:12,color:"#64748b"}}>Out of date ({stale.length}) — left out of the table above</span>
-                  {onClearDeleteLogEntry&&<button onClick={()=>stale.forEach(x=>onClearDeleteLogEntry(x.r.id))} style={{marginLeft:"auto",padding:"3px 10px",borderRadius:6,border:"1px solid #cbd5e1",background:"#fff",color:"#475569",cursor:"pointer",fontSize:11,fontWeight:600,fontFamily:"inherit"}}>Remove these</button>}
-                </div>
-                {stale.map(({r,why})=>(
-                  <div key={r.id} style={{fontSize:11,color:"#64748b",display:"flex",gap:6,flexWrap:"wrap"}}>
-                    <span style={{fontWeight:600,color:"#475569"}}>{clubOf(r)}</span>
-                    <span>{dayOf(r.date)} {fmtDateShort(r.date)} · {facName(r.facility_id)} · {fmtTime(r.start_hour)}–{fmtTime((r.start_hour||0)+(r.duration||0))}</span>
-                    <span style={{fontStyle:"italic"}}>{why}</span>
-                  </div>
-                ))}
+            {rows.some(r=>purgeHolder(r))&&(
+              <div style={{fontSize:11,color:"#991b1b",display:"flex",flexDirection:"column",gap:2}}>
+                <span style={{fontWeight:700}}>Still on GTEC&apos;s schedule at the last sync:</span>
+                {rows.map(r=>{ const h=purgeHolder(r); return h&&(
+                  <span key={r.id}>{dayOf(r.date)} {fmtDateShort(r.date)} · {facName(r.facility_id)} — &ldquo;{h.name}&rdquo; {h.allDay?"(all day)":`${fmtTime(h.start_hour)}–${fmtTime((h.start_hour||0)+(h.duration||0))}`}</span>); })}
               </div>
             )}
           </div>
@@ -1404,7 +1383,10 @@ export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDel
             <tr key={b.id} style={{background:rowBg}}>
               {/* Booker */}
               <td style={tdS2}>
-                <div style={{fontWeight:600,color:"#0f172a",whiteSpace:"nowrap"}}>{b.name}</div>
+                <div style={{fontWeight:600,color:"#0f172a",whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:6}}>{b.name}
+                  {onView&&<button onClick={()=>onView(b)} title="Open this booking"
+                    style={{padding:"1px 7px",borderRadius:6,border:"1px solid #fcd34d",background:"#fff",color:"#92400e",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Open ↗</button>}
+                </div>
                 <div style={{color:"#64748b",fontSize:10}}>{b.email}</div>
                 {(()=>{ const g=parseGtecSnapshot(b.system_notes); return g ? (
                   <div title="The incoming GTEC event this booking was matched against" style={{marginTop:3,fontSize:10,color:"#0e7490",background:"#ecfeff",border:"1px solid #a5f3fc",borderRadius:4,padding:"1px 5px",display:"inline-block",maxWidth:200,whiteSpace:"normal"}}>
