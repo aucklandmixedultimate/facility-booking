@@ -4,7 +4,7 @@ import { gmailToken, fetchCouncilEmails, parseCouncilEmail } from "./councilMail
 import { driveConfigured, getDriveToken, renameFile, ensureFolderPath, DRIVE_ROOT_FOLDER, ensureFolder, findChildFile, uploadFile, keepLatestRevisionForever } from "./drive-client.js";
 import { htmlToPdfBlob } from "./pdf-utils.js";
 import { currentLeagueSeason, LEAGUE_SEASONS, seasonOfBooker } from "./seasons.js";
-import { ALL_VENUES, Badge, COUNCIL_APPLICATION_FEE, COUNCIL_APPLICATION_URL, COUNCIL_APP_RE, CPSA_FIELD_IDS, CopyableTable, EmailLoginScreen, FACILITIES, LOGO_SRC, MOBILE_STYLE, MONTHS, Modal, PROVIDERS, ProviderMenu, REVIEW_STATUSES, S, STATUS_META, SUPABASE_ANON, SUPABASE_URL, T, TableViewToggle, groupStatusLabel, VENUE_SEP, _emailAliases, activeVenueKeys, applyAmuaOrg, applyCouncilFacilities, authHeaders, buildApprovalEmailHtml, buildClashEmailHtml, buildInformCpsaEmailHtml, buildMismatchEmailHtml, buildOrderEmailHtml, buildRoomRequestEmailHtml, canSendToCouncil, clearSlotLink, councilFeeSplit, councilOverlaps, defaultProviderId, defaultVenueKey, emailColor, evenSlotShares, facShort, fmt24, fmtCost, fmtDate, fmtDateShort, fmtDateShortDow, fmtTime, fmtTimeShort, getBillingDrift, getClashes, inActiveVenue, isAdminBooking, linkCouncilChildren, listVenues, logActivity, newId, newSlotRef, parseClashPrevStatus, parseCouncilApp, parseCpsaOrig, parseCpsaRefs, parseCpsaResolution, parseMismatchNote, parseSlotLink, reachedGtecQueue, sb, sendApprovalEmail, sendEmail, setBilledSnapshot, setClashPrevStatus, setCpsaResolution, setGtecSnapshot, setMismatchNote, setModuleState, setSlotLink, setVendorVariance, slotGroupMembers, stripClashPrevStatus, stripMismatchNote, supabase, timeOverlaps, todayKey, useMobile, useTableView, venueFacilities, venueKeyOf, visibleFacilities, workflowOf } from "./booking/core.jsx";
+import { ALL_VENUES, Badge, COUNCIL_APPLICATION_FEE, COUNCIL_APPLICATION_URL, COUNCIL_APP_RE, CPSA_FIELD_IDS, CopyableTable, EmailLoginScreen, FACILITIES, LOGO_SRC, MOBILE_STYLE, MONTHS, Modal, PROVIDERS, ProviderMenu, REVIEW_STATUSES, VenueChipMenu, S, STATUS_META, SUPABASE_ANON, SUPABASE_URL, T, TableViewToggle, groupStatusLabel, VENUE_SEP, _emailAliases, activeVenueKeys, applyAmuaOrg, applyCouncilFacilities, authHeaders, buildApprovalEmailHtml, buildClashEmailHtml, buildInformCpsaEmailHtml, buildMismatchEmailHtml, buildOrderEmailHtml, buildRoomRequestEmailHtml, canSendToCouncil, clearSlotLink, councilFeeSplit, councilOverlaps, defaultProviderId, defaultVenueKey, emailColor, evenSlotShares, facShort, fmt24, fmtCost, fmtDate, fmtDateShort, fmtDateShortDow, fmtTime, fmtTimeShort, getBillingDrift, getClashes, inActiveVenue, isAdminBooking, linkCouncilChildren, listVenues, logActivity, newId, newSlotRef, parseClashPrevStatus, parseCouncilApp, parseCpsaOrig, parseCpsaRefs, parseCpsaResolution, parseMismatchNote, parseSlotLink, reachedGtecQueue, sb, sendApprovalEmail, sendEmail, setBilledSnapshot, setClashPrevStatus, setCpsaResolution, setGtecSnapshot, setMismatchNote, setModuleState, setSlotLink, setVendorVariance, slotGroupMembers, stripClashPrevStatus, stripMismatchNote, supabase, timeOverlaps, todayKey, useMobile, useTableView, venueFacilities, venueKeyOf, visibleFacilities, workflowOf } from "./booking/core.jsx";
 import { councilAppBookings, mergeCouncilOutcomes } from "./booking/councilData.jsx";
 import { cjrMonthUrl, extractCPSATeam, extractEventDetailsEmail, fetchCJREvents, parseFeedText, findMatchingUserBooking, purgeObsolete, gtecTeamKey, mapCJRFacility, parseCJRDate, parseCJRDateTime } from "./booking/gtec.jsx";
 import { DRIVE_SUBFOLDERS, billingDocBaseName, buildBillingDocHtml, driveBatchFolderName, drivePoFolderName } from "./booking/billingDocs.jsx";
@@ -2250,6 +2250,8 @@ export default function App() {
 
   const venues = listVenues();
   // Phones: one scrolling row. Desktop: wraps, so nothing is cut off.
+  // Called as a function, not <FacilityPills/>: a component made afresh each render would
+  // remount and close the location dropdown whenever a pick re-renders the page.
   const FacilityPills=()=>(
     <div className="facpills" style={{display:"flex",gap:6,marginBottom:16,alignItems:"center",overflowX:isMobile?"auto":"visible",flexWrap:isMobile?"nowrap":"wrap",WebkitOverflowScrolling:"touch",scrollbarWidth:"none",msOverflowStyle:"none",paddingBottom:2}}>
       {/* Provider + 📍 location: shown only when the viewer can see more than one location. */}
@@ -2267,14 +2269,31 @@ export default function App() {
           add((vs.find(v=>v.key===`${pid}|${PROVIDERS[pid]?.defaultSite||""}`)||vs[0])?.key); };
         const pickFacility=id=>{ const f=FACILITIES.find(x=>x.id===id); if(!f) return; add(venueKeyOf(f)); setSelFac(id); };
         const siteOf=k=>venues.find(v=>v.key===k);
+        // The location chip's dropdown: a vendor's locations and their fields, ticked when shown.
+        const vis=visibleFacilities(), shownKeys=all?venues.map(v=>v.key):ks;
+        const sitesOf=pid=>venues.filter(v=>v.providerId===pid).map(v=>({ key:v.key, site:v.site, shown:shownKeys.includes(v.key),
+          facs:vis.filter(f=>venueKeyOf(f)===v.key).map(f=>({ id:f.id, name:f.name, color:f.color, shown:shownKeys.includes(v.key)&&!hiddenFacs.has(f.id) })) }));
+        const facsAt=k=>vis.filter(f=>venueKeyOf(f)===k).map(f=>f.id);
+        // A location goes in with all its fields, or out (unless it's the last one shown).
+        const toggleSite=k=>{
+          if(shownKeys.includes(k)){ if(shownKeys.length>1) save(shownKeys.filter(x=>x!==k)); return; }
+          const at=new Set(facsAt(k)); setHiddenFacs(new Set([...hiddenFacs].filter(id=>!at.has(id)))); save([...shownKeys,k]); };
+        // A field goes in alone (its location added with only that field) or out of the list.
+        const toggleFac=id=>{ const f=vis.find(x=>x.id===id); if(!f) return; const k=venueKeyOf(f), next=new Set(hiddenFacs);
+          if(!shownKeys.includes(k)){ facsAt(k).forEach(x=>x!==id&&next.add(x)); next.delete(id); setHiddenFacs(next); save([...shownKeys,k]); return; }
+          if(next.has(id)) next.delete(id);
+          else { next.add(id); if(selFac===id) setSelFac("all"); }
+          setHiddenFacs(next); };
         return <>
           {all
             ? <span style={chip}>All locations<button onClick={()=>setVenue(null)} title="Back to the default location" style={{border:"none",background:"none",cursor:"pointer",color:"#64748b",fontSize:12,padding:"0 2px"}}>✕</button></span>
             : ks.map(k=>{ const v=siteOf(k); return (
               // Vendor first: several vendors can share a site (GTEC / CPSA and St Cuthberts at Cornwall Park).
               // Same width as the facility pills (name cut with …, in full on hover) so the row doesn't overflow.
+              // ▾ opens the vendor's locations, each expandable to its fields.
               <span key={k} className="facpill" style={{...chip,justifyContent:"space-between",overflow:"hidden"}} title={v?`${v.providerName} — ${v.site}`:k}>
-                <span className="facpill-n">📍 {v?`${PROVIDERS[v.providerId]?.label||PROVIDERS[v.providerId]?.short||v.providerName} · ${v.site}`:k}</span>
+                <VenueChipMenu label={`📍 ${v?`${PROVIDERS[v.providerId]?.label||PROVIDERS[v.providerId]?.short||v.providerName} · ${v.site}`:k}`}
+                  title={v?`${v.providerName}: choose locations and fields`:k} sites={v?sitesOf(v.providerId):[]} onToggleSite={toggleSite} onToggleFac={toggleFac}/>
                 {ks.length>1&&<button onClick={()=>drop(k)} title="Stop showing this location" style={{border:"none",background:"none",cursor:"pointer",color:"#64748b",fontSize:12,padding:"0 2px"}}>✕</button>}
               </span>); })}
           <ProviderMenu pids={pids} value={null} onPick={pickProvider} label="＋ Add" sites={pid=>venues.filter(v=>v.providerId===pid).map(v=>v.site)}
@@ -2521,7 +2540,7 @@ export default function App() {
           );
         })()}
 
-        {(tab==="calendar"||tab==="month"||tab==="list")&&<FacilityPills/>}
+        {(tab==="calendar"||tab==="month"||tab==="list")&&FacilityPills()}
 
         {tab==="calendar"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<WeekCalendar bookings={bookings} selectedFacility={selFac} onNewBooking={openNew} onNewBookingRange={openNewRange} onBookingClick={setViewing} cartSourceIds={new Set(cart.flatMap(i=>i.sourceIds||[]))} deleteIds={new Set(deleteQueue.map(b=>b.id))} cartNewDrafts={cart.flatMap(i=>!i.notifyOnly&&!i.statusChange&&(i.sourceIds||[]).length===0?i.drafts:[])} focusedDate={focusedDate} setFocusedDate={setFocusedDate} onOpenDay={openDay} bookerFilter={listBookerFilter} aliasNames={aliasNames} emailAliases={emailAliases}/>}</div>}
         {tab==="month"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<MonthCalendar bookings={bookings} selectedFacility={selFac} onBookingClick={setViewing} onNewBooking={openNew} onNewBookingRange={openNewRange} onMultiDelete={queueMultiForRemoval} onMultiAddToCart={handleMultiAddToCart} loggedInEmail={loggedInEmail} isAdmin={isAdmin} cartSourceIds={new Set(cart.flatMap(i=>i.sourceIds||[]))} deleteIds={new Set(deleteQueue.map(b=>b.id))} cartNewDrafts={cart.flatMap(i=>!i.notifyOnly&&!i.statusChange&&(i.sourceIds||[]).length===0?i.drafts:[])} onOpenDay={openDay} onGotoWeek={dk=>{ setFocusedDate(new Date(dk+"T00:00:00")); setTab("calendar"); }} bookerFilter={listBookerFilter} aliasNames={aliasNames} emailAliases={emailAliases}/>}</div>}
