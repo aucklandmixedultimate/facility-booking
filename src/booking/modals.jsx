@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
 import { LEAGUE_SEASONS, seasonOfBooker } from "../seasons.js";
-import { ACTIVITY_LABELS, ACTIVITY_PUBLIC_ACTIONS, AMUA_CONTACT_ROLES, AMUA_DEFAULT_NAME, Badge, CopyableTable, EMAIL_COLORS, FACILITIES, Modal, PROVIDERS, PROVIDER_GROUPS, S, SUPABASE_URL, VENDOR_GTEC, activityActor, authHeaders, deriveRecipientCode, describeActivity, emailColor, fmtDate, fmtDateShort, fmtDateShortDow, fmtTime, isAdminBooking, providerGroupOf, providerLabel, sb, useMobile, workflowOf } from "./core.jsx";
+import { ACTIVITY_LABELS, ACTIVITY_PUBLIC_ACTIONS, AMUA_CONTACT_ROLES, AMUA_DEFAULT_NAME, Badge, CopyableTable, EMAIL_COLORS, FACILITIES, Modal, PROVIDERS, PROVIDER_GROUPS, S, SUPABASE_URL, VENDOR_GTEC, activityActor, activitySlot, authHeaders, deriveRecipientCode, describeActivity, emailColor, fmtDate, fmtDateShort, fmtDateShortDow, fmtTime, isAdminBooking, providerGroupOf, providerLabel, sb, useMobile, workflowOf } from "./core.jsx";
 export function ActivityLogModal({onClose, inline=false, bookers=[], isAdmin=true}) {
   const isMobile = useMobile();
   const [showFilters, setShowFilters] = useState(false);
@@ -13,6 +13,24 @@ export function ActivityLogModal({onClose, inline=false, bookers=[], isAdmin=tru
   const [bookerSel, setBookerSel] = useState(""); // canonical booker email, "" = all
   const [actionFilter, setActionFilter] = useState("all");
   const [limit, setLimit]     = useState(1000);
+  // Entries whose full booking list is open — any number at once.
+  const [openRows, setOpenRows] = useState(()=>new Set());
+  const toggleRow = id => setOpenRows(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  // The detail line, plus an expander listing every booking when the summary cut some off.
+  const detail = r => {
+    const text = describeActivity(r); if (!text) return null;
+    const items = Array.isArray(r.detail?.items) ? r.detail.items : [];
+    if (items.length <= 3) return text;
+    const open = openRows.has(r.id);
+    return (<>
+      {text}{" "}
+      <button onClick={()=>toggleRow(r.id)} data-nocopy=""
+        style={{border:"none",background:"none",padding:0,color:"#2563eb",cursor:"pointer",fontSize:"inherit",fontWeight:600,fontFamily:"inherit"}}>{open?"▴ less":`▾ all ${items.length}`}</button>
+      {open&&<ul style={{margin:"4px 0 0",paddingLeft:16}}>
+        {[...items].sort((a,b)=>(a.date||"").localeCompare(b.date||"")||(a.start_hour||0)-(b.start_hour||0)).map((it,i)=><li key={i}>{activitySlot(it)}</li>)}
+      </ul>}
+    </>);
+  };
   const [truncated, setTruncated] = useState(false);
   const SYNC_ACTIONS = useMemo(()=>new Set([
     "cpsa_sync_start","cpsa_sync_complete","cpsa_confirm","cpsa_review_flag",
@@ -181,7 +199,7 @@ export function ActivityLogModal({onClose, inline=false, bookers=[], isAdmin=tru
                     {badge(r)}
                     <span style={{marginLeft:"auto",fontSize:11,color:"#94a3b8",whiteSpace:"nowrap"}}>{when(r)}</span>
                   </div>
-                  {describeActivity(r)&&<div style={{fontSize:12,color:"#334155",overflowWrap:"anywhere",lineHeight:1.35}}>{describeActivity(r)}</div>}
+                  {describeActivity(r)&&<div style={{fontSize:12,color:"#334155",overflowWrap:"anywhere",lineHeight:1.35}}>{detail(r)}</div>}
                   <div style={{display:"flex",alignItems:"center",gap:5,fontSize:11,color:"#64748b",minWidth:0}}>
                     {isAdmin&&roleChip(r)}<span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",minWidth:0}} title={r.user_email||""}>{whoLabel(r)}</span>
                   </div>
@@ -210,7 +228,7 @@ export function ActivityLogModal({onClose, inline=false, bookers=[], isAdmin=tru
                         </div>
                       </td>
                       <td style={{padding:"6px 10px"}}>{badge(r)}</td>
-                      <td style={{padding:"6px 10px",color:"#475569",fontSize:11,overflowWrap:"anywhere"}}>{describeActivity(r)}</td>
+                      <td style={{padding:"6px 10px",color:"#475569",fontSize:11,overflowWrap:"anywhere"}}>{detail(r)}</td>
                     </tr>
                   ))
               }
