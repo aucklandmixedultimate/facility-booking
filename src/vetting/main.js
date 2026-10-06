@@ -1860,7 +1860,7 @@ function renderBook() {
           <td class="mf-r">${stars(x.park_id)}</td>
           <td class="mf-a">${x.kind === "community" ? "" : `<button data-bkopen="${esc(x.park_id)}" title="Open this park">↗</button>`}${isActive(x) ? `<a href="${venueLink(prov(x), x.park)}" target="_blank" rel="noopener" title="Book dates in Facility Booking">📅</a>` : ""}${canEdit(w) && !isRetired(x) ? (mfRemove.has(x.id) ? `<button data-bkdel="${esc(x.id)}" data-bkw="${esc(w)}" title="Keep this field (take it out of the removal cart)">↶</button>` : `<button data-bkdel="${esc(x.id)}" data-bkw="${esc(w)}" title="Add to the removal cart">✕</button>`) : ""}</td></tr>`; }).join("")}
       </tbody></table></div>`
-    : `<p class="muted">${rows.length ? "Nothing at this stage." : mfWho === me ? (IS_ADMIN ? "No fields yet. ★ Top pick or ✓ Shortlist a park and its rated fields are added here." : "No fields yet. In 📅 Book mode, open a park and tap its field areas to add them to your cart.") : "No fields."}</p>`}`;
+    : `<p class="muted">${rows.length ? "Nothing at this stage." : mfWho === me ? (IS_ADMIN ? "No fields yet. ★ Top pick or ✓ Shortlist a park and its rated fields are added to the cart here." : "No fields yet. In 📅 Book mode, open a park and tap its field areas to add them to your cart.") : "No fields."}</p>`}`;
 }
 function renderTabs() { const n = activeOf().length + cartOf().length;
   $("bookTab").innerHTML = `📌<span class="tl"> My fields</span>${n ? ` (${n})` : ""}`; }
@@ -1875,8 +1875,8 @@ function applyModeUi() {
   if (book) $("fitPop").hidden = true;
 }
 function setMode(m) {
-  // One way into the active fields: admins decide (top pick / shortlist adds the park's
-  // rated fields); bookers, who don't rate, pick fields in Book mode.
+  // Two ways into the cart: admins decide (top pick / shortlist carts the park's rated
+  // fields); bookers, who don't rate, pick fields in Book mode.
   m = IS_ADMIN ? "rate" : "book";
   workMode = m; store.set("vet-work-mode", m); applyModeUi();
   const p = current(); if (p && view === "park") { drawParkFields(p); drawLights(p); }
@@ -2254,7 +2254,7 @@ async function decide(decision) {
   const rev = buildReview(p, t, decision, withField);
   await new Promise(r => setTimeout(r, matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 220));
   const ok = await save(p.id, rev);
-  if (ok) await decisionToActive(p, t, decision);
+  if (ok) await decisionToCart(p, t, decision);
   const fromCity = !!focusId && focusFrom === "city";
   if (ok && focusFrom === "back") { focusId = null; focusFrom = null; }
   if (ok) { delete draft[p.id]; delete edits[p.id]; later.delete(p.id); if (!fromCity && $("mode").value !== "todo") cursor++; }
@@ -2300,26 +2300,27 @@ async function setParkStage(p, stage) {
   setStatus(cur === stage ? `Removed ${p.name} from ${who}'s fields.` : stage === "active" ? `${p.name} is active for ${who}: bookable in Facility Booking.` : `${p.name} moved to ${who}'s cart (not bookable yet).`);
   renderRail(); renderTabs(); if (view === "book") renderBook(); if (view !== "city" && current()?.id === p.id) drawParkFields(p);
 }
-// A decision is the one way a field becomes bookable: Top pick or Shortlist adds the park's
-// rated fields (or the whole park, when it has none rated) to the booker's active fields;
-// Reject takes the park's fields off them.
-async function decisionToActive(p, t, decision) {
+// A decision puts a park's fields in the booker's cart: Top pick or Shortlist adds its rated
+// fields (or the whole park, when it has none rated) to the cart, where saving the cart makes
+// them bookable; fields already active stay active. Reject takes the park's fields off.
+async function decisionToCart(p, t, decision) {
   const who = whoBooks(), before = [...(bookLocs[who] || [])];
   let list = before.filter(x => x.park_id !== p.id || decision !== "no");
   if (decision !== "no") {
-    // The venue's groups become its active fields; the park's earlier fields that aren't
-    // among them are retired (kept for the bookings already on them).
-    const add = venueEntries(p, "active", { decision }), ids = new Set(add.map(x => x.id)), at = new Date().toISOString();
+    // The venue's groups become its fields; the park's earlier fields that aren't among
+    // them are retired (kept for the bookings already on them).
+    const add = venueEntries(p, "cart", { decision }), ids = new Set(add.map(x => x.id)), at = new Date().toISOString();
     list = list.map(x => x.park_id !== p.id || ids.has(x.id) || isRetired(x) ? x : { ...x, status: "retired", retired_at: at });
     add.forEach(e => { const i = list.findIndex(x => x.id === e.id);
-      if (i >= 0) list[i] = { ...list[i], ...e, status: "active", added_at: list[i].added_at || e.added_at, activated_at: list[i].activated_at || e.activated_at };
+      if (i >= 0) list[i] = { ...list[i], ...e, status: isActive(list[i]) ? "active" : "cart", added_at: list[i].added_at || e.added_at };
       else list.push(e); });
   }
   if (JSON.stringify(list) === JSON.stringify(before)) return;
   bookLocs[who] = list;
   if (!(await saveBookLocs())) { bookLocs[who] = before; return; }
-  const n = list.filter(x => x.park_id === p.id && isActive(x)).length;
-  setStatus(decision === "no" ? `Rejected ${p.name}: removed from ${who}'s active fields.` : `${p.name}: ${n} field${n === 1 ? "" : "s"} now active for ${who} — bookable in Facility Booking.`);
+  const mine = list.filter(x => x.park_id === p.id && !isRetired(x)), nAct = mine.filter(isActive).length, nCart = mine.length - nAct;
+  setStatus(decision === "no" ? `Rejected ${p.name}: removed from ${who}'s fields.`
+    : `${p.name}: ${nCart} field${nCart === 1 ? "" : "s"} in ${who}'s cart${nAct ? `, ${nAct} already active` : ""} — save the cart to make them bookable.`);
   renderTabs();
 }
 function buildReview(p, t, decision, withField) {
