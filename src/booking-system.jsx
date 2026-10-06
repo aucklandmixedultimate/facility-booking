@@ -4,7 +4,7 @@ import { gmailToken, fetchCouncilEmails, parseCouncilEmail } from "./councilMail
 import { driveConfigured, getDriveToken, renameFile, ensureFolderPath, DRIVE_ROOT_FOLDER, ensureFolder, findChildFile, uploadFile, keepLatestRevisionForever } from "./drive-client.js";
 import { htmlToPdfBlob } from "./pdf-utils.js";
 import { currentLeagueSeason, LEAGUE_SEASONS, seasonOfBooker } from "./seasons.js";
-import { ALL_VENUES, Badge, COUNCIL_APPLICATION_FEE, COUNCIL_APPLICATION_URL, COUNCIL_APP_RE, CPSA_FIELD_IDS, CopyableTable, EmailLoginScreen, FACILITIES, LOGO_SRC, MOBILE_STYLE, MONTHS, Modal, PROVIDERS, ProviderMenu, REVIEW_STATUSES, S, STATUS_META, SUPABASE_ANON, SUPABASE_URL, T, TableViewToggle, groupStatusLabel, VENUE_SEP, _emailAliases, activeVenueKeys, applyAmuaOrg, applyCouncilFacilities, authHeaders, buildApprovalEmailHtml, buildClashEmailHtml, buildInformCpsaEmailHtml, buildMismatchEmailHtml, buildOrderEmailHtml, buildRoomRequestEmailHtml, canSendToCouncil, clearSlotLink, councilFeeSplit, councilOverlaps, defaultProviderId, defaultVenueKey, defaultVenueSelection, emailColor, evenSlotShares, facShort, fmt24, fmtCost, fmtDate, fmtDateShort, fmtDateShortDow, fmtTime, fmtTimeShort, getBillingDrift, getClashes, inActiveVenue, isAdminBooking, linkCouncilChildren, listVenues, logActivity, newId, newSlotRef, parseClashPrevStatus, parseCouncilApp, parseCpsaOrig, parseCpsaRefs, parseCpsaResolution, parseMismatchNote, parseSlotLink, reachedGtecQueue, sb, sendApprovalEmail, sendEmail, setBilledSnapshot, setClashPrevStatus, setCpsaResolution, setGtecSnapshot, setMismatchNote, setModuleState, setSlotLink, setVendorVariance, slotGroupMembers, stripClashPrevStatus, stripMismatchNote, supabase, timeOverlaps, todayKey, useMobile, useTableView, venueFacilities, venueKeyOf, visibleFacilities, workflowOf } from "./booking/core.jsx";
+import { ALL_VENUES, Badge, COUNCIL_APPLICATION_FEE, COUNCIL_APPLICATION_URL, COUNCIL_APP_RE, CPSA_FIELD_IDS, CopyableTable, EmailLoginScreen, FACILITIES, LOGO_SRC, MOBILE_STYLE, MONTHS, Modal, PROVIDERS, ProviderMenu, REVIEW_STATUSES, S, STATUS_META, SUPABASE_ANON, SUPABASE_URL, T, TableViewToggle, groupStatusLabel, VENUE_SEP, _emailAliases, activeVenueKeys, applyAmuaOrg, applyCouncilFacilities, authHeaders, buildApprovalEmailHtml, buildClashEmailHtml, buildInformCpsaEmailHtml, buildMismatchEmailHtml, buildOrderEmailHtml, buildRoomRequestEmailHtml, canSendToCouncil, clearSlotLink, councilFeeSplit, councilOverlaps, defaultProviderId, defaultVenueKey, emailColor, evenSlotShares, facShort, fmt24, fmtCost, fmtDate, fmtDateShort, fmtDateShortDow, fmtTime, fmtTimeShort, getBillingDrift, getClashes, inActiveVenue, isAdminBooking, linkCouncilChildren, listVenues, logActivity, newId, newSlotRef, parseClashPrevStatus, parseCouncilApp, parseCpsaOrig, parseCpsaRefs, parseCpsaResolution, parseMismatchNote, parseSlotLink, reachedGtecQueue, sb, sendApprovalEmail, sendEmail, setBilledSnapshot, setClashPrevStatus, setCpsaResolution, setGtecSnapshot, setMismatchNote, setModuleState, setSlotLink, setVendorVariance, slotGroupMembers, stripClashPrevStatus, stripMismatchNote, supabase, timeOverlaps, todayKey, useMobile, useTableView, venueFacilities, venueKeyOf, visibleFacilities, workflowOf } from "./booking/core.jsx";
 import { councilAppBookings, mergeCouncilOutcomes } from "./booking/councilData.jsx";
 import { cjrMonthUrl, extractCPSATeam, extractEventDetailsEmail, fetchCJREvents, parseFeedText, findMatchingUserBooking, purgeObsolete, gtecTeamKey, mapCJRFacility, parseCJRDate, parseCJRDateTime } from "./booking/gtec.jsx";
 import { DRIVE_SUBFOLDERS, billingDocBaseName, buildBillingDocHtml, driveBatchFolderName, drivePoFolderName } from "./booking/billingDocs.jsx";
@@ -12,7 +12,7 @@ import { ScheduleSummaryModal, resolveRates } from "./booking/schedule.jsx";
 import { ActivityLogModal, AmuaDetailsModal, Banner, CouncilContactModal, DateRangePicker, UserMenuItem, UserMgmtModal } from "./booking/modals.jsx";
 import { DayTimelinePopup, MonthCalendar, WeekCalendar } from "./booking/calendar.jsx";
 import { BookingDetail, BookingForm, CartModal, DeleteCartModal } from "./booking/forms.jsx";
-import { isLegacyStatus, ST } from "./statuses.js";
+import { isClosed, isLegacyStatus, ST } from "./statuses.js";
 import { APPS, appHref } from "./appnav.js";
 
 // Tabs loaded on first use, so the calendars open without downloading Summary, Billing,
@@ -70,6 +70,16 @@ export default function App() {
   }
   // Reset (default locations, nothing hidden) turns into Undo for the rest of the session.
   const [optionsUndo, setOptionsUndo] = useState(null);
+  // What Reset shows: the CPSA fields plus every field with an upcoming (live) booking, at just
+  // those fields' locations; every other facility at those locations is removed from the options.
+  function resetTarget() {
+    const today = todayKey();
+    const active = new Set(bookings.filter(b => !isAdminBooking(b) && !isClosed(b.status) && b.date >= today).map(b => b.facility_id));
+    const vis = visibleFacilities(), keep = f => CPSA_FIELD_IDS.has(f.id) || active.has(f.id);
+    const venues = [defaultVenueKey()];
+    vis.filter(keep).forEach(f => { const k = venueKeyOf(f); if (!venues.includes(k)) venues.push(k); });
+    return { venues, hidden: vis.filter(f => !keep(f) && venues.includes(venueKeyOf(f))).map(f => f.id) };
+  }
   function setVenue(v) {
     setVenueState(v); setModuleState({ _activeVenue: v });
     try{ v ? localStorage.setItem("fb_venue", v) : localStorage.removeItem("fb_venue"); }catch{ /* ignore */ }
@@ -2288,9 +2298,9 @@ export default function App() {
         ? <button onClick={()=>{ setVenue(optionsUndo.venue); setHiddenFacs(new Set(optionsUndo.hidden)); setSelFac(optionsUndo.selFac); setOptionsUndo(null); }}
             title="Put back the locations and facilities you had before Reset"
             style={{padding:"5px 12px",borderRadius:20,border:"1.5px dashed #94a3b8",cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",flexShrink:0,background:"#f8fafc",color:"#334155"}}>↶ Undo reset</button>
-        : <button onClick={()=>{ setOptionsUndo({ venue, hidden:[...hiddenFacs], selFac }); const d=defaultVenueSelection(); setVenue(d.length===1?null:d.join(VENUE_SEP)); setHiddenFacs(new Set()); setSelFac("all"); }}
-            title="Back to the default: GTEC / CPSA plus your active fields, with nothing removed"
-            style={{padding:"5px 12px",borderRadius:20,border:"1.5px dashed #94a3b8",cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",flexShrink:0,background:"#fff",color:"#64748b"}}>↺ Reset{hiddenFacs.size?` (${hiddenFacs.size} removed)`:""}</button>}
+        : <button onClick={()=>{ setOptionsUndo({ venue, hidden:[...hiddenFacs], selFac }); const t=resetTarget(); setVenue(t.venues.length===1?null:t.venues.join(VENUE_SEP)); setHiddenFacs(new Set(t.hidden)); setSelFac("all"); }}
+            title="Back to the default: the GTEC / CPSA fields plus fields with upcoming bookings, and only their locations"
+            style={{padding:"5px 12px",borderRadius:20,border:"1.5px dashed #94a3b8",cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",flexShrink:0,background:"#fff",color:"#64748b"}}>↺ Reset</button>}
     </div>
   );
 

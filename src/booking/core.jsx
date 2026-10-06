@@ -129,13 +129,13 @@ export const FACILITIES = [
   { id:"f4", name:"Field #2",                    capacity:50,  color:"#22c55e", kind:"field", provider:"gtec" }, // mid green
   { id:"f5", name:"Field #3",                    capacity:50,  color:"#86efac", kind:"field", provider:"gtec" }, // light green
   // GTEC Orakei (Reihana St) — managed by GTEC but not a CPSA ground, so it sits outside
-  // the sync entirely and is hidden from bookers until AMUA decides to open it up.
+  // the sync entirely. Open to bookers.
   { id:"g1", name:"GTEC Orakei – Field 1",       capacity:50,  color:"#0e7490", kind:"field",
-    site:"GTEC Orakei", provider:"gtec", adminOnly:true, defaultRate:45 },   // dark cyan
+    site:"GTEC Orakei", provider:"gtec", defaultRate:45 },   // dark cyan
   { id:"g2", name:"GTEC Orakei – Field 2",       capacity:50,  color:"#0891b2", kind:"field",
-    site:"GTEC Orakei", provider:"gtec", adminOnly:true, defaultRate:45 },   // mid cyan
+    site:"GTEC Orakei", provider:"gtec", defaultRate:45 },   // mid cyan
   { id:"g3", name:"GTEC Orakei – Field 3",       capacity:50,  color:"#22d3ee", kind:"field",
-    site:"GTEC Orakei", provider:"gtec", adminOnly:true, defaultRate:45 },   // light cyan
+    site:"GTEC Orakei", provider:"gtec", defaultRate:45 },   // light cyan
   // St Cuthbert's College (Epsom) — hired directly from the school, not through GTEC, so
   // it has its own purchase order and never enters the GTEC queue or sync. Admin-only
   // until AMUA opens it to bookers; set its rate under Pricing. Listed at the Cornwall
