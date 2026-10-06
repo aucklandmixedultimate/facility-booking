@@ -12,7 +12,7 @@ import { ScheduleSummaryModal, resolveRates } from "./booking/schedule.jsx";
 import { ActivityLogModal, AmuaDetailsModal, Banner, CouncilContactModal, DateRangePicker, UserMenuItem, UserMgmtModal } from "./booking/modals.jsx";
 import { DayTimelinePopup, MonthCalendar, WeekCalendar } from "./booking/calendar.jsx";
 import { BookingDetail, BookingForm, CartModal, DeleteCartModal } from "./booking/forms.jsx";
-import { isLegacyStatus } from "./statuses.js";
+import { isLegacyStatus, ST } from "./statuses.js";
 import { APPS, appHref } from "./appnav.js";
 
 // Tabs loaded on first use, so the calendars open without downloading Summary, Billing,
@@ -245,6 +245,10 @@ export default function App() {
     try{ return JSON.parse(localStorage.getItem("fb_cpsa_delete_log")||"[]"); }catch{ return []; }
   });
   useEffect(()=>{ try{ localStorage.setItem("fb_cpsa_delete_log", JSON.stringify(cpsaDeleteLog)); }catch{ /* ignore */ } }, [cpsaDeleteLog]);
+  // The details panel holds the booking it was opened with; follow reloads (a sync confirming
+  // it, a status change) so it never shows a stale status beside the live feed note.
+  useEffect(()=>{ setViewing(v => { if (!v) return v; const cur = bookings.find(b => b.id === v.id);
+    return cur && (cur.status !== v.status || cur.system_notes !== v.system_notes || cur.updated_at !== v.updated_at) ? { ...v, ...cur } : v; }); }, [bookings]);
   // Bumped each time the user clicks "↗ Summary" on a billing row; SummaryTab
   // reacts to the version change rather than the payload itself so repeated
   // loads of the same record still take effect.
@@ -1908,7 +1912,7 @@ export default function App() {
     //  • notify-only  — clash / CPSA / mismatch / inform-CPSA emails (no mutation).
     //  • slotChange   — shared-slot split / merge / unlink: relinks members and, for a
     //    split, inserts the new team's booking.
-    const statusItems = cart.filter(item => item.statusChange);
+    let statusItems = cart.filter(item => item.statusChange);
     const saveItems   = cart.filter(item => !item.notifyOnly && !item.statusChange && !item.slotChange);
     const notifyItems = cart.filter(item => item.notifyOnly);
     const slotItems   = cart.filter(item => item.slotChange);
@@ -1943,6 +1947,32 @@ export default function App() {
     }
 
     // 2. Apply the queued status changes (the whole action was deferred to submit).
+    if (statusItems.length) {
+      // A queued change was decided against the status the booking had when it was queued.
+      // If a GTEC sync has since given it the vendor's answer (confirmed / mismatch), that
+      // answer is newer than the queued change and wins — otherwise submitting the cart
+      // after a sync quietly put a confirmed booking back to "Pending GTEC review".
+      try {
+        const ids = [...new Set(statusItems.flatMap(it => it.ids))];
+        const fresh = configured ? await sb.select("bookings", `id=in.(${ids.map(id => `"${id}"`).join(",")})`) : bookings;
+        const nowStatus = new Map(fresh.map(b => [b.id, b.status]));
+        const vendorAnswered = new Set([ST.VENDOR_CONFIRMED, ST.VENDOR_MISMATCH]);
+        const kept = [];
+        statusItems = statusItems.map(it => {
+          const wasStatus = new Map((it.drafts || []).map(d => [d.id, d.status]));
+          const keep = new Set(it.ids.filter(id => { const cur = nowStatus.get(id);
+            return cur && cur !== it.newStatus && cur !== wasStatus.get(id) && vendorAnswered.has(cur); }));
+          if (!keep.size) return it;
+          kept.push(...[...keep].map(id => ({ id, status: nowStatus.get(id) })));
+          return { ...it, ids: it.ids.filter(id => !keep.has(id)), drafts: (it.drafts || []).filter(d => !keep.has(d.id)) };
+        }).filter(it => it.ids.length);
+        if (kept.length) {
+          const nConf = kept.filter(k => k.status === ST.VENDOR_CONFIRMED).length;
+          showToast(`Kept the sync's GTEC result on ${kept.length} booking${kept.length !== 1 ? "s" : ""} (${nConf} confirmed${kept.length - nConf ? `, ${kept.length - nConf} mismatch` : ""}) — the queued status change was older`, "info");
+          logActivity("status_change_superseded", { kept });
+        }
+      } catch { /* couldn't re-check: apply as queued */ }
+    }
     if (statusItems.length) {
       const now = new Date().toISOString();
       if (configured) {
