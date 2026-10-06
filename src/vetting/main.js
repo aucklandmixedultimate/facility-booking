@@ -1442,7 +1442,7 @@ function mfMatches(x) {
   return !reg || p.region === reg;
 }
 function mfBookerList() {
-  const who = mfWho === null ? (IS_ADMIN ? "" : whoBooks()) : mfWho;
+  const who = mfWho === null ? whoBooks() : mfWho;
   return who ? [who] : Object.keys(bookLocs);
 }
 function drawMyFieldPins(reg) {
@@ -1548,6 +1548,7 @@ function setView(v, { refit } = {}) {
   $("card").classList.toggle("city", v === "city"); $("card").classList.toggle("book", v === "book");
   $("cityInfo").hidden = v !== "city"; $("legend").hidden = v !== "city";
   $("bookPanel").hidden = v !== "book";
+  document.body.classList.toggle("bookview", v === "book");   // the queue's controls don't apply to My fields
   $("railBox").hidden = v !== "book";
   applyModeUi();
   if (v === "book" && rotating) setRotating(false);
@@ -1794,7 +1795,7 @@ let mfWho = null, mfStage = "all", mfShowRej = store.get("vet-mf-rejected", fals
 const QWORD = ["", "poor", "fair", "ok", "good", "great"];
 function renderBook() {
   const me = whoBooks();
-  if (mfWho === null) mfWho = IS_ADMIN ? "" : me;   // admins see every booker by default
+  if (mfWho === null) mfWho = me;   // the viewing profile's fields first; admins can pick another booker or all
   const bookers = Object.keys(bookLocs).filter(e => (bookLocs[e] || []).length).sort();
   if (mfWho && !bookers.includes(mfWho)) bookers.unshift(mfWho);
   const rows = (mfWho ? [mfWho] : bookers).flatMap(w => (bookLocs[w] || []).filter(x => !isRetired(x)).map(x => ({ x, w })));
@@ -1810,6 +1811,10 @@ function renderBook() {
   const prov = x => x.kind === "community" ? "cm_" + x.operator.id : x.kind === "council_private" ? "op_" + x.operator.id : "akl_council";
   const tag = x => x.kind === "community" ? `<span class="mf-tag comm" title="Community facility">🏫</span>` : x.kind === "council_private" ? `<span class="mf-tag priv" title="${esc(x.operator?.name || "operator")} + council">◆</span>` : `<span class="mf-tag" title="Council">🏛</span>`;
   const who = w => esc(personFromEmail(w));
+  // Lights come from the park's rating: lit, none, or not known yet.
+  const lit = x => { const l = reviews[x.park_id]?.lights;
+    return l === "full" || l === "training" ? `<span class="mfl-l lit" title="${l === "training" ? "Training lights" : "Floodlights"}">💡 ${l === "training" ? "Training lights" : "Lights"}</span>`
+      : l === "none" ? `<span class="mfl-l" title="No lights">No lights</span>` : `<span class="mfl-l unk" title="Lights not known yet">Lights ?</span>`; };
   const DEC = [["top", "★", "Top"], ["yes", "✓", "Shortlist"], ["no", "✕", "Reject"]];
   loadContact(mfWho || me);
   $("bookPanel").innerHTML = `<div class="mf-head">
@@ -1823,7 +1828,7 @@ function renderBook() {
         return `<li class="mfl-r ${d}${isActive(x) ? " bk" : ""}">
           <div class="mfl-n">${tag(x)}${x.kind === "community" ? `<span class="mfl-t" title="${esc(x.park)} – ${esc(x.field)}">${esc(x.park)} <span class="muted">– ${esc(x.field)}</span></span>`
             : `<button class="mfl-t" data-bkopen="${esc(x.park_id)}" title="Open ${esc(x.park)}">${esc(x.park)} <span class="muted">– ${esc(x.field)}</span></button>`}
-            ${mfWho ? "" : `<span class="mfl-w" title="${esc(w)}">${who(w)}</span>`}</div>
+            ${lit(x)}${mfWho ? "" : `<span class="mfl-w" title="${esc(w)}">${who(w)}</span>`}</div>
           <div class="mfl-c">
             <span class="mfl-dec" role="group" aria-label="State">${DEC.map(([k, i, l]) => `<button ${at} data-mfdec="${k}" class="${k}" aria-pressed="${d === k}" title="${l}"${ed ? "" : " disabled"}>${i}<span class="tl"> ${l}</span></button>`).join("")}</span>
             <span class="mfl-q" role="group" aria-label="Quality${q ? " " + q + " of 5" : ""}" title="${x.quality ? "Quality: " + QWORD[q] : q ? "The park's rating (" + QWORD[q] + "); click to set your own" : "Quality: not set"}">${[1, 2, 3, 4, 5].map(n => `<button ${at} data-mfq="${n}" class="${n <= q ? "on" : ""}${x.quality ? "" : " soft"}" aria-label="${n} of 5"${ed ? "" : " disabled"}>★</button>`).join("")}</span>
