@@ -332,33 +332,56 @@ export function parseCJRDateTime(dt) {
   return { start_hour: start, duration: dur > 0 ? dur : 1 };
 }
 
-export async function fetchCJREvents(year, month) {
-  // month is 0-based
+// GTEC's calendar API for a month (0-based) — also opened directly in a browser tab for the manual
+// "paste the feed" fallback (a top-level page isn't subject to CORS, so it always shows the JSON).
+export function cjrMonthUrl(year, month) {
   const dateStr = `${year}-${String(month+1).padStart(2,"0")}-01`;
-  // The `_` parameter changes every call: some public proxies cache responses, which made a
-  // sync miss entries GTEC had added since (the feed ignores the unknown parameter).
-  const target = `https://www.carltonjuniorsrugby.co.nz/api/v1/calendar/MonthCalendarEvents?organisationId=%2014520&sportId=0&ical=${encodeURIComponent(CJR_ICAL)}&date=${dateStr}&_=${Date.now()}`;
-  // Free public CORS proxies time out now and then (HTTP 408), so each attempt is capped at
-  // 20 s and the whole list is tried twice, with a short pause, before giving up.
-  const proxies = [
-    `https://corsproxy.io/?url=${encodeURIComponent(target)}`,
-    `https://api.allorigins.win/raw?url=${encodeURIComponent(target)}`,
-    `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(target)}`,
-  ];
+  return `https://www.carltonjuniorsrugby.co.nz/api/v1/calendar/MonthCalendarEvents?organisationId=%2014520&sportId=0&ical=${encodeURIComponent(CJR_ICAL)}&date=${dateStr}`;
+}
+// The feed as an array of events, from raw JSON text or a relay's wrapper ({ contents: "…" }).
+export function parseFeedText(text) {
+  let v = JSON.parse(String(text || "").trim());
+  if (v && !Array.isArray(v) && typeof v.contents === "string") v = JSON.parse(v.contents);
+  if (!Array.isArray(v)) throw new Error("not a GTEC calendar feed (expected a list of events)");
+  return v;
+}
+// The calendar API sends no CORS headers, so the browser reads it through free public relays.
+// None is dependable on its own (corsproxy.io now answers 401 to websites), so several are
+// tried, starting with whichever worked last; each attempt is capped and the list is tried twice.
+let _lastGoodRelay = null;
+// After every relay has failed, the rest of that sync's months fail at once (for a minute)
+// rather than each waiting out every relay again.
+let _relaysDownUntil = 0;
+const RELAYS = [
+  ["allorigins", t => `https://api.allorigins.win/raw?url=${encodeURIComponent(t)}`],
+  ["allorigins-get", t => `https://api.allorigins.win/get?url=${encodeURIComponent(t)}`],
+  ["codetabs", t => `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(t)}`],
+  ["cors.lol", t => `https://api.cors.lol/?url=${encodeURIComponent(t)}`],
+  ["corsproxy.io", t => `https://corsproxy.io/?url=${encodeURIComponent(t)}`],
+];
+export async function fetchCJREvents(year, month) {
+  // The `_` parameter changes every call: some relays cache responses, which made a sync miss
+  // entries GTEC had added since (the feed ignores the unknown parameter).
+  const target = `${cjrMonthUrl(year, month)}&_=${Date.now()}`;
+  if (Date.now() < _relaysDownUntil) throw new Error("Couldn't reach GTEC's calendar — every relay failed moments ago. Open the month's calendar and paste it below to sync it by hand, or try Sync again in a minute.");
+  const order = [...RELAYS].sort((a, b) => (b[0] === _lastGoodRelay) - (a[0] === _lastGoodRelay));
   const errs = [];
   for (let round = 0; round < 2; round++) {
-    if (round) await new Promise(res => setTimeout(res, 2000));
-    for (const url of proxies) {
-      const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 20000);
+    if (round) await new Promise(res => setTimeout(res, 1500));
+    for (const [name, wrap] of order) {
+      const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 15000);
       try {
-        const r = await fetch(url, { signal: ctl.signal });
+        const r = await fetch(wrap(target), { signal: ctl.signal });
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return await r.json();
-      } catch(e) { errs.push(`${new URL(url).hostname}: ${e.name === "AbortError" ? "timed out" : e.message}`); }
+        const events = parseFeedText(await r.text());
+        _lastGoodRelay = name; _relaysDownUntil = 0;
+        return events;
+      } catch(e) { errs.push(`${name}: ${e.name === "AbortError" ? "timed out" : e.message}`); }
       finally { clearTimeout(timer); }
     }
   }
-  throw new Error("All proxies failed: " + errs.slice(-proxies.length).join("; "));
+  _relaysDownUntil = Date.now() + 60000;
+  throw new Error("Couldn't reach GTEC's calendar through any relay (" + errs.slice(-RELAYS.length).join("; ") + "). Open the month's calendar and paste it below to sync it by hand.");
 }
 // GTEC purge requests (bookings cancelled after reaching GTEC) go stale: the booker re-books
 // the slot, or GTEC's schedule (as of the last sync) doesn't hold it for them. purgeHolder is

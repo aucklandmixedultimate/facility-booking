@@ -314,7 +314,9 @@ export function ContactReviewModal({ booking, onClose, onConfirm }) {
       </div>
     </Modal>);
 }
-export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,clashes=[],deleteIds=new Set(),facilityRates={},onResolveOldUnapproved,onReassign,bookers=[],onBulkApply,onSaveMismatch,onInformCpsa,onRequestRoom,onQueueNotifications,onMarkAdjustmentSettled,onLinkClash,loggedInEmail,syncResults=[],onClearSyncResults,showSyncResults=false,onToggleSyncResults,bookerFilter=new Set(),onToggleBooker,onSetBookerFilter,aliasNames={},emailAliases={},pricingConditions=[],onAddPricingCondition,onUpdatePricingCondition,onRemovePricingCondition,cpsaDeleteLog=[],onClearDeleteLogEntry,onClearDeleteLog,onSendToCouncil,approxPlayers={},syncFeed=null}) {
+export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,clashes=[],deleteIds=new Set(),facilityRates={},onResolveOldUnapproved,onReassign,bookers=[],onBulkApply,onSaveMismatch,onInformCpsa,onRequestRoom,onQueueNotifications,onMarkAdjustmentSettled,onLinkClash,loggedInEmail,syncResults=[],onClearSyncResults,showSyncResults=false,onToggleSyncResults,bookerFilter=new Set(),onToggleBooker,onSetBookerFilter,aliasNames={},emailAliases={},pricingConditions=[],onAddPricingCondition,onUpdatePricingCondition,onRemovePricingCondition,cpsaDeleteLog=[],onClearDeleteLogEntry,onClearDeleteLog,onSendToCouncil,approxPlayers={},syncFeed=null,onPasteFeed,cjrMonthUrl}) {
+  // Pasted GTEC calendar text per month key, for the manual sync fallback.
+  const [feedPaste, setFeedPaste] = useState({});
   // Stale purge requests are pruned as bookings and the synced feed change (booking-system.jsx);
   // this only filters any not yet pruned.
   const canonPurge = em => (emailAliases[(em||"").toLowerCase()] || (em||"").toLowerCase());
@@ -707,7 +709,23 @@ export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDel
                 {open&&(
                   <div style={{padding:"0 14px 10px 38px"}}>
                     {r.error
-                      ? <div style={{fontSize:12,color:"#b91c1c"}}>⚠ {r.error}</div>
+                      ? <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                          <div style={{fontSize:12,color:"#b91c1c"}}>⚠ {r.error}</div>
+                          {onPasteFeed&&cjrMonthUrl&&(()=>{ const [y,m]=r.monthKey.split("-").map(Number); return (
+                            <div style={{display:"flex",flexDirection:"column",gap:6,background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:10}}>
+                              <div style={{fontSize:12,color:"#334155"}}>
+                                <b>Sync {r.label} by hand:</b> 1. <a href={cjrMonthUrl(y,m-1)} target="_blank" rel="noopener noreferrer" style={{color:"#0369a1",fontWeight:600}}>Open GTEC&apos;s calendar for {r.label} ↗</a> 2. Select all of the page (Ctrl/⌘-A), copy, and paste it here. 3. Sync.
+                              </div>
+                              <textarea value={feedPaste[r.monthKey]||""} onChange={e=>setFeedPaste(p=>({...p,[r.monthKey]:e.target.value}))}
+                                placeholder='[{"EventName": …}]' rows={3}
+                                style={{width:"100%",boxSizing:"border-box",fontFamily:"monospace",fontSize:11,padding:6,border:"1px solid #cbd5e1",borderRadius:6,resize:"vertical"}}/>
+                              <button disabled={!(feedPaste[r.monthKey]||"").trim()}
+                                onClick={async()=>{ if (await onPasteFeed(r.monthKey, feedPaste[r.monthKey])) setFeedPaste(p=>({...p,[r.monthKey]:""})); }}
+                                style={{alignSelf:"flex-start",padding:"5px 12px",borderRadius:6,border:"none",background:(feedPaste[r.monthKey]||"").trim()?"#0ea5e9":"#cbd5e1",color:"#fff",fontWeight:700,fontSize:12,cursor:(feedPaste[r.monthKey]||"").trim()?"pointer":"default",fontFamily:"inherit"}}>
+                                🔄 Sync {r.label} from pasted feed
+                              </button>
+                            </div>); })()}
+                        </div>
                       : <div style={{display:"flex",flexDirection:"column",gap:3,paddingLeft:12,borderLeft:"2px solid #e0f2fe"}}>
                           {[
                             r.added>0 && ((r.addedBookings&&r.addedBookings.length)
