@@ -692,3 +692,30 @@ button.mfl-t:hover{text-decoration:underline}
 .list .pick .saved{flex:none;align-self:center;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;white-space:nowrap}
 .list .pick .saved.top{background:var(--top-soft);color:var(--top)}.list .pick .saved.yes{background:var(--turf-soft);color:var(--turf)}.list .pick .saved.no{background:var(--reject-soft);color:var(--reject)}
 .list .pick button.add{flex:none;display:block;width:32px;padding:0;font-size:16px;font-weight:700;color:var(--turf)}
+.mfl-l{font-size:12px;white-space:nowrap;color:var(--muted)}
+.mfl-l.lit{color:var(--ink);font-weight:600}
+.mfl-l.unk{opacity:.7}
+/* My fields doesn't use the queue's controls (status, order, maps-only, progress). */
+body.bookview #mode,body.bookview #order,body.bookview .filters .chk,body.bookview .filters>div:last-child{display:none}
+@media (max-width:640px){
+  body.bookview .filters{grid-template-columns:minmax(0,1fr)}
+  .bookpanel{padding:10px 8px;gap:10px}
+  .bookpanel .mf-head select{flex:1 1 100%;margin-right:0;padding:8px;font-size:14px}
+  .bookpanel .mf-stages{gap:6px;flex-wrap:wrap}
+  .bookpanel .mf-stages button{padding:6px 12px;font-size:13px}
+  .bookpanel .mf-rej{font-size:13px;padding:4px 0}
+  .bookpanel .mf-rej input{width:18px;height:18px}
+  .mfl-r{padding:10px;gap:8px}
+  .mfl-t{font-size:14px;white-space:normal}
+  .mfl-c{width:100%;justify-content:space-between;gap:6px}
+  .mfl-dec button{min-width:38px;min-height:38px;padding:0 8px;font-size:15px}
+  .mfl-q button{font-size:21px;padding:6px 1px}
+  .mfl-bk{min-width:40px;min-height:38px;font-size:15px}
+  .mfl-go{padding:8px 2px;font-size:16px}
+  .mfl-c{flex-wrap:nowrap}
+  .mfl-n{flex-wrap:wrap}
+  .mfl-l{font-size:12px}
+  .railfilters select{flex:1 1 calc(50% - 6px);padding:7px 6px;font-size:13px}
+  .railfilters .rf-n{flex:1 1 100%;margin-left:0}
+  .list .pick button.add{width:40px}
+}
