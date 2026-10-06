@@ -1437,11 +1437,9 @@ function buildCity() {
 // amber = cart only; the count is the number of fields; click opens the park.
 // The header's region and review-status dropdowns filter My fields (table and pins) too.
 function mfMatches(x) {
-  const p = BYID[x.park_id], reg = $("region").value, m = $("mode").value;
-  if (!p) return !reg && (m === "all" || m === "todo");   // community facilities aren't rated parks
-  if (reg && p.region !== reg) return false;
-  const d = reviews[p.id]?.decision;
-  return m === "all" || (m === "todo" ? !d || d === "rating" : d === m);
+  const p = BYID[x.park_id], reg = $("region").value;
+  if (!p) return !reg;   // community facilities aren't rated parks
+  return !reg || p.region === reg;
 }
 function mfBookerList() {
   const who = mfWho === null ? (IS_ADMIN ? "" : whoBooks()) : mfWho;
@@ -1449,7 +1447,7 @@ function mfBookerList() {
 }
 function drawMyFieldPins(reg) {
   const byPlace = new Map();
-  mfBookerList().forEach(w => (bookLocs[w] || []).filter(x => !isRetired(x) && mfMatches(x)).forEach(x => {
+  mfBookerList().forEach(w => (bookLocs[w] || []).filter(x => !isRetired(x) && !isRejected(x) && mfMatches(x)).forEach(x => {
     const op = x.id.startsWith("cm-") ? (PRIV.operators || []).find(o => "cm-" + o.id === x.id) : null;
     const p = BYID[x.park_id];
     if (p && reg && p.region !== reg) return;
@@ -1702,8 +1700,11 @@ const myLocs = () => bookLocs[whoBooks()] || [];
 // "retired": a field replaced when the venue's fields were regrouped; kept so bookings on it
 // keep their name, but neither active nor in the cart.
 const isRetired = x => x.status === "retired";
-const cartOf = () => myLocs().filter(x => x.status === "cart" || (!isActive(x) && !isRetired(x)));
-const activeOf = () => myLocs().filter(isActive);
+// A saved field's state for its booker: ★ Top, ✓ Shortlist (the default) or ✕ Rejected.
+// Rejected fields stay listed (under "Show rejected") but are never bookable.
+const decOf = x => x.decision === "top" ? "top" : x.decision === "no" ? "no" : "yes";
+const isRejected = x => decOf(x) === "no";
+const cartOf = () => myLocs().filter(x => !isActive(x) && !isRetired(x) && !isRejected(x));
 const locState = id => { const x = myLocs().find(y => y.id === id); return !x || isRetired(x) ? null : isActive(x) ? "active" : "cart"; };
 // Save every cart field as an active booking.
 async function saveCartActive() {
@@ -1785,84 +1786,62 @@ function contactNote(who) {
     : `<p class="warn-note">📇 <b>Add ${who === (session?.user?.email || "").toLowerCase() ? "your" : "the booker's"} council contact</b> (name and phone) before booking these fields — the booker is the key holder on AMUA's council application.
        <a href="./?contact=1">Add it in Facility Booking ↗</a></p>`;
 }
-// ── My fields: every booker's council fields as one table (default: the signed-in booker) ──
-// Field · Booker · Carted · Active · Started (first accepted booking) · Ended (retired, or the
-// last booking once none are upcoming) · ★ crowd rating. The booker's cart can be saved as
-// active here; another booker's rows are read-only unless you're an admin.
-let mfWho = null, mfStage = "all";
-// Removal cart: fields marked ✕ wait here (struck through) until "Remove N" — no popup.
-const mfRemove = new Map();   // cart entry id -> booker email   // mfWho: booker email, "" = all bookers (null = you)
-let fieldBookings = null;            // facility_id -> [{date, status, email}] from Facility Booking
-const ACCEPTED = new Set(["approved", "council_granted", "cpsa_confirmed"]);
-async function loadFieldBookings() {
-  if (!supabase || !session) { fieldBookings = {}; return; }
-  const { data, error } = await supabase.from("bookings").select("facility_id,date,status,email").or("facility_id.like.cf-%,facility_id.like.cm-%");
-  fieldBookings = {};
-  if (!error) (data || []).forEach(r => (fieldBookings[r.facility_id] ||= []).push(r));
-  if (view === "book") renderBook();
-}
-const mfDate = iso => { if (!iso) return ""; const d = new Date(String(iso).length === 10 ? iso + "T12:00" : iso); if (isNaN(d)) return "";
-  return d.toLocaleDateString("en-NZ", { day: "numeric", month: "short", ...(d.getFullYear() !== new Date().getFullYear() ? { year: "2-digit" } : {}) }); };
-function mfTimeline(x, who) {
-  const today = new Date().toISOString().slice(0, 10);
-  const bk = (fieldBookings?.[x.id] || []).filter(r => (r.email || "").toLowerCase() === who && !["rejected", "cancelled"].includes(r.status)).sort((a, b) => a.date.localeCompare(b.date));
-  const acc = bk.filter(r => ACCEPTED.has(r.status));
-  const started = acc[0]?.date || "";
-  const ended = isRetired(x) ? x.retired_at : bk.length && !bk.some(r => r.date >= today) ? bk[bk.length - 1].date : "";
-  const pending = !started && bk.length ? bk.length : 0;
-  return { started, ended, pending, next: bk.find(r => r.date >= today)?.date || "" };
-}
+// ── My fields: the booker's saved fields, each ★ Top / ✓ Shortlist (or ✕ Rejected, shown on
+// request), with its quality (1–5, the booker's own; the park's rating until set) and a 📅
+// switch that offers it in Facility Booking. Another booker's rows are read-only unless
+// you're an admin.
+let mfWho = null, mfStage = "all", mfShowRej = store.get("vet-mf-rejected", false);
+const QWORD = ["", "poor", "fair", "ok", "good", "great"];
 function renderBook() {
   const me = whoBooks();
   if (mfWho === null) mfWho = IS_ADMIN ? "" : me;   // admins see every booker by default
   const bookers = Object.keys(bookLocs).filter(e => (bookLocs[e] || []).length).sort();
   if (mfWho && !bookers.includes(mfWho)) bookers.unshift(mfWho);
-  const rows = (mfWho ? [mfWho] : bookers).flatMap(w => (bookLocs[w] || []).map(x => ({ x, w })));
-  const stageOf = ({ x, w }) => isRetired(x) || mfTimeline(x, w).ended ? "ended" : isActive(x) ? "active" : "cart";
-  const counts = { all: 0, cart: 0, active: 0, ended: 0 }; rows.filter(r => mfMatches(r.x)).forEach(r => { counts.all++; counts[stageOf(r)]++; });
-  // Header dropdowns: region and review status filter; the order sorts (least viewed parks
-  // first, A–Z, or the default: cart, active, ended, newest first).
-  const ord = $("order").value, rank = { cart: 0, active: 1, ended: 2 };
-  const byDefault = (a, b) => rank[stageOf(a)] - rank[stageOf(b)] || (b.x.activated_at || b.x.added_at || "").localeCompare(a.x.activated_at || a.x.added_at || "");
+  const rows = (mfWho ? [mfWho] : bookers).flatMap(w => (bookLocs[w] || []).filter(x => !isRetired(x)).map(x => ({ x, w })));
   const matching = rows.filter(r => mfMatches(r.x)), hidden = rows.length - matching.length;
-  const shown = matching.filter(r => mfStage === "all" || stageOf(r) === mfStage)
-    .sort((a, b) => ord === "alpha" ? (a.x.park || "").localeCompare(b.x.park || "") || (a.x.field || "").localeCompare(b.x.field || "") || byDefault(a, b)
-      : ord === "least" ? viewsOf(a.x.park_id) - viewsOf(b.x.park_id) || byDefault(a, b) : byDefault(a, b));
+  const counts = { all: 0, top: 0, yes: 0, no: 0 };
+  matching.forEach(({ x }) => { counts[decOf(x)]++; if (!isRejected(x)) counts.all++; });
+  const qOf = x => x.quality || reviews[x.park_id]?.quality || 0;
+  const rank = { top: 0, yes: 1, no: 2 };
+  const shown = matching.filter(({ x }) => isRejected(x) ? mfShowRej : mfStage === "all" || decOf(x) === mfStage)
+    .sort((a, b) => rank[decOf(a.x)] - rank[decOf(b.x)] || qOf(b.x) - qOf(a.x) || (a.x.park || "").localeCompare(b.x.park || "") || (a.x.field || "").localeCompare(b.x.field || ""));
   const canEdit = w => IS_ADMIN || w === (session?.user?.email || "demo@local").toLowerCase();
-  const editable = mfWho && canEdit(mfWho), cart = editable ? (bookLocs[mfWho] || []).filter(x => !isActive(x) && !isRetired(x)) : [];
-  if (IS_ADMIN && mfWho) bookFor = mfWho;   // admins' cart clicks in Book mode go to the booker shown
+  if (IS_ADMIN && mfWho) bookFor = mfWho;   // admins' clicks in Book mode go to the booker shown
   const prov = x => x.kind === "community" ? "cm_" + x.operator.id : x.kind === "council_private" ? "op_" + x.operator.id : "akl_council";
   const tag = x => x.kind === "community" ? `<span class="mf-tag comm" title="Community facility">🏫</span>` : x.kind === "council_private" ? `<span class="mf-tag priv" title="${esc(x.operator?.name || "operator")} + council">◆</span>` : `<span class="mf-tag" title="Council">🏛</span>`;
   const who = w => esc(personFromEmail(w));
-  // Who added it: the person picked at sign-in, else the adding account when it isn't the booker's.
-  const byWho = (x, w) => x.added_by_name ? shortName(x.added_by_name) : x.added_by && x.added_by.toLowerCase() !== w ? personFromEmail(x.added_by) : "";
-  const stars = id => { const a = crowdAvg(id); return a ? `<span title="${ratings[id].n} rating${ratings[id].n > 1 ? "s" : ""}">★${a.toFixed(1)}</span>` : `<span class="mf-none">–</span>`; };
-  const cell = (k, v, title) => `<td class="mf-d" data-k="${k}"${title ? ` title="${esc(title)}"` : ""}>${v || `<span class="mf-none">–</span>`}</td>`;
+  const DEC = [["top", "★", "Top"], ["yes", "✓", "Shortlist"], ["no", "✕", "Reject"]];
   loadContact(mfWho || me);
-  if (fieldBookings === null) { fieldBookings = {}; loadFieldBookings(); }
   $("bookPanel").innerHTML = `<div class="mf-head">
       <select id="mfWho" aria-label="Booker">${[...new Set([me, ...bookers])].map(e => `<option value="${esc(e)}"${e === mfWho ? " selected" : ""}>${e === me ? "Me" : who(e)} · ${esc(e.split("@")[0])}</option>`).join("")}
         <option value=""${mfWho === "" ? " selected" : ""}>All bookers</option></select>
-      <div class="mf-stages">${[["all", "All"], ["cart", "🛒 Cart"], ["active", "📌 Active"], ["ended", "Ended"]].map(([k, l]) => `<button data-mfstage="${k}" aria-pressed="${mfStage === k}">${l} <b>${counts[k]}</b></button>`).join("")}</div></div>
+      <div class="mf-stages">${[["all", "All"], ["top", "★ Top"], ["yes", "✓ Shortlist"]].map(([k, l]) => `<button data-mfstage="${k}" aria-pressed="${mfStage === k}">${l} <b>${counts[k]}</b></button>`).join("")}
+        <label class="mf-rej"><input type="checkbox" id="mfRej"${mfShowRej ? " checked" : ""}> Show rejected <b>${counts.no}</b></label></div></div>
     ${mfWho ? contactNote(mfWho) : ""}
-    ${cart.length ? `<div class="mf-go"><span>${cart.length} field${cart.length === 1 ? "" : "s"} in the cart, not bookable yet.</span><button class="primary" id="bkSave">✅ Save as active</button></div>` : ""}
-    ${mfRemove.size ? `<div class="mf-go mf-rmbar"><span>🗑 ${mfRemove.size} field${mfRemove.size === 1 ? "" : "s"} queued for removal${[...mfRemove.keys()].some(id => Object.values(bookLocs).flat().find(x => x.id === id && isActive(x))) ? " — active ones stop being offered in Facility Booking (existing bookings stay)" : ""}.</span>
-      <button id="mfRmClear">Clear</button><button class="danger" id="mfRmGo">Remove ${mfRemove.size}</button></div>` : ""}
-    ${hidden ? `<p class="mf-hidden">${hidden} field${hidden === 1 ? " is" : "s are"} hidden by the region / review filters above. <button id="mfShowAll">Show all</button></p>` : ""}
-    ${shown.length ? `<div class="mf-wrap"><table class="mf"><thead><tr><th>Field</th><th title="The booker, and who on the login added the field">Booker · by</th><th title="Added to the cart">Carted</th><th title="Saved as an active booking field">Active</th>
-      <th title="First booking the council / vendor accepted">Started</th><th title="Field retired, or its last booking once none are upcoming">Ended</th><th title="Crowd quality rating">★</th><th></th></tr></thead><tbody>
-      ${shown.map(r => { const { x, w } = r, t = mfTimeline(x, w), st = stageOf(r);
-        return `<tr class="mf-${st}${mfRemove.has(x.id) ? " mf-rm" : ""}"><td class="mf-f"><span class="mf-st ${st}" title="${st === "cart" ? "In the cart" : st === "active" ? "Active" : "Ended"}"></span>${tag(x)}
-            <span class="mf-n" title="${esc(x.park)} – ${esc(x.field)}">${esc(x.park)} <span class="muted">– ${esc(x.field)}</span></span></td>
-          <td class="mf-w" title="${esc(w)}${x.added_by ? " · added by " + esc(x.added_by_name ? `${x.added_by_name} (${x.added_by})` : x.added_by) : ""}${x.activated_by_name ? " · made active by " + esc(x.activated_by_name) : ""}">${who(w)}${byWho(x, w) ? `<span class="mf-by"> · ${esc(byWho(x, w))}</span>` : ""}</td>
-          ${cell("Carted", mfDate(x.added_at), x.added_by && x.added_by !== w ? "Added by " + x.added_by : "")}${cell("Active", mfDate(x.activated_at))}
-          ${cell("Started", t.started ? mfDate(t.started) : t.pending ? `<span class="mf-pend">${t.pending} pending</span>` : "", t.next ? "Next booking " + mfDate(t.next) : "")}${cell("Ended", mfDate(t.ended))}
-          <td class="mf-r">${stars(x.park_id)}</td>
-          <td class="mf-a">${x.kind === "community" ? "" : `<button data-bkopen="${esc(x.park_id)}" title="Open this park">↗</button>`}${isActive(x) ? `<a href="${venueLink(prov(x), x.park)}" target="_blank" rel="noopener" title="Book dates in Facility Booking">📅</a>` : ""}${canEdit(w) && !isRetired(x) ? (mfRemove.has(x.id) ? `<button data-bkdel="${esc(x.id)}" data-bkw="${esc(w)}" title="Keep this field (take it out of the removal cart)">↶</button>` : `<button data-bkdel="${esc(x.id)}" data-bkw="${esc(w)}" title="Add to the removal cart">✕</button>`) : ""}</td></tr>`; }).join("")}
-      </tbody></table></div>`
-    : `<p class="muted">${rows.length ? "Nothing at this stage." : mfWho === me ? (IS_ADMIN ? "No fields yet. ★ Top pick or ✓ Shortlist a park and its rated fields are added to the cart here." : "No fields yet. In 📅 Book mode, open a park and tap its field areas to add them to your cart.") : "No fields."}</p>`}`;
+    ${hidden ? `<p class="mf-hidden">${hidden} field${hidden === 1 ? " is" : "s are"} hidden by the region filter above. <button id="mfShowAll">Show all</button></p>` : ""}
+    ${shown.length ? `<ul class="mfl">${shown.map(({ x, w }) => { const d = decOf(x), q = qOf(x), ed = canEdit(w), at = `data-id="${esc(x.id)}" data-w="${esc(w)}"`;
+        return `<li class="mfl-r ${d}${isActive(x) ? " bk" : ""}">
+          <div class="mfl-n">${tag(x)}${x.kind === "community" ? `<span class="mfl-t" title="${esc(x.park)} – ${esc(x.field)}">${esc(x.park)} <span class="muted">– ${esc(x.field)}</span></span>`
+            : `<button class="mfl-t" data-bkopen="${esc(x.park_id)}" title="Open ${esc(x.park)}">${esc(x.park)} <span class="muted">– ${esc(x.field)}</span></button>`}
+            ${mfWho ? "" : `<span class="mfl-w" title="${esc(w)}">${who(w)}</span>`}</div>
+          <div class="mfl-c">
+            <span class="mfl-dec" role="group" aria-label="State">${DEC.map(([k, i, l]) => `<button ${at} data-mfdec="${k}" class="${k}" aria-pressed="${d === k}" title="${l}"${ed ? "" : " disabled"}>${i}<span class="tl"> ${l}</span></button>`).join("")}</span>
+            <span class="mfl-q" role="group" aria-label="Quality${q ? " " + q + " of 5" : ""}" title="${x.quality ? "Quality: " + QWORD[q] : q ? "The park's rating (" + QWORD[q] + "); click to set your own" : "Quality: not set"}">${[1, 2, 3, 4, 5].map(n => `<button ${at} data-mfq="${n}" class="${n <= q ? "on" : ""}${x.quality ? "" : " soft"}" aria-label="${n} of 5"${ed ? "" : " disabled"}>★</button>`).join("")}</span>
+            ${d === "no" ? "" : `<button ${at} data-mfbk class="mfl-bk" aria-pressed="${isActive(x)}" title="${isActive(x) ? "Bookable in Facility Booking · click to stop offering it" : "Not bookable yet · click to offer it in Facility Booking"}"${ed ? "" : " disabled"}>📅<span class="tl"> ${isActive(x) ? "Bookable" : "Book"}</span></button>`}
+            ${isActive(x) ? `<a class="mfl-go" href="${venueLink(prov(x), x.park)}" target="_blank" rel="noopener" title="Book dates in Facility Booking">↗</a>` : ""}
+          </div></li>`; }).join("")}</ul>`
+    : `<p class="muted">${rows.length ? "Nothing here." : mfWho === me ? (IS_ADMIN ? "No fields yet. ★ Top pick or ✓ Shortlist a park and its rated fields are saved here." : "No fields yet. In 📅 Book mode, open a park and tap its field areas to save them.") : "No fields."}</p>`}`;
 }
-function renderTabs() { const n = activeOf().length + cartOf().length;
+// Change one saved field (state, quality, bookable) for its booker and save at once.
+async function setEntry(w, id, patch) {
+  if (IS_ADMIN) bookFor = w; else if (w !== whoBooks()) return;
+  const before = bookLocs[w] || [], i = before.findIndex(x => x.id === id); if (i < 0) return;
+  const list = [...before]; list[i] = { ...before[i], ...patch };
+  bookLocs[w] = list;
+  if (!(await saveBookLocs())) { bookLocs[w] = before; }
+  renderBook(); renderTabs(); renderRail();
+}
+function renderTabs() { const n = myLocs().filter(x => !isRetired(x) && !isRejected(x)).length;
   $("bookTab").innerHTML = `📌<span class="tl"> My fields</span>${n ? ` (${n})` : ""}`; }
 function applyModeUi() {
   const book = workMode === "book";
@@ -1891,25 +1870,18 @@ function bindBook() {
     if (e.target.id === "bbWhole") return toggleCart(p, "Whole park");
     if (e.target.id === "bbCart") setView("book");
     if (e.target.id === "bbSave") saveCartActive(); });
+  $("bookPanel").addEventListener("change", e => { if (e.target.id === "mfRej") { mfShowRej = e.target.checked; store.set("vet-mf-rejected", mfShowRej); renderBook(); } });
   $("bookPanel").addEventListener("click", async e => {
-    const del = e.target.closest("[data-bkdel]"), stage = e.target.closest("[data-mfstage]");
-    if (stage) { mfStage = stage.dataset.mfstage; renderBook(); return; }
-    if (e.target.id === "bkSave") return saveCartActive();
-    if (del) { const id = del.dataset.bkdel; if (mfRemove.has(id)) mfRemove.delete(id); else mfRemove.set(id, del.dataset.bkw); renderBook(); return; }
-    if (e.target.id === "mfRmClear") { mfRemove.clear(); renderBook(); return; }
-    if (e.target.id === "mfShowAll") { $("region").value = ""; $("mode").value = "all"; ["region", "mode"].forEach(id => $(id).dispatchEvent(new Event("change"))); return; }
-    if (e.target.id === "mfRmGo") {
-      // One save per booker; anything that fails stays queued.
-      const byBooker = {}; mfRemove.forEach((w, id) => (byBooker[w] ||= []).push(id));
-      let removed = 0;
-      for (const [w, ids] of Object.entries(byBooker)) {
-        if (IS_ADMIN) bookFor = w; else if (w !== whoBooks()) continue;
-        const before = bookLocs[w] || [];
-        bookLocs[w] = before.filter(x => !ids.includes(x.id));
-        if (await saveBookLocs()) { ids.forEach(id => mfRemove.delete(id)); removed += ids.length; } else bookLocs[w] = before;
-      }
-      setStatus(removed ? `Removed ${removed} field${removed === 1 ? "" : "s"}.` : "Nothing was removed.", !removed);
-      renderBook(); renderTabs(); render(); return; }
+    const stage = e.target.closest("[data-mfstage]"); if (stage) { mfStage = stage.dataset.mfstage; renderBook(); return; }
+    if (e.target.id === "mfShowAll") { $("region").value = ""; $("region").dispatchEvent(new Event("change")); return; }
+    const b = e.target.closest("[data-id]");
+    if (b && !b.disabled && !busy) { const { id, w } = b.dataset, x = (bookLocs[w] || []).find(y => y.id === id); if (!x) return;
+      if (b.dataset.mfdec) { const d = b.dataset.mfdec; if (d === decOf(x)) return;
+        return setEntry(w, id, d === "no" ? { decision: "no", status: "cart" } : { decision: d }); }
+      if (b.dataset.mfq) { const n = +b.dataset.mfq; return setEntry(w, id, { quality: x.quality === n ? null : n }); }
+      if ("mfbk" in b.dataset) return setEntry(w, id, isActive(x) ? { status: "cart" }
+        : { status: "active", activated_at: x.activated_at || new Date().toISOString(), ...(x.activated_at ? {} : activatedBy()) });
+    }
     const op = e.target.closest("[data-bkopen]"); if (op) { if (workMode !== "book") setMode("book"); openPark(op.dataset.bkopen); }
   });
   $("modeRate").onclick = () => setMode("rate");
@@ -2117,22 +2089,45 @@ function maskContact(v) {
   return first + (m[2] && first ? " " + m[3].replace(/[^\p{L}]/gu, "").toUpperCase() : "");
 }
 const contactValue = v => { const s = maskContact(v).trim(); return /\s\p{L}$/u.test(s) ? s + "." : s; };
+// The rail beside My fields: every rated park (unrated ones hidden), filtered by decision,
+// space, lights and quality, best first. ＋ saves a park's fields for the booker.
+let railF = { dec: "", fit: "", lights: "", q: "", ...store.get("vet-rail-filter", {}) };
+const RAIL_FILTERS = {
+  dec: ["Any decision", [["top", "★ Top pick"], ["yes", "✓ Shortlist"], ["no", "✕ Rejected"]], (r, v) => r.decision === v],
+  fit: ["Any space", [["multi", "2 × full 7v7"], ["full", "1 × full 7v7 or more"], ["reduced", "3v3 only"]], (r, v) => v === "full" ? r.fit === "full" || r.fit === "multi" : r.fit === v],
+  lights: ["Any lights", [["lit", "💡 Lights"], ["none", "No lights"], ["unknown", "Lights unknown"]],
+    (r, v) => v === "lit" ? r.lights === "full" || r.lights === "training" : v === "none" ? r.lights === "none" : !r.lights || r.lights === "unknown"],
+  q: ["Any quality", [["4", "★ 4+"], ["3", "★ 3+"]], (r, v) => (r.quality || 0) >= +v],
+};
 function renderRail() {
   const reg = $("region").value, mapsOnly = $("mapsOnly").checked;
   const scope = PARKS.filter(x => (!reg || x.region === reg) && (!mapsOnly || x.maps.length) && interestOk(x));
   const done = scope.filter(x => reviews[x.id] && reviews[x.id].decision !== "rating").length;
   $("progress").textContent = `${done} / ${scope.length} reviewed`;
   $("barFill").style.width = scope.length ? (100 * done / scope.length) + "%" : "0";
-  const all = Object.entries(reviews).filter(([id]) => BYID[id]);
-  $("nTop").textContent = all.filter(([, r]) => r.decision === "top").length;
-  $("nYes").textContent = all.filter(([, r]) => r.decision === "yes").length;
-  $("nNo").textContent = all.filter(([, r]) => r.decision === "no").length;
-  const picks = all.filter(([, r]) => r.decision !== "no" && r.decision !== "rating").sort((a, b) => suitScore(b[1]) - suitScore(a[1]) || BYID[a[0]].name.localeCompare(BYID[b[0]].name));
-  $("list").innerHTML = picks.length ? picks.map(([id, r]) => { const pp = BYID[id], st = parkStage(id);
-    return `<div class="pick"><button data-open="${id}"><span class="dot" style="background:${suitColor(r)}"></span><span style="min-width:0"><span class="n">${r.decision === "top" ? "★ " : ""}${esc(pp.name)}</span><span class="m">${esc(pp.region)} · ${suitWord(r).toLowerCase()} · ${esc(FIT_LABEL[r.fit] || r.fit)}${r.quality ? " · " + r.quality + "/5" : ""}${r.lights === "full" || r.lights === "training" ? " · 💡" : ""}</span></span></button>`
-      + `<span class="stage" role="group" aria-label="Stage for ${esc(pp.name)}">${["cart", "active"].map(k => `<button data-stage="${k}" data-park="${id}" class="${st === k ? "on" : ""}" aria-pressed="${st === k}" title="${k === "active" ? "Active: bookable in Facility Booking" : "Cart: chosen, not bookable yet"}${st === k ? " · click again to remove" : ""}">${k === "active" ? "✓ Active" : "🛒 Cart"}</button>`).join("")}</span></div>`; }).join("")
-    : `<p class="help">Shortlisted and top-pick parks collect here, best first.</p>`;
+  const rated = Object.entries(reviews).filter(([id, r]) => BYID[id] && suitScore(r) !== null && (!reg || BYID[id].region === reg));
+  const shown = rated.filter(([, r]) => Object.entries(RAIL_FILTERS).every(([k, [, , ok]]) => !railF[k] || ok(r, railF[k])))
+    .sort((a, b) => suitScore(b[1]) - suitScore(a[1]) || BYID[a[0]].name.localeCompare(BYID[b[0]].name));
+  $("railFilters").innerHTML = Object.entries(RAIL_FILTERS).map(([k, [any, opts]]) => `<select data-rf="${k}" aria-label="${any.replace("Any ", "")}" class="${railF[k] ? "on" : ""}">
+      <option value="">${any}</option>${opts.map(([v, l]) => `<option value="${v}"${railF[k] === v ? " selected" : ""}>${l}</option>`).join("")}</select>`).join("")
+    + `<span class="rf-n">${shown.length} of ${rated.length}</span>`;
+  const DW = { top: "★ Top", yes: "✓ Shortlist", no: "✕ Rejected" };
+  $("list").innerHTML = shown.length ? shown.map(([id, r]) => { const pp = BYID[id], saved = myLocs().filter(x => x.park_id === id && !isRetired(x)), sd = saved.length ? decOf(saved[0]) : null;
+    return `<div class="pick"><button data-open="${id}"><span class="dot" style="background:${suitColor(r)}"></span><span style="min-width:0"><span class="n">${r.decision === "top" ? "★ " : ""}${esc(pp.name)}</span><span class="m">${esc(pp.region)} · ${suitWord(r).toLowerCase()} · ${esc(FIT_LABEL[r.fit] || r.fit || "space not rated")}${r.quality ? " · ★" + r.quality : ""}${r.lights === "full" || r.lights === "training" ? " · 💡" : r.lights === "none" ? " · no lights" : ""}</span></span></button>`
+      + (saved.length ? `<span class="saved ${sd}" title="Saved for ${esc(personFromEmail(whoBooks()))}: ${saved.length} field${saved.length > 1 ? "s" : ""}">${DW[sd]}</span>`
+        : r.decision === "no" ? "" : `<button class="add" data-save="${id}" title="Save this park's fields for ${esc(personFromEmail(whoBooks()))} (${r.decision === "top" ? "★ Top" : "✓ Shortlist"})">＋</button>`) + `</div>`; }).join("")
+    : `<p class="help">${rated.length ? "No rated parks match these filters." : "Parks appear here once they're rated."}</p>`;
   return { scope, done };
+}
+// ＋ in the rail: save a rated park's fields for the booker with the park's decision.
+async function saveParkFields(p) {
+  if (!p) return;
+  const who = whoBooks(), before = [...(bookLocs[who] || [])], r = reviews[p.id];
+  const add = venueEntries(p, "cart", { decision: r?.decision === "top" ? "top" : "yes" }), ids = new Set(add.map(x => x.id));
+  bookLocs[who] = [...before.filter(x => !ids.has(x.id)), ...add];
+  if (!(await saveBookLocs())) { bookLocs[who] = before; return; }
+  setStatus(`Saved ${p.name} for ${who}: ${add.length} field${add.length === 1 ? "" : "s"}.`);
+  renderRail(); renderTabs(); if (view === "book") renderBook();
 }
 function renderCity() {
   const { scope, done } = renderRail();
@@ -2266,14 +2261,6 @@ async function decide(decision) {
   if (ok && fromCity) { focusId = null; setView("city"); setStatus(`Saved ${p.name} — ${suitWord(reviews[p.id]).toLowerCase()}.`); return; }
   render();
 }
-// A decided park's stage among the booker's fields: "active" when any of its fields are
-// active, "cart" when they're only in the cart, null when none are listed.
-function parkStage(id) {
-  const xs = myLocs().filter(x => x.park_id === id && !isRetired(x));
-  return !xs.length ? null : xs.some(isActive) ? "active" : "cart";
-}
-// The summary's Cart / Active toggle: move a park's fields to that stage (adding its rated
-// fields when none are listed); pressing the current stage again removes them.
 // The venue's bookable fields: its saved frisbee groups (council fields grouped on save,
 // multi-field areas included), else its rated fields, else the whole park.
 function venueEntries(p, status, extra = {}) {
@@ -2285,27 +2272,12 @@ function venueEntries(p, status, extra = {}) {
   return (keys.length ? keys : ["Whole park"]).map(key => { const fr = t.fr[key], f = fieldKeys(p).find(x => x.key === key)?.f, c = fr?.lat != null ? [fr.lat, fr.lon] : f?.c || [p.lat, p.lon];
     return { ...base, id: cartId(p, key), field: key, lat: c[0], lon: c[1] }; });
 }
-async function setParkStage(p, stage) {
-  if (!p) return;
-  const who = whoBooks(), before = [...(bookLocs[who] || [])], cur = parkStage(p.id), at = new Date().toISOString();
-  let list;
-  if (cur === stage) list = before.filter(x => x.park_id !== p.id || isRetired(x));
-  else if (cur) list = before.map(x => x.park_id !== p.id || isRetired(x) ? x : stage === "active" ? { ...x, status: "active", activated_at: x.activated_at || at, ...(x.activated_at ? {} : activatedBy()) } : { ...x, status: "cart" });
-  else {
-    const add = venueEntries(p, stage, { decision: reviews[p.id]?.decision }), ids = new Set(add.map(x => x.id));
-    list = [...before.filter(x => !ids.has(x.id)), ...add];
-  }
-  bookLocs[who] = list;
-  if (!(await saveBookLocs())) { bookLocs[who] = before; return; }
-  setStatus(cur === stage ? `Removed ${p.name} from ${who}'s fields.` : stage === "active" ? `${p.name} is active for ${who}: bookable in Facility Booking.` : `${p.name} moved to ${who}'s cart (not bookable yet).`);
-  renderRail(); renderTabs(); if (view === "book") renderBook(); if (view !== "city" && current()?.id === p.id) drawParkFields(p);
-}
-// A decision puts a park's fields in the booker's cart: Top pick or Shortlist adds its rated
-// fields (or the whole park, when it has none rated) to the cart, where saving the cart makes
-// them bookable; fields already active stay active. Reject takes the park's fields off.
+// A decision saves a park's fields for the booker: Top pick or Shortlist adds its rated fields
+// (or the whole park, when it has none rated) with that state, not bookable until 📅 is
+// switched on; fields already bookable stay so. Reject marks the park's fields rejected.
 async function decisionToCart(p, t, decision) {
   const who = whoBooks(), before = [...(bookLocs[who] || [])];
-  let list = before.filter(x => x.park_id !== p.id || decision !== "no");
+  let list = decision === "no" ? before.map(x => x.park_id !== p.id || isRetired(x) ? x : { ...x, decision: "no", status: "cart" }) : before;
   if (decision !== "no") {
     // The venue's groups become its fields; the park's earlier fields that aren't among
     // them are retired (kept for the bookings already on them).
@@ -2319,7 +2291,7 @@ async function decisionToCart(p, t, decision) {
   bookLocs[who] = list;
   if (!(await saveBookLocs())) { bookLocs[who] = before; return; }
   const mine = list.filter(x => x.park_id === p.id && !isRetired(x)), nAct = mine.filter(isActive).length, nCart = mine.length - nAct;
-  setStatus(decision === "no" ? `Rejected ${p.name}: removed from ${who}'s fields.`
+  setStatus(decision === "no" ? `Rejected ${p.name}: its fields are marked rejected for ${who} (not bookable).`
     : `${p.name}: ${nCart} field${nCart === 1 ? "" : "s"} in ${who}'s cart${nAct ? `, ${nAct} already active` : ""} — save the cart to make them bookable.`);
   renderTabs();
 }
@@ -2494,9 +2466,11 @@ function bind() {
     if (view === "park" && !focusId) shownPark = null;
     render(); }));
   $("list").addEventListener("click", e => {
-    const sb = e.target.closest("[data-stage]"); if (sb) { if (!busy) setParkStage(BYID[sb.dataset.park], sb.dataset.stage); return; }
+    const sv = e.target.closest("[data-save]"); if (sv) { if (!busy) saveParkFields(BYID[sv.dataset.save]); return; }
     const b = e.target.closest("[data-open]"); if (b) openPark(b.dataset.open); });
   $("exportBtn").onclick = exportCsv;
+  $("railFilters").addEventListener("change", e => { const k = e.target.dataset.rf; if (!k) return;
+    railF = { ...railF, [k]: e.target.value }; store.set("vet-rail-filter", railF); renderRail(); });
   window.addEventListener("focus", async () => { if (mode === "shared" && !busy) { await loadShared(); if (view === "city") render(); else renderRail(); } });
   // Any click on the opaque plan (except the open-in-new-tab link) puts it away again.
   $("cimgBox").addEventListener("click", e => { if (!e.target.closest("#cimgOpen")) closeCouncilImage(); });

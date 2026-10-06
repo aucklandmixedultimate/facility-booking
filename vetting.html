@@ -27,7 +27,7 @@
           <div class="viewtabs" role="tablist" aria-label="View">
             <button id="cityTab" role="tab" aria-selected="false" title="All of Auckland, coloured by suitability (C)">🗺 Auckland</button>
             <button id="parkTab" role="tab" aria-selected="true" title="One park at a time (C)">🔍 Park</button>
-            <button id="bookTab" role="tab" aria-selected="false" title="My fields: council fields in the cart, active for booking, and their bookings">📌 My fields</button>
+            <button id="bookTab" role="tab" aria-selected="false" title="My fields: saved fields (★ Top / ✓ Shortlist), their quality and whether they're bookable">📌 My fields</button>
           </div>
           <div class="modetabs" role="radiogroup" aria-label="Mode">
             <button id="modeRate" role="radio" aria-checked="true" title="Rate parks and fields (B toggles)">⭐ Rate</button>
@@ -165,12 +165,8 @@
               <div class="booksplit">
               <div class="bookpanel" id="bookPanel" hidden></div>
               <section class="rail" id="railBox" hidden>
-                <h3>Decisions summary</h3>
-                <div class="counts">
-                  <div class="c-top"><b id="nTop">0</b><span>Top</span></div>
-                  <div class="c-yes"><b id="nYes">0</b><span>Shortlist</span></div>
-                  <div class="c-no"><b id="nNo">0</b><span>Rejected</span></div>
-                </div>
+                <h3>Rated parks</h3>
+                <div class="railfilters" id="railFilters"></div>
                 <div class="list" id="list"></div>
                 <div class="railtools"><button id="exportBtn">Download CSV</button></div>
               </section>
