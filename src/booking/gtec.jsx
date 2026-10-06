@@ -308,7 +308,9 @@ export function parseCJRDateTime(dt) {
 export async function fetchCJREvents(year, month) {
   // month is 0-based
   const dateStr = `${year}-${String(month+1).padStart(2,"0")}-01`;
-  const target = `https://www.carltonjuniorsrugby.co.nz/api/v1/calendar/MonthCalendarEvents?organisationId=%2014520&sportId=0&ical=${encodeURIComponent(CJR_ICAL)}&date=${dateStr}`;
+  // The `_` parameter changes every call: some public proxies cache responses, which made a
+  // sync miss entries GTEC had added since (the feed ignores the unknown parameter).
+  const target = `https://www.carltonjuniorsrugby.co.nz/api/v1/calendar/MonthCalendarEvents?organisationId=%2014520&sportId=0&ical=${encodeURIComponent(CJR_ICAL)}&date=${dateStr}&_=${Date.now()}`;
   // Free public CORS proxies time out now and then (HTTP 408), so each attempt is capped at
   // 20 s and the whole list is tried twice, with a short pause, before giving up.
   const proxies = [
