@@ -1,7 +1,17 @@
 import { useState, useRef, useEffect } from "react";
 import { initialsOf } from "../people.js";
-import { CAL_SLOTS, CAL_START, CAL_TOTAL, FACILITIES, FACILITY_TINT, HOUR_H, MONTHS, Modal, REVIEW_STATUSES, S, SLOTS_PER_HOUR, SLOT_H, SLOT_HOURS, STATUS_CAL_COLOR, STATUS_CAL_TEXT, dateKey, emailColor, facColLabel, fmt24, fmtTime, fmtTimeShort, getDaysInMonth, getWeekDates, inActiveVenue, isAdminBooking, isSocialFac, layoutOverlapLanes, parseMismatchNote, todayKey, useMobile, venueFacilities } from "./core.jsx";
+import { CAL_SLOTS, CAL_START, CAL_TOTAL, FACILITIES, FACILITY_TINT, HOUR_H, MONTHS, Modal, REVIEW_STATUSES, S, SLOTS_PER_HOUR, SLOT_H, SLOT_HOURS, STATUS_CAL_COLOR, STATUS_CAL_TEXT, T, dateKey, emailColor, facColLabel, fmt24, fmtTime, fmtTimeShort, getDaysInMonth, getWeekDates, inActiveVenue, isAdminBooking, isSocialFac, layoutOverlapLanes, parseMismatchNote, todayKey, useMobile, venueFacilities } from "./core.jsx";
 import { isClosed } from "../statuses.js";
+import { holidayLabel, loadNzHolidays } from "../holidays.js";
+
+// NZ public holidays for the years shown (synced, cached on the device): date key → holiday.
+function useNzHolidays(years) {
+  const [map, setMap] = useState({}), key = [...new Set(years)].sort().join(",");
+  useEffect(() => { loadNzHolidays(key.split(",").map(Number), setMap); }, [key]);
+  return map;
+}
+// Holiday days: a warm tint behind the day, and its name in small type.
+const HOL_BG = T.warnSoft, HOL_TXT = T.warn;
 export function WeekCalendar({ bookings, onNewBooking, onNewBookingRange, onBookingClick, selectedFacility, cartSourceIds=new Set(), deleteIds=new Set(), cartNewDrafts=[], focusedDate, setFocusedDate, onOpenDay, bookerFilter=new Set(), aliasNames={}, emailAliases={} }) {
   function calAlias(em) {
     if (!em) return "";
@@ -22,6 +32,7 @@ export function WeekCalendar({ bookings, onNewBooking, onNewBookingRange, onBook
 
   const days    = getWeekDates(weekBase);
   const today   = todayKey();
+  const hols    = useNzHolidays(days.map(d => d.getFullYear()));
   const visible = (selectedFacility === "all" ? bookings.filter(b => inActiveVenue(b.facility_id)) : bookings.filter(b => b.facility_id === selectedFacility))
     .filter(b => !isClosed(b.status));
 
@@ -106,12 +117,13 @@ export function WeekCalendar({ bookings, onNewBooking, onNewBookingRange, onBook
           {/* Day headers */}
           <div style={{ display:"flex", marginLeft:axisW }}>
             {days.map(d=>{
-              const dk=dateKey(d), isToday=dk===today;
+              const dk=dateKey(d), isToday=dk===today, hol=hols[dk];
               return (
-                <div key={dk} style={{ flex:1, minWidth:0, textAlign:"center", padding:narrow?"4px 0 6px":"6px 0 10px" }}>
+                <div key={dk} title={hol?holidayLabel(hol):undefined} style={{ flex:1, minWidth:0, textAlign:"center", padding:narrow?"4px 0 6px":"6px 0 10px", background:hol?HOL_BG:undefined, borderRadius:hol?"8px 8px 0 0":undefined }}>
                   <div style={{ fontSize:narrow?10:11, fontWeight:600, color:"#94a3b8", textTransform:"uppercase", letterSpacing:narrow?0:"0.08em" }}>{d.toLocaleDateString("en-NZ",{weekday:"short"}).slice(0, narrow?2:3)}</div>
                   <div onClick={()=>onOpenDay&&onOpenDay(dk)} title="Open day view"
                     style={{ width:narrow?28:32, height:narrow?28:32, borderRadius:"50%", margin:"4px auto 0", background:isToday?"#0f172a":"transparent", display:"flex", alignItems:"center", justifyContent:"center", fontSize:15, fontWeight:isToday?700:500, color:isToday?"#fff":"#0f172a", cursor:onOpenDay?"pointer":"default" }}>{d.getDate()}</div>
+                  {hol&&<div style={{ margin:"2px 2px 0", fontSize:narrow?8:10, lineHeight:1.15, fontWeight:700, color:HOL_TXT, overflow:"hidden", display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical", wordBreak:"break-word" }}>{holidayLabel(hol)}</div>}
                   {onOpenDay&&!narrow&&<button onClick={()=>onOpenDay(dk)} title="Open day view"
                     style={{ marginTop:3, fontSize:9, fontWeight:700, color:"#4f46e5", background:"#eef2ff", border:"1px solid #c7d2fe", borderRadius:6, padding:"1px 6px", cursor:"pointer", fontFamily:"inherit" }}>⤢ day</button>}
                 </div>
@@ -149,7 +161,7 @@ export function WeekCalendar({ bookings, onNewBooking, onNewBookingRange, onBook
                 const dayBkgs=visible.filter(b=>b.date===dk);
                 return (
                   <div key={dk}
-                    style={{ flex:1, minWidth:0, position:"relative", borderLeft:"1px solid #f1f5f9" }}
+                    style={{ flex:1, minWidth:0, position:"relative", borderLeft:"1px solid #f1f5f9", background:hols[dk]?HOL_BG:undefined }}
                   >
                     {/* Hour cells */}
                     {Array.from({length:CAL_TOTAL},(_,i)=>i).map(i=>(
@@ -239,6 +251,7 @@ export function MonthCalendar({ bookings, onBookingClick, onNewBooking, onNewBoo
   const today = todayKey();
 
   const days    = getDaysInMonth(year, month);
+  const hols    = useNzHolidays([year]), isMobile = useMobile();
   const visible = (selectedFacility === "all" ? bookings.filter(b => inActiveVenue(b.facility_id)) : bookings.filter(b => b.facility_id === selectedFacility))
     .filter(b => !isClosed(b.status));
 
@@ -393,7 +406,8 @@ export function MonthCalendar({ bookings, onBookingClick, onNewBooking, onNewBoo
               return a.start_hour-b.start_hour;
             });
           const hasSelected=dayBkgs.some(b=>selIds.has(b.id));
-          const cellBg = hasSelected?"#eef2ff":isToday?"#f0f9ff":"#fff";
+          const hol = hols[dk];
+          const cellBg = hasSelected?"#eef2ff":isToday?"#f0f9ff":hol?HOL_BG:"#fff";
           const cellBorder = hasSelected?"1.5px solid #6366f1":isToday?"1.5px solid #4a90d9":"1px solid #f1f5f9";
           return (
             <div key={dk}
@@ -401,8 +415,12 @@ export function MonthCalendar({ bookings, onBookingClick, onNewBooking, onNewBoo
               onMouseEnter={e=>{ if(dragSel) extendCellDrag(dk); else if(!selMode&&!isPast) e.currentTarget.style.boxShadow="0 2px 8px rgba(0,0,0,0.08)"; }}
               onMouseLeave={e=>e.currentTarget.style.boxShadow="none"}
               style={{ minHeight:80, background:inDragRange?"#e0e7ff":cellBg, border:inDragRange?"1.5px solid #6366f1":cellBorder, borderRadius:6, padding:"4px 4px 3px", cursor:selMode||isPast?"default":"pointer", overflow:"hidden", userSelect:"none" }}>
-              <div onMouseDown={e=>e.stopPropagation()} onClick={e=>{ e.stopPropagation(); onGotoWeek&&onGotoWeek(dk); }} title="Open this day in week view"
-                style={{ fontSize:12, fontWeight:isToday?800:500, color:isToday?"#1d4ed8":isPast?"#cbd5e1":"#0f172a", marginBottom:4, textAlign:"right", cursor:onGotoWeek?"pointer":"default" }}>{d.getDate()}</div>
+              {/* Holiday name beside the date; on a phone (narrow cells) on two lines under it. */}
+              <div style={{ display:"flex", flexDirection:isMobile?"column-reverse":"row", alignItems:isMobile?"stretch":"baseline", gap:isMobile?1:4, marginBottom:4 }} title={hol?holidayLabel(hol):undefined}>
+                {hol&&<span style={{ flex:1, minWidth:0, fontSize:isMobile?8:10, fontWeight:700, color:HOL_TXT, overflow:"hidden", lineHeight:1.2, ...(isMobile?{ display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical", wordBreak:"break-word", hyphens:"auto" }:{ textOverflow:"ellipsis", whiteSpace:"nowrap" }) }}>{holidayLabel(hol)}</span>}
+                <div onMouseDown={e=>e.stopPropagation()} onClick={e=>{ e.stopPropagation(); onGotoWeek&&onGotoWeek(dk); }} title="Open this day in week view"
+                  style={{ marginLeft:"auto", fontSize:12, fontWeight:isToday?800:500, color:isToday?"#1d4ed8":isPast?"#cbd5e1":"#0f172a", textAlign:"right", cursor:onGotoWeek?"pointer":"default" }}>{d.getDate()}</div>
+              </div>
               <div style={{ display:"flex", flexDirection:"column", gap:2 }}>
                 {dayBkgs.slice(0,3).map(b=>{
                   const fac=FACILITIES.find(x=>x.id===b.facility_id);
