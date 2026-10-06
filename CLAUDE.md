@@ -14,6 +14,7 @@ Two apps on GitHub Pages (`/facility-booking/`), one Supabase project:
 - **Council fields** — `vetting.html` → `src/vetting/main.js` (Leaflet, vanilla JS).
 - Shared: `src/actor.js` (who's using a shared login), `src/people.js`, `src/seasons.js`,
   `src/councilSeasons.js`, `src/drive-client.js`, `src/councilMail.js`, `src/statuses.js` (the status model),
+  `src/holidays.js` (NZ public holidays from date.nager.at, Mondayised, cached a week on the device),
   `src/appnav.js` (the Bookings / Council fields switcher in both headers — add a page there).
 
 ## Commands
