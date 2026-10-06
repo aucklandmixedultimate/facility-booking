@@ -148,6 +148,16 @@ export function findMatchingUserBooking(allBookings, ev, facilityIds, gtecLinks=
     if (start_hour + duration <= b.start_hour) return false;
     return true;
   });
+  // The entry names the booker by email but sits at a different time (GTEC entered it wrongly,
+  // e.g. 12:00–1:00 pm for a 6:30 pm session): with nothing of theirs overlapping, link it to the
+  // booker's booking that day on the entry's field (nearest start) so it's flagged as a time
+  // mismatch, instead of becoming another club's block and leaving the booking unanswered.
+  if (detailEmail && !candidates.some(b => canon(b.email) === canon(detailEmail))) {
+    const own = allBookings.filter(b => b.email !== "admin" && (isLive(b.status) || b.status === "clash" || b.invoiced)
+      && b.date === date && canon(b.email) === canon(detailEmail) && facilityIds.includes(b.facility_id))
+      .sort((a, b) => Math.abs(a.start_hour - start_hour) - Math.abs(b.start_hour - start_hour));
+    if (own.length) candidates.push(own[0]);
+  }
   if (!candidates.length) return null;
 
   // Identity dominates (×10) over the time/duration/facility tie-breakers.

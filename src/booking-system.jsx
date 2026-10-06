@@ -92,6 +92,8 @@ export default function App() {
   const [prefill,  setPrefill]  =useState({date:null,startHour:9,duration:1});
   const [toast,    setToast]    =useState(null);
   const [syncingMonth, setSyncingMonth] = useState(false);
+  // Sync-all progress for the header button: { done, total, label, phase } while running.
+  const [syncProgress, setSyncProgress] = useState(null);
   // Synchronous re-entrancy guard for the GTEC sync. The `syncingMonth` state can't
   // gate concurrent runs — a manual click and the on-mount auto-sync (or a double
   // click) both read the old state before React commits the update, so both proceed
@@ -546,7 +548,9 @@ export default function App() {
   async function handleSyncMonth(year, month) {
     setSyncingMonth(true);
     try {
+      setSyncProgress(p => p && { ...p, phase: "Reading GTEC…" });
       const events = await fetchCJREvents(year, month);
+      setSyncProgress(p => p && { ...p, phase: `Matching ${events.length} entr${events.length === 1 ? "y" : "ies"}…` });
       let added = 0, skipped = 0, removed = 0, cpsaConfirmed = 0, cpsaReviewNeeded = 0;
       const addedBookings = []; // snapshots of bookings added this sync (for the expandable log)
       const reviewBookings = []; // user bookings flagged needing review (mismatch) this sync
@@ -709,6 +713,7 @@ export default function App() {
           byDate: { ...Object.fromEntries(Object.entries(prev.byDate).filter(([d]) => !d.startsWith(monthStr))), ...byDate } }));
       }
 
+      setSyncProgress(p => p && { ...p, phase: "Saving…" });
       // Apply the winning match for each booking exactly once.
       for (const { match, gtecSnap, effectiveExact } of bestByBooking.values()) {
         const booking = match.booking;
@@ -946,7 +951,8 @@ export default function App() {
       // Drop months that have aged out of the retention window before re-syncing.
       purgeOldLogs();
       logActivity("cpsa_sync_start", { months: sorted.length });
-      for (const [y,m] of sorted) {
+      for (const [i,[y,m]] of sorted.entries()) {
+        setSyncProgress({ done: i, total: sorted.length, label: `${MONTHS[m].slice(0,3)} ${y}`, phase: "" });
         await handleSyncMonth(y, m);
       }
       try{localStorage.setItem("fb_last_sync_at", String(Date.now()));}catch{ /* ignore */ }
@@ -962,6 +968,7 @@ export default function App() {
       setTab("admin");
     } finally {
       syncRunningRef.current = false;
+      setSyncProgress(null);
     }
   }
 
@@ -2339,9 +2346,16 @@ export default function App() {
                 const syncLabel=minsAgo===null?"Never synced":minsAgo<1?"Just synced":minsAgo<60?`${minsAgo}m ago`:`${Math.floor(minsAgo/60)}h ago`;
                 return(
                   <button onClick={handleSyncAll} disabled={syncingMonth}
-                    title={`Sync all months with GTEC · Last: ${syncLabel}`}
-                    style={S.btn({background:syncingMonth?"#e2e8f0":"#0ea5e9",color:syncingMonth?"#94a3b8":"#fff",fontSize:11,padding:"7px 10px",cursor:syncingMonth?"wait":"pointer",opacity:syncingMonth?0.7:1})}>
-                    {syncingMonth?"⏳":"🔄"}{!isMobile&&(syncingMonth?` Syncing…`:` Sync`)}
+                    title={syncProgress?`Syncing ${syncProgress.label} (${syncProgress.done+1} of ${syncProgress.total})${syncProgress.phase?` — ${syncProgress.phase}`:""}`:`Sync all months with GTEC · Last: ${syncLabel}`}
+                    style={S.btn({background:syncingMonth?"#e2e8f0":"#0ea5e9",color:syncingMonth?"#94a3b8":"#fff",fontSize:11,padding:"7px 10px",cursor:syncingMonth?"wait":"pointer",opacity:syncingMonth&&!syncProgress?0.7:1})}>
+                    {syncProgress ? (
+                      <span style={{display:"inline-flex",flexDirection:"column",gap:3,minWidth:isMobile?44:150,textAlign:"left"}}>
+                        <span style={{whiteSpace:"nowrap",color:"#0f172a"}}>⏳ {isMobile ? `${syncProgress.done+1}/${syncProgress.total}` : `${syncProgress.label} · ${syncProgress.done+1}/${syncProgress.total}${syncProgress.phase?` · ${syncProgress.phase}`:""}`}</span>
+                        <span style={{display:"block",height:4,borderRadius:2,background:"#cbd5e1",overflow:"hidden"}}>
+                          <span style={{display:"block",height:"100%",width:`${Math.round(100*(syncProgress.done+(syncProgress.phase==="Saving…"?0.8:syncProgress.phase.startsWith("Matching")?0.5:0.1))/syncProgress.total)}%`,background:"#0ea5e9",transition:"width .3s"}}/>
+                        </span>
+                      </span>
+                    ) : <>{syncingMonth?"⏳":"🔄"}{!isMobile&&(syncingMonth?` Syncing…`:` Sync`)}</>}
                   </button>
                 );
               })()}
