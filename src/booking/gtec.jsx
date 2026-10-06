@@ -131,7 +131,7 @@ export function gtecTeamKey(eventName) { return stripActivityTokens(extractCPSAT
 export function findMatchingUserBooking(allBookings, ev, facilityIds, gtecLinks={}, emailAliases={}) {
   const date = parseCJRDate(ev.EventStartDate);
   if (!date) return null;
-  const { start_hour, duration } = parseCJRDateTime(ev.EventDateTime);
+  const { start_hour, duration, allDay } = parseCJRDateTime(ev.EventDateTime);
   const team = extractCPSATeam(ev.EventName);
   const teamNorm = normalizeId(team);
   const detailEmail = extractEventDetailsEmail(ev.EventDetails);
@@ -168,10 +168,15 @@ export function findMatchingUserBooking(allBookings, ev, facilityIds, gtecLinks=
 
   // Capture specific inconsistencies (booked → CPSA) so the admin sees what differs.
   const b = best.booking;
-  const reasons = [];
-  if (b.start_hour !== start_hour) reasons.push(`Time: ${fmtTimeShort(b.start_hour)} → ${fmtTimeShort(start_hour)}`);
-  if (b.duration !== duration)     reasons.push(`Dur: ${b.duration}h → ${duration}h`);
-  if (!facilityIds.includes(b.facility_id)) reasons.push(`Field: ${facShort(b.facility_id)} → ${facilityIds.map(facShort).join("/")}`);
+  // An entry with no time holds the field all day, so a booking inside it isn't a time difference.
+  const dimReasons = bk => {
+    const rs = [];
+    if (!allDay && bk.start_hour !== start_hour) rs.push(`Time: ${fmtTimeShort(bk.start_hour)} → ${fmtTimeShort(start_hour)}`);
+    if (!allDay && bk.duration !== duration)     rs.push(`Dur: ${bk.duration}h → ${duration}h`);
+    if (!facilityIds.includes(bk.facility_id)) rs.push(`Field: ${facShort(bk.facility_id)} → ${facilityIds.map(facShort).join("/")}`);
+    return rs;
+  };
+  const reasons = dimReasons(b);
   // Name is only an inconsistency for loosely-identified events — not when the email
   // (or a strong org link) already confirms identity, even if the booking is under an
   // individual member's name.
@@ -192,15 +197,26 @@ export function findMatchingUserBooking(allBookings, ev, facilityIds, gtecLinks=
   // booking against one 6:30–8:30 GTEC entry). The event is matched to the best one; the
   // rest aren't what GTEC holds either, so they're returned as mismatches too (the sync
   // keeps an exact match from another event over these).
-  const also = scored.slice(1).filter(x => x.identityScore >= 3 || (detailEmail && canon(detailEmail) === canon(x.booking.email))).map(x => {
-    const ob = x.booking, rs = [];
-    if (ob.start_hour !== start_hour) rs.push(`Time: ${fmtTimeShort(ob.start_hour)} → ${fmtTimeShort(start_hour)}`);
-    if (ob.duration !== duration)     rs.push(`Dur: ${ob.duration}h → ${duration}h`);
-    if (!facilityIds.includes(ob.facility_id)) rs.push(`Field: ${facShort(ob.facility_id)} → ${facilityIds.map(facShort).join("/")}`);
+  const sameBooker = x => x.identityScore >= 3 || (detailEmail && canon(detailEmail) === canon(x.booking.email));
+  // An entry covering several fields ("Field 2 & 3") matches one of the booker's bookings on
+  // EACH of those fields — each is a match in its own right (exact or with its own
+  // differences), not a booking left over because the entry went to another.
+  const siblingFacs = new Set([b.facility_id]);
+  const siblings = [];
+  for (const x of scored.slice(1)) {
+    const fid = x.booking.facility_id;
+    if (!sameBooker(x) || !facilityIds.includes(fid) || siblingFacs.has(fid)) continue;
+    siblingFacs.add(fid);
+    const rs = dimReasons(x.booking);
+    siblings.push({ booking: x.booking, exact: rs.length === 0 && identityOk, reasons: rs });
+  }
+  const sibIds = new Set(siblings.map(x => x.booking.id));
+  const also = scored.slice(1).filter(x => sameBooker(x) && !sibIds.has(x.booking.id)).map(x => {
+    const rs = dimReasons(x.booking);
     rs.push(`GTEC entry ${fmtTimeShort(start_hour)}–${fmtTimeShort(start_hour + duration)} is matched to another of your bookings`);
-    return { booking: ob, exact: false, reasons: rs };
+    return { booking: x.booking, exact: false, reasons: rs };
   });
-  return { booking: b, exact, reasons, also };
+  return { booking: b, exact, reasons, also, siblings };
 }
 
 // Maps facility mentions in EventName to internal facility IDs
@@ -289,7 +305,8 @@ export function parseCJRTime(t) {
 // even though the field was taken, so evening bookings were neither clashed nor matched
 // against it. 8pm sits inside the calendar grid (which runs to CAL_END, 10pm).
 export const CJR_ALLDAY_START = 8, CJR_ALLDAY_END = 20;
-export const cjrAllDay = () => ({ start_hour: CJR_ALLDAY_START, duration: CJR_ALLDAY_END - CJR_ALLDAY_START });
+// allDay marks the stand-in so the matcher doesn't report its 8am–8pm as a time difference.
+export const cjrAllDay = () => ({ start_hour: CJR_ALLDAY_START, duration: CJR_ALLDAY_END - CJR_ALLDAY_START, allDay: true });
 
 // Parse EventDateTime string for start_hour and duration
 // e.g. "08/06/2026, 6:30 pm to 8:30 pm"  or  "08/06/2026" (no time = all day)
