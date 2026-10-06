@@ -8,6 +8,7 @@ Two apps on GitHub Pages (`/facility-booking/`), one Supabase project:
     email builders, shared UI (`Modal`, `Badge`, `ProviderMenu`, `TableViewToggle`…)
   - `modals.jsx`, `forms.jsx`, `calendar.jsx`, `schedule.jsx` (Grouped view / schedule
     summary, pricing rules), `billingDocs.jsx` (invoice/PO rendering), `councilData.jsx`,
+    `facilityStrip.jsx` (the Week / Month / List facility chips, 📍 Fields menu and Reset),
     `gtec.jsx` (GTEC calendar sync helpers)
   - lazily loaded tabs: `summary.jsx`, `billing.jsx`, `admin.jsx`, `about.jsx`
 - **Council fields** — `vetting.html` → `src/vetting/main.js` (Leaflet, vanilla JS).
