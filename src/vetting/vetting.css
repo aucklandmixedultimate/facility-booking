@@ -230,11 +230,6 @@ kbd{font-family:var(--font-mono);font-size:10px;border:1px solid var(--line);bor
 
 .rail{min-height:0;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:12px;display:flex;flex-direction:column;gap:10px;min-width:0;overflow:hidden}
 .rail h3{font-family:var(--font-display);font-size:20px;margin:0}
-.counts{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
-.counts div{border-radius:10px;padding:6px;text-align:center}
-.counts b{display:block;font-family:var(--font-display);font-size:22px;font-variant-numeric:tabular-nums}
-.counts span{font-size:11px;text-transform:uppercase;letter-spacing:.06em}
-.c-top{background:var(--top-soft);color:var(--top)} .c-yes{background:var(--turf-soft);color:var(--turf)} .c-no{background:var(--reject-soft);color:var(--reject)}
 .list{flex:1;min-height:0;display:flex;flex-direction:column;gap:6px;overflow:auto;overscroll-behavior:contain}
 .list button{display:grid;grid-template-columns:12px minmax(0,1fr);gap:8px;align-items:center;text-align:left;background:none;border:1px solid var(--line);border-radius:10px;padding:6px 8px}
 .list .dot{width:12px;height:12px;border-radius:50%}
@@ -421,11 +416,6 @@ body.viewer .handle .hint,body.viewer .rail .help,body.viewer #fieldBtn,body.vie
 /* Decision summary rows: the park, then its Cart / Active stage toggle */
 .list .pick{display:flex;gap:6px;align-items:stretch}
 .list .pick>button{flex:1;min-width:0}
-.list .stage{display:flex;flex:none;border:1px solid var(--line);border-radius:10px;overflow:hidden}
-.list .stage button{display:block;border:0;border-radius:0;padding:4px 8px;font-size:11px;font-weight:600;color:var(--muted);background:var(--surface);white-space:nowrap}
-.list .stage button+button{border-left:1px solid var(--line)}
-.list .stage button.on[data-stage=cart]{background:#fef3c7;color:#92400e}
-.list .stage button.on[data-stage=active]{background:#dcfce7;color:#166534}
 /* Book view: the active fields / cart and the decisions summary side by side, split by a
    vertical divider (stacked on narrow screens). Elsewhere the wrapper is transparent. */
 .booksplit{display:contents}
@@ -635,7 +625,8 @@ body.aklzoom #field,body.aklzoom #centreWrap,body.aklzoom #fitPop,body.aklzoom .
 .hist-empty{padding:14px 2px;color:var(--muted);font-size:13px}
 .pm-actor{font-size:12px;color:var(--muted,#64748b);margin:-2px 0 6px}
 .hist-acct{opacity:.7}
-/* My fields: every booker's council fields as one compact table */
+/* My fields: the booker's saved fields */
+.bookpanel{container-type:inline-size}
 .bookpanel .mf-head{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .bookpanel .mf-head select{margin-right:auto}
 .bookpanel .mf-head select{padding:5px 8px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);max-width:100%}
@@ -644,47 +635,6 @@ body.aklzoom #field,body.aklzoom #centreWrap,body.aklzoom #fitPop,body.aklzoom .
 .bookpanel .mf-stages button b{font-weight:700;opacity:.6;margin-left:2px}
 .bookpanel .mf-stages button[aria-pressed="true"]{background:var(--turf);border-color:var(--turf);color:#fff}
 .bookpanel .mf-stages button[aria-pressed="true"] b{opacity:.85}
-.bookpanel .mf-go{display:flex;align-items:center;gap:8px;flex-wrap:wrap;border:1px solid var(--line);border-radius:10px;padding:6px 10px;font-size:13px}
-.bookpanel .mf-go span{flex:1}
-.bookpanel .mf-go .primary{border:0;background:var(--turf);color:#fff;border-radius:8px;padding:6px 12px;font-weight:600}
-.bookpanel .mf-wrap{border:1px solid var(--line);border-radius:10px;overflow-x:auto}
-.bookpanel table.mf{width:100%;border-collapse:collapse;font-size:12.5px;text-align:left}
-.bookpanel .mf th{font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:700;padding:6px 8px;background:var(--bg);white-space:nowrap}
-.bookpanel .mf td{padding:6px 8px;border-top:1px solid var(--line);vertical-align:middle}
-.bookpanel .mf .mf-f{display:flex;align-items:center;gap:6px;min-width:0;max-width:30ch}
-.bookpanel .mf .mf-by{color:var(--muted);font-size:11.5px}
-.bookpanel .mf .mf-n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;min-width:0}
-.bookpanel .mf .mf-n .muted{font-weight:400}
-.bookpanel .mf .mf-st{width:8px;height:8px;border-radius:50%;flex-shrink:0;background:#94a3b8}
-.bookpanel .mf .mf-st.cart{background:#f59e0b}.bookpanel .mf .mf-st.active{background:#0f766e}
-.bookpanel .mf .mf-tag{font-size:11px;flex-shrink:0}.bookpanel .mf .mf-tag.priv{color:#6d28d9}
-.bookpanel .mf .mf-d,.bookpanel .mf .mf-r,.bookpanel .mf .mf-w{white-space:nowrap;color:var(--ink)}
-.bookpanel .mf .mf-none{color:var(--muted);opacity:.6}
-.bookpanel .mf .mf-pend{color:#b45309;font-size:11px}
-.bookpanel .mf .mf-a{white-space:nowrap;text-align:right}
-.bookpanel .mf .mf-a button,.bookpanel .mf .mf-a a{border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:6px;padding:2px 7px;font-size:12px;text-decoration:none;margin-left:3px}
-.bookpanel .mf tr.mf-ended{opacity:.65}
-/* Narrow (a phone, or the half-width panel on desktop): each row becomes a small card —
-   field and actions, then the booker, then the four dates labelled. */
-.bookpanel{container-type:inline-size}
-@container (max-width: 860px){
-  .bookpanel table.mf,.bookpanel .mf tbody{display:block}
-  .bookpanel .mf thead{display:none}
-  .bookpanel .mf tr{display:grid;grid-template-columns:repeat(4,minmax(0,1fr)) 92px;gap:2px 6px;padding:7px 8px;border-top:1px solid var(--line)}
-  .bookpanel .mf tr:first-child{border-top:0}
-  .bookpanel .mf td{border:0;padding:0}
-  .bookpanel .mf .mf-f{grid-column:1 / 5;max-width:none}
-  .bookpanel .mf .mf-a{grid-column:5;grid-row:1}
-  .bookpanel .mf .mf-w{grid-column:1 / -1;font-size:11px;color:var(--muted)}
-  .bookpanel .mf .mf-r{grid-column:5;text-align:right}
-  .bookpanel .mf .mf-d{font-size:11.5px}
-  .bookpanel .mf .mf-d::before{content:attr(data-k);display:block;font-size:9.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:700}
-}
-.bookpanel .mf tr.mf-rm td{text-decoration:line-through;opacity:.55}
-.bookpanel .mf tr.mf-rm td.mf-a{text-decoration:none;opacity:1}
-.bookpanel .mf-rmbar{border-color:#fecaca;background:rgba(239,68,68,.06)}
-.bookpanel .mf-go button{border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:8px;padding:6px 12px;font-weight:600}
-.bookpanel .mf-go .danger{border:0;background:#dc2626;color:#fff}
 /* My fields pins on the Auckland map */
 .myfpin{position:relative;width:26px;height:30px;display:flex;align-items:flex-start;justify-content:center;filter:drop-shadow(0 2px 2px rgba(0,0,0,.35))}
 .myfpin span{font-size:22px;line-height:1}
@@ -705,3 +655,40 @@ body.aklzoom #field,body.aklzoom #centreWrap,body.aklzoom #fitPop,body.aklzoom .
 .logopin{position:relative}
 .logopin .litin{right:-3px;bottom:-3px;width:15px;height:15px;border-radius:50%;background:#15211c;border:1.5px solid #fff;font-size:9px;filter:none;z-index:20}
 .toolbar .fitbtn{max-width:14em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* My fields: one row per saved field — name, then state (★ / ✓ / ✕), quality and 📅 bookable. */
+.bookpanel .mf-rej{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--muted);white-space:nowrap;margin-left:auto}
+.bookpanel .mf-rej b{opacity:.7}
+.mfl{list-style:none;margin:0;padding:0;border:1px solid var(--line);border-radius:10px}
+.mfl-r{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;padding:7px 10px;border-top:1px solid var(--line)}
+.mfl-r:first-child{border-top:0}
+.mfl-r.no{opacity:.6}
+.mfl-n{flex:1 1 220px;min-width:min(220px,100%);display:flex;align-items:center;gap:6px}
+.mfl-t{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;font-size:13px;border:0;background:none;padding:0;text-align:left;color:var(--ink);cursor:pointer}
+button.mfl-t:hover{text-decoration:underline}
+.mfl-t .muted{font-weight:400}
+.mfl-w{font-size:11px;color:var(--muted);white-space:nowrap}
+.mf-tag{font-size:11px;flex-shrink:0}.mf-tag.priv{color:#6d28d9}
+.mfl-c{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.mfl-dec{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.mfl-dec button{border:0;background:var(--surface);color:var(--muted);padding:3px 8px;font-size:12px;font-weight:600;white-space:nowrap}
+.mfl-dec button+button{border-left:1px solid var(--line)}
+.mfl-dec button.top[aria-pressed=true]{background:var(--top-soft);color:var(--top)}
+.mfl-dec button.yes[aria-pressed=true]{background:var(--turf-soft);color:var(--turf)}
+.mfl-dec button.no[aria-pressed=true]{background:var(--reject-soft);color:var(--reject)}
+.mfl-q{display:inline-flex}
+.mfl-q button{border:0;background:none;padding:0 1px;font-size:15px;line-height:1;color:var(--line)}
+.mfl-q button.on{color:#f59e0b}.mfl-q button.on.soft{opacity:.45}
+.mfl-bk{border:1px solid var(--line);background:var(--surface);color:var(--muted);border-radius:8px;padding:3px 8px;font-size:12px;font-weight:600;white-space:nowrap}
+.mfl-bk[aria-pressed=true]{background:var(--turf-soft);border-color:var(--turf);color:var(--turf)}
+.mfl-go{font-size:13px;text-decoration:none;color:var(--turf);font-weight:700}
+.mfl button:disabled{cursor:default}
+@container (max-width: 520px){ .mfl .tl{display:none} }
+/* Rated parks rail: filters, then the parks. */
+.railfilters{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.railfilters select{padding:4px 6px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);font-size:12px;max-width:100%}
+.railfilters select.on{border-color:var(--turf);background:var(--turf-soft)}
+.railfilters .rf-n{font-size:11px;color:var(--muted);margin-left:auto}
+.list .pick .saved{flex:none;align-self:center;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;white-space:nowrap}
+.list .pick .saved.top{background:var(--top-soft);color:var(--top)}.list .pick .saved.yes{background:var(--turf-soft);color:var(--turf)}.list .pick .saved.no{background:var(--reject-soft);color:var(--reject)}
+.list .pick button.add{flex:none;display:block;width:32px;padding:0;font-size:16px;font-weight:700;color:var(--turf)}
