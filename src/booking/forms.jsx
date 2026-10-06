@@ -1232,7 +1232,7 @@ function VendorVarianceSection({ booking, onPatch }) {
   );
 }
 
-export function BookingDetail({booking,onEdit,onClose,onCancel,isAdmin,onStatusChange,onPatch,loggedInEmail,allClashes=[],bookers=[],onConvertAdmin,allBookings=[],onShareSlot,onMergeSlot,onUnlinkSlot}) {
+export function BookingDetail({booking,syncFeed=null,onEdit,onClose,onCancel,isAdmin,onStatusChange,onPatch,loggedInEmail,allClashes=[],bookers=[],onConvertAdmin,allBookings=[],onShareSlot,onMergeSlot,onUnlinkSlot}) {
   const f=FACILITIES.find(x=>x.id===booking.facility_id);
   const m=STATUS_META[booking.status]||STATUS_META.pending;
   const isPast = booking.date < todayKey();
@@ -1348,6 +1348,29 @@ export function BookingDetail({booking,onEdit,onClose,onCancel,isAdmin,onStatusC
             </div>
             <div style={{fontSize:11,color:"#0e7490",marginTop:8}}>As held by GTEC at the most recent sync.</div>
           </div>
+        );
+      })()}
+      {syncFeed&&!isAdminBk&&(()=>{
+        // What the last GTEC sync received for this day — explains why a booking was or wasn't
+        // recognised (entry missing from the feed, different time or field, matched elsewhere).
+        const mine = syncFeed.entries.filter(e=>e.matched?.id===booking.id);
+        const others = syncFeed.entries.filter(e=>e.matched?.id!==booking.id).sort((a,b)=>a.start_hour-b.start_hour);
+        const line = (e,i) => (
+          <div key={i} style={{fontSize:12,color:"#0f172a",padding:"3px 0",borderTop:i?"1px solid #e0f2fe":"none"}}>
+            <b>{e.name||"(no name)"}</b> · {fmtTime(e.start_hour)}–{fmtTime(e.start_hour+e.duration)} · {e.facilityIds.map(id=>FACILITIES.find(f=>f.id===id)?.name||id).join(", ")}
+            <span style={{color:"#64748b"}}> — {e.matched ? (e.matched.id===booking.id ? (e.matched.exact?"✓ matched to this booking":`matched to this booking with differences: ${e.matched.reasons.join("; ")}`) : "matched to another booking") : "not matched to any booking"}</span>
+          </div>);
+        return (
+          <details style={{background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:10,padding:"8px 14px"}} open={!mine.length && !["cpsa_confirmed","approved"].includes(booking.status)}>
+            <summary style={{fontSize:12,fontWeight:700,color:"#0369a1",cursor:"pointer"}}>
+              🔎 GTEC feed at the last sync ({new Date(syncFeed.at).toLocaleTimeString("en-NZ",{hour:"numeric",minute:"2-digit"})}): {syncFeed.entries.length} entr{syncFeed.entries.length===1?"y":"ies"} on this day{mine.length?" · matched":""}
+            </summary>
+            <div style={{marginTop:6}}>
+              {syncFeed.entries.length===0
+                ? <div style={{fontSize:12,color:"#475569"}}>The feed had nothing for this day. If GTEC&apos;s calendar shows it, it was added after the feed was read (or the feed was stale) — sync again.</div>
+                : [...mine, ...others].map(line)}
+            </div>
+          </details>
         );
       })()}
       {isAdmin&&!isAdminBk&&onPatch ? <VendorVarianceSection key={booking.id+(booking.system_notes||"")} booking={booking} onPatch={onPatch}/>

@@ -109,6 +109,9 @@ export default function App() {
   const [councilSyncing, setCouncilSyncing] = useState(false);
   const councilOpenCount = Object.values(councilOutcomes).filter(o => o.outcome === "action" || (o.outcome === "confirmed" && !o.allocated)).length;
   useEffect(()=>{ try{ localStorage.setItem("fb_council_sync_log", JSON.stringify(councilSyncLog.slice(0,30))); }catch{ /* ignore */ } }, [councilSyncLog]);
+  // What the last sync received from the GTEC feed, by date (admins see it on a booking's
+  // details): { at, byDate: { "YYYY-MM-DD": [{ name, when, fields, start_hour, duration, facilityIds, matched }] } }.
+  const [syncFeed, setSyncFeed] = useState({ at: null, byDate: {} });
   const [syncResults, setSyncResults] = useState(()=>{
     try{ return JSON.parse(localStorage.getItem("fb_sync_results")||"[]"); }catch{ return []; }
   });
@@ -627,6 +630,20 @@ export default function App() {
           const oRank = 500 - (o.reasons?.length || 0), op = bestByBooking.get(o.booking.id);
           if (!op || oRank > op.rank) bestByBooking.set(o.booking.id, { match: o, gtecSnap, effectiveExact: false, rank: oRank });
         }
+      }
+
+      // Remember what the feed held for each day (shown on bookings' details for admins).
+      {
+        const byDate = {};
+        for (const ev of events) {
+          const date = parseCJRDate(ev.EventStartDate); if (!date) continue;
+          const { start_hour, duration } = parseCJRDateTime(ev.EventDateTime);
+          const facilityIds = mapCJRFacility(ev.EventName || "", ev);
+          const m = findMatchingUserBooking(currentBookings, ev, facilityIds, gtecLinksRef.current, emailAliasesRef.current);
+          (byDate[date] ||= []).push({ name: ev.EventName || "", when: ev.EventDateTime || ev.EventStartDate || "", start_hour, duration, facilityIds,
+            matched: m ? { id: m.booking.id, exact: m.exact, reasons: m.reasons || [] } : null });
+        }
+        setSyncFeed(prev => ({ at: new Date().toISOString(), byDate: { ...Object.fromEntries(Object.entries(prev.byDate).filter(([d]) => !d.startsWith(monthStr))), ...byDate } }));
       }
 
       // Apply the winning match for each booking exactly once.
@@ -2935,7 +2952,7 @@ export default function App() {
 
       {viewing&&(
         <Modal title="Booking Details" onClose={()=>setViewing(null)} side>
-          <BookingDetail booking={viewing} onEdit={()=>openEdit(viewing)} onClose={()=>setViewing(null)} onCancel={()=>queueForRemoval(viewing.id)} isAdmin={isAdmin} onStatusChange={status=>handleStatusChange(viewing,status)} onPatch={handlePatchBooking} loggedInEmail={loggedInEmail} allClashes={allClashes} bookers={knownBookers} onConvertAdmin={handleConvertAdminBooking} allBookings={bookings} onShareSlot={handleShareSlot} onMergeSlot={handleMergeSlots} onUnlinkSlot={handleUnlinkSlot}/>
+          <BookingDetail booking={viewing} syncFeed={isAdmin&&syncFeed.at?{ at: syncFeed.at, entries: syncFeed.byDate[viewing.date]||[] }:null} onEdit={()=>openEdit(viewing)} onClose={()=>setViewing(null)} onCancel={()=>queueForRemoval(viewing.id)} isAdmin={isAdmin} onStatusChange={status=>handleStatusChange(viewing,status)} onPatch={handlePatchBooking} loggedInEmail={loggedInEmail} allClashes={allClashes} bookers={knownBookers} onConvertAdmin={handleConvertAdminBooking} allBookings={bookings} onShareSlot={handleShareSlot} onMergeSlot={handleMergeSlots} onUnlinkSlot={handleUnlinkSlot}/>
         </Modal>
       )}
 
