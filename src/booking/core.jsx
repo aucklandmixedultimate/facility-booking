@@ -579,13 +579,6 @@ export function venueFacilities(keepId) {
   const ks = activeVenueKeys();
   return visibleFacilities().filter(f => f.id === keepId || (!_hiddenFacs.has(f.id) && (ks === ALL_VENUES || ks.includes(venueKeyOf(f)))));
 }
-// The calendars' default options: the default venue (GTEC Cornwall Park) plus the venues of
-// the viewer's own active council / community fields.
-export function defaultVenueSelection() {
-  const ks = [defaultVenueKey()];
-  visibleFacilities().filter(f => f.council && ownsCouncilFacility(f)).forEach(f => { const k = venueKeyOf(f); if (!ks.includes(k)) ks.push(k); });
-  return ks;
-}
 // The booking form picks a facility in three steps: provider → venue (a provider's site) →
 // facility. Every facility the viewer can book is offered (council fields added on the
 // Council fields page included), not just the calendar's current venue. `keepId` keeps a
@@ -694,51 +687,6 @@ export function ProviderMenu({ pids, value, onPick, sites, style, extra = [], fa
         {extra.map(x => <button key={x.value} type="button" role="menuitem" onMouseEnter={() => setHover(null)} onClick={() => pick(x.value)} style={{ ...row(x.value === value), borderTop: "1px solid #f1f5f9" }}><b>{x.label}</b></button>)}
       </div>}
     </div>
-  );
-}
-// A location chip's dropdown: the vendor's locations (GTEC / CPSA: Cornwall Park and Orakei),
-// each with a ✓ when shown; ▸ expands one to its fields, which go in or out of the calendars'
-// field list one at a time.
-export function VenueChipMenu({ label, title, sites, onToggleSite, onToggleFac, style }) {
-  const [open, setOpen] = useState(null), [exp, setExp] = useState(null), ref = useRef(null), btnRef = useRef(null), menuRef = useRef(null);
-  useEffect(() => { if (!open) return;
-    const off = e => { if (!ref.current?.contains(e.target) && !menuRef.current?.contains(e.target)) setOpen(null); };
-    document.addEventListener("mousedown", off); document.addEventListener("touchstart", off);
-    return () => { document.removeEventListener("mousedown", off); document.removeEventListener("touchstart", off); }; }, [open]);
-  const toggleOpen = () => { if (open) { setOpen(null); return; }
-    const r = btnRef.current.getBoundingClientRect();
-    setOpen({ top: r.bottom + 4, left: Math.max(8, Math.min(r.left, window.innerWidth - 268)) });
-    setExp(sites.find(s => s.shown)?.key || null); };
-  const row = { display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left", padding: "7px 12px", border: "none", background: "#fff",
-    cursor: "pointer", fontFamily: "inherit", fontSize: 13, color: "#0f172a", whiteSpace: "nowrap" };
-  const tick = on => <span aria-hidden style={{ width: 16, height: 16, borderRadius: 4, flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 11,
-    border: `1.5px solid ${on ? "#0f172a" : "#cbd5e1"}`, background: on ? "#0f172a" : "#fff", color: "#fff" }}>{on ? "✓" : ""}</span>;
-  return (
-    <span ref={ref} style={{ display: "inline-flex", minWidth: 0, flex: 1 }}>
-      <button ref={btnRef} type="button" aria-haspopup="menu" aria-expanded={!!open} title={title} onClick={toggleOpen}
-        style={{ ...style, display: "inline-flex", alignItems: "center", gap: 4, minWidth: 0, flex: 1, border: "none", background: "none", padding: 0, cursor: "pointer", fontFamily: "inherit", fontSize: "inherit", fontWeight: "inherit", color: "inherit" }}>
-        <span className="facpill-n">{label}</span><span aria-hidden style={{ color: "#64748b", fontSize: 10 }}>▾</span>
-      </button>
-      {open && <div ref={menuRef} role="menu" style={{ position: "fixed", top: open.top, left: open.left, zIndex: 1200, width: 260, maxWidth: "calc(100vw - 16px)",
-        maxHeight: `calc(100vh - ${open.top + 8}px)`, overflowY: "auto", background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, boxShadow: "0 10px 30px rgba(15,23,42,.15)", padding: "4px 0" }}>
-        {sites.map(s => { const n = s.facs.filter(f => f.shown).length, ex = exp === s.key; return (
-          <div key={s.key} style={{ borderTop: "1px solid #f1f5f9" }}>
-            <div style={{ display: "flex", alignItems: "center" }}>
-              <button type="button" role="menuitemcheckbox" aria-checked={s.shown} onClick={() => onToggleSite(s.key)} title={s.shown ? `Stop showing ${s.site}` : `Show every field at ${s.site}`} style={{ ...row, flex: 1, minWidth: 0 }}>
-                {tick(s.shown)}<span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}><b>📍 {s.site}</b>{s.shown && <span style={{ color: "#64748b", fontSize: 11 }}> · {n}/{s.facs.length}</span>}</span>
-              </button>
-              {s.facs.length > 0 && <button type="button" aria-expanded={ex} onClick={() => setExp(ex ? null : s.key)} title={ex ? "Hide its fields" : "Pick its fields"}
-                style={{ ...row, width: "auto", padding: "7px 12px", color: "#64748b" }}>{s.facs.length} {ex ? "▾" : "▸"}</button>}
-            </div>
-            {ex && <div role="group" aria-label={`${s.site} fields`} style={{ borderLeft: "3px solid #e2e8f0", marginLeft: 18 }}>
-              {s.facs.map(f => (
-                <button key={f.id} type="button" role="menuitemcheckbox" aria-checked={f.shown} onClick={() => onToggleFac(f.id)} title={f.name} style={{ ...row, padding: "6px 12px", fontSize: 12 }}>
-                  {tick(f.shown)}<span style={{ width: 8, height: 8, borderRadius: "50%", background: f.color, flexShrink: 0 }}/><span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{f.name}</span>
-                </button>))}
-            </div>}
-          </div>); })}
-      </div>}
-    </span>
   );
 }
 export function ProviderVenuePicker({ facilityId, onPick, small }) {
