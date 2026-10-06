@@ -111,7 +111,7 @@ export default function App() {
   useEffect(()=>{ try{ localStorage.setItem("fb_council_sync_log", JSON.stringify(councilSyncLog.slice(0,30))); }catch{ /* ignore */ } }, [councilSyncLog]);
   // What the last sync received from the GTEC feed, by date (admins see it on a booking's
   // details): { at, byDate: { "YYYY-MM-DD": [{ name, when, fields, start_hour, duration, facilityIds, matched }] } }.
-  const [syncFeed, setSyncFeed] = useState({ at: null, byDate: {} });
+  const [syncFeed, setSyncFeed] = useState({ at: null, months: [], byDate: {} });
   const [syncResults, setSyncResults] = useState(()=>{
     try{ return JSON.parse(localStorage.getItem("fb_sync_results")||"[]"); }catch{ return []; }
   });
@@ -621,6 +621,13 @@ export default function App() {
         const gtecSnap = { name: ev.EventName || "", date, start_hour, duration, facilityIds };
         const prev = bestByBooking.get(match.booking.id);
         if (!prev || rank > prev.rank) bestByBooking.set(match.booking.id, { match, gtecSnap, effectiveExact, rank });
+        // The same entry's other fields ("Field 2 & 3") match the booker's booking on each.
+        for (const sib of match.siblings || []) {
+          matchedUserIds.add(sib.booking.id);
+          const sConfirmed = parseCpsaResolution(sib.booking.system_notes)?.resolution === "confirmed";
+          const sExact = sib.exact || sConfirmed, sRank = (sExact ? 2 : 1) * 1000 - (sib.reasons?.length || 0), sp = bestByBooking.get(sib.booking.id);
+          if (!sp || sRank > sp.rank) bestByBooking.set(sib.booking.id, { match: sib, gtecSnap, effectiveExact: sExact, rank: sRank });
+        }
         // Other bookings by the same booker this event overlaps: mismatches, ranked below any
         // direct match (so an exact match from another event still wins). A booking the
         // admin confirmed stays confirmed.
@@ -637,13 +644,14 @@ export default function App() {
         const byDate = {};
         for (const ev of events) {
           const date = parseCJRDate(ev.EventStartDate); if (!date) continue;
-          const { start_hour, duration } = parseCJRDateTime(ev.EventDateTime);
+          const { start_hour, duration, allDay } = parseCJRDateTime(ev.EventDateTime);
           const facilityIds = mapCJRFacility(ev.EventName || "", ev);
           const m = findMatchingUserBooking(currentBookings, ev, facilityIds, gtecLinksRef.current, emailAliasesRef.current);
-          (byDate[date] ||= []).push({ name: ev.EventName || "", when: ev.EventDateTime || ev.EventStartDate || "", start_hour, duration, facilityIds,
+          (byDate[date] ||= []).push({ name: ev.EventName || "", when: ev.EventDateTime || ev.EventStartDate || "", start_hour, duration, allDay: !!allDay, facilityIds,
             matched: m ? { id: m.booking.id, exact: m.exact, reasons: m.reasons || [] } : null });
         }
-        setSyncFeed(prev => ({ at: new Date().toISOString(), byDate: { ...Object.fromEntries(Object.entries(prev.byDate).filter(([d]) => !d.startsWith(monthStr))), ...byDate } }));
+        setSyncFeed(prev => ({ at: new Date().toISOString(), months: [...new Set([...(prev.months || []), monthStr])],
+          byDate: { ...Object.fromEntries(Object.entries(prev.byDate).filter(([d]) => !d.startsWith(monthStr))), ...byDate } }));
       }
 
       // Apply the winning match for each booking exactly once.
@@ -2674,7 +2682,7 @@ export default function App() {
         {tab==="about"&&<div style={{padding:"8px 0"}}><Suspense fallback={<TabLoading/>}><AboutTab/></Suspense></div>}
         {tab==="allocation"&&isAdmin&&<div style={S.card}><Suspense fallback={<TabLoading/>}><CouncilAllocationTab outcomes={councilOutcomes} bookings={bookings} syncing={councilSyncing} syncLog={councilSyncLog} onSync={handleCouncilMailSync} onSaveOutcomes={saveCouncilOutcomes} onBulkStatusChange={handleBulkStatusChange} onQueueNotifications={queueNotifications} onLinkApp={handleLinkCouncilApp} aliasNames={aliasNames} loggedInEmail={loggedInEmail}/></Suspense></div>}
         {tab==="admin"&&isAdmin&&<div style={S.card}>
-          {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<Suspense fallback={<TabLoading/>}><AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onView={setViewing} onQueueDelete={queueForRemovalSilent} clashes={allClashes} deleteIds={new Set(deleteQueue.map(b=>b.id))} facilityRates={facilityRates} onUpdateFacilityRate={updateFacilityRate} onResolveOldUnapproved={handleResolveOldUnapproved} onReassign={handleBulkReassign} bookers={knownBookers} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onSyncDB={handleSyncDB} onBulkApply={handleBulkApply} onSaveMismatch={handleSaveMismatch} onInformCpsa={setInformCpsaFor} onRequestRoom={setRoomRequestFor} onQueueNotifications={queueNotifications} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} onLinkClash={handleLinkClashToGtec} loggedInEmail={loggedInEmail} syncResults={syncResults} onClearSyncResults={()=>setSyncResults([])} showSyncResults={showSyncPanel} onToggleSyncResults={()=>setShowSyncPanel(v=>!v)} bookerFilter={listBookerFilter} onToggleBooker={toggleBooker} onSetBookerFilter={setListBookerFilter} aliasNames={aliasNames} emailAliases={emailAliases} pricingConditions={pricingConditions} onAddPricingCondition={addPricingCondition} onUpdatePricingCondition={updatePricingCondition} onRemovePricingCondition={removePricingCondition} cpsaDeleteLog={cpsaDeleteLog} onClearDeleteLogEntry={id=>setCpsaDeleteLog(prev=>prev.filter(e=>e.id!==id))} onClearDeleteLog={()=>setCpsaDeleteLog([])} onSendToCouncil={handleSendToCouncil}/></Suspense>}
+          {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<Suspense fallback={<TabLoading/>}><AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onView={setViewing} onQueueDelete={queueForRemovalSilent} clashes={allClashes} deleteIds={new Set(deleteQueue.map(b=>b.id))} facilityRates={facilityRates} onUpdateFacilityRate={updateFacilityRate} onResolveOldUnapproved={handleResolveOldUnapproved} onReassign={handleBulkReassign} bookers={knownBookers} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onSyncDB={handleSyncDB} onBulkApply={handleBulkApply} onSaveMismatch={handleSaveMismatch} onInformCpsa={setInformCpsaFor} onRequestRoom={setRoomRequestFor} onQueueNotifications={queueNotifications} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} onLinkClash={handleLinkClashToGtec} loggedInEmail={loggedInEmail} syncResults={syncResults} onClearSyncResults={()=>setSyncResults([])} showSyncResults={showSyncPanel} onToggleSyncResults={()=>setShowSyncPanel(v=>!v)} bookerFilter={listBookerFilter} onToggleBooker={toggleBooker} onSetBookerFilter={setListBookerFilter} aliasNames={aliasNames} emailAliases={emailAliases} pricingConditions={pricingConditions} onAddPricingCondition={addPricingCondition} onUpdatePricingCondition={updatePricingCondition} onRemovePricingCondition={removePricingCondition} cpsaDeleteLog={cpsaDeleteLog} onClearDeleteLogEntry={id=>setCpsaDeleteLog(prev=>prev.filter(e=>e.id!==id))} onClearDeleteLog={()=>setCpsaDeleteLog([])} syncFeed={syncFeed} onSendToCouncil={handleSendToCouncil}/></Suspense>}
         </div>}
       </div>
 
