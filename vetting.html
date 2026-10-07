@@ -8,12 +8,12 @@
     <title>Council / Community Fields</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap">
-    <script type="module" crossorigin src="/facility-booking/assets/vetting-C-PWYjyt.js"></script>
+    <script type="module" crossorigin src="/facility-booking/assets/vetting-uNX-Kaix.js"></script>
     <link rel="modulepreload" crossorigin href="/facility-booking/assets/appnav-B4wTRebd.js">
     <link rel="modulepreload" crossorigin href="/facility-booking/assets/_commonjsHelpers-Cpj98o6Y.js">
     <link rel="modulepreload" crossorigin href="/facility-booking/assets/councilSeasons-PuEG0kll.js">
     <link rel="stylesheet" crossorigin href="/facility-booking/assets/appnav-DuensfJ6.css">
-    <link rel="stylesheet" crossorigin href="/facility-booking/assets/vetting--EszXw00.css">
+    <link rel="stylesheet" crossorigin href="/facility-booking/assets/vetting-DsA0Ii5T.css">
   </head>
   <body class="booting">
     <div class="wrap">
@@ -172,6 +172,18 @@
               <div class="bookpanel" id="bookPanel" hidden></div>
               <section class="rail" id="railBox" hidden>
                 <h3>Rated parks</h3>
+                <div class="rf-top">
+                  <input type="search" id="railQ" placeholder="Search parks, regions, clubs" aria-label="Search rated parks">
+                  <select id="railSort" aria-label="Sort rated parks">
+                    <option value="best">Best first</option>
+                    <option value="quality">Quality</option>
+                    <option value="space">Most space</option>
+                    <option value="recent">Recently rated</option>
+                    <option value="name">Name A–Z</option>
+                    <option value="region">By region</option>
+                  </select>
+                  <button type="button" id="railFBtn" aria-expanded="false" aria-controls="railFilters">Filters</button>
+                </div>
                 <div class="railfilters" id="railFilters"></div>
                 <div class="list" id="list"></div>
                 <div class="railtools"><button id="exportBtn">Download CSV</button></div>
