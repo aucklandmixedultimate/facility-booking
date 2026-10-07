@@ -377,7 +377,7 @@ alter table public.field_flags add column if not exists contact text not null de
 alter table public.field_flags add column if not exists website text not null default '';
 alter table public.field_flags add column if not exists details text not null default '';
 
--- Everyone signed in reads the reviews and provider flags (admins still do the writing).
+-- Everyone signed in reads the reviews and provider flags (writes: see v5 below).
 drop policy if exists "field_reviews admin select" on public.field_reviews;
 drop policy if exists "field_reviews select authenticated" on public.field_reviews;
 create policy "field_reviews select authenticated" on public.field_reviews
@@ -386,6 +386,19 @@ create policy "field_reviews select authenticated" on public.field_reviews
 drop policy if exists "field_flags select authenticated" on public.field_flags;
 create policy "field_flags select authenticated" on public.field_flags
   for select to authenticated using (true);
+
+-- (v5) Every signed-in booker rates parks the same way admins do: places and rates frisbee
+-- fields, decides and amends vendors. Each change is logged in vetting_history, where admins
+-- can reject it (restoring the earlier value). Deleting a review stays admin-only.
+drop policy if exists "field_reviews insert authenticated" on public.field_reviews;
+create policy "field_reviews insert authenticated" on public.field_reviews
+  for insert to authenticated with check (true);
+drop policy if exists "field_reviews update authenticated" on public.field_reviews;
+create policy "field_reviews update authenticated" on public.field_reviews
+  for update to authenticated using (true) with check (true);
+drop policy if exists "field_flags write authenticated" on public.field_flags;
+create policy "field_flags write authenticated" on public.field_flags
+  for all to authenticated using (true) with check (true);
 
 -- Crowd quality ratings: everyone signed in gives each park 1–5 stars.
 create table if not exists public.field_ratings (
@@ -495,7 +508,7 @@ revoke all on function public.settings_merge(text, jsonb, text[]) from public, a
 grant execute on function public.settings_merge(text, jsonb, text[]) to authenticated;
 
 -- ── Version stamp ───────────────────────────────────────────────────────────────
-insert into public.schema_version (id, version, applied_at) values (1, 4, now())
+insert into public.schema_version (id, version, applied_at) values (1, 5, now())
 on conflict (id) do update set version = excluded.version, applied_at = now();
 
 -- ── 6. Making someone an admin ──────────────────────────────────────────────────

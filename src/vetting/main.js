@@ -88,10 +88,13 @@ const interestsSet = () => interests.regions.length > 0 || !interests.council ||
 let cursor = 0, busy = false;
 let dims = store.get("vet-field-dims", WFDF);
 let fieldOn = store.get("vet-field-on", true);
+// The Field button cycles: "on" (the live field and the frisbee fields) → "council" (council
+// outlines only) → "off" (no live field; frisbee fields still outlined).
+let fieldMode = store.get("vet-field-mode", fieldOn ? "on" : "off");
 let view = store.get("vet-view", "city");   // "city" | "park" | "book" (the cart)
 // Admins rate and book for anyone; other signed-in bookers see the ratings and book for themselves.
 let IS_ADMIN = true;
-let workMode = store.get("vet-work-mode", "rate");   // "rate" | "book": what clicking a park's field areas does
+let workMode = "rate";   // "rate" | "book": what clicking a park's field areas does
 let focusId = null;                          // park opened from the Auckland map (overrides the queue)
 let focusFrom = null;                        // "city" (opened from the map) or "back" (the Back button)
 const visited = [];                          // parks shown in park view, for Back
@@ -195,8 +198,9 @@ async function save(id, rev) {
     const { error } = await q;
     if (error) {
       const old = /fit_check/i.test(error.message || ""), dec = /decision_check/i.test(error.message || "");
+      const rls = !IS_ADMIN && /row-level security|permission|policy/i.test(error.message || "");
       setStatus(old || dec ? `Saving ${dec ? "field ratings before a decision" : "\"2 × full 7v7\""} needs supabase-setup.sql — run it in the Supabase SQL editor.`
-                    : "Couldn't save that decision (" + error.message + "). Try again.", true);
+                    : rls ? "Couldn't save: rating parks needs the updated supabase-setup.sql (v5). Ask an AMUA admin to run it." : "Couldn't save that decision (" + error.message + "). Try again.", true);
       return false;
     }
   }
@@ -986,10 +990,12 @@ function drawParkFields(p) {
     L.polygon(f.p, { pane: "fieldsPane", fill: true, fillColor: fc || (dia ? "#f97316" : "#ffffff"), fillOpacity: fc ? 0.18 : dia ? 0.12 : 0.02,
       color: dia ? "#f97316" : fc || "#ffffff", weight: dia ? 2 : 1.2, dashArray: "4 4", opacity: 0.85, bubblingMouseEvents: false })
       .bindTooltip(`${dia ? "⚾ " : ""}${esc(key)}${dia ? " — pitching mound / infield: may be unsuitable for frisbee in summer" : ""}${g ? ` · in ${esc(g.frisbee.join(" + "))}${g.cap > 1 ? ` (${g.cap} field areas)` : ""}` : ""} — click to place a frisbee field here`, { className: "parktip", sticky: true })
-      .on("click", () => { if (rotating) return lockField(); placeOnCouncil(p, f); })
+      .on("click", () => { if (rotating) return lockField(); if (fieldMode !== "on") setFieldMode("on"); placeOnCouncil(p, f); })
       .addTo(parkFieldsLayer);
   });
-  // Saved frisbee fields: their outlines, coloured by fit; click one to edit it.
+  // Saved frisbee fields: their outlines, coloured by fit; click one to edit it. (Not in
+  // the Field button's council-only setting.)
+  if (fieldMode === "council") return;
   Object.values(t.fr).filter(x => x.lat != null).forEach(fr => {
     const sel = t.sel === fr.name, fc = rated(fr) && FIT_COLOR[fr.fit];
     if (sel && !rotating) return;   // the live field is drawn on top
@@ -1170,6 +1176,32 @@ function setRotating(on) {
   if (on) $("fitPop").hidden = true;
   sizeField(); renderCentre(); updateActions();
 }
+const FIELD_MODES = { on: ["Field", "Showing the frisbee field and frisbee fields · click for council outlines only (T)"],
+  council: ["Council", "Showing council outlines only · click to hide the field (T)"], off: ["No field", "Field hidden · click to show it (T)"] };
+function setFieldMode(m, redraw = true) {
+  fieldMode = FIELD_MODES[m] ? m : "on"; store.set("vet-field-mode", fieldMode);
+  const [label, title] = FIELD_MODES[fieldMode], b = $("fieldBtn");
+  b.textContent = label; b.title = title; b.dataset.mode = fieldMode;
+  showField(fieldMode === "on");
+  // Redraw only once the park map is showing (Leaflet can't draw shapes before its first view).
+  const p = redraw && current(); if (p && view === "park" && map?._loaded) drawParkFields(p);
+}
+// The info area under the park map is never taller than its rows down to and including
+// Notes; anything below (vendor box, warnings, links) scrolls inside it, so the map keeps
+// its room. Re-measured whenever those rows change size.
+function capInfo() {
+  const info = $("info"), notes = info.querySelector(".tags2");
+  if (info.hidden || !notes) return;
+  info.style.maxHeight = "none";
+  const h = notes.getBoundingClientRect().bottom - info.getBoundingClientRect().top + parseFloat(getComputedStyle(info).paddingBottom || 0);
+  info.style.maxHeight = h > 0 ? Math.ceil(h) + "px" : "";
+}
+function watchInfo() {
+  const ro = typeof ResizeObserver === "function" ? new ResizeObserver(() => capInfo()) : null;
+  ["info"].forEach(id => { const el = $(id); el.querySelectorAll(".tags, .amendrow, .tags2").forEach(x => ro?.observe(x)); });
+  window.addEventListener("resize", capInfo);
+}
+const nextFieldMode = () => setFieldMode({ on: "council", council: "off", off: "on" }[fieldMode]);
 function showField(on) {
   fieldOn = on; store.set("vet-field-on", on);
   $("field").hidden = !on; $("centreWrap").hidden = !on; $("fieldBtn").setAttribute("aria-pressed", String(on));
@@ -1221,11 +1253,11 @@ function previewFields(p) {
 
   // Tools for the selected field: undo, move (unlock), remove.
   const fr = t.sel && t.fr[t.sel];
-  $("fbTools").hidden = !IS_ADMIN || !(fr?.lat != null || edits[p.id]?.length);
+  $("fbTools").hidden = !(fr?.lat != null || edits[p.id]?.length);
   $("fbUndo").disabled = !edits[p.id]?.length;
   $("fbMove").hidden = $("fbRemove").hidden = !(fr?.lat != null);
   renderAlign(p);
-  $("saveNextBtn").hidden = !IS_ADMIN || !(curRating(t)?.fit && curRating(t).fit !== "unknown") || moved;
+  $("saveNextBtn").hidden = !(curRating(t)?.fit && curRating(t).fit !== "unknown") || moved;
 }
 function afterMove() {
   const p = current(); if (!p) return;
@@ -1840,7 +1872,7 @@ function renderBook() {
             ${d === "no" ? "" : `<button ${at} data-mfbk class="mfl-bk" aria-pressed="${isActive(x)}" title="${isActive(x) ? "Bookable in Facility Booking · click to stop offering it" : "Not bookable yet · click to offer it in Facility Booking"}"${ed ? "" : " disabled"}>📅<span class="tl"> ${isActive(x) ? "Bookable" : "Book"}</span></button>`}
             ${isActive(x) ? `<a class="mfl-go" href="${venueLink(prov(x), x.park)}" target="_blank" rel="noopener" title="Book dates in Facility Booking">↗</a>` : ""}
           </div></li>`; }).join("")}</ul>`
-    : `<p class="muted">${rows.length ? "Nothing here." : mfWho === me ? (IS_ADMIN ? "No fields yet. ★ Top pick or ✓ Shortlist a park and its rated fields are saved here." : "No fields yet. In 📅 Book mode, open a park and tap its field areas to save them.") : "No fields."}</p>`}`;
+    : `<p class="muted">${rows.length ? "Nothing here." : mfWho === me ? "No fields yet. Open a park, place and rate its frisbee fields, then ★ Top pick or ✓ Shortlist it: its fields are saved here." : "No fields."}</p>`}`;
 }
 // Quality is the park's global rating: the stars show everyone's average (count beside it);
 // clicking gives your own 1–5 rating (click it again to take it back).
@@ -1871,9 +1903,9 @@ function applyModeUi() {
   if (book) $("fitPop").hidden = true;
 }
 function setMode(m) {
-  // Two ways into the cart: admins decide (top pick / shortlist carts the park's rated
-  // fields); bookers, who don't rate, pick fields in Book mode.
-  m = IS_ADMIN ? "rate" : "book";
+  // One way into My fields for everyone: place and rate frisbee fields, then decide (they
+  // roll up to council areas on save). Book mode (picking council areas) is retired.
+  m = "rate";
   workMode = m; store.set("vet-work-mode", m); applyModeUi();
   const p = current(); if (p && view === "park") { drawParkFields(p); drawLights(p); }
   render();
@@ -1910,7 +1942,7 @@ function bindBook() {
 // The decision buttons, or (in fit mode) the fit buttons in their places.
 function updateActions() {
   const p = current(), t = p && tagsFor(p);
-  const on = !!(fitArmed && !rotating && t?.sel && IS_ADMIN && workMode !== "book" && view === "park");
+  const on = !!(fitArmed && !rotating && t?.sel && workMode !== "book" && view === "park");
   $("actions").classList.toggle("fitmode", on);
 }
 function renderTags(p) {
@@ -2394,7 +2426,7 @@ async function saveAndNext() {
 }
 // Field configuration changed since the last save (each edit pushes an undo snapshot; notes don't).
 function hasUnsaved(p) {
-  if (!IS_ADMIN || !p || !draft[p.id]) return false;
+  if (!p || !draft[p.id]) return false;
   return (edits[p.id]?.length || 0) !== (savedDepth[p.id] || 0) || (draft[p.id].notes || "").trim() !== (reviews[p.id]?.notes || "").trim();
 }
 function askUnsaved(p) {
@@ -2427,7 +2459,7 @@ function bind() {
       const sm = document.querySelector(".sb-map"); if (sm) sm.textContent = (seasonPick === "winter" ? "❄ Winter" : "☀ Summer") + " maps"; setStatus(`Showing ${seasonPick} council maps${seasonPick === COUNCIL_NOW.mapSeason ? " (the current season)" : ""}.`); return; }
     if (t && t.tagName === "BUTTON") { snap(p); const d = tagsFor(p), k = t.dataset.tag, v = k === "quality" ? +t.dataset.val : t.dataset.val;
       if (k === "quality") { const nv = (ratings[p.id]?.mine || (ratingsShared ? 0 : d.quality)) === v ? 0 : v;
-        if (IS_ADMIN) d.quality = nv;
+        d.quality = nv;
         setRating(p.id, nv).then(() => renderTags(p)); }
       renderTags(p); }
   });
@@ -2477,7 +2509,7 @@ function bind() {
   $("fbAlign").onclick = e => { e.stopPropagation(); const p = current(); if (p) askAlign(p); };
   $("fbRemove").onclick = e => { e.stopPropagation(); const p = current(); if (p) removeField(p); };
   $("helpBtn").onclick = () => { const el = $("helpPanel"); el.hidden = !el.hidden; $("helpBtn").setAttribute("aria-expanded", String(!el.hidden)); };
-  $("fieldBtn").onclick = () => showField(!fieldOn);
+  $("fieldBtn").onclick = nextFieldMode;
   bindDispenser();
   $("clubFlagBtn").onclick = () => { const p = current(); if (!p) return;
     amendFor = amendFor === p.id ? null : p.id; renderFlag(p); if (amendFor) $("clubIn").focus(); };
@@ -2549,7 +2581,6 @@ function bind() {
     if (!$("cimgBox").hidden && e.key === "Escape") return closeCouncilImage();
     if ($("saveDlg").open || $("unsavedDlg").open || e.target.matches("input, textarea, select")) return;
     const p = current();
-    if (!IS_ADMIN && !/^(Escape|c|C)$/.test(e.key)) return;   // bookers: no rating keys
     if (e.key === "Escape") { if (document.body.classList.contains("mapfull")) { setFullMap(false); return; } if (infoOpenFor) { infoOpenFor = null; render(); return; } if (rotating) setRotating(false); $("sizePanel").hidden = true; $("helpPanel").hidden = true; $("fitPop").hidden = true; if (p && tagsFor(p).sel) selectField(p, null); return; }
     if (/^[cC]$/.test(e.key)) { focusId = null; setView(view === "city" ? "park" : "city"); return; }
     if (/^[bB]$/.test(e.key)) { setMode(workMode === "book" ? "rate" : "book"); return; }
@@ -2565,7 +2596,7 @@ function bind() {
     else if (e.key === "Enter" && fieldOn && !e.target.closest("button")) { e.preventDefault(); $("centreBtn").click(); }
     else if (/^[sS]$/.test(e.key)) skip();
     else if (/^[zZ]$/.test(e.key)) editUndo();
-    else if (/^[tT]$/.test(e.key)) showField(!fieldOn);
+    else if (/^[tT]$/.test(e.key)) nextFieldMode();
     else if (e.key === "0") $("fitBtn").click();
     else if (/^[rR]$/.test(e.key)) { angle = (angle + 15) % 360; sizeField(); afterMove(); }
     else if (p && /^[1-5]$/.test(e.key)) { tagsFor(p).quality = +e.key; setRating(p.id, +e.key).then(() => renderTags(p)); renderTags(p); }
@@ -2680,17 +2711,15 @@ async function start() {
     if (!(await ensureActor())) return;
     renderProfile();
     await loadShared();
-    if (!IS_ADMIN) {
-      workMode = "book"; document.body.classList.add("viewer");
-      setStatus("Pick a park, then click its field areas to add them to your cart. They show up in your booking site locations.");
-    }
+    // Everyone signed in rates and places fields the same way; admins also moderate
+    // (vetting history, relationships, council-only, map alignment).
   } else {
     reviews = store.get("vet-reviews", {}); flags = store.get("vet-flags", {});
     setStatus("Demo mode (no Supabase configured): decisions are kept in this browser.", true);
   }
   $("app").hidden = false; renderSeasonBar();
   await loadBookLocs(); await loadActivity(); await loadViews(); await loadRatings(); await loadHistory(); await loadOffsets(); await loadCouncilOnly(); await loadRelations(); await syncCartWorkflows();
-  initMap(); drawField(); showField(fieldOn); renderLegend(); bind();
+  initMap(); drawField(); setFieldMode(fieldMode, false); renderLegend(); bind(); watchInfo();
   setView(view === "park" || view === "book" ? view : "city", { refit: true });
   // The header controls stay hidden (body.booting) until sign-in, role and mode are known,
   // so they appear once, fully set, instead of flashing their defaults first.
