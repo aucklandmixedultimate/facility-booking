@@ -335,19 +335,25 @@ async function openHistory() {
   dlg.showModal();
 }
 
-// Overall suitability, 0 (rejected) … 1 (ideal); null when not rated yet.
-function suitScore(r) {
+// A park's quality is global: the average of everyone's 1–5 ratings (field_ratings), else
+// the reviewer's own quality from before crowd ratings existed.
+const qualityOf = (id, r = reviews[id]) => (id && crowdAvg(id)) ?? (r?.quality || null);
+const qText = q => q ? (Math.round(q * 10) / 10).toString() : "";
+// Overall suitability, 0 (unusable) … 1 (ideal); null when not rated yet. Rejecting is a
+// per-profile choice (the booker's saved fields), so a reviewer's Reject doesn't zero it.
+function suitScore(r, id) {
   if (!r || r.decision === "rating") return null;
-  if (r.decision === "no") return 0;
-  let s = r.quality ? r.quality / 5 : 0.5;
+  if (r.fit === "no") return 0;
+  const q = qualityOf(id, r);
+  let s = q ? q / 5 : 0.5;
   s += { multi: 0.2, full: 0.1, reduced: -0.15, no: -0.3 }[r.fit] || 0;
   if (r.lights === "full" || r.lights === "training") s += 0.1;
   if (r.decision === "top") s += 0.15;
   return Math.max(0.05, Math.min(1, s));
 }
 const suitHue = s => Math.round(15 + s * 115);
-function suitColor(r) { const s = suitScore(r); return s === null ? "#8a958f" : s === 0 ? "#b3372d" : `hsl(${suitHue(s)} 72% 42%)`; }
-function suitWord(r) { const s = suitScore(r); return s === null ? (r?.decision === "rating" ? "Rating in progress" : "Not rated") : s === 0 ? "Rejected" : s >= 0.85 ? "Excellent" : s >= 0.65 ? "Good" : s >= 0.45 ? "Fair" : "Poor"; }
+function suitColor(r, id) { const s = suitScore(r, id); return s === null ? "#8a958f" : s === 0 ? "#b3372d" : `hsl(${suitHue(s)} 72% 42%)`; }
+function suitWord(r, id) { const s = suitScore(r, id); return s === null ? (r?.decision === "rating" ? "Rating in progress" : "Not rated") : s === 0 ? "Unusable" : s >= 0.85 ? "Excellent" : s >= 0.65 ? "Good" : s >= 0.45 ? "Fair" : "Poor"; }
 function parkLatLng(p) {
   const pl = reviews[p.id]?.placement;
   if (pl?.lat != null) return [pl.lat, pl.lon];
@@ -1370,7 +1376,7 @@ function buildCity() {
   PARKS.forEach(p => {
     if ((reg && p.region !== reg) || !interestOk(p)) return;
     const ll = parkLatLng(p); if (!ll) return;
-    const r = reviews[p.id], col = suitColor(r), top = r?.decision === "top", isCur = view === "city" && cur?.id === p.id && !!focusId;
+    const r = reviews[p.id], col = rejectedForMe(p.id) ? "#b3372d" : suitColor(r, p.id), top = r?.decision === "top", isCur = view === "city" && cur?.id === p.id && !!focusId;
     pts.push(ll);
     const pv = privOps(p);
     const fl = !PRIV_BY_PARK[p.id]?.length && flags[p.id];
@@ -1398,7 +1404,7 @@ function buildCity() {
     const tags = r ? [r.decision === "top" ? "★ Top pick" : r.decision === "yes" ? "Shortlisted" : r.decision === "rating" ? "Rating in progress" : "Rejected",
       r.quality ? r.quality + "/5" : "", r.fit && r.fit !== "unknown" ? FIT_LABEL[r.fit] : "",
       r.lights === "full" || r.lights === "training" ? "💡 lights" : r.lights === "none" ? "no lights" : ""].filter(Boolean).join(" · ") : "Not rated yet";
-    mk.bindTooltip(`<b>${esc(p.name)}</b><br>${esc(p.region)} · <b style="color:${col}">${suitWord(r)}</b><br>${esc(tags)}${r?.fields ? "<br>Fields: " + esc(r.fields) : ""}`
+    mk.bindTooltip(`<b>${esc(p.name)}</b><br>${esc(p.region)} · <b style="color:${col}">${rejectedForMe(p.id) ? "Rejected (yours)" : suitWord(r, p.id)}</b><br>${esc(tags)}${r?.fields ? "<br>Fields: " + esc(r.fields) : ""}`
       + (isAmua ? `<br><b style="color:#b7791f">★ Book only through: AMUA</b>`
         : pv?.length ? `<br><b style="color:${PRIV_COLOR}">◆ Privately managed: contact ${esc(pv[0].short)}</b> first` : "")
       + (ult.length ? `<br><b style="color:${ULT_COLOR}">🥏 ${ult.some(o => o.booking_only) ? "Book only through" : "Ultimate club"}: ${esc(ult.map(o => o.operator).join(", "))}</b>` : "")
@@ -1412,7 +1418,7 @@ function buildCity() {
     const chosen = new Set((r?.fields || "").split(",").map(s => s.trim().toLowerCase()).filter(Boolean));
     fs.forEach(f => L.polygon(f.p, { pane: "fieldsPane", color: col, weight: chosen.has((f.n || "").toLowerCase()) ? 3 : 1.5, fillColor: col,
       fillOpacity: chosen.has((f.n || "").toLowerCase()) ? 0.45 : 0.22, bubblingMouseEvents: false })
-      .bindTooltip(`${esc(p.name)}${f.n ? " · " + esc(f.n) : ""} — ${suitWord(r)}`, { className: "parktip", sticky: true })
+      .bindTooltip(`${esc(p.name)}${f.n ? " · " + esc(f.n) : ""} — ${rejectedForMe(p.id) ? "Rejected (yours)" : suitWord(r, p.id)}`, { className: "parktip", sticky: true })
       .on("click", () => openPark(p.id)).addTo(cityFieldsLayer));
   });
   drawMyFieldPins(reg);
@@ -1787,12 +1793,11 @@ function contactNote(who) {
     : `<p class="warn-note">📇 <b>Add ${who === (session?.user?.email || "").toLowerCase() ? "your" : "the booker's"} council contact</b> (name and phone) before booking these fields — the booker is the key holder on AMUA's council application.
        <a href="./?contact=1">Add it in Facility Booking ↗</a></p>`;
 }
-// ── My fields: the booker's saved fields, each ★ Top / ✓ Shortlist (or ✕ Rejected, shown on
-// request), with its quality (1–5, the booker's own; the park's rating until set) and a 📅
-// switch that offers it in Facility Booking. Another booker's rows are read-only unless
-// you're an admin.
+// ── My fields: the booker's saved fields, each ★ Top / ✓ Shortlist (or ✕ Rejected — the
+// booker's own call, shown on request), with the park's quality (everyone's average; click
+// to give yours) and a 📅 switch that offers it in Facility Booking. Another booker's rows
+// are read-only unless you're an admin.
 let mfWho = null, mfStage = "all", mfShowRej = store.get("vet-mf-rejected", false);
-const QWORD = ["", "poor", "fair", "ok", "good", "great"];
 function renderBook() {
   const me = whoBooks();
   if (mfWho === null) mfWho = me;   // the viewing profile's fields first; admins can pick another booker or all
@@ -1802,7 +1807,7 @@ function renderBook() {
   const matching = rows.filter(r => mfMatches(r.x)), hidden = rows.length - matching.length;
   const counts = { all: 0, top: 0, yes: 0, no: 0 };
   matching.forEach(({ x }) => { counts[decOf(x)]++; if (!isRejected(x)) counts.all++; });
-  const qOf = x => x.quality || reviews[x.park_id]?.quality || 0;
+  const qOf = x => qualityOf(x.park_id) || 0;
   const rank = { top: 0, yes: 1, no: 2 };
   const shown = matching.filter(({ x }) => isRejected(x) ? mfShowRej : mfStage === "all" || decOf(x) === mfStage)
     .sort((a, b) => rank[decOf(a.x)] - rank[decOf(b.x)] || qOf(b.x) - qOf(a.x) || (a.x.park || "").localeCompare(b.x.park || "") || (a.x.field || "").localeCompare(b.x.field || ""));
@@ -1824,20 +1829,27 @@ function renderBook() {
         <label class="mf-rej"><input type="checkbox" id="mfRej"${mfShowRej ? " checked" : ""}> Show rejected <b>${counts.no}</b></label></div></div>
     ${mfWho ? contactNote(mfWho) : ""}
     ${hidden ? `<p class="mf-hidden">${hidden} field${hidden === 1 ? " is" : "s are"} hidden by the region filter above. <button id="mfShowAll">Show all</button></p>` : ""}
-    ${shown.length ? `<ul class="mfl">${shown.map(({ x, w }) => { const d = decOf(x), q = qOf(x), ed = canEdit(w), at = `data-id="${esc(x.id)}" data-w="${esc(w)}"`;
+    ${shown.length ? `<ul class="mfl">${shown.map(({ x, w }) => { const d = decOf(x), ed = canEdit(w), at = `data-id="${esc(x.id)}" data-w="${esc(w)}"`;
         return `<li class="mfl-r ${d}${isActive(x) ? " bk" : ""}">
           <div class="mfl-n">${tag(x)}${x.kind === "community" ? `<span class="mfl-t" title="${esc(x.park)} – ${esc(x.field)}">${esc(x.park)} <span class="muted">– ${esc(x.field)}</span></span>`
             : `<button class="mfl-t" data-bkopen="${esc(x.park_id)}" title="Open ${esc(x.park)}">${esc(x.park)} <span class="muted">– ${esc(x.field)}</span></button>`}
             ${lit(x)}${mfWho ? "" : `<span class="mfl-w" title="${esc(w)}">${who(w)}</span>`}</div>
           <div class="mfl-c">
             <span class="mfl-dec" role="group" aria-label="State">${DEC.map(([k, i, l]) => `<button ${at} data-mfdec="${k}" class="${k}" aria-pressed="${d === k}" title="${l}"${ed ? "" : " disabled"}>${i}<span class="tl"> ${l}</span></button>`).join("")}</span>
-            <span class="mfl-q" role="group" aria-label="Quality${q ? " " + q + " of 5" : ""}" title="${x.quality ? "Quality: " + QWORD[q] : q ? "The park's rating (" + QWORD[q] + "); click to set your own" : "Quality: not set"}">${[1, 2, 3, 4, 5].map(n => `<button ${at} data-mfq="${n}" class="${n <= q ? "on" : ""}${x.quality ? "" : " soft"}" aria-label="${n} of 5"${ed ? "" : " disabled"}>★</button>`).join("")}</span>
+            ${qStars(x)}
             ${d === "no" ? "" : `<button ${at} data-mfbk class="mfl-bk" aria-pressed="${isActive(x)}" title="${isActive(x) ? "Bookable in Facility Booking · click to stop offering it" : "Not bookable yet · click to offer it in Facility Booking"}"${ed ? "" : " disabled"}>📅<span class="tl"> ${isActive(x) ? "Bookable" : "Book"}</span></button>`}
             ${isActive(x) ? `<a class="mfl-go" href="${venueLink(prov(x), x.park)}" target="_blank" rel="noopener" title="Book dates in Facility Booking">↗</a>` : ""}
           </div></li>`; }).join("")}</ul>`
     : `<p class="muted">${rows.length ? "Nothing here." : mfWho === me ? (IS_ADMIN ? "No fields yet. ★ Top pick or ✓ Shortlist a park and its rated fields are saved here." : "No fields yet. In 📅 Book mode, open a park and tap its field areas to save them.") : "No fields."}</p>`}`;
 }
-// Change one saved field (state, quality, bookable) for its booker and save at once.
+// Quality is the park's global rating: the stars show everyone's average (count beside it);
+// clicking gives your own 1–5 rating (click it again to take it back).
+function qStars(x) {
+  const id = x.park_id, avg = qualityOf(id) || 0, n = ratings[id]?.n || 0, mine = ratings[id]?.mine || 0, shown = Math.round(avg);
+  const tip = `${n ? `Average ${qText(avg)} from ${n} rating${n === 1 ? "" : "s"}` : avg ? `Reviewer's quality ${avg}` : "Not rated yet"}${mine ? ` · yours: ${mine}` : ""} — click to give your rating`;
+  return `<span class="mfl-q" role="group" aria-label="Quality: ${tip}" title="${esc(tip)}">${[1, 2, 3, 4, 5].map(k => `<button data-mfr="${esc(id)}" data-n="${k}" class="${k <= shown ? "on" : ""}${k === mine ? " mine" : ""}" aria-label="Rate ${k} of 5"${k === mine ? ' aria-pressed="true"' : ""}>★</button>`).join("")}${n ? `<small class="mfl-qn">${qText(avg)}${n > 1 ? ` · ${n}` : ""}</small>` : ""}</span>`;
+}
+// Change one saved field (state, bookable) for its booker and save at once.
 async function setEntry(w, id, patch) {
   if (IS_ADMIN) bookFor = w; else if (w !== whoBooks()) return;
   const before = bookLocs[w] || [], i = before.findIndex(x => x.id === id); if (i < 0) return;
@@ -1879,11 +1891,12 @@ function bindBook() {
   $("bookPanel").addEventListener("click", async e => {
     const stage = e.target.closest("[data-mfstage]"); if (stage) { mfStage = stage.dataset.mfstage; renderBook(); return; }
     if (e.target.id === "mfShowAll") { $("region").value = ""; $("region").dispatchEvent(new Event("change")); return; }
+    const qr = e.target.closest("[data-mfr]");
+    if (qr) { const id = qr.dataset.mfr, k = +qr.dataset.n; await setRating(id, (ratings[id]?.mine || 0) === k ? 0 : k); renderBook(); renderRail(); return; }
     const b = e.target.closest("[data-id]");
     if (b && !b.disabled && !busy) { const { id, w } = b.dataset, x = (bookLocs[w] || []).find(y => y.id === id); if (!x) return;
       if (b.dataset.mfdec) { const d = b.dataset.mfdec; if (d === decOf(x)) return;
         return setEntry(w, id, d === "no" ? { decision: "no", status: "cart" } : { decision: d }); }
-      if (b.dataset.mfq) { const n = +b.dataset.mfq; return setEntry(w, id, { quality: x.quality === n ? null : n }); }
       if ("mfbk" in b.dataset) return setEntry(w, id, isActive(x) ? { status: "cart" }
         : { status: "active", activated_at: x.activated_at || new Date().toISOString(), ...(x.activated_at ? {} : activatedBy()) });
     }
@@ -2102,13 +2115,16 @@ let railF = { ...RAIL_DEFAULT, ...store.get("vet-rail-filter", {}) };
 let railSort = store.get("vet-rail-sort", "best"), railQ = "", railOpen = store.get("vet-rail-open", false);
 const isLit = r => r.lights === "full" || r.lights === "training";
 const savedHere = id => myLocs().filter(x => x.park_id === id && !isRetired(x));
+// Rejected is per profile: every one of the booker's saved fields at the park is rejected.
+const rejectedForMe = id => { const xs = savedHere(id); return xs.length > 0 && xs.every(isRejected); };
 const RAIL_FILTERS = {
-  dec: ["Any decision", [["picks", "★ Top + ✓ Shortlist"], ["top", "★ Top pick"], ["yes", "✓ Shortlist"], ["no", "✕ Rejected"]],
-    (r, v) => v === "picks" ? r.decision === "top" || r.decision === "yes" : r.decision === v],
+  // Top pick / Shortlist are the reviewers' calls; Rejected is the booker's own (per profile).
+  dec: ["Any decision", [["picks", "★ Top + ✓ Shortlist"], ["top", "★ Top pick"], ["yes", "✓ Shortlist"], ["no", "✕ Rejected (booker's)"], ["notno", "Not rejected"]],
+    (r, v, id) => v === "no" ? rejectedForMe(id) : v === "notno" ? !rejectedForMe(id) : !rejectedForMe(id) && (v === "picks" ? r.decision === "top" || r.decision === "yes" : r.decision === v)],
   fit: ["Any space", [["multi", "2 × full 7v7"], ["full", "1 × full 7v7 or more"], ["reduced", "3v3 only"]], (r, v) => v === "full" ? r.fit === "full" || r.fit === "multi" : r.fit === v],
   lights: ["Any lights", [["lit", "💡 Lights"], ["none", "No lights"], ["unknown", "Lights unknown"]],
     (r, v) => v === "lit" ? isLit(r) : v === "none" ? r.lights === "none" : !r.lights || r.lights === "unknown"],
-  q: ["Any quality", [["4", "★ 4+"], ["3", "★ 3+"], ["unset", "Quality not set"]], (r, v) => v === "unset" ? !r.quality : (r.quality || 0) >= +v],
+  q: ["Any quality", [["4", "★ 4+"], ["3", "★ 3+"], ["unset", "Not rated yet"]], (r, v, id) => v === "unset" ? !qualityOf(id, r) : (qualityOf(id, r) || 0) >= +v],
   saved: ["Saved or not", [["yes", "📌 Saved for the booker"], ["no", "Not saved yet"]], (r, v, id) => (savedHere(id).length > 0) === (v === "yes")],
   op: ["Any operator", [["council", "🏛 Council-run"], ["club", "◆ Club-run"], ["ult", "🥏 Ultimate club home"]],
     (r, v, id) => { const p = BYID[id]; return v === "ult" ? ultimateOf(p).length > 0 : (privOps(p).length > 0) === (v === "club"); }],
@@ -2118,16 +2134,16 @@ const RAIL_PRESETS = [
   ["Ready to book", { dec: "picks", fit: "full", lights: "", q: "", saved: "", op: "" }, "Top picks and shortlisted parks with a full-size field"],
   ["Lit & full size", { dec: "", fit: "full", lights: "lit", q: "", saved: "", op: "" }, "Floodlit parks with at least one full 7v7"],
   ["Not saved yet", { dec: "picks", fit: "", lights: "", q: "", saved: "no", op: "" }, "Picks the booker hasn't saved yet"],
-  ["Needs a look", { dec: "", fit: "", lights: "unknown", q: "", saved: "", op: "" }, "Rated parks whose lights aren't known yet"],
+  ["Needs a look", { dec: "notno", fit: "", lights: "unknown", q: "", saved: "", op: "" }, "Rated parks whose lights aren't known yet"],
 ];
 const SPACE_RANK = { multi: 3, full: 2, reduced: 1, unknown: 0, no: -1 };
 const RAIL_SORTS = {
-  best: (a, b) => suitScore(b[1]) - suitScore(a[1]),
-  quality: (a, b) => (b[1].quality || 0) - (a[1].quality || 0) || suitScore(b[1]) - suitScore(a[1]),
-  space: (a, b) => (SPACE_RANK[b[1].fit] ?? 0) - (SPACE_RANK[a[1].fit] ?? 0) || isLit(b[1]) - isLit(a[1]) || suitScore(b[1]) - suitScore(a[1]),
+  best: (a, b) => rejectedForMe(a[0]) - rejectedForMe(b[0]) || suitScore(b[1], b[0]) - suitScore(a[1], a[0]),
+  quality: (a, b) => (qualityOf(b[0]) || 0) - (qualityOf(a[0]) || 0) || suitScore(b[1], b[0]) - suitScore(a[1], a[0]),
+  space: (a, b) => (SPACE_RANK[b[1].fit] ?? 0) - (SPACE_RANK[a[1].fit] ?? 0) || isLit(b[1]) - isLit(a[1]) || suitScore(b[1], b[0]) - suitScore(a[1], a[0]),
   recent: (a, b) => String(b[1].at || "").localeCompare(String(a[1].at || "")),
   name: () => 0,
-  region: (a, b) => BYID[a[0]].region.localeCompare(BYID[b[0]].region) || suitScore(b[1]) - suitScore(a[1]),
+  region: (a, b) => BYID[a[0]].region.localeCompare(BYID[b[0]].region) || suitScore(b[1], b[0]) - suitScore(a[1], a[0]),
 };
 const railText = (id, r) => { const p = BYID[id]; return [p.name, p.region, r.notes, ...(PRIV_BY_PARK[id] || []).flatMap(o => [o.operator, o.short])].filter(Boolean).join(" ").toLowerCase(); };
 function renderRail() {
@@ -2136,7 +2152,7 @@ function renderRail() {
   const done = scope.filter(x => reviews[x.id] && reviews[x.id].decision !== "rating").length;
   $("progress").textContent = `${done} / ${scope.length} reviewed`;
   $("barFill").style.width = scope.length ? (100 * done / scope.length) + "%" : "0";
-  const rated = Object.entries(reviews).filter(([id, r]) => BYID[id] && suitScore(r) !== null && (!reg || BYID[id].region === reg));
+  const rated = Object.entries(reviews).filter(([id, r]) => BYID[id] && suitScore(r, id) !== null && (!reg || BYID[id].region === reg));
   const words = railQ.trim().toLowerCase().split(/\s+/).filter(Boolean);
   const shown = rated.filter(([id, r]) => Object.entries(RAIL_FILTERS).every(([k, [, , ok]]) => !railF[k] || ok(r, railF[k], id))
       && (!words.length || words.every(w => railText(id, r).includes(w))))
@@ -2154,9 +2170,10 @@ function renderRail() {
   $("list").innerHTML = shown.length ? shown.map(([id, r]) => { const pp = BYID[id], saved = savedHere(id), sd = saved.length ? decOf(saved[0]) : null;
     const head = railSort === "region" && pp.region !== lastReg ? `<div class="rf-group">${esc(lastReg = pp.region)} <span>${shown.filter(([i]) => BYID[i].region === pp.region).length}</span></div>` : "";
     const club = privOps(pp).length ? " · ◆" : "", ult = ultimateOf(pp).length ? " · 🥏" : "";
-    return head + `<div class="pick"><button data-open="${id}"><span class="dot" style="background:${suitColor(r)}"></span><span style="min-width:0"><span class="n">${r.decision === "top" ? "★ " : ""}${esc(pp.name)}</span><span class="m">${esc(pp.region)} · ${suitWord(r).toLowerCase()} · ${esc(FIT_LABEL[r.fit] || r.fit || "space not rated")}${r.quality ? " · ★" + r.quality : ""}${isLit(r) ? " · 💡" : r.lights === "none" ? " · no lights" : ""}${club}${ult}${railSort === "recent" && r.at ? " · " + esc(new Date(r.at).toLocaleDateString("en-NZ", { day: "numeric", month: "short" })) : ""}</span></span></button>`
+    const q = qualityOf(id, r), nq = ratings[id]?.n || 0, rej = rejectedForMe(id);
+    return head + `<div class="pick${rej ? " rej" : ""}"><button data-open="${id}"><span class="dot" style="background:${rej ? "#b3372d" : suitColor(r, id)}"></span><span style="min-width:0"><span class="n">${r.decision === "top" ? "★ " : ""}${esc(pp.name)}</span><span class="m">${esc(pp.region)} · ${suitWord(r, id).toLowerCase()} · ${esc(FIT_LABEL[r.fit] || r.fit || "space not rated")}${q ? ` · <span title="${nq ? `Average of ${nq} rating${nq === 1 ? "" : "s"}` : "Reviewer's quality"}">★${qText(q)}${nq > 1 ? `<small> (${nq})</small>` : ""}</span>` : ""}${isLit(r) ? " · 💡" : r.lights === "none" ? " · no lights" : ""}${club}${ult}${railSort === "recent" && r.at ? " · " + esc(new Date(r.at).toLocaleDateString("en-NZ", { day: "numeric", month: "short" })) : ""}</span></span></button>`
       + (saved.length ? `<span class="saved ${sd}" title="Saved for ${esc(personFromEmail(whoBooks()))}: ${saved.length} field${saved.length > 1 ? "s" : ""}">${DW[sd]}</span>`
-        : r.decision === "no" ? "" : `<button class="add" data-save="${id}" title="Save this park's fields for ${esc(personFromEmail(whoBooks()))} (${r.decision === "top" ? "★ Top" : "✓ Shortlist"})">＋</button>`) + `</div>`; }).join("")
+        : `<button class="add" data-save="${id}" title="Save this park's fields for ${esc(personFromEmail(whoBooks()))} (${r.decision === "top" ? "★ Top" : "✓ Shortlist"})">＋</button>`) + `</div>`; }).join("")
     : `<p class="help">${rated.length ? `No rated parks match${words.length ? ` “${esc(railQ.trim())}”` : ""} with these filters.` : "Parks appear here once they're rated."}</p>`;
   return { scope, done };
 }
@@ -2181,7 +2198,7 @@ function renderCity() {
   const unplaced = scope.filter(x => !parkLatLng(x)).length;
   const nextUp = queue()[0];
   $("cityInfo").innerHTML = `<span><b>${done}</b> of ${scope.length} rated</span>`
-    + `<span><b>${rated.filter(x => suitScore(reviews[x.id]) >= 0.65).length}</b> good or better</span>`
+    + `<span><b>${rated.filter(x => suitScore(reviews[x.id], x.id) >= 0.65).length}</b> good or better</span>`
     + `<span><b>${rated.filter(x => ["full", "training"].includes(reviews[x.id].lights)).length}</b> with lights</span>`
     + (unplaced ? `<span>${unplaced} without a location (no council map)</span>` : "")
     + (nextUp ? `<button class="railtools" id="nextUnrated" style="border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:4px 10px">Rate next: ${esc(nextUp.name)} ▸</button>` : "");
@@ -2219,7 +2236,8 @@ function render() {
     // Chips: the managing club (◆) and any ultimate club (🥏), which may be the booking contact.
     const lead = (pv || []).find(o => o.code !== "ultimate"), ult = ultimateOf(p);
     $("decChip").innerHTML = (lead ? `<span class="chip priv" title="Ask ${esc(lead.operator)} before applying to council">◆ ${esc(lead.short)}</span> ` : "")
-      + ult.map(o => `<span class="chip ult" title="Home of ${esc(o.operator)}"${o.colors ? ` style="background:${o.colors.pattern || o.colors.fill};color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.8);box-shadow:inset 0 0 0 2px ${o.colors.edge || "#fff"}"` : ""}>🥏 ${esc(o.short)}</span> `).join("") + (r ? `<span class="chip ${r.decision === "no" ? "no" : r.decision === "top" ? "top" : ""}">${r.decision === "top" ? "Top pick" : r.decision === "yes" ? "Shortlisted" : "Rejected"}${r.by ? " · " + esc(r.by.split("@")[0]) : ""}</span>` : "");
+      + ult.map(o => `<span class="chip ult" title="Home of ${esc(o.operator)}"${o.colors ? ` style="background:${o.colors.pattern || o.colors.fill};color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.8);box-shadow:inset 0 0 0 2px ${o.colors.edge || "#fff"}"` : ""}>🥏 ${esc(o.short)}</span> `).join("") + (rejectedForMe(p.id) ? `<span class="chip no" title="Rejected for ${esc(personFromEmail(whoBooks()))} (other bookers aren't affected)">Rejected</span>`
+        : r && r.decision !== "rating" ? `<span class="chip ${r.decision === "top" ? "top" : r.decision === "no" ? "plain" : ""}">${r.decision === "top" ? "Top pick" : r.decision === "yes" ? "Shortlisted" : "Rated"}${r.by ? " · " + esc(r.by.split("@")[0]) : ""}</span>` : "");
     const i = Math.min(mapIndex(p), Math.max(0, p.maps.length - 1));
     // One ☀/❄ toggle flips the season for every park; extra maps in a season (e.g. an
     // area plan) get a small cycle button.
@@ -2288,7 +2306,10 @@ async function decide(decision) {
   const card = $("card"); card.classList.remove("snap", "deal"); card.classList.add("fly");
   const x = decision === "yes" ? 800 : decision === "no" ? -800 : 0, y = decision === "top" ? -600 : 40;
   card.style.transform = `translate(${x}px, ${y}px) rotate(${x / 25}deg)`; card.style.opacity = "0";
-  const rev = buildReview(p, t, decision, withField);
+  // Reject is per profile (decisionToCart marks the booker's fields), so it doesn't overwrite
+  // an existing Top pick / Shortlist on the shared review.
+  const prevDec = reviews[p.id]?.decision;
+  const rev = buildReview(p, t, decision === "no" && (prevDec === "top" || prevDec === "yes") ? prevDec : decision, withField);
   await new Promise(r => setTimeout(r, matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 220));
   const ok = await save(p.id, rev);
   if (ok) await decisionToCart(p, t, decision);
@@ -2300,7 +2321,7 @@ async function decide(decision) {
   if (rotating) setRotating(false);
   $("fitPop").hidden = true;
   busy = false;
-  if (ok && fromCity) { focusId = null; setView("city"); setStatus(`Saved ${p.name} — ${suitWord(reviews[p.id]).toLowerCase()}.`); return; }
+  if (ok && fromCity) { focusId = null; setView("city"); setStatus(`Saved ${p.name} — ${suitWord(reviews[p.id], p.id).toLowerCase()}.`); return; }
   render();
 }
 // The venue's bookable fields: its saved frisbee groups (council fields grouped on save,
@@ -2316,10 +2337,12 @@ function venueEntries(p, status, extra = {}) {
 }
 // A decision saves a park's fields for the booker: Top pick or Shortlist adds its rated fields
 // (or the whole park, when it has none rated) with that state, not bookable until 📅 is
-// switched on; fields already bookable stay so. Reject marks the park's fields rejected.
+// switched on; fields already bookable stay so. Reject is the booker's own: their fields at
+// the park are saved as rejected (added as rejected when none were saved).
 async function decisionToCart(p, t, decision) {
   const who = whoBooks(), before = [...(bookLocs[who] || [])];
   let list = decision === "no" ? before.map(x => x.park_id !== p.id || isRetired(x) ? x : { ...x, decision: "no", status: "cart" }) : before;
+  if (decision === "no" && !list.some(x => x.park_id === p.id && !isRetired(x))) list = [...list, ...venueEntries(p, "cart", { decision: "no" })];
   if (decision !== "no") {
     // The venue's groups become its fields; the park's earlier fields that aren't among
     // them are retired (kept for the bookings already on them).
@@ -2560,8 +2583,8 @@ function exportCsv() {
   const rows = [["Region", "Park", "Decision", "Suitability", "Lights", "Light poles", "Fit", "Quality", "Fields", "Notes", "Field placement (lat, lon, angle°)", "Private operator", "Operator contact", "Ultimate club", "Vendor amendment", "Reviewer", "Reviewed at", "Activity score",
     "Local board", "Tenure", "Tenure until", "Board links", "Council influence", "Relationship", "Last event"]];
   PARKS.forEach(p => { const r = reviews[p.id] || {}, fl = flags[p.id]; if (!reviews[p.id] && !fl && !ultimateOf(p).length) return; const pl = r.placement;
-    rows.push([p.region, p.name, r.decision ? (r.decision === "top" ? "top pick" : r.decision === "yes" ? "shortlist" : r.decision === "rating" ? "rating in progress" : "reject") : "", r.decision ? suitWord(r) : "", r.lights || "", pl?.lights?.length || 0,
-      r.fit ? FIT_LABEL[r.fit] || r.fit : "", r.quality || "", r.fields || "", r.notes || "", pl?.lat != null ? `${pl.lat}, ${pl.lon}, ${pl.angle}` : "",
+    rows.push([p.region, p.name, r.decision ? (r.decision === "top" ? "top pick" : r.decision === "yes" ? "shortlist" : r.decision === "rating" ? "rating in progress" : "reject") : "", r.decision ? suitWord(r, p.id) : "", r.lights || "", pl?.lights?.length || 0,
+      r.fit ? FIT_LABEL[r.fit] || r.fit : "", qText(qualityOf(p.id, r)), r.fields || "", r.notes || "", pl?.lat != null ? `${pl.lat}, ${pl.lon}, ${pl.angle}` : "",
       privOps(p)[0]?.operator || "",
       [privOps(p)[0]?.contact?.email, privOps(p)[0]?.contact?.phone].filter(Boolean).join(" / "),
       ultimateOf(p).map(o => o.operator + ([o.contact?.email, o.contact?.phone].filter(Boolean).length ? ` (${[o.contact?.email, o.contact?.phone].filter(Boolean).join(" / ")})` : "")).join("; "),
