@@ -685,10 +685,23 @@ button.mfl-t:hover{text-decoration:underline}
 .mfl button:disabled{cursor:default}
 @container (max-width: 520px){ .mfl .tl{display:none} }
 /* Rated parks rail: filters, then the parks. */
-.railfilters{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
-.railfilters select{padding:4px 6px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);font-size:12px;max-width:100%}
-.railfilters select.on{border-color:var(--turf);background:var(--turf-soft)}
-.railfilters .rf-n{font-size:11px;color:var(--muted);margin-left:auto}
+.rf-top{display:flex;gap:6px;align-items:center}
+.rf-top input{flex:1;min-width:0;padding:5px 9px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);font-size:13px}
+.rf-top select,.rf-top button{flex:none;padding:5px 8px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);font-size:12px;white-space:nowrap}
+.rf-top button.on{border-color:var(--turf);background:var(--turf-soft);color:var(--turf);font-weight:700}
+.rf-top button b{display:inline-block;min-width:16px;padding:0 4px;border-radius:999px;background:var(--turf);color:#fff;font-size:10.5px;line-height:16px}
+.railfilters{display:flex;flex-direction:column;gap:6px}
+.rf-presets{display:flex;gap:5px;overflow-x:auto;scrollbar-width:none}
+.rf-presets button{flex:none;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:999px;padding:3px 10px;font-size:12px;font-weight:600;white-space:nowrap}
+.rf-presets button[aria-pressed=true]{background:var(--turf);border-color:var(--turf);color:#fff}
+.rf-sel{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:6px}
+.rf-sel select{padding:4px 6px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);font-size:12px;min-width:0}
+.rf-sel select.on{border-color:var(--turf);background:var(--turf-soft)}
+.rf-foot{display:flex;align-items:center;gap:8px}
+.railfilters .rf-n{font-size:11px;color:var(--muted)}
+.rf-foot button{margin-left:auto;border:0;background:none;color:var(--turf);font-weight:700;font-size:12px;padding:0;cursor:pointer}
+.rf-group{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);padding:6px 2px 0}
+.rf-group span{font-weight:600;opacity:.7}
 .list .pick .saved{flex:none;align-self:center;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;white-space:nowrap}
 .list .pick .saved.top{background:var(--top-soft);color:var(--top)}.list .pick .saved.yes{background:var(--turf-soft);color:var(--turf)}.list .pick .saved.no{background:var(--reject-soft);color:var(--reject)}
 .list .pick button.add{flex:none;display:block;width:32px;padding:0;font-size:16px;font-weight:700;color:var(--turf)}
@@ -715,7 +728,11 @@ body.bookview #mode,body.bookview #order,body.bookview .filters .chk,body.bookvi
   .mfl-c{flex-wrap:nowrap}
   .mfl-n{flex-wrap:wrap}
   .mfl-l{font-size:12px}
-  .railfilters select{flex:1 1 calc(50% - 6px);padding:7px 6px;font-size:13px}
-  .railfilters .rf-n{flex:1 1 100%;margin-left:0}
+  .rf-top{flex-wrap:wrap}
+  .rf-top input{flex:1 1 100%;padding:8px 10px;font-size:14px}
+  .rf-top select,.rf-top button{flex:1 1 0;padding:8px 6px;font-size:13px}
+  .rf-sel{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+  .rf-sel select{padding:8px 6px;font-size:13px}
+  .rf-presets button{padding:6px 12px;font-size:13px}
   .list .pick button.add{width:40px}
 }
