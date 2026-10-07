@@ -736,3 +736,7 @@ body.bookview #mode,body.bookview #order,body.bookview .filters .chk,body.bookvi
   .rf-presets button{padding:6px 12px;font-size:13px}
   .list .pick button.add{width:40px}
 }
+.mfl-q button.mine{text-shadow:0 0 0 currentColor;outline:1.5px solid var(--top);outline-offset:-2px;border-radius:4px}
+.mfl-qn{font-size:11px;color:var(--muted);margin-left:4px;white-space:nowrap;align-self:center}
+.list .pick.rej>button{opacity:.65}
+.list .m small{opacity:.75}
