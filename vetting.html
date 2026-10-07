@@ -166,6 +166,18 @@
               <div class="bookpanel" id="bookPanel" hidden></div>
               <section class="rail" id="railBox" hidden>
                 <h3>Rated parks</h3>
+                <div class="rf-top">
+                  <input type="search" id="railQ" placeholder="Search parks, regions, clubs" aria-label="Search rated parks">
+                  <select id="railSort" aria-label="Sort rated parks">
+                    <option value="best">Best first</option>
+                    <option value="quality">Quality</option>
+                    <option value="space">Most space</option>
+                    <option value="recent">Recently rated</option>
+                    <option value="name">Name A–Z</option>
+                    <option value="region">By region</option>
+                  </select>
+                  <button type="button" id="railFBtn" aria-expanded="false" aria-controls="railFilters">Filters</button>
+                </div>
                 <div class="railfilters" id="railFilters"></div>
                 <div class="list" id="list"></div>
                 <div class="railtools"><button id="exportBtn">Download CSV</button></div>

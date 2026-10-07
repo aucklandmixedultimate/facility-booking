@@ -2094,16 +2094,42 @@ function maskContact(v) {
   return first + (m[2] && first ? " " + m[3].replace(/[^\p{L}]/gu, "").toUpperCase() : "");
 }
 const contactValue = v => { const s = maskContact(v).trim(); return /\s\p{L}$/u.test(s) ? s + "." : s; };
-// The rail beside My fields: every rated park (unrated ones hidden), filtered by decision,
-// space, lights and quality, best first. ＋ saves a park's fields for the booker.
-let railF = { dec: "", fit: "", lights: "", q: "", ...store.get("vet-rail-filter", {}) };
+// The rail beside My fields: every rated park (unrated ones hidden). Search, sort, filters
+// (in a panel that folds away) and one-tap presets; all remembered on the device. ＋ saves a
+// park's fields for the booker.
+const RAIL_DEFAULT = { dec: "", fit: "", lights: "", q: "", saved: "", op: "" };
+let railF = { ...RAIL_DEFAULT, ...store.get("vet-rail-filter", {}) };
+let railSort = store.get("vet-rail-sort", "best"), railQ = "", railOpen = store.get("vet-rail-open", false);
+const isLit = r => r.lights === "full" || r.lights === "training";
+const savedHere = id => myLocs().filter(x => x.park_id === id && !isRetired(x));
 const RAIL_FILTERS = {
-  dec: ["Any decision", [["top", "★ Top pick"], ["yes", "✓ Shortlist"], ["no", "✕ Rejected"]], (r, v) => r.decision === v],
+  dec: ["Any decision", [["picks", "★ Top + ✓ Shortlist"], ["top", "★ Top pick"], ["yes", "✓ Shortlist"], ["no", "✕ Rejected"]],
+    (r, v) => v === "picks" ? r.decision === "top" || r.decision === "yes" : r.decision === v],
   fit: ["Any space", [["multi", "2 × full 7v7"], ["full", "1 × full 7v7 or more"], ["reduced", "3v3 only"]], (r, v) => v === "full" ? r.fit === "full" || r.fit === "multi" : r.fit === v],
   lights: ["Any lights", [["lit", "💡 Lights"], ["none", "No lights"], ["unknown", "Lights unknown"]],
-    (r, v) => v === "lit" ? r.lights === "full" || r.lights === "training" : v === "none" ? r.lights === "none" : !r.lights || r.lights === "unknown"],
-  q: ["Any quality", [["4", "★ 4+"], ["3", "★ 3+"]], (r, v) => (r.quality || 0) >= +v],
+    (r, v) => v === "lit" ? isLit(r) : v === "none" ? r.lights === "none" : !r.lights || r.lights === "unknown"],
+  q: ["Any quality", [["4", "★ 4+"], ["3", "★ 3+"], ["unset", "Quality not set"]], (r, v) => v === "unset" ? !r.quality : (r.quality || 0) >= +v],
+  saved: ["Saved or not", [["yes", "📌 Saved for the booker"], ["no", "Not saved yet"]], (r, v, id) => (savedHere(id).length > 0) === (v === "yes")],
+  op: ["Any operator", [["council", "🏛 Council-run"], ["club", "◆ Club-run"], ["ult", "🥏 Ultimate club home"]],
+    (r, v, id) => { const p = BYID[id]; return v === "ult" ? ultimateOf(p).length > 0 : (privOps(p).length > 0) === (v === "club"); }],
 };
+// Presets: common searches in one tap (they replace the filters; Clear undoes them).
+const RAIL_PRESETS = [
+  ["Ready to book", { dec: "picks", fit: "full", lights: "", q: "", saved: "", op: "" }, "Top picks and shortlisted parks with a full-size field"],
+  ["Lit & full size", { dec: "", fit: "full", lights: "lit", q: "", saved: "", op: "" }, "Floodlit parks with at least one full 7v7"],
+  ["Not saved yet", { dec: "picks", fit: "", lights: "", q: "", saved: "no", op: "" }, "Picks the booker hasn't saved yet"],
+  ["Needs a look", { dec: "", fit: "", lights: "unknown", q: "", saved: "", op: "" }, "Rated parks whose lights aren't known yet"],
+];
+const SPACE_RANK = { multi: 3, full: 2, reduced: 1, unknown: 0, no: -1 };
+const RAIL_SORTS = {
+  best: (a, b) => suitScore(b[1]) - suitScore(a[1]),
+  quality: (a, b) => (b[1].quality || 0) - (a[1].quality || 0) || suitScore(b[1]) - suitScore(a[1]),
+  space: (a, b) => (SPACE_RANK[b[1].fit] ?? 0) - (SPACE_RANK[a[1].fit] ?? 0) || isLit(b[1]) - isLit(a[1]) || suitScore(b[1]) - suitScore(a[1]),
+  recent: (a, b) => String(b[1].at || "").localeCompare(String(a[1].at || "")),
+  name: () => 0,
+  region: (a, b) => BYID[a[0]].region.localeCompare(BYID[b[0]].region) || suitScore(b[1]) - suitScore(a[1]),
+};
+const railText = (id, r) => { const p = BYID[id]; return [p.name, p.region, r.notes, ...(PRIV_BY_PARK[id] || []).flatMap(o => [o.operator, o.short])].filter(Boolean).join(" ").toLowerCase(); };
 function renderRail() {
   const reg = $("region").value, mapsOnly = $("mapsOnly").checked;
   const scope = PARKS.filter(x => (!reg || x.region === reg) && (!mapsOnly || x.maps.length) && interestOk(x));
@@ -2111,19 +2137,30 @@ function renderRail() {
   $("progress").textContent = `${done} / ${scope.length} reviewed`;
   $("barFill").style.width = scope.length ? (100 * done / scope.length) + "%" : "0";
   const rated = Object.entries(reviews).filter(([id, r]) => BYID[id] && suitScore(r) !== null && (!reg || BYID[id].region === reg));
-  const shown = rated.filter(([, r]) => Object.entries(RAIL_FILTERS).every(([k, [, , ok]]) => !railF[k] || ok(r, railF[k])))
-    .sort((a, b) => suitScore(b[1]) - suitScore(a[1]) || BYID[a[0]].name.localeCompare(BYID[b[0]].name));
-  $("railFilters").innerHTML = Object.entries(RAIL_FILTERS).map(([k, [any, opts]]) => `<select data-rf="${k}" aria-label="${any.replace("Any ", "")}" class="${railF[k] ? "on" : ""}">
-      <option value="">${any}</option>${opts.map(([v, l]) => `<option value="${v}"${railF[k] === v ? " selected" : ""}>${l}</option>`).join("")}</select>`).join("")
-    + `<span class="rf-n">${shown.length} of ${rated.length}</span>`;
+  const words = railQ.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const shown = rated.filter(([id, r]) => Object.entries(RAIL_FILTERS).every(([k, [, , ok]]) => !railF[k] || ok(r, railF[k], id))
+      && (!words.length || words.every(w => railText(id, r).includes(w))))
+    .sort((a, b) => (RAIL_SORTS[railSort] || RAIL_SORTS.best)(a, b) || BYID[a[0]].name.localeCompare(BYID[b[0]].name));
+  const nOn = Object.values(railF).filter(Boolean).length, same = f => Object.keys(RAIL_DEFAULT).every(k => (f[k] || "") === (railF[k] || ""));
+  $("railSort").value = railSort;
+  $("railFBtn").innerHTML = `⚙ Filters${nOn ? ` <b>${nOn}</b>` : ""} ${railOpen ? "▴" : "▾"}`;
+  $("railFBtn").setAttribute("aria-expanded", String(railOpen)); $("railFBtn").classList.toggle("on", nOn > 0);
+  $("railFilters").innerHTML = `<div class="rf-presets">${RAIL_PRESETS.map(([l, f, t], i) => `<button type="button" data-rp="${i}" aria-pressed="${same(f)}" title="${esc(t)}">${l}</button>`).join("")}</div>`
+    + (railOpen ? `<div class="rf-sel">${Object.entries(RAIL_FILTERS).map(([k, [any, opts]]) => `<select data-rf="${k}" aria-label="${any}" class="${railF[k] ? "on" : ""}">
+      <option value="">${any}</option>${opts.map(([v, l]) => `<option value="${v}"${railF[k] === v ? " selected" : ""}>${l}</option>`).join("")}</select>`).join("")}</div>` : "")
+    + `<div class="rf-foot"><span class="rf-n">${shown.length} of ${rated.length} rated park${rated.length === 1 ? "" : "s"}${reg ? " in " + esc(reg) : ""}</span>${nOn || words.length ? `<button type="button" id="railClear">Clear filters</button>` : ""}</div>`;
   const DW = { top: "★ Top", yes: "✓ Shortlist", no: "✕ Rejected" };
-  $("list").innerHTML = shown.length ? shown.map(([id, r]) => { const pp = BYID[id], saved = myLocs().filter(x => x.park_id === id && !isRetired(x)), sd = saved.length ? decOf(saved[0]) : null;
-    return `<div class="pick"><button data-open="${id}"><span class="dot" style="background:${suitColor(r)}"></span><span style="min-width:0"><span class="n">${r.decision === "top" ? "★ " : ""}${esc(pp.name)}</span><span class="m">${esc(pp.region)} · ${suitWord(r).toLowerCase()} · ${esc(FIT_LABEL[r.fit] || r.fit || "space not rated")}${r.quality ? " · ★" + r.quality : ""}${r.lights === "full" || r.lights === "training" ? " · 💡" : r.lights === "none" ? " · no lights" : ""}</span></span></button>`
+  let lastReg = null;
+  $("list").innerHTML = shown.length ? shown.map(([id, r]) => { const pp = BYID[id], saved = savedHere(id), sd = saved.length ? decOf(saved[0]) : null;
+    const head = railSort === "region" && pp.region !== lastReg ? `<div class="rf-group">${esc(lastReg = pp.region)} <span>${shown.filter(([i]) => BYID[i].region === pp.region).length}</span></div>` : "";
+    const club = privOps(pp).length ? " · ◆" : "", ult = ultimateOf(pp).length ? " · 🥏" : "";
+    return head + `<div class="pick"><button data-open="${id}"><span class="dot" style="background:${suitColor(r)}"></span><span style="min-width:0"><span class="n">${r.decision === "top" ? "★ " : ""}${esc(pp.name)}</span><span class="m">${esc(pp.region)} · ${suitWord(r).toLowerCase()} · ${esc(FIT_LABEL[r.fit] || r.fit || "space not rated")}${r.quality ? " · ★" + r.quality : ""}${isLit(r) ? " · 💡" : r.lights === "none" ? " · no lights" : ""}${club}${ult}${railSort === "recent" && r.at ? " · " + esc(new Date(r.at).toLocaleDateString("en-NZ", { day: "numeric", month: "short" })) : ""}</span></span></button>`
       + (saved.length ? `<span class="saved ${sd}" title="Saved for ${esc(personFromEmail(whoBooks()))}: ${saved.length} field${saved.length > 1 ? "s" : ""}">${DW[sd]}</span>`
         : r.decision === "no" ? "" : `<button class="add" data-save="${id}" title="Save this park's fields for ${esc(personFromEmail(whoBooks()))} (${r.decision === "top" ? "★ Top" : "✓ Shortlist"})">＋</button>`) + `</div>`; }).join("")
-    : `<p class="help">${rated.length ? "No rated parks match these filters." : "Parks appear here once they're rated."}</p>`;
+    : `<p class="help">${rated.length ? `No rated parks match${words.length ? ` “${esc(railQ.trim())}”` : ""} with these filters.` : "Parks appear here once they're rated."}</p>`;
   return { scope, done };
 }
+function setRailFilters(f) { railF = { ...RAIL_DEFAULT, ...f }; store.set("vet-rail-filter", railF); renderRail(); }
 // ＋ in the rail: save a rated park's fields for the booker with the park's decision.
 async function saveParkFields(p) {
   if (!p) return;
@@ -2474,8 +2511,14 @@ function bind() {
     const sv = e.target.closest("[data-save]"); if (sv) { if (!busy) saveParkFields(BYID[sv.dataset.save]); return; }
     const b = e.target.closest("[data-open]"); if (b) openPark(b.dataset.open); });
   $("exportBtn").onclick = exportCsv;
-  $("railFilters").addEventListener("change", e => { const k = e.target.dataset.rf; if (!k) return;
-    railF = { ...railF, [k]: e.target.value }; store.set("vet-rail-filter", railF); renderRail(); });
+  $("railFilters").addEventListener("change", e => { const k = e.target.dataset.rf; if (k) setRailFilters({ ...railF, [k]: e.target.value }); });
+  $("railFilters").addEventListener("click", e => {
+    const pr = e.target.closest("[data-rp]");
+    if (pr) { const f = RAIL_PRESETS[+pr.dataset.rp][1]; return setRailFilters(pr.getAttribute("aria-pressed") === "true" ? RAIL_DEFAULT : f); }
+    if (e.target.id === "railClear") { railQ = ""; $("railQ").value = ""; setRailFilters(RAIL_DEFAULT); } });
+  $("railFBtn").onclick = () => { railOpen = !railOpen; store.set("vet-rail-open", railOpen); renderRail(); };
+  $("railSort").onchange = e => { railSort = e.target.value; store.set("vet-rail-sort", railSort); renderRail(); };
+  $("railQ").addEventListener("input", e => { railQ = e.target.value; renderRail(); });
   window.addEventListener("focus", async () => { if (mode === "shared" && !busy) { await loadShared(); if (view === "city") render(); else renderRail(); } });
   // Any click on the opaque plan (except the open-in-new-tab link) puts it away again.
   $("cimgBox").addEventListener("click", e => { if (!e.target.closest("#cimgOpen")) closeCouncilImage(); });
