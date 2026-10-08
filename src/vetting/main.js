@@ -1585,7 +1585,7 @@ const amuaOnly = o => o.must_book_through === "AMUA" && o.category !== "communit
 function privHtml(o) {
   if (amuaOnly(o)) return `<b>${esc(o.park)}</b><br><a href="${BASE}">📅 Book in Facility Booking</a>`;
   const c = o.contact || {};
-  return `<b>${esc(o.park)}</b>${o.approx ? " (approx. location)" : ""}${o.must_book_through === "AMUA" ? `<br><b style="color:#b7791f">★ BOOKING ONLY AVAILABLE THROUGH AMUA</b>` : ""}<br><b style="color:${PRIV_COLOR}">◆ ${esc(o.operator)}</b> · ${esc(privStatus(o))}<br>${esc(o.manages)}<br>${privContacts(o)}${c.address ? "<br>" + esc(c.address) : ""}${o.notes ? `<br><i>${esc(o.notes)}</i>` : ""}`;
+  return `<b>${esc(o.park)}</b>${o.approx ? " (approx. location)" : ""}${o.must_book_through === "AMUA" ? `<br><b style="color:#b7791f">★ BOOKING ONLY AVAILABLE THROUGH AMUA</b>` : ""}<br><b style="color:${PRIV_COLOR}">◆ ${esc(o.operator)}</b> · ${esc(privStatus(o))}<br>${esc(o.manages)}${o.lit ? "<br>💡 Floodlit" : ""}${o.private_contact ? `<br><b>🔒 Private contact required:</b> AMUA arranges the hire with the venue` : ""}${o.rates ? `<br>💲 ${esc(o.rates)}` : ""}<br>${privContacts(o)}${c.address ? "<br>" + esc(c.address) : ""}${o.notes ? `<br><i>${esc(o.notes)}</i>` : ""}`;
 }
 // Park card banner: every operator on this ground, then the request steps once.
 // The provider line shows names only; contacts and details open under ⓘ.
