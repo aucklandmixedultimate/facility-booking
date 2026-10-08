@@ -81,8 +81,20 @@ const mapIndex = p => mapIdx[p.id] ?? Math.max(0, p.maps.findIndex(m => m.season
 // Interests: which parks are served. Areas (regions; none ticked = all) and provider
 // (council-run and/or privately operated).
 let interests = { regions: [], council: true, priv: true, lit: true, dark: true, ...store.get("vet-interests", {}) };
-const interestOk = p => (!interests.regions.length || interests.regions.includes(p.region))
-  && (privOps(p).length ? interests.priv : interests.council)
+// The region dropdown starts from Interests (one region → that region, several → "🎯 My
+// interests", none → All regions). Picking another region is temporary: it isn't saved, so
+// the page opens on Interests again, and changing Interests resets it too.
+const REG_INT = "@int";
+const defaultRegion = () => interests.regions.length === 1 ? interests.regions[0] : interests.regions.length ? REG_INT : "";
+const regionLabel = v => v === REG_INT ? `My interests (${interests.regions.join(", ")})` : v;
+function regionOk(p) { const v = $("region").value; return v === REG_INT ? interests.regions.includes(p.region) : !v || p.region === v; }
+function syncRegionSelect() {
+  const sel = $("region"); let o = sel.querySelector(`option[value="${REG_INT}"]`);
+  if (interests.regions.length > 1) { if (!o) { o = document.createElement("option"); o.value = REG_INT; sel.insertBefore(o, sel.options[1] || null); } o.textContent = `🎯 ${regionLabel(REG_INT)}`; }
+  else if (o) o.remove();
+  sel.value = defaultRegion();
+}
+const interestOk = p => (privOps(p).length ? interests.priv : interests.council)
   && (reviews[p.id]?.lights === "none" ? interests.dark : interests.lit);
 const interestsSet = () => interests.regions.length > 0 || !interests.council || !interests.priv || !interests.lit || !interests.dark;
 let cursor = 0, busy = false;
@@ -450,8 +462,8 @@ async function bumpActivity(id, delta) {
 
 // ── Queue ────────────────────────────────────────────────────────────────────
 function queue() {
-  const reg = $("region").value, m = $("mode").value, mapsOnly = $("mapsOnly").checked;
-  let q = PARKS.filter(p => (!reg || p.region === reg) && (!mapsOnly || p.maps.length) && interestOk(p));
+  const m = $("mode").value, mapsOnly = $("mapsOnly").checked;
+  let q = PARKS.filter(p => regionOk(p) && (!mapsOnly || p.maps.length) && interestOk(p));
   const undecided = p => !reviews[p.id] || reviews[p.id].decision === "rating";
   if (m === "todo") q = q.filter(undecided);
   else if (m !== "all") q = q.filter(p => reviews[p.id]?.decision === m);
@@ -1429,7 +1441,7 @@ function buildCity() {
   const reg = $("region").value, cur = current();
   const pts = [];
   PARKS.forEach(p => {
-    if ((reg && p.region !== reg) || !interestOk(p)) return;
+    if (!regionOk(p) || !interestOk(p)) return;
     const located = parkLatLng(p), ll = located || unplacedLatLng(p); if (!ll) return;
     const r = reviews[p.id], col = rejectedForMe(p.id) ? "#b3372d" : suitColor(r, p.id), top = r?.decision === "top", isCur = view === "city" && cur?.id === p.id && !!focusId;
     pts.push(ll);
@@ -1477,7 +1489,7 @@ function buildCity() {
       .on("click", () => openPark(p.id)).addTo(cityFieldsLayer));
   });
   // A label over each group of parks without a location.
-  Object.keys(UNPLACED_AT).forEach(g => { const n = PARKS.filter(x => x.region === g && !parkLatLng(x) && (!reg || reg === g) && interestOk(x)).length; if (!n) return;
+  Object.keys(UNPLACED_AT).forEach(g => { const n = PARKS.filter(x => x.region === g && !parkLatLng(x) && regionOk(x) && interestOk(x)).length; if (!n) return;
     const at = UNPLACED_AT[g];
     L.marker([at[0] + 0.012, at[1]], { interactive: false, keyboard: false,
       icon: L.divIcon({ className: "", html: `<span class="unplacedlbl">${esc(g)} · no location (${n})</span>`, iconSize: null }) }).addTo(cityLayer); });
@@ -1503,9 +1515,9 @@ function buildCity() {
 // amber = cart only; the count is the number of fields; click opens the park.
 // The header's region and review-status dropdowns filter My fields (table and pins) too.
 function mfMatches(x) {
-  const p = BYID[x.park_id], reg = $("region").value;
-  if (!p) return !reg;   // community facilities aren't rated parks
-  return !reg || p.region === reg;
+  const p = BYID[x.park_id];
+  if (!p) return !$("region").value;   // community facilities aren't rated parks
+  return regionOk(p);
 }
 function mfBookerList() {
   const who = mfWho === null ? whoBooks() : mfWho;
@@ -2208,11 +2220,11 @@ const RAIL_SORTS = {
 const railText = (id, r) => { const p = BYID[id]; return [p.name, p.region, r.notes, ...(PRIV_BY_PARK[id] || []).flatMap(o => [o.operator, o.short])].filter(Boolean).join(" ").toLowerCase(); };
 function renderRail() {
   const reg = $("region").value, mapsOnly = $("mapsOnly").checked;
-  const scope = PARKS.filter(x => (!reg || x.region === reg) && (!mapsOnly || x.maps.length) && interestOk(x));
+  const scope = PARKS.filter(x => regionOk(x) && (!mapsOnly || x.maps.length) && interestOk(x));
   const done = scope.filter(x => reviews[x.id] && reviews[x.id].decision !== "rating").length;
   $("progress").textContent = `${done} / ${scope.length} reviewed`;
   $("barFill").style.width = scope.length ? (100 * done / scope.length) + "%" : "0";
-  const rated = Object.entries(reviews).filter(([id, r]) => BYID[id] && suitScore(r, id) !== null && (!reg || BYID[id].region === reg));
+  const rated = Object.entries(reviews).filter(([id, r]) => BYID[id] && suitScore(r, id) !== null && regionOk(BYID[id]));
   const words = railQ.trim().toLowerCase().split(/\s+/).filter(Boolean);
   const shown = rated.filter(([id, r]) => Object.entries(RAIL_FILTERS).every(([k, [, , ok]]) => !railF[k] || ok(r, railF[k], id))
       && (!words.length || words.every(w => railText(id, r).includes(w))))
@@ -2224,7 +2236,7 @@ function renderRail() {
   $("railFilters").innerHTML = `<div class="rf-presets">${RAIL_PRESETS.map(([l, f, t], i) => `<button type="button" data-rp="${i}" aria-pressed="${same(f)}" title="${esc(t)}">${l}</button>`).join("")}</div>`
     + (railOpen ? `<div class="rf-sel">${Object.entries(RAIL_FILTERS).map(([k, [any, opts]]) => `<select data-rf="${k}" aria-label="${any}" class="${railF[k] ? "on" : ""}">
       <option value="">${any}</option>${opts.map(([v, l]) => `<option value="${v}"${railF[k] === v ? " selected" : ""}>${l}</option>`).join("")}</select>`).join("")}</div>` : "")
-    + `<div class="rf-foot"><span class="rf-n">${shown.length} of ${rated.length} rated park${rated.length === 1 ? "" : "s"}${reg ? " in " + esc(reg) : ""}</span>${nOn || words.length ? `<button type="button" id="railClear">Clear filters</button>` : ""}</div>`;
+    + `<div class="rf-foot"><span class="rf-n">${shown.length} of ${rated.length} rated park${rated.length === 1 ? "" : "s"}${reg ? " in " + esc(regionLabel(reg)) : ""}</span>${nOn || words.length ? `<button type="button" id="railClear">Clear filters</button>` : ""}</div>`;
   const DW = { top: "★ Top", yes: "✓ Shortlist", no: "✕ Rejected" };
   let lastReg = null;
   $("list").innerHTML = shown.length ? shown.map(([id, r]) => { const pp = BYID[id], saved = savedHere(id), sd = saved.length ? decOf(saved[0]) : null;
@@ -2251,7 +2263,7 @@ async function saveParkFields(p) {
 function renderCity() {
   const { scope, done } = renderRail();
   const reg = $("region").value;
-  $("parkName").textContent = reg ? reg + " parks" : "Auckland";
+  $("parkName").textContent = reg === REG_INT ? "My interests" : reg ? reg + " parks" : "Auckland";
   $("parkRegion").textContent = `${scope.length} parks`; $("decChip").innerHTML = "";
   $("handle").title = "Click a park to rate it · colours show overall suitability · zoom in to see its fields";
   const rated = scope.filter(x => reviews[x.id]);
@@ -2264,13 +2276,14 @@ function renderCity() {
     + (nextUp ? `<button class="railtools" id="nextUnrated" style="border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:4px 10px">Rate next: ${esc(nextUp.name)} ▸</button>` : "");
   // Parks the region dropdown or 🎯 Interests hide from the map, said plainly, with one tap
   // to show them all (a filter left on otherwise looks like missing data).
-  const hiddenBy = [reg && `region: ${reg}`, interests.regions.length && `Interests: ${interests.regions.join(", ")} only`,
+  const hiddenBy = [reg && (reg === defaultRegion() ? `🎯 Interests: ${interests.regions.join(", ")}` : `region: ${regionLabel(reg)} (for now)`),
     !interests.council && "council-run hidden", !interests.priv && "club-run hidden", !interests.lit && "lit hidden", !interests.dark && "unlit hidden"].filter(Boolean);
-  const nHidden = PARKS.filter(x => (reg && x.region !== reg) || !interestOk(x)).length;
+  const nHidden = PARKS.filter(x => !regionOk(x) || !interestOk(x)).length;
   if (nHidden) $("cityInfo").insertAdjacentHTML("afterbegin", `<span class="cityhidden">⚠ ${nHidden} of ${PARKS.length} parks hidden (${esc(hiddenBy.join(" · "))}) <button id="showAllParks">Show all parks</button></span>`);
   const sa = $("showAllParks"); if (sa) sa.onclick = () => {
-    interests = { regions: [], council: true, priv: true, lit: true, dark: true }; store.set("vet-interests", interests); renderInterests();
-    $("region").value = ""; store.set("vet-region", ""); cursor = 0; setView("city", { refit: true }); };
+    // All regions for now (Interests stay your default); park-type filters switched back on.
+    interests = { ...interests, council: true, priv: true, lit: true, dark: true }; store.set("vet-interests", interests); renderInterests();
+    $("region").value = ""; cursor = 0; setView("city", { refit: true }); };
   const nb = $("nextUnrated"); if (nb) nb.onclick = () => openPark(nextUp.id);
   $("emptyState").hidden = true; $("card").hidden = false; $("behind").hidden = true;
   buildCity(); syncCityFields();
@@ -2593,9 +2606,9 @@ function bind() {
       if (!interests.council && !interests.priv) interests[k === "council" ? "priv" : "council"] = true;
       if (!interests.lit && !interests.dark) interests[k === "lit" ? "dark" : "lit"] = true; }
     store.set("vet-interests", interests); cursor = 0; if (view === "park" && !focusId) shownPark = null;
-    renderInterests(); render(); });
+    syncRegionSelect(); renderInterests(); if (view === "city") return setView("city", { refit: true }); render(); });
   ["region", "mode", "mapsOnly", "order"].forEach(id => $(id).addEventListener("change", () => {
-    cursor = 0; store.set("vet-" + id, id === "mapsOnly" ? $(id).checked : $(id).value);
+    cursor = 0; if (id !== "region") store.set("vet-" + id, id === "mapsOnly" ? $(id).checked : $(id).value);   // region: for now only
     if (view === "city" && id === "region") return setView("city", { refit: true });
     if (view === "park" && !focusId) shownPark = null;
     render(); }));
@@ -2732,7 +2745,7 @@ async function start() {
   Object.values(PRIV_BY_PARK).forEach(ops => ops.sort((a, b) => rank(a) - rank(b)));
   const regions = [...new Set(PARKS.map(p => p.region))];
   $("region").insertAdjacentHTML("beforeend", regions.map(r => `<option>${esc(r)}</option>`).join(""));
-  $("region").value = store.get("vet-region", ""); $("mode").value = store.get("vet-mode", "todo"); $("mapsOnly").checked = store.get("vet-mapsOnly", true); $("order").value = store.get("vet-order", "least");
+  syncRegionSelect(); $("mode").value = store.get("vet-mode", "todo"); $("mapsOnly").checked = store.get("vet-mapsOnly", true); $("order").value = store.get("vet-order", "least");
 
   if (supabase) {
     const { data } = await supabase.auth.getSession(); session = data.session;
