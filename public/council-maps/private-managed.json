@@ -652,7 +652,7 @@
       "short": "Bill McKinlay Park",
       "type": "trust",
       "code": "football",
-      "manages": "Full-size artificial turf with warm-up area, plus clubrooms; takes field bookings directly",
+      "manages": "Fully floodlit full-size artificial turf with warm-up area, plus clubrooms; hired directly for private games and tournaments",
       "contact": {
         "email": "info@billmckinlaypark.co.nz",
         "phone": "027 530 1408",
@@ -662,9 +662,10 @@
       "status": "confirmed",
       "sources": [
         "https://www.billmckinlaypark.co.nz/mckinlay_park.html",
-        "https://en.wikipedia.org/wiki/Bill_McKinlay_Park"
+        "https://en.wikipedia.org/wiki/Bill_McKinlay_Park",
+        "https://www.billmckinlaypark.co.nz/facilities.html"
       ],
-      "notes": "Not in the council field maps; council step may not apply — ask the operator.",
+      "notes": "BOOKING ONLY AVAILABLE THROUGH AMUA. Private contact required: AMUA arranges the hire with the venue directly (not a council booking). Not in the council field maps.",
       "local_board": "albert-eden",
       "tenure": {
         "kind": "unknown"
@@ -674,7 +675,12 @@
       ],
       "board_links": [
         "facility_partnership"
-      ]
+      ],
+      "must_book_through": "AMUA",
+      "private_contact": true,
+      "lit": true,
+      "category": "community",
+      "rates": "Three set fees depending on day and time (not published; ask info@billmckinlaypark.co.nz). quoted on request. Benchmarks: Auckland Hockey water turfs $127 (summer) to $155 (winter) + GST/hr; Rangitoto College hockey turf $110 + GST/hr."
     },
     {
       "id": "bruce-pulman",
@@ -1715,6 +1721,256 @@
       "local_board": "maungakiekie-tamaki",
       "tenure": {
         "kind": "unknown"
+      }
+    },
+    {
+      "id": "ags-epsom",
+      "park_id": null,
+      "park": "Auckland Grammar School (Lower Artificial Sports Turf)",
+      "lat": -36.8668,
+      "lon": 174.7676,
+      "approx": true,
+      "operator": "Auckland Grammar School",
+      "short": "Grammar School",
+      "type": "school",
+      "code": "multi",
+      "category": "community",
+      "manages": "Lower Artificial Sports Turf and a hockey turf, both floodlit, hired to outside groups",
+      "contact": {
+        "address": "55 Mountain Road, Epsom",
+        "url": "https://www.ags.school.nz/about/facilities/"
+      },
+      "status": "likely",
+      "notes": "BOOKING ONLY AVAILABLE THROUGH AMUA. Private contact required: AMUA arranges the hire with the venue directly (not a council booking).",
+      "must_book_through": "AMUA",
+      "private_contact": true,
+      "lit": true,
+      "rates": "Not published; quoted on request. Benchmarks: Auckland Hockey water turfs $127 (summer) to $155 (winter) + GST/hr; Rangitoto College hockey turf $110 + GST/hr.",
+      "sources": [
+        "https://www.ags.school.nz/about/facilities/"
+      ],
+      "tenure": {
+        "kind": "none"
+      }
+    },
+    {
+      "id": "macleans-bucklands",
+      "park_id": null,
+      "park": "Macleans College (sports turf)",
+      "lat": -36.8955,
+      "lon": 174.9065,
+      "approx": true,
+      "operator": "Macleans College",
+      "short": "Macleans",
+      "type": "school",
+      "code": "multi",
+      "category": "community",
+      "manages": "FIFA-certified dual-purpose artificial turf (FIH hockey pitch since 2020), six 15 m light poles; used by outside clubs after hours",
+      "contact": {
+        "address": "2 Macleans Road, Bucklands Beach",
+        "url": "https://www.macleans.school.nz/"
+      },
+      "status": "likely",
+      "notes": "BOOKING ONLY AVAILABLE THROUGH AMUA. Private contact required: AMUA arranges the hire with the venue directly (not a council booking).",
+      "must_book_through": "AMUA",
+      "private_contact": true,
+      "lit": true,
+      "rates": "Not published; quoted on request. Benchmarks: Auckland Hockey water turfs $127 (summer) to $155 (winter) + GST/hr; Rangitoto College hockey turf $110 + GST/hr.",
+      "sources": [
+        "https://www.macleans.school.nz/news/advertising-space-on-the-sports-turf",
+        "https://lumosa.eu/en/testimonials/macleans-college-auckland"
+      ],
+      "tenure": {
+        "kind": "none"
+      }
+    },
+    {
+      "id": "acg-strathallan",
+      "park_id": null,
+      "park": "ACG Strathallan (hockey turf)",
+      "lat": -37.0675,
+      "lon": 174.9175,
+      "approx": true,
+      "operator": "ACG Strathallan",
+      "short": "Strathallan",
+      "type": "school",
+      "code": "hockey",
+      "category": "community",
+      "manages": "Outdoor multi-use hockey turf with floodlights for evening games and community hire",
+      "contact": {
+        "address": "Hingaia Peninsula, Karaka",
+        "url": "https://www.strathallan.acgedu.com/"
+      },
+      "status": "likely",
+      "notes": "BOOKING ONLY AVAILABLE THROUGH AMUA. Private contact required: AMUA arranges the hire with the venue directly (not a council booking).",
+      "must_book_through": "AMUA",
+      "private_contact": true,
+      "lit": true,
+      "rates": "Not published; quoted on request. Benchmarks: Auckland Hockey water turfs $127 (summer) to $155 (winter) + GST/hr; Rangitoto College hockey turf $110 + GST/hr.",
+      "sources": [
+        "https://bwhenderson.co.nz/project/strathallancollege/"
+      ],
+      "tenure": {
+        "kind": "none"
+      }
+    },
+    {
+      "id": "one-tree-hill-college",
+      "park_id": null,
+      "park": "One Tree Hill College (turf)",
+      "lat": -36.9053,
+      "lon": 174.816,
+      "approx": true,
+      "operator": "One Tree Hill College",
+      "short": "OTHC",
+      "type": "school",
+      "code": "multi",
+      "category": "community",
+      "manages": "Floodlit turf used for evening social leagues and independent bookings",
+      "contact": {
+        "address": "421–451 Great South Road, Penrose",
+        "url": "https://www.othc.school.nz/"
+      },
+      "status": "likely",
+      "notes": "BOOKING ONLY AVAILABLE THROUGH AMUA. Private contact required: AMUA arranges the hire with the venue directly (not a council booking).",
+      "must_book_through": "AMUA",
+      "private_contact": true,
+      "lit": true,
+      "rates": "Not published; quoted on request. Benchmarks: Auckland Hockey water turfs $127 (summer) to $155 (winter) + GST/hr; Rangitoto College hockey turf $110 + GST/hr.",
+      "sources": [
+        "https://en.wikipedia.org/wiki/One_Tree_Hill_College"
+      ],
+      "tenure": {
+        "kind": "none"
+      }
+    },
+    {
+      "id": "st-peters-epsom",
+      "park_id": null,
+      "park": "St Peter's College (the Cage turf)",
+      "lat": -36.8634,
+      "lon": 174.7703,
+      "approx": true,
+      "operator": "St Peter's College",
+      "short": "St Peter's",
+      "type": "school",
+      "code": "multi",
+      "category": "community",
+      "manages": "Floodlit artificial field (\"the Cage\", across Mountain Road; Auckland's first school turf, 2012) used for after-hours casual competitions",
+      "contact": {
+        "phone": "09 524 8108",
+        "email": "admin@st-peters.school.nz",
+        "address": "23 Mountain Road, Epsom",
+        "url": "https://www.st-peters.school.nz/"
+      },
+      "status": "likely",
+      "notes": "BOOKING ONLY AVAILABLE THROUGH AMUA. Private contact required: AMUA arranges the hire with the venue directly (not a council booking).",
+      "must_book_through": "AMUA",
+      "private_contact": true,
+      "lit": true,
+      "rates": "Not published; quoted on request. Benchmarks: Auckland Hockey water turfs $127 (summer) to $155 (winter) + GST/hr; Rangitoto College hockey turf $110 + GST/hr.",
+      "sources": [
+        "https://cathnews.co.nz/2012/05/11/st-peters-college-first-school-to-get-artificial-turf/",
+        "https://en.wikipedia.org/wiki/St_Peter%27s_College,_Auckland"
+      ],
+      "tenure": {
+        "kind": "none"
+      }
+    },
+    {
+      "id": "rutherford-te-atatu",
+      "park_id": null,
+      "park": "Rutherford College (all-weather turf)",
+      "lat": -36.8448,
+      "lon": 174.6528,
+      "approx": true,
+      "operator": "Rutherford College",
+      "short": "Rutherford",
+      "type": "school",
+      "code": "multi",
+      "category": "community",
+      "manages": "All-weather turf (over the former tennis and netball courts) with evening lighting; school fields hired on occasion when free",
+      "contact": {
+        "address": "16 Kotuku Street, Te Atatū Peninsula",
+        "url": "https://www.rutherford.school.nz/our-community/hire-facilities"
+      },
+      "status": "to-verify",
+      "notes": "BOOKING ONLY AVAILABLE THROUGH AMUA. Private contact required: AMUA arranges the hire with the venue directly (not a council booking).",
+      "must_book_through": "AMUA",
+      "private_contact": true,
+      "lit": true,
+      "rates": "Not published; quoted on request (fields hired only when the school's teams aren't using them). quoted on request. Benchmarks: Auckland Hockey water turfs $127 (summer) to $155 (winter) + GST/hr; Rangitoto College hockey turf $110 + GST/hr.",
+      "sources": [
+        "https://www.rutherford.school.nz/our-community/hire-facilities",
+        "https://www.nzct.org.nz/news/ground-breaking-new-turf-for-rutherford-college/"
+      ],
+      "tenure": {
+        "kind": "none"
+      }
+    },
+    {
+      "id": "westlake-girls",
+      "park_id": null,
+      "park": "Westlake Girls High School (turfs)",
+      "lat": -36.7792,
+      "lon": 174.7525,
+      "approx": true,
+      "operator": "Westlake Girls High School",
+      "short": "Westlake Girls",
+      "type": "school",
+      "code": "multi",
+      "category": "community",
+      "manages": "Three floodlit artificial turfs: a blue international hockey turf and two FIFA-class football fields; outdoor facilities open to community hire",
+      "contact": {
+        "email": "sportbookings@westlakegirls.school.nz",
+        "address": "2 Wairau Road, Takapuna",
+        "url": "https://facilities.westlakegirls.school.nz/sport-facilities/",
+        "phone": "09 489 4169"
+      },
+      "status": "confirmed",
+      "notes": "BOOKING ONLY AVAILABLE THROUGH AMUA. Private contact required: AMUA arranges the hire with the venue directly (not a council booking). Auckland Uni Ultimate has hired a field here (Aug 2024).",
+      "must_book_through": "AMUA",
+      "private_contact": true,
+      "lit": true,
+      "rates": "$104.35 + GST/hr ($120/hr incl. GST): field hire invoiced to Auckland Uni Ultimate, 6 Aug 2024 (2 hours, $240). Hockey turfs A and B are booked through North Harbour Hockey (portal.sportskey.com/venues/nhha); football turfs through sportbookings@westlakegirls.school.nz.",
+      "sources": [
+        "https://facilities.westlakegirls.school.nz/sport-facilities/",
+        "https://portal.sportskey.com/venues/nhha"
+      ],
+      "tenure": {
+        "kind": "none"
+      }
+    },
+    {
+      "id": "college-rifles",
+      "park_id": null,
+      "park": "College Rifles Park (artificial fields)",
+      "lat": -36.8787,
+      "lon": 174.809,
+      "approx": true,
+      "operator": "College Rifles Rugby Union Football & Sports Club",
+      "short": "College Rifles",
+      "type": "club",
+      "code": "rugby",
+      "category": "community",
+      "manages": "Two floodlit FieldTurf artificial rugby fields (club-owned grounds, part of the council sports field network); open for community and casual group bookings",
+      "contact": {
+        "address": "Haast Street, Remuera",
+        "url": "https://www.collegerifles.co.nz/newsarticle/80536"
+      },
+      "status": "likely",
+      "notes": "BOOKING ONLY AVAILABLE THROUGH AMUA. Private contact required: AMUA arranges the hire with the venue directly (not a council booking).",
+      "must_book_through": "AMUA",
+      "private_contact": true,
+      "lit": true,
+      "rates": "Not published; quoted on request. Benchmarks: Auckland Hockey water turfs $127 (summer) to $155 (winter) + GST/hr; Rangitoto College hockey turf $110 + GST/hr.",
+      "sources": [
+        "https://www.collegerifles.co.nz/newsarticle/80536",
+        "https://en.wikipedia.org/wiki/College_Rifles_RFC",
+        "https://ourauckland.aucklandcouncil.govt.nz/news/2018/7/college-rifles-turf-upgrade"
+      ],
+      "tenure": {
+        "kind": "none"
       }
     }
   ]
