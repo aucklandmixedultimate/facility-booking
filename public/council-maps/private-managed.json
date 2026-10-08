@@ -405,11 +405,11 @@
       "park": "Colin Maiden Park",
       "lat": -36.88195,
       "lon": 174.8475,
-      "operator": "Auckland University RFC (rugby) · Auckland University Cricket Club (cricket) · Auckland Hockey (turfs)",
+      "operator": "Auckland University RFC (rugby) · Auckland University Cricket Club (cricket)",
       "short": "Varsity clubs",
       "type": "club",
       "code": "rugby",
-      "manages": "Rugby grounds and clubrooms (AURFC); cricket grounds, booked through bookanet (AUCC); hockey turfs (Auckland Hockey, leaseholder)",
+      "manages": "Rugby grounds and clubrooms (AURFC); cricket grounds, booked through bookanet (AUCC)",
       "contact": {
         "url": "https://www.aurfc.co.nz/about-us-1/venue-hire",
         "url2": "https://www.aucc.co.nz/clubrooms-1"
@@ -418,7 +418,6 @@
       "sources": [
         "https://www.aurfc.co.nz/about-us-1/venue-hire",
         "https://aucc.bookanet.co.nz/terms",
-        "https://akhockey.org.nz/colin-maiden-park-project-overview-and-faqs/",
         "https://ourauckland.aucklandcouncil.govt.nz/news/2025/06/a-game-changer-for-colin-maiden-park/",
         "https://www.scoop.co.nz/stories/AK1312/S00566/colin-maiden-park-to-stay-in-public-ownership.htm"
       ],
@@ -428,8 +427,8 @@
         "kind": "unknown"
       },
       "refs": [
-        3,
-        4
+        2,
+        3
       ],
       "board_links": [
         "landowner_approval"
@@ -680,7 +679,7 @@
       "private_contact": true,
       "lit": true,
       "category": "community",
-      "rates": "Three set fees depending on day and time (not published; ask info@billmckinlaypark.co.nz). quoted on request. Benchmarks: Auckland Hockey water turfs $127 (summer) to $155 (winter) + GST/hr; Rangitoto College hockey turf $110 + GST/hr."
+      "rates": "Three set fees depending on day and time (not published; ask info@billmckinlaypark.co.nz; estimate ~$120/hr for turf)."
     },
     {
       "id": "bruce-pulman",
@@ -1735,7 +1734,7 @@
       "type": "school",
       "code": "multi",
       "category": "community",
-      "manages": "Lower Artificial Sports Turf and a hockey turf, both floodlit, hired to outside groups",
+      "manages": "Floodlit Lower Artificial Sports Turf, hired to outside groups",
       "contact": {
         "address": "55 Mountain Road, Epsom",
         "url": "https://www.ags.school.nz/about/facilities/"
@@ -1745,70 +1744,9 @@
       "must_book_through": "AMUA",
       "private_contact": true,
       "lit": true,
-      "rates": "Not published; quoted on request. Benchmarks: Auckland Hockey water turfs $127 (summer) to $155 (winter) + GST/hr; Rangitoto College hockey turf $110 + GST/hr.",
+      "rates": "Not published; quoted on request (estimate ~$120/hr for turf).",
       "sources": [
         "https://www.ags.school.nz/about/facilities/"
-      ],
-      "tenure": {
-        "kind": "none"
-      }
-    },
-    {
-      "id": "macleans-bucklands",
-      "park_id": null,
-      "park": "Macleans College (sports turf)",
-      "lat": -36.8955,
-      "lon": 174.9065,
-      "approx": true,
-      "operator": "Macleans College",
-      "short": "Macleans",
-      "type": "school",
-      "code": "multi",
-      "category": "community",
-      "manages": "FIFA-certified dual-purpose artificial turf (FIH hockey pitch since 2020), six 15 m light poles; used by outside clubs after hours",
-      "contact": {
-        "address": "2 Macleans Road, Bucklands Beach",
-        "url": "https://www.macleans.school.nz/"
-      },
-      "status": "likely",
-      "notes": "BOOKING ONLY AVAILABLE THROUGH AMUA. Private contact required: AMUA arranges the hire with the venue directly (not a council booking).",
-      "must_book_through": "AMUA",
-      "private_contact": true,
-      "lit": true,
-      "rates": "Not published; quoted on request. Benchmarks: Auckland Hockey water turfs $127 (summer) to $155 (winter) + GST/hr; Rangitoto College hockey turf $110 + GST/hr.",
-      "sources": [
-        "https://www.macleans.school.nz/news/advertising-space-on-the-sports-turf",
-        "https://lumosa.eu/en/testimonials/macleans-college-auckland"
-      ],
-      "tenure": {
-        "kind": "none"
-      }
-    },
-    {
-      "id": "acg-strathallan",
-      "park_id": null,
-      "park": "ACG Strathallan (hockey turf)",
-      "lat": -37.0675,
-      "lon": 174.9175,
-      "approx": true,
-      "operator": "ACG Strathallan",
-      "short": "Strathallan",
-      "type": "school",
-      "code": "hockey",
-      "category": "community",
-      "manages": "Outdoor multi-use hockey turf with floodlights for evening games and community hire",
-      "contact": {
-        "address": "Hingaia Peninsula, Karaka",
-        "url": "https://www.strathallan.acgedu.com/"
-      },
-      "status": "likely",
-      "notes": "BOOKING ONLY AVAILABLE THROUGH AMUA. Private contact required: AMUA arranges the hire with the venue directly (not a council booking).",
-      "must_book_through": "AMUA",
-      "private_contact": true,
-      "lit": true,
-      "rates": "Not published; quoted on request. Benchmarks: Auckland Hockey water turfs $127 (summer) to $155 (winter) + GST/hr; Rangitoto College hockey turf $110 + GST/hr.",
-      "sources": [
-        "https://bwhenderson.co.nz/project/strathallancollege/"
       ],
       "tenure": {
         "kind": "none"
@@ -1836,7 +1774,7 @@
       "must_book_through": "AMUA",
       "private_contact": true,
       "lit": true,
-      "rates": "Not published; quoted on request. Benchmarks: Auckland Hockey water turfs $127 (summer) to $155 (winter) + GST/hr; Rangitoto College hockey turf $110 + GST/hr.",
+      "rates": "Not published; quoted on request (estimate ~$120/hr for turf).",
       "sources": [
         "https://en.wikipedia.org/wiki/One_Tree_Hill_College"
       ],
@@ -1868,7 +1806,7 @@
       "must_book_through": "AMUA",
       "private_contact": true,
       "lit": true,
-      "rates": "Not published; quoted on request. Benchmarks: Auckland Hockey water turfs $127 (summer) to $155 (winter) + GST/hr; Rangitoto College hockey turf $110 + GST/hr.",
+      "rates": "Not published; quoted on request (estimate ~$120/hr for turf).",
       "sources": [
         "https://cathnews.co.nz/2012/05/11/st-peters-college-first-school-to-get-artificial-turf/",
         "https://en.wikipedia.org/wiki/St_Peter%27s_College,_Auckland"
@@ -1899,7 +1837,7 @@
       "must_book_through": "AMUA",
       "private_contact": true,
       "lit": true,
-      "rates": "Not published; quoted on request (fields hired only when the school's teams aren't using them). quoted on request. Benchmarks: Auckland Hockey water turfs $127 (summer) to $155 (winter) + GST/hr; Rangitoto College hockey turf $110 + GST/hr.",
+      "rates": "Not published; quoted on request (fields hired only when the school's teams aren't using them; estimate ~$120/hr for turf).",
       "sources": [
         "https://www.rutherford.school.nz/our-community/hire-facilities",
         "https://www.nzct.org.nz/news/ground-breaking-new-turf-for-rutherford-college/"
@@ -1911,16 +1849,16 @@
     {
       "id": "westlake-girls",
       "park_id": null,
-      "park": "Westlake Girls High School (turfs)",
+      "park": "Westlake Girls High School (football turfs)",
       "lat": -36.7792,
       "lon": 174.7525,
       "approx": true,
       "operator": "Westlake Girls High School",
       "short": "Westlake Girls",
       "type": "school",
-      "code": "multi",
+      "code": "football",
       "category": "community",
-      "manages": "Three floodlit artificial turfs: a blue international hockey turf and two FIFA-class football fields; outdoor facilities open to community hire",
+      "manages": "Two floodlit FIFA-class artificial football fields; outdoor facilities open to community hire",
       "contact": {
         "email": "sportbookings@westlakegirls.school.nz",
         "address": "2 Wairau Road, Takapuna",
@@ -1932,10 +1870,9 @@
       "must_book_through": "AMUA",
       "private_contact": true,
       "lit": true,
-      "rates": "$104.35 + GST/hr ($120/hr incl. GST): field hire invoiced to Auckland Uni Ultimate, 6 Aug 2024 (2 hours, $240). Hockey turfs A and B are booked through North Harbour Hockey (portal.sportskey.com/venues/nhha); football turfs through sportbookings@westlakegirls.school.nz.",
+      "rates": "$104.35 + GST/hr ($120/hr incl. GST): field hire invoiced to Auckland Uni Ultimate, 6 Aug 2024 (2 hours, $240). Book through sportbookings@westlakegirls.school.nz.",
       "sources": [
-        "https://facilities.westlakegirls.school.nz/sport-facilities/",
-        "https://portal.sportskey.com/venues/nhha"
+        "https://facilities.westlakegirls.school.nz/sport-facilities/"
       ],
       "tenure": {
         "kind": "none"
@@ -1963,7 +1900,7 @@
       "must_book_through": "AMUA",
       "private_contact": true,
       "lit": true,
-      "rates": "Not published; quoted on request. Benchmarks: Auckland Hockey water turfs $127 (summer) to $155 (winter) + GST/hr; Rangitoto College hockey turf $110 + GST/hr.",
+      "rates": "Not published; quoted on request (estimate ~$120/hr for turf).",
       "sources": [
         "https://www.collegerifles.co.nz/newsarticle/80536",
         "https://en.wikipedia.org/wiki/College_Rifles_RFC",
