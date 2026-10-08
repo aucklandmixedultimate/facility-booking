@@ -363,6 +363,24 @@ function parkLatLng(p) {
   if (pl?.lat != null) return [pl.lat, pl.lon];
   return p.lat ? [p.lat, p.lon] : null;
 }
+// Parks with no location (no council map, e.g. schools and stadiums) still show on the
+// Auckland map: grouped just off the edge of the city on their region's side (Central's in
+// the gulf to the east), in a small grid, dashed, under a "North · no location" label.
+const UNPLACED_AT = { North: [-36.70, 174.92], West: [-36.95, 174.42], South: [-37.04, 174.63], Central: [-36.84, 174.95] };
+const UNPLACED_SIDE = { North: "North", West: "West", South: "South", Central: "East" };
+function unplacedLatLng(p) {
+  const same = PARKS.filter(x => x.region === p.region && !parkLatLng(x)), i = same.indexOf(p), at = UNPLACED_AT[p.region] || UNPLACED_AT.Central;
+  if (i < 0) return null;
+  const cols = 4, r = Math.floor(i / cols), c = i % cols;
+  return [at[0] - r * 0.012, at[1] + (c - (cols - 1) / 2) * 0.016];
+}
+// Which outer side of Auckland a point lies on (from the city centre), for parks outside
+// every suburb: "North", "East", "South" or "West".
+const AKL_CENTRE = [-36.87, 174.77];
+function sideOf(ll) {
+  const dy = ll[0] - AKL_CENTRE[0], dx = (ll[1] - AKL_CENTRE[1]) * Math.cos(AKL_CENTRE[0] * Math.PI / 180);
+  return Math.abs(dy) >= Math.abs(dx) ? (dy > 0 ? "North" : "South") : (dx > 0 ? "East" : "West");
+}
 
 // Interests open inline in the map toolbar as toggle buttons: pressed = served. Every area
 // and both providers start pressed (no filter).
@@ -599,8 +617,13 @@ const suburbAt = (all, ll) => ll && all.find(s => ll[0] >= s.b[0] && ll[0] <= s.
 // The zoom-out button names the park's suburb (where it zooms to); 🔍 without suburb data.
 async function labelFitBtn(p) {
   const btn = $("fitBtn"); btn.textContent = "🔍"; btn.title = "Zoom to the park; press again for its suburb and neighbours (0)";
-  const home = suburbAt(await loadSuburbs(), parkLatLng(p));
-  if (home && current()?.id === p.id) btn.textContent = home.n;
+  const ll = parkLatLng(p), home = suburbAt(await loadSuburbs(), ll);
+  if (current()?.id !== p.id) return;
+  // Outside every suburb (or no location at all): the outer side of Auckland it's on.
+  if (home) btn.textContent = home.n;
+  else { const side = ll ? sideOf(ll) : UNPLACED_SIDE[p.region] || "Auckland";
+    btn.textContent = ll ? `Outer ${side.toLowerCase()}` : `${side} · no location`;
+    btn.title = ll ? `Outside the suburb map, ${side.toLowerCase()} of the city · zoom out to it (0)` : `No location on the council maps · shown with the other ${p.region} parks off the ${side.toLowerCase()} edge of the Auckland map (0)`; }
 }
 async function showSuburbs(p, ll) {
   hideSuburbs();
@@ -634,8 +657,8 @@ async function zoomToggle(p) {
   if (!back && (aklNext || atParkView())) {
     // Zoom out to the park's suburb and all its neighbours (with suburb outlines), or
     // Auckland-wide centred on the park when there's no suburb data.
-    const ll = parkLatLng(p), z = map.getBoundsZoom(L.latLngBounds(DEFAULT_VIEW));
-    const sb = await showSuburbs(p, ll);
+    const ll = parkLatLng(p) || unplacedLatLng(p), z = map.getBoundsZoom(L.latLngBounds(DEFAULT_VIEW));
+    const sb = await showSuburbs(p, parkLatLng(p));   // no suburb for a park without a location
     if (sb) map.fitBounds(sb, { padding: [20, 20] });
     else if (ll) map.setView(ll, z); else map.fitBounds(DEFAULT_VIEW, { padding: [16, 16] });
     if (ll) { whereMark = L.marker(ll, { icon: L.divIcon({ className: "", html: `<div class="wherepin">📍</div>`, iconSize: [30, 30], iconAnchor: [15, 28] }), interactive: false }).addTo(map);
@@ -1407,7 +1430,7 @@ function buildCity() {
   const pts = [];
   PARKS.forEach(p => {
     if ((reg && p.region !== reg) || !interestOk(p)) return;
-    const ll = parkLatLng(p); if (!ll) return;
+    const located = parkLatLng(p), ll = located || unplacedLatLng(p); if (!ll) return;
     const r = reviews[p.id], col = rejectedForMe(p.id) ? "#b3372d" : suitColor(r, p.id), top = r?.decision === "top", isCur = view === "city" && cur?.id === p.id && !!focusId;
     pts.push(ll);
     const pv = privOps(p);
@@ -1431,12 +1454,12 @@ function buildCity() {
       : lit ? L.marker(ll, { icon: L.divIcon({ className: "", iconSize: [20, 20], iconAnchor: [10, 10],
           html: `<div class="dotpin" style="background:${col};opacity:${r ? 1 : 0.8};border:${dotW}px ${fl ? "dashed" : "solid"} ${dotEdge}"><span class="litin" aria-label="Lights">⚡</span></div>` }),
           keyboard: false, bubblingMouseEvents: false, zIndexOffset: 300 })
-      : L.circleMarker(ll, { radius: r ? 8 : 6, color: dotEdge, weight: dotW, dashArray: fl ? "3 3" : null,
-      fillColor: col, fillOpacity: r ? 0.95 : 0.7, bubblingMouseEvents: false });
+      : L.circleMarker(ll, { radius: r ? 8 : 6, color: located ? dotEdge : "#475569", weight: located ? dotW : 2, dashArray: fl || !located ? "3 3" : null,
+      fillColor: col, fillOpacity: located ? (r ? 0.95 : 0.7) : 0.55, bubblingMouseEvents: false });
     const tags = r ? [r.decision === "top" ? "★ Top pick" : r.decision === "yes" ? "Shortlisted" : r.decision === "rating" ? "Rating in progress" : "Rejected",
       r.quality ? r.quality + "/5" : "", r.fit && r.fit !== "unknown" ? FIT_LABEL[r.fit] : "",
       r.lights === "full" || r.lights === "training" ? "💡 lights" : r.lights === "none" ? "no lights" : ""].filter(Boolean).join(" · ") : "Not rated yet";
-    mk.bindTooltip(`<b>${esc(p.name)}</b><br>${esc(p.region)} · <b style="color:${col}">${rejectedForMe(p.id) ? "Rejected (yours)" : suitWord(r, p.id)}</b><br>${esc(tags)}${r?.fields ? "<br>Fields: " + esc(r.fields) : ""}`
+    mk.bindTooltip(`<b>${esc(p.name)}</b>${located ? "" : `<br><i>No location on the council maps: shown with the other ${esc(p.region)} parks</i>`}<br>${esc(p.region)} · <b style="color:${col}">${rejectedForMe(p.id) ? "Rejected (yours)" : suitWord(r, p.id)}</b><br>${esc(tags)}${r?.fields ? "<br>Fields: " + esc(r.fields) : ""}`
       + (isAmua ? `<br><b style="color:#b7791f">★ Book only through: AMUA</b>`
         : pv?.length ? `<br><b style="color:${PRIV_COLOR}">◆ Privately managed: contact ${esc(pv[0].short)}</b> first` : "")
       + (ult.length ? `<br><b style="color:${ULT_COLOR}">🥏 ${ult.some(o => o.booking_only) ? "Book only through" : "Ultimate club"}: ${esc(ult.map(o => o.operator).join(", "))}</b>` : "")
@@ -1453,6 +1476,11 @@ function buildCity() {
       .bindTooltip(`${esc(p.name)}${f.n ? " · " + esc(f.n) : ""} — ${rejectedForMe(p.id) ? "Rejected (yours)" : suitWord(r, p.id)}`, { className: "parktip", sticky: true })
       .on("click", () => openPark(p.id)).addTo(cityFieldsLayer));
   });
+  // A label over each group of parks without a location.
+  Object.keys(UNPLACED_AT).forEach(g => { const n = PARKS.filter(x => x.region === g && !parkLatLng(x) && (!reg || reg === g) && interestOk(x)).length; if (!n) return;
+    const at = UNPLACED_AT[g];
+    L.marker([at[0] + 0.012, at[1]], { interactive: false, keyboard: false,
+      icon: L.divIcon({ className: "", html: `<span class="unplacedlbl">${esc(g)} · no location (${n})</span>`, iconSize: null }) }).addTo(cityLayer); });
   drawMyFieldPins(reg);
   // Private grounds that aren't in the council maps: hollow diamonds with the operator's contacts.
   PRIV.operators.filter(o => !o.park_id || !BYID[o.park_id]).forEach(o => {
@@ -1489,7 +1517,7 @@ function drawMyFieldPins(reg) {
     const op = x.id.startsWith("cm-") ? (PRIV.operators || []).find(o => "cm-" + o.id === x.id) : null;
     const p = BYID[x.park_id];
     if (p && reg && p.region !== reg) return;
-    const ll = p ? parkLatLng(p) : op ? [op.lat, op.lon] : null; if (!ll) return;
+    const ll = p ? parkLatLng(p) || unplacedLatLng(p) : op ? [op.lat, op.lon] : null; if (!ll) return;
     const k = p ? p.id : x.id;
     if (!byPlace.has(k)) byPlace.set(k, { ll, park: p, name: p?.name || x.park, items: [] });
     byPlace.get(k).items.push({ x, w });
@@ -2232,7 +2260,7 @@ function renderCity() {
   $("cityInfo").innerHTML = `<span><b>${done}</b> of ${scope.length} rated</span>`
     + `<span><b>${rated.filter(x => suitScore(reviews[x.id], x.id) >= 0.65).length}</b> good or better</span>`
     + `<span><b>${rated.filter(x => ["full", "training"].includes(reviews[x.id].lights)).length}</b> with lights</span>`
-    + (unplaced ? `<span>${unplaced} without a location (no council map)</span>` : "")
+    + (unplaced ? `<span title="Shown in groups off the edge of the map, on their region's side">${unplaced} without a location (no council map) · shown at the map's edge</span>` : "")
     + (nextUp ? `<button class="railtools" id="nextUnrated" style="border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:4px 10px">Rate next: ${esc(nextUp.name)} ▸</button>` : "");
   const nb = $("nextUnrated"); if (nb) nb.onclick = () => openPark(nextUp.id);
   $("emptyState").hidden = true; $("card").hidden = false; $("behind").hidden = true;
