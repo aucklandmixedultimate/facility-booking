@@ -745,3 +745,5 @@ body.bookview #mode,body.bookview #order,body.bookview .filters .chk,body.bookvi
 #fieldBtn[data-mode=off]{opacity:.7}
 /* Parks without a location: their group's label on the Auckland map */
 .unplacedlbl{display:inline-block;transform:translate(-50%,-50%);white-space:nowrap;font:700 11px/1.2 var(--font-body);color:#334155;background:rgba(255,255,255,.88);border:1px dashed #64748b;border-radius:999px;padding:2px 8px}
+.cityhidden{flex:1 1 100%;white-space:normal;color:#92400e;background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:3px 8px;font-weight:600}
+.cityhidden button{margin-left:6px;border:0;background:#92400e;color:#fff;border-radius:6px;padding:2px 8px;font-weight:700;cursor:pointer}

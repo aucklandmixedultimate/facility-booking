@@ -2262,6 +2262,15 @@ function renderCity() {
     + `<span><b>${rated.filter(x => ["full", "training"].includes(reviews[x.id].lights)).length}</b> with lights</span>`
     + (unplaced ? `<span title="Shown in groups off the edge of the map, on their region's side">${unplaced} without a location (no council map) · shown at the map's edge</span>` : "")
     + (nextUp ? `<button class="railtools" id="nextUnrated" style="border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:4px 10px">Rate next: ${esc(nextUp.name)} ▸</button>` : "");
+  // Parks the region dropdown or 🎯 Interests hide from the map, said plainly, with one tap
+  // to show them all (a filter left on otherwise looks like missing data).
+  const hiddenBy = [reg && `region: ${reg}`, interests.regions.length && `Interests: ${interests.regions.join(", ")} only`,
+    !interests.council && "council-run hidden", !interests.priv && "club-run hidden", !interests.lit && "lit hidden", !interests.dark && "unlit hidden"].filter(Boolean);
+  const nHidden = PARKS.filter(x => (reg && x.region !== reg) || !interestOk(x)).length;
+  if (nHidden) $("cityInfo").insertAdjacentHTML("afterbegin", `<span class="cityhidden">⚠ ${nHidden} of ${PARKS.length} parks hidden (${esc(hiddenBy.join(" · "))}) <button id="showAllParks">Show all parks</button></span>`);
+  const sa = $("showAllParks"); if (sa) sa.onclick = () => {
+    interests = { regions: [], council: true, priv: true, lit: true, dark: true }; store.set("vet-interests", interests); renderInterests();
+    $("region").value = ""; store.set("vet-region", ""); cursor = 0; setView("city", { refit: true }); };
   const nb = $("nextUnrated"); if (nb) nb.onclick = () => openPark(nextUp.id);
   $("emptyState").hidden = true; $("card").hidden = false; $("behind").hidden = true;
   buildCity(); syncCityFields();
