@@ -1850,7 +1850,7 @@
     {
       "id": "rutherford-te-atatu",
       "park_id": null,
-      "park": "Rutherford College (all-weather turf)",
+      "park": "Rutherford College (school fields)",
       "lat": -36.851788,
       "lon": 174.644333,
       "operator": "Rutherford College",
@@ -1858,7 +1858,7 @@
       "type": "school",
       "code": "multi",
       "category": "community",
-      "manages": "All-weather turf (over the former tennis and netball courts), no floodlights; school fields hired on occasion when free",
+      "manages": "School fields, no floodlights; hired on occasion when the school's teams aren't using them",
       "contact": {
         "address": "16 Kotuku Street, Te Atatū Peninsula",
         "url": "https://www.rutherford.school.nz/our-community/hire-facilities"
@@ -1868,10 +1868,9 @@
       "must_book_through": "AMUA",
       "private_contact": true,
       "lit": false,
-      "rates": "Not published; quoted on request (fields hired only when the school's teams aren't using them; estimate ~$120/hr for turf).",
+      "rates": "Not published; quoted on request (fields hired only when the school's teams aren't using them; estimate ~$90/hr for grass).",
       "sources": [
-        "https://www.rutherford.school.nz/our-community/hire-facilities",
-        "https://www.nzct.org.nz/news/ground-breaking-new-turf-for-rutherford-college/"
+        "https://www.rutherford.school.nz/our-community/hire-facilities"
       ],
       "tenure": {
         "kind": "none"
@@ -1882,6 +1881,75 @@
           "mono": "RC",
           "bg": "#0b5cad",
           "img": "logos/rutherford.png"
+        }
+      ]
+    },
+    {
+      "id": "macleans-college",
+      "park_id": null,
+      "park": "Macleans College (turf)",
+      "lat": -36.879527,
+      "lon": 174.913262,
+      "operator": "Macleans College",
+      "short": "Macleans",
+      "type": "school",
+      "code": "multi",
+      "category": "community",
+      "ownership": "private",
+      "manages": "Floodlit artificial turf; used by outside clubs after hours",
+      "contact": {
+        "address": "2 Macleans Road, Bucklands Beach",
+        "url": "https://www.macleans.school.nz/"
+      },
+      "status": "likely",
+      "notes": "BOOKING ONLY AVAILABLE THROUGH AMUA. Private contact required: AMUA arranges the hire with the venue directly (not a council booking).",
+      "must_book_through": "AMUA",
+      "private_contact": true,
+      "lit": true,
+      "rates": "Not published; quoted on request (estimate ~$120/hr for turf).",
+      "sources": [
+        "https://www.macleans.school.nz/"
+      ],
+      "tenure": {
+        "kind": "none"
+      },
+      "icons": [
+        {
+          "mono": "MC",
+          "bg": "#1e3a8a",
+          "img": "logos/macleans.png"
+        }
+      ]
+    },
+    {
+      "id": "ormiston-primary",
+      "park_id": null,
+      "park": "Ormiston Primary School (turf)",
+      "lat": -36.970108,
+      "lon": 174.921181,
+      "operator": "Ormiston Primary School",
+      "short": "Ormiston Primary",
+      "type": "school",
+      "code": "multi",
+      "category": "community",
+      "ownership": "private",
+      "manages": "Floodlit artificial turf",
+      "contact": {},
+      "status": "likely",
+      "notes": "BOOKING ONLY AVAILABLE THROUGH AMUA. Private contact required: AMUA arranges the hire with the venue directly (not a council booking).",
+      "must_book_through": "AMUA",
+      "private_contact": true,
+      "lit": true,
+      "rates": "Not published; quoted on request (estimate ~$120/hr for turf).",
+      "sources": [],
+      "tenure": {
+        "kind": "none"
+      },
+      "icons": [
+        {
+          "mono": "OPS",
+          "bg": "#3f3f46",
+          "img": "logos/ormiston-primary.png"
         }
       ]
     },
