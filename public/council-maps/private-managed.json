@@ -97,8 +97,8 @@
       "low": "Operator effectively decides"
     },
     "category": {
-      "council": "Council park",
-      "community": "Community facility (school or trust)"
+      "council": "Council park (may be club-operated)",
+      "community": "Privately owned (school, club or trust land; not a council park)"
     }
   },
   "_contact_rule": "Where several clubs operate at one ground, contact the operator marked booking_only (the only booking channel), then primary, then the rugby or football club.",
@@ -196,7 +196,8 @@
           "img": "logos/ani.png"
         }
       ],
-      "category": "community"
+      "category": "community",
+      "ownership": "private"
     },
     {
       "id": "ani-lower",
@@ -233,7 +234,8 @@
           "mono": "ANI",
           "bg": "#111827"
         }
-      ]
+      ],
+      "ownership": "private"
     },
     {
       "id": "stcuthberts-epsom",
@@ -270,7 +272,8 @@
       ],
       "tenure": {
         "kind": "none"
-      }
+      },
+      "ownership": "private"
     },
     {
       "id": "sacred-heart-glen-innes",
@@ -308,7 +311,8 @@
       "local_board": "orakei",
       "tenure": {
         "kind": "none"
-      }
+      },
+      "ownership": "private"
     },
     {
       "id": "arl-cornwall-lower",
@@ -679,7 +683,15 @@
       "private_contact": true,
       "lit": true,
       "category": "community",
-      "rates": "Three set fees depending on day and time (not published; ask info@billmckinlaypark.co.nz; estimate ~$120/hr for turf)."
+      "rates": "Three set fees depending on day and time (not published; ask info@billmckinlaypark.co.nz; estimate ~$120/hr for turf).",
+      "ownership": "private",
+      "icons": [
+        {
+          "mono": "BMP",
+          "bg": "#9d2a8f",
+          "img": "logos/bill-mckinlay.png"
+        }
+      ]
     },
     {
       "id": "bruce-pulman",
@@ -1750,7 +1762,15 @@
       ],
       "tenure": {
         "kind": "none"
-      }
+      },
+      "icons": [
+        {
+          "mono": "AGS",
+          "bg": "#1e3a6e",
+          "img": "logos/ags.png"
+        }
+      ],
+      "ownership": "private"
     },
     {
       "id": "one-tree-hill-college",
@@ -1780,7 +1800,15 @@
       ],
       "tenure": {
         "kind": "none"
-      }
+      },
+      "icons": [
+        {
+          "mono": "OTHC",
+          "bg": "#1a487c",
+          "img": "logos/othc.png"
+        }
+      ],
+      "ownership": "private"
     },
     {
       "id": "st-peters-epsom",
@@ -1813,7 +1841,15 @@
       ],
       "tenure": {
         "kind": "none"
-      }
+      },
+      "icons": [
+        {
+          "mono": "SPC",
+          "bg": "#003b79",
+          "img": "logos/st-peters.png"
+        }
+      ],
+      "ownership": "private"
     },
     {
       "id": "rutherford-te-atatu",
@@ -1844,7 +1880,15 @@
       ],
       "tenure": {
         "kind": "none"
-      }
+      },
+      "ownership": "private",
+      "icons": [
+        {
+          "mono": "RC",
+          "bg": "#0b5cad",
+          "img": "logos/rutherford.png"
+        }
+      ]
     },
     {
       "id": "westlake-girls",
@@ -1876,7 +1920,15 @@
       ],
       "tenure": {
         "kind": "none"
-      }
+      },
+      "icons": [
+        {
+          "mono": "WGHS",
+          "bg": "#c8102e",
+          "img": "logos/westlake-girls.png"
+        }
+      ],
+      "ownership": "private"
     },
     {
       "id": "college-rifles",
@@ -1908,7 +1960,15 @@
       ],
       "tenure": {
         "kind": "none"
-      }
+      },
+      "icons": [
+        {
+          "mono": "CR",
+          "bg": "#2b2f7a",
+          "img": "logos/college-rifles.png"
+        }
+      ],
+      "ownership": "private"
     }
   ]
 }
