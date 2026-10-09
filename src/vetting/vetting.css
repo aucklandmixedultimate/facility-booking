@@ -752,3 +752,4 @@ body.bookview #mode,body.bookview #order,body.bookview .filters .chk,body.bookvi
 .logopin.own .lp{border-radius:22%}
 .ownpin{width:14px;height:14px;margin:3px;border-radius:3px;background:#fff;border:3px solid #2563eb;box-shadow:0 1px 4px rgba(0,0,0,.5);cursor:pointer}
 .ownlg{display:inline-block;width:10px;height:10px;border-radius:2px;border:2.5px solid #2563eb;background:#fff;margin-right:6px;vertical-align:-2px}
+.chip.own{background:#dbeafe;color:#1d4ed8}
