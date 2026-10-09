@@ -1424,14 +1424,21 @@ function resetLights(p) {
   syncFromFields(t); drawLights(p); drawParkFields(p); renderTags(p);
   setStatus(`${p.name}: lights reset to unknown.`);
 }
+// The centre button shows what tapping it does: while the field is locked, a move-and-turn
+// icon (four arrows inside a turning arc) to pick it up; while it's moving, 🔒 to lock it there.
+const MOVE_ICON = `<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M12 6v12M6 12h12"/><path d="M10 8l2-2 2 2M10 16l2 2 2-2M8 10l-2 2 2 2M16 10l2 2-2 2"/>
+  <path d="M19.5 7.5A9 9 0 0 0 7.5 3.2" stroke-width="1.6"/><path d="M19.8 4.2v3.4h-3.4" stroke-width="1.6"/></svg>`;
 function renderCentre() {
   const p = current(), t = p ? tagsFor(p) : null, moved = !!t && spotMoved(t);
   $("centreWrap").classList.toggle("unlocked", rotating);
   const rated = !!t && curRating(t)?.fit && curRating(t).fit !== "unknown";
   $("centreWrap").classList.toggle("needfit", !rotating && !!t && (!rated || moved));
-  $("centreIco").textContent = rotating ? "🔓" : "🔒";
+  $("centreIco").innerHTML = rotating ? "🔒" : MOVE_ICON;
+  $("centreBtn").title = rotating ? "Lock the field here (Enter)" : "Move and turn the field (Enter)";
+  $("centreBtn").setAttribute("aria-label", $("centreBtn").title);
   $("centreLbl").textContent = rotating ? (matchMedia("(hover: none)").matches ? "Tap to lock it here" : "Click to lock it here")
-    : !curRating(t) ? "Unlock to place the field"
+    : !curRating(t) ? "Tap to move & turn the field"
     : moved ? "Moved · lock it again" : !rated ? `${t.sel}: rate the fit` : `${t.sel}: ${FIT_LABEL[curRating(t).fit]}`;
 }
 
