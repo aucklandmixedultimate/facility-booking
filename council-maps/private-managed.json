@@ -1773,44 +1773,6 @@
       "ownership": "private"
     },
     {
-      "id": "one-tree-hill-college",
-      "park_id": null,
-      "park": "One Tree Hill College (turf)",
-      "lat": -36.9053,
-      "lon": 174.816,
-      "approx": true,
-      "operator": "One Tree Hill College",
-      "short": "OTHC",
-      "type": "school",
-      "code": "multi",
-      "category": "community",
-      "manages": "Floodlit turf used for evening social leagues and independent bookings",
-      "contact": {
-        "address": "421–451 Great South Road, Penrose",
-        "url": "https://www.othc.school.nz/"
-      },
-      "status": "likely",
-      "notes": "BOOKING ONLY AVAILABLE THROUGH AMUA. Private contact required: AMUA arranges the hire with the venue directly (not a council booking).",
-      "must_book_through": "AMUA",
-      "private_contact": true,
-      "lit": true,
-      "rates": "Not published; quoted on request (estimate ~$120/hr for turf).",
-      "sources": [
-        "https://en.wikipedia.org/wiki/One_Tree_Hill_College"
-      ],
-      "tenure": {
-        "kind": "none"
-      },
-      "icons": [
-        {
-          "mono": "OTHC",
-          "bg": "#1a487c",
-          "img": "logos/othc.png"
-        }
-      ],
-      "ownership": "private"
-    },
-    {
       "id": "st-peters-epsom",
       "park_id": null,
       "park": "St Peter's College (the Cage turf)",
