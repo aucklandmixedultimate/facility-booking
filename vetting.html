@@ -8,12 +8,12 @@
     <title>Council / Community Fields</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap">
-    <script type="module" crossorigin src="/facility-booking/assets/vetting-DeRP1tLy.js"></script>
+    <script type="module" crossorigin src="/facility-booking/assets/vetting-DWI07OnA.js"></script>
     <link rel="modulepreload" crossorigin href="/facility-booking/assets/appnav-B4wTRebd.js">
     <link rel="modulepreload" crossorigin href="/facility-booking/assets/_commonjsHelpers-Cpj98o6Y.js">
     <link rel="modulepreload" crossorigin href="/facility-booking/assets/councilSeasons-PuEG0kll.js">
     <link rel="stylesheet" crossorigin href="/facility-booking/assets/appnav-DuensfJ6.css">
-    <link rel="stylesheet" crossorigin href="/facility-booking/assets/vetting-DYJWXbvU.css">
+    <link rel="stylesheet" crossorigin href="/facility-booking/assets/vetting-B7wdslmW.css">
   </head>
   <body class="booting">
     <div class="wrap">
@@ -80,10 +80,10 @@
                   <svg id="fieldSvg" role="img" aria-label="Ultimate frisbee field to scale"></svg>
                 </div>
                 <div class="centre" id="centreWrap" hidden>
-                  <button id="centreBtn" class="centrebtn" title="Unlock to turn the field; lock it to rate the fit (Enter)">
+                  <button id="centreBtn" class="centrebtn" title="Move and turn the field (Enter)">
                     <span class="ico" id="centreIco">🔒</span>
                   </button>
-                  <span class="centrelbl" id="centreLbl">Unlock · rate fit</span>
+                  <span class="centrelbl" id="centreLbl">Move & turn · rate fit</span>
                 </div>
                 <div class="toolbar" role="toolbar" aria-label="Map tools">
                   <button id="fieldBtn" aria-pressed="true" title="Show or hide the frisbee field (T)">Field</button>
@@ -101,7 +101,7 @@
                 <div class="sizepanel helppanel" id="helpPanel" hidden>
                   <b>How it works</b>
                   <ol>
-                    <li><b>Place the field:</b> tap 🔒 to unlock, then twist (or move the mouse) to turn it and drag the map to move it. Tap 🔓 to lock it there: that records its spot and angle.</li>
+                    <li><b>Place the field:</b> tap the ✥ move-and-turn button in the middle, then twist (or move the mouse) to turn it and drag the map to move it. Tap 🔒 to lock it there: that records its spot and angle.</li>
                     <li><b>Rate the fit:</b> once it's locked, the decision buttons become <b>Reduced size</b> <b>Unusable (reject)</b> | <b>3v3 only</b>, <b>1 × full 7v7</b> and <b>2 × full 7v7</b>. Unusable (reject) fields are kept but never become bookable. Each locked field is its own frisbee field (Frisbee 1, 2, …); tapping a council field area drops a new one there. <b>💾 Next field</b> saves it and readies the next; saved ones show as outlines (tap one to edit it).</li>
                     <li><b>2 × full 7v7</b> sets two single fields side by side: the one you placed and a twin a field-width over, on the side that overlaps other fields least. If that side already has a set field, that field is the second one, so nothing overlaps.</li>
                     <li><b>Venue save</b> (deciding, then on to the next venue) rolls the fields up into bookable slots: a mosaic of 1-field and 2-field slots using only the fields as placed. Neighbouring single fields, including ones set separately, are combined into a 2-field slot when that crosses fewer council boundaries. Each council area goes to the slot that overlaps it most; if under a quarter of the council area is left, the rest joins the nearest slot, otherwise you're asked whether to add another field.</li>
@@ -109,7 +109,7 @@
                     <li><b>Decide:</b> ✕ Reject, ★ Top pick or ✓ Shortlist. A top pick or shortlist adds the park's rated fields to the cart (save the cart to make them bookable); Later skips it for now.</li>
                     <li>◆ parks are run by a club or trust; 🎯 Interests chooses which parks are served; ☀/❄ flips the season's maps.</li>
                   </ol>
-                  <p class="keys">Keys: <kbd>←</kbd> back, <kbd>→</kbd> later, <kbd>↓</kbd> shortlist, <kbd>↑</kbd> top pick, <kbd>Backspace</kbd> reject (or rate the fit once locked; <kbd>←</kbd> unusable, <kbd>↓</kbd> 3v3 only, <kbd>↑</kbd> 1 ×, <kbd>→</kbd> 2 ×), <kbd>Z</kbd> undo, <kbd>1</kbd>–<kbd>5</kbd> quality, <kbd>Enter</kbd> lock/unlock, <kbd>C</kbd> Auckland, <kbd>T</kbd> field, <kbd>M</kbd> next map, <kbd>0</kbd> zoom to the council map.</p>
+                  <p class="keys">Keys: <kbd>←</kbd> back, <kbd>→</kbd> later, <kbd>↓</kbd> shortlist, <kbd>↑</kbd> top pick, <kbd>Backspace</kbd> reject (or rate the fit once locked; <kbd>←</kbd> unusable, <kbd>↓</kbd> 3v3 only, <kbd>↑</kbd> 1 ×, <kbd>→</kbd> 2 ×), <kbd>Z</kbd> undo, <kbd>1</kbd>–<kbd>5</kbd> quality, <kbd>Enter</kbd> move &amp; turn / lock, <kbd>C</kbd> Auckland, <kbd>T</kbd> field, <kbd>M</kbd> next map, <kbd>0</kbd> zoom to the council map.</p>
                 </div>
                 <div class="sizepanel" id="sizePanel" hidden>
                   <label>Length (m) <input type="number" id="fLen" min="40" max="130" step="1"></label>
@@ -121,7 +121,7 @@
                   <span class="fb-msg" id="fitMsg">Pan to fine-tune, then rate the fit here</span>
                   <span class="fb-tools" id="fbTools" hidden>
                     <button type="button" id="fbUndo" title="Undo the last change to this park's fields (Z)">↶ Undo</button>
-                    <button type="button" id="fbMove" title="Move or turn this field: unlocks it; lock it again to save the spot">✎ Move</button>
+                    <button type="button" id="fbMove" title="Move or turn this field; lock it again (🔒) to save the spot">✥ Move</button>
                     <button type="button" id="fbRemove" title="Remove this frisbee field (Undo brings it back)">🗑 Remove</button>
                     <button type="button" id="fbAlign" class="fb-align" hidden>⚠ Misaligned</button>
                   </span>
