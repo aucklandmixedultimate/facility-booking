@@ -401,7 +401,7 @@ function renderInterests() {
   const inc = interests.regions.length ? interests.regions : allRegions();
   const btn = (k, v, label, on, title) => `<button data-int="${k}"${v ? ` data-val="${esc(v)}"` : ""} aria-pressed="${on}" title="${title}">${label}</button>`;
   $("interestRow").innerHTML = allRegions().map(r => btn("region", r, esc(r), inc.includes(r), `${esc(r)} parks`)).join("")
-    + `<i class="sep"></i>` + btn("council", "", "🏛 Council", interests.council, "Council-run parks") + btn("priv", "", "◆ Private", interests.priv, "Privately operated parks")
+    + `<i class="sep"></i>` + btn("council", "", "🏛 Council", interests.council, "Council-run parks") + btn("priv", "", "◆ Club-operated", interests.priv, "Council parks a club operates (ask the club first)")
     + `<i class="sep"></i>` + btn("lit", "", "💡 Lights / ?", interests.lit, "Parks with lights, or not known yet") + btn("dark", "", "🚫 No lights", interests.dark, "Parks known to have no lights")
     + (interestsSet() ? `<button data-int="reset" title="Serve every park again">↺ All</button>` : "");
   $("interestBtn").setAttribute("aria-pressed", String(interestsSet()));
@@ -1473,7 +1473,7 @@ function buildCity() {
       r.lights === "full" || r.lights === "training" ? "💡 lights" : r.lights === "none" ? "no lights" : ""].filter(Boolean).join(" · ") : "Not rated yet";
     mk.bindTooltip(`<b>${esc(p.name)}</b>${located ? "" : `<br><i>No location on the council maps: shown with the other ${esc(p.region)} parks</i>`}<br>${esc(p.region)} · <b style="color:${col}">${rejectedForMe(p.id) ? "Rejected (yours)" : suitWord(r, p.id)}</b><br>${esc(tags)}${r?.fields ? "<br>Fields: " + esc(r.fields) : ""}`
       + (isAmua ? `<br><b style="color:#b7791f">★ Book only through: AMUA</b>`
-        : pv?.length ? `<br><b style="color:${PRIV_COLOR}">◆ Privately managed: contact ${esc(pv[0].short)}</b> first` : "")
+        : pv?.length ? `<br><b style="color:${PRIV_COLOR}">◆ Council park, club-operated: contact ${esc(pv[0].short)}</b> first` : "")
       + (ult.length ? `<br><b style="color:${ULT_COLOR}">🥏 ${ult.some(o => o.booking_only) ? "Book only through" : "Ultimate club"}: ${esc(ult.map(o => o.operator).join(", "))}</b>` : "")
       + (flags[p.id] ? `<br><b style="color:${PRIV_COLOR}">✎ ${esc(amendText(flags[p.id]))}</b>${flags[p.id].website ? `<br>🔗 ${esc(flags[p.id].website.replace(/^https?:\/\//, ""))}` : ""}` : "")
       + (diamonds(p).length ? `<br><b style="color:#c2410c">⚾ Softball / baseball ground: mounds may make it unsuitable in summer</b>` : "")
@@ -1499,13 +1499,15 @@ function buildCity() {
     const ll = [o.lat, o.lon]; pts.push(ll);
     // Community facilities can be booked like council fields: in Book mode their popup adds
     // them to the cart, and their badge gets the cart / active ring.
-    const comm = o.category === "community";
+    const comm = o.category === "community", own = ownedPriv(o);
     if (comm && workMode === "book") { const st = locState("cm-" + o.id);
       if (st === "active") L.circleMarker(ll, { radius: 13, color: "#0f766e", weight: 4, fill: true, fillColor: "#14b8a6", fillOpacity: 0.25, interactive: false }).addTo(cityLayer);
       else if (st) L.circleMarker(ll, { radius: 12, color: "#14b8a6", weight: 3, dashArray: "4 3", fill: false, interactive: false }).addTo(cityLayer); }
-    (o.icons ? logoMarker(ll, o.icons, comm ? COMM_COLOR : o.amua ? "#e0a647" : PRIV_COLOR, false, o.amua ? 700 : 550, comm) : o.amua ? amuaMarker(ll, "#ffffff", false) : privMarker(ll, "transparent", false, false))
+    (o.icons ? logoMarker(ll, o.icons, own ? COMM_COLOR : o.amua ? "#e0a647" : PRIV_COLOR, false, o.amua ? 700 : 550, false, !!o.lit, own)
+      : o.amua ? amuaMarker(ll, "#ffffff", false) : own ? ownMarker(ll) : privMarker(ll, "transparent", false, false))
       .bindPopup(() => privHtml(o) + (comm && workMode === "book" ? communityBookHtml(o) : ""), { className: "parktip", maxWidth: 320 })
-      .bindTooltip(amuaOnly(o) ? `<b>${esc(o.park)}</b><br>Click to book in Facility Booking` : `<b>${esc(o.park)}</b><br><b style="color:${PRIV_COLOR}">◆ ${esc(o.operator)}</b><br>Not in the council field maps · click for contacts`, { className: "parktip", direction: "top", offset: [0, -8] })
+      .bindTooltip(amuaOnly(o) ? `<b>${esc(o.park)}</b><br>Click to book in Facility Booking` : (own ? `<b>${esc(o.park)}</b><br><b style="color:${COMM_COLOR}">■ Privately owned</b> · ${esc(o.operator)}<br>Not a council park · click for contacts${o.rates ? " and rates" : ""}`
+        : `<b>${esc(o.park)}</b><br><b style="color:${PRIV_COLOR}">◆ Operated by ${esc(o.operator)}</b><br>Not in the council field maps · click for contacts`), { className: "parktip", direction: "top", offset: [0, -8] })
       .addTo(cityLayer);
   });
   return pts;
@@ -1551,17 +1553,24 @@ function drawMyFieldPins(reg) {
 // image sits over the club's letters; if the logo file isn't there yet it removes itself.
 // Sizes: AMUA's own badge 36px, other clubs and venues 27px, community facilities 18px.
 // Every park marker can carry the lights symbol inside it (`lit`), so a park is one icon.
-function logoMarker(ll, icons, ring, isCur, z = 600, small = false, lit = false) {
+// own: a privately owned venue (school, club or trust land): square badges instead of round.
+function logoMarker(ll, icons, ring, isCur, z = 600, small = false, lit = false, own = false) {
   const badge = (ic, i) => `<span class="lp" style="background:${ic.bg || "#334155"};z-index:${9 - i}"><b>${esc(ic.mono || "")}</b>`
     + (ic.img ? `<img src="${BASE}council-maps/${esc(ic.img)}" alt="" onerror="this.remove()">` : "") + `</span>`;
   const d = small ? 18 : icons.some(ic => ic.mono === "AMUA") ? 36 : 27, w = d + (icons.length - 1) * (d * 2 / 3);
   return L.marker(ll, { icon: L.divIcon({ className: "", iconSize: [w, d], iconAnchor: [w / 2, d / 2],
-    html: `<div class="logopin${isCur ? " cur" : ""}${d <= 18 ? " sm" : d < 36 ? " md" : ""}" style="--ring:${ring}">${icons.map(badge).join("")}${lit ? `<span class="litin" aria-label="Lights">⚡</span>` : ""}</div>` }), keyboard: false, bubblingMouseEvents: false, zIndexOffset: z });
+    html: `<div class="logopin${isCur ? " cur" : ""}${own ? " own" : ""}${d <= 18 ? " sm" : d < 36 ? " md" : ""}" style="--ring:${ring}">${icons.map(badge).join("")}${lit ? `<span class="litin" aria-label="Lights">⚡</span>` : ""}</div>` }), keyboard: false, bubblingMouseEvents: false, zIndexOffset: z });
 }
 function amuaMarker(ll, fill, isCur, lit = false) {
   return L.marker(ll, { icon: L.divIcon({ className: "", iconSize: [30, 30], iconAnchor: [15, 15],
     html: `<div class="amuapin${isCur ? " cur" : ""}"><div><span style="background:${fill}"></span></div>${lit ? `<span class="litin" aria-label="Lights">⚡</span>` : ""}</div>` }), keyboard: false, bubblingMouseEvents: false, zIndexOffset: 500 });
 }
+// A privately owned venue without a logo: a blue square (council parks a club operates are ◆).
+function ownMarker(ll) {
+  return L.marker(ll, { icon: L.divIcon({ className: "", iconSize: [20, 20], iconAnchor: [10, 10], html: `<div class="ownpin"></div>` }), keyboard: false, bubblingMouseEvents: false, zIndexOffset: 450 });
+}
+// Private ownership (not council land) vs private operation (a council park a club runs).
+const ownedPriv = o => o.ownership === "private" || o.category === "community";
 function privMarker(ll, fill, isCur, top, club, lit = false) {
   const style = club
     ? `background:${club.pattern || club.fill};border-color:${club.edge || "#fff"};box-shadow:0 0 0 2.5px ${PRIV_COLOR},0 1px 5px rgba(0,0,0,.5);width:18px;height:18px;margin:2px`
@@ -1585,7 +1594,7 @@ const amuaOnly = o => o.must_book_through === "AMUA" && o.category !== "communit
 function privHtml(o) {
   if (amuaOnly(o)) return `<b>${esc(o.park)}</b><br><a href="${BASE}">📅 Book in Facility Booking</a>`;
   const c = o.contact || {};
-  return `<b>${esc(o.park)}</b>${o.approx ? " (approx. location)" : ""}${o.must_book_through === "AMUA" ? `<br><b style="color:#b7791f">★ BOOKING ONLY AVAILABLE THROUGH AMUA</b>` : ""}<br><b style="color:${PRIV_COLOR}">◆ ${esc(o.operator)}</b> · ${esc(privStatus(o))}<br>${esc(o.manages)}${o.lit ? "<br>💡 Floodlit" : ""}${o.private_contact ? `<br><b>🔒 Private contact required:</b> AMUA arranges the hire with the venue` : ""}${o.rates ? `<br>💲 ${esc(o.rates)}` : ""}<br>${privContacts(o)}${c.address ? "<br>" + esc(c.address) : ""}${o.notes ? `<br><i>${esc(o.notes)}</i>` : ""}`;
+  return `<b>${esc(o.park)}</b>${o.approx ? " (approx. location)" : ""}${o.must_book_through === "AMUA" ? `<br><b style="color:#b7791f">★ BOOKING ONLY AVAILABLE THROUGH AMUA</b>` : ""}<br>${ownedPriv(o) ? `<b style="color:${COMM_COLOR}">■ Privately owned</b> by ${esc(o.operator)} · not a council park` : `<b style="color:${PRIV_COLOR}">◆ Operated by ${esc(o.operator)}</b>`} · ${esc(privStatus(o))}<br>${esc(o.manages)}${o.lit ? "<br>💡 Floodlit" : ""}${o.private_contact ? `<br><b>🔒 Private contact required:</b> AMUA arranges the hire with the venue` : ""}${o.rates ? `<br>💲 ${esc(o.rates)}` : ""}<br>${privContacts(o)}${c.address ? "<br>" + esc(c.address) : ""}${o.notes ? `<br><i>${esc(o.notes)}</i>` : ""}`;
 }
 // Park card banner: every operator on this ground, then the request steps once.
 // The provider line shows names only; contacts and details open under ⓘ.
@@ -1613,7 +1622,7 @@ function syncCityFields() {
 function renderLegend() {
   const row = (c, t) => `<div><i style="background:${c}"></i>${t}</div>`;
   $("legend").innerHTML = `<button class="lg-h" id="legendToggle" aria-expanded="true">Suitability <span aria-hidden="true">▾</span></button>`
-    + `<div class="lg-b">${row(`hsl(${suitHue(0.95)} 72% 42%)`, "Excellent")}${row(`hsl(${suitHue(0.7)} 72% 42%)`, "Good")}${row(`hsl(${suitHue(0.5)} 72% 42%)`, "Fair")}${row(`hsl(${suitHue(0.2)} 72% 42%)`, "Poor")}${row("#b3372d", "Rejected")}${row("#8a958f", "Not rated")}<div><span class="dia" style="background:linear-gradient(45deg,#f2b705 50%,#c8102e 50%);border-color:#f2b705;box-shadow:0 0 0 2px ${PRIV_COLOR}"></span><b>Ultimate club home</b> <span class="lg-note">(club colours)</span></div><div><span class="amualg"><span></span></span><b>AMUA venue</b> <span class="lg-note">(GTEC · CPSA)</span></div><div><span class="logolg">A</span>Club or venue logo</div><div><span class="logolg" style="border-color:${COMM_COLOR}">S</span>Community facility <span class="lg-note">(school)</span></div><div><span class="dia"></span>Privately managed</div><div><i style="background:#8a958f;border:2px dashed ${PRIV_COLOR};box-shadow:none"></i>Flagged: probably club-run</div><div><span class="litbadge lg">⚡</span>Lights <span class="lg-note">(shown inside the park's marker)</span></div><div class="lg-note">Gold ring = top pick</div></div>`;
+    + `<div class="lg-b">${row(`hsl(${suitHue(0.95)} 72% 42%)`, "Excellent")}${row(`hsl(${suitHue(0.7)} 72% 42%)`, "Good")}${row(`hsl(${suitHue(0.5)} 72% 42%)`, "Fair")}${row(`hsl(${suitHue(0.2)} 72% 42%)`, "Poor")}${row("#b3372d", "Rejected")}${row("#8a958f", "Not rated")}<div><span class="dia" style="background:linear-gradient(45deg,#f2b705 50%,#c8102e 50%);border-color:#f2b705;box-shadow:0 0 0 2px ${PRIV_COLOR}"></span><b>Ultimate club home</b> <span class="lg-note">(club colours)</span></div><div><span class="amualg"><span></span></span><b>AMUA venue</b> <span class="lg-note">(GTEC · CPSA)</span></div><div><span class="logolg">A</span>Club or venue logo</div><div><span class="ownlg"></span><b>Privately owned</b> <span class="lg-note">(school, club or trust land; book with the owner)</span></div><div><span class="dia"></span><b>Council park, club-operated</b> <span class="lg-note">(ask the club, then council)</span></div><div><i style="background:#8a958f;border:2px dashed ${PRIV_COLOR};box-shadow:none"></i>Flagged: probably club-run</div><div><span class="litbadge lg">⚡</span>Lights <span class="lg-note">(shown inside the park's marker)</span></div><div class="lg-note">Gold ring = top pick</div></div>`;
   // Collapsed by default on small screens so it doesn't cover the map; the choice is remembered.
   const setOpen = open => { $("legend").classList.toggle("collapsed", !open); $("legendToggle").setAttribute("aria-expanded", String(open)); };
   setOpen(store.get("vet-legend-open", !matchMedia("(max-width: 640px)").matches));
