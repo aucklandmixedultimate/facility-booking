@@ -479,19 +479,19 @@ begin
   end if;
 end $$;
 
--- (v6) Hockey-only venues (Macleans College, ACG Strathallan) were dropped from the
--- community venues as unsuitable for ultimate: take them out of any booker's saved fields
+-- (v6, v7) Venues dropped from the community list (Macleans College and ACG Strathallan:
+-- hockey turfs only; One Tree Hill College: its lit fields couldn't be found): take them out of any booker's saved fields
 -- (settings "council_facilities": { booker email: [ {id: "cm-…", …}, … ] }). Re-runnable:
 -- only touches lists that still hold them.
 update public.settings s
 set value = (
       select coalesce(jsonb_object_agg(k, (
         select coalesce(jsonb_agg(e), '[]'::jsonb) from jsonb_array_elements(v) e
-        where e ->> 'id' not in ('cm-macleans-bucklands', 'cm-acg-strathallan'))), '{}'::jsonb)
+        where e ->> 'id' not in ('cm-macleans-bucklands', 'cm-acg-strathallan', 'cm-one-tree-hill-college'))), '{}'::jsonb)
       from jsonb_each(s.value) as t(k, v) where jsonb_typeof(v) = 'array'),
     updated_at = now()
 where s.key = 'council_facilities'
-  and s.value::text ~ 'cm-(macleans-bucklands|acg-strathallan)';
+  and s.value::text ~ 'cm-(macleans-bucklands|acg-strathallan|one-tree-hill-college)';
 
 -- ── 5. settings_merge(): atomic partial updates ─────────────────────────────────
 -- Changes some entries of a settings value without rewriting the rest, so two admins
@@ -522,7 +522,7 @@ revoke all on function public.settings_merge(text, jsonb, text[]) from public, a
 grant execute on function public.settings_merge(text, jsonb, text[]) to authenticated;
 
 -- ── Version stamp ───────────────────────────────────────────────────────────────
-insert into public.schema_version (id, version, applied_at) values (1, 6, now())
+insert into public.schema_version (id, version, applied_at) values (1, 7, now())
 on conflict (id) do update set version = excluded.version, applied_at = now();
 
 -- ── 6. Making someone an admin ──────────────────────────────────────────────────
