@@ -1505,9 +1505,9 @@ function buildCity() {
       else if (st) L.circleMarker(ll, { radius: 12, color: "#14b8a6", weight: 3, dashArray: "4 3", fill: false, interactive: false }).addTo(cityLayer); }
     (o.icons ? logoMarker(ll, o.icons, own ? COMM_COLOR : o.amua ? "#e0a647" : PRIV_COLOR, false, o.amua ? 700 : 550, false, !!o.lit, own)
       : o.amua ? amuaMarker(ll, "#ffffff", false) : own ? ownMarker(ll) : privMarker(ll, "transparent", false, false))
-      .bindPopup(() => privHtml(o) + (comm && workMode === "book" ? communityBookHtml(o) : ""), { className: "parktip", maxWidth: 320 })
-      .bindTooltip(amuaOnly(o) ? `<b>${esc(o.park)}</b><br>Click to book in Facility Booking` : (own ? `<b>${esc(o.park)}</b><br><b style="color:${COMM_COLOR}">■ Privately owned</b> · ${esc(o.operator)}<br>Not a council park · click for contacts${o.rates ? " and rates" : ""}`
-        : `<b>${esc(o.park)}</b><br><b style="color:${PRIV_COLOR}">◆ Operated by ${esc(o.operator)}</b><br>Not in the council field maps · click for contacts`), { className: "parktip", direction: "top", offset: [0, -8] })
+      .on("click", () => { if (BYID["op-" + o.id]) openPark("op-" + o.id); })
+      .bindTooltip(amuaOnly(o) ? `<b>${esc(o.park)}</b><br>AMUA venue · click to open it` : (own ? `<b>${esc(o.park)}</b><br><b style="color:${COMM_COLOR}">■ Privately owned</b> · ${esc(o.operator)}<br>Not a council park · click to open it${o.rates ? " (contacts and rates)" : ""}`
+        : `<b>${esc(o.park)}</b><br><b style="color:${PRIV_COLOR}">◆ Operated by ${esc(o.operator)}</b><br>Not in the council field maps · click to open it`), { className: "parktip", direction: "top", offset: [0, -8] })
       .addTo(cityLayer);
   });
   return pts;
@@ -1568,6 +1568,19 @@ function amuaMarker(ll, fill, isCur, lit = false) {
 // A privately owned venue without a logo: a blue square (council parks a club operates are ◆).
 function ownMarker(ll) {
   return L.marker(ll, { icon: L.divIcon({ className: "", iconSize: [20, 20], iconAnchor: [10, 10], html: `<div class="ownpin"></div>` }), keyboard: false, bubblingMouseEvents: false, zIndexOffset: 450 });
+}
+// Venues that aren't council parks (schools, club grounds, trusts…) open in the park view
+// like a park: each gets a park entry "op-<id>" in BYID (not in PARKS, so it stays out of
+// the queue and the park counts) with no council map, in the region of the nearest park.
+function addVenueParks() {
+  (PRIV.operators || []).filter(o => (!o.park_id || !BYID[o.park_id]) && o.lat != null).forEach(o => {
+    const id = "op-" + o.id;
+    if (BYID[id]) return;
+    let near = null, best = Infinity;
+    PARKS.forEach(x => { if (x.lat == null) return; const d = (x.lat - o.lat) ** 2 + (x.lon - o.lon) ** 2; if (d < best) { best = d; near = x; } });
+    BYID[id] = { id, region: near?.region || "Central", name: o.park, maps: [], fields: [], lat: o.lat, lon: o.lon, venue: o };
+    PRIV_BY_PARK[id] = [o];
+  });
 }
 // Private ownership (not council land) vs private operation (a council park a club runs).
 const ownedPriv = o => o.ownership === "private" || o.category === "community";
@@ -1744,30 +1757,13 @@ async function saveBookLocsRaw() {
   }
   store.set("vet-booklocs", bookLocs); return true;
 }
-// ── Community facilities (schools, trusts) in the cart: one entry per facility, "cm-<id>" ──
-function communityBookHtml(o) {
-  const st = locState("cm-" + o.id);
-  return `<div class="cm-book">${st === "active" ? "📌 Active booking — book dates in Facility Booking"
-    : `<button data-cmbook="${esc(o.id)}">${st ? "🛒 In the cart · remove" : "📅 Add to cart"}</button>`}</div>`;
-}
-async function toggleCommunity(o) {
-  const who = whoBooks(), before = [...(bookLocs[who] || [])], list = [...before], id = "cm-" + o.id, i = list.findIndex(x => x.id === id);
-  if (i >= 0 && isActive(list[i])) return;
-  if (i >= 0) list.splice(i, 1);
-  else list.push({ id, park_id: o.id, park: o.park, region: "", field: "Main field", lat: o.lat, lon: o.lon, kind: "community", status: "cart",
-    operator: { id: o.id, name: o.operator, short: o.short, email: o.contact?.email || "", phone: o.contact?.phone || "" },
-    added_at: new Date().toISOString(), ...addedBy() });
-  bookLocs[who] = list;
-  if (!(await saveBookLocs())) { bookLocs[who] = before; return; }
-  setStatus(`${i >= 0 ? "Removed" : "Added"} ${o.short || o.operator} ${i >= 0 ? "from" : "to"} ${who}'s cart.`);
-  map.closePopup(); render(); renderTabs();
-}
-document.addEventListener("click", e => { const b = e.target.closest("[data-cmbook]"); if (!b) return;
-  const o = (PRIV.operators || []).find(x => x.id === b.dataset.cmbook); if (o) toggleCommunity(o); });
 // A privately managed park's booking is filed under the club that manages the fields, but
 // requests go to its booking contact: a booking-only club (e.g. Ellerslie Ultimate Club at
 // Michaels Ave, managed by Ellerslie AFC), else the manager itself.
 function parkWorkflow(p) {
+  // A privately owned venue (school, club, trust) is booked with its owner, as a community facility.
+  if (p.venue && ownedPriv(p.venue)) { const o = p.venue;
+    return { kind: "community", provider: "cm_" + o.id, operator: { id: o.id, name: o.operator, short: o.short, email: o.contact?.email || "", phone: o.contact?.phone || "" } }; }
   const ops = privOps(p);
   const manager = ops.find(o => o.code !== "ultimate") || ops.find(o => o.booking_only);
   const contact = ops.find(o => o.booking_only) || manager;
@@ -2160,6 +2156,8 @@ function knownProvider(p) {
   return { club: op.short || op.operator, kind: "private", contact: shortName(relations[op.id]?.contacts?.[0]?.name || ""), website: op.contact?.url || "", known: true };
 }
 function renderFlag(p) {
+  // Venues that aren't council parks have no council vendor listing to amend.
+  $("clubFlagBtn").hidden = !!p.venue; if (p.venue) { $("amendRow").hidden = true; return; }
   const fl = flags[p.id], known = knownProvider(p), d = fl || known || {};
   $("clubFlagBtn").setAttribute("aria-pressed", String(!!fl));
   $("clubFlagBtn").textContent = fl ? "✎ " + amendText(fl) : known ? "✎ " + amendText(known) : "✎ Vendor?";
@@ -2320,13 +2318,14 @@ function render() {
     $("parkName").textContent = p.name; $("parkRegion").textContent = p.region;
     const pv = privOps(p), co = councilOnly(p);
     $("privBox").hidden = !pv.length && !co; $("privBox").classList.toggle("co", co);
-    $("privBox").innerHTML = co ? councilOnlyBanner(p) : pv.length ? privBanner(pv) : "";
+    $("privBox").innerHTML = p.venue ? `<span class="pb-venue">${privHtml(p.venue)}</span>` : co ? councilOnlyBanner(p) : pv.length ? privBanner(pv) : "";
     renderInfo(p);
     renderFlag(p); renderCouncilOnly(p); renderSoftWarn(p);
     const r = reviews[p.id];
     // Chips: the managing club (◆) and any ultimate club (🥏), which may be the booking contact.
     const lead = (pv || []).find(o => o.code !== "ultimate"), ult = ultimateOf(p);
-    $("decChip").innerHTML = (lead ? `<span class="chip priv" title="Ask ${esc(lead.operator)} before applying to council">◆ ${esc(lead.short)}</span> ` : "")
+    $("decChip").innerHTML = (p.venue && ownedPriv(p.venue) ? `<span class="chip own" title="Privately owned by ${esc(p.venue.operator)}: not a council park">■ ${esc(p.venue.short || p.venue.operator)}</span> `
+        : lead ? `<span class="chip priv" title="Ask ${esc(lead.operator)} before applying to council">◆ ${esc(lead.short)}</span> ` : "")
       + ult.map(o => `<span class="chip ult" title="Home of ${esc(o.operator)}"${o.colors ? ` style="background:${o.colors.pattern || o.colors.fill};color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.8);box-shadow:inset 0 0 0 2px ${o.colors.edge || "#fff"}"` : ""}>🥏 ${esc(o.short)}</span> `).join("") + (rejectedForMe(p.id) ? `<span class="chip no" title="Rejected for ${esc(personFromEmail(whoBooks()))} (other bookers aren't affected)">Rejected</span>`
         : r && r.decision !== "rating" ? `<span class="chip ${r.decision === "top" ? "top" : r.decision === "no" ? "plain" : ""}">${r.decision === "top" ? "Top pick" : r.decision === "yes" ? "Shortlisted" : "Rated"}${r.by ? " · " + esc(r.by.split("@")[0]) : ""}</span>` : "");
     const i = Math.min(mapIndex(p), Math.max(0, p.maps.length - 1));
@@ -2752,6 +2751,7 @@ async function start() {
   // club that isn't the booking channel is listed separately.
   const rank = o => o.booking_only ? -1 : o.code === "ultimate" ? 3 : o.primary ? 0 : ["rugby", "football"].includes(o.code) ? 1 : 2;
   Object.values(PRIV_BY_PARK).forEach(ops => ops.sort((a, b) => rank(a) - rank(b)));
+  addVenueParks();
   const regions = [...new Set(PARKS.map(p => p.region))];
   $("region").insertAdjacentHTML("beforeend", regions.map(r => `<option>${esc(r)}</option>`).join(""));
   syncRegionSelect(); $("mode").value = store.get("vet-mode", "todo"); $("mapsOnly").checked = store.get("vet-mapsOnly", true); $("order").value = store.get("vet-order", "least");
