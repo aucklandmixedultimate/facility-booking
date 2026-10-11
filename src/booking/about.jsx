@@ -87,12 +87,12 @@ export function AboutTab() {
           <p style={{margin:"0 0 12px",fontSize:13,color:"#475569"}}>
             Auckland Council parks are booked through the council's online services portal. AMUA batches its bookers' council fields into one application,
             and the council charges <b>${COUNCIL_APPLICATION_FEE} per field per application</b>, split between the bookers sharing each field. Pick fields on the{" "}
-            <a href={import.meta.env.BASE_URL+"vetting.html"} style={link}>Council / Community fields</a> page (rate them, then mark them bookable in 📌 My fields); they then appear here under
+            <a href={import.meta.env.BASE_URL+"vetting.html"} style={link}>All Auckland fields</a> page (rate them, then mark them bookable in 📌 My fields); they then appear here under
             Vendor → 📍 Location.
           </p>
-          <AboutMap src={councilMap} alt="The Council / Community fields page's Auckland map with its markers labelled: rated parks coloured by suitability with lights shown as a bolt, grey not rated, red rejected, purple diamonds privately managed, round club or venue logos, and red pins for your active fields">
-            The Council / Community fields page&apos;s Auckland view: each marker is a park. Tap one, switch to <b>📅 Book</b> and add its fields to your cart;
-            once saved as <b>📌 Active</b> they can be booked here. <b>◆</b> parks are privately managed — see the next tab.
+          <AboutMap src={councilMap} alt="The All Auckland fields page's Auckland map with its markers labelled: rated parks coloured by suitability with lights shown as a bolt, grey not rated, red rejected, purple diamonds privately managed, round club or venue logos, and red pins for your active fields">
+            The All Auckland fields page&apos;s Auckland view: each marker is a park. Tap one to rate it; ★ Top or ✓ Shortlist saves its fields
+            to 📌 My fields, and once marked bookable there they can be booked here. <b>◆</b> parks are privately managed — see the next tab.
           </AboutMap>
           <h3 style={{margin:"12px 0 8px",fontSize:14,fontWeight:700,color:"#0f172a"}}>Approval Process</h3>
           <p style={{margin:"0 0 12px",fontSize:13,color:"#475569"}}>
@@ -115,14 +115,14 @@ export function AboutTab() {
         </>)}
         {howTab==="private"&&(<>
           <p style={{margin:"0 0 12px",fontSize:13,color:"#475569"}}>
-            Some council parks are run by a club, trust or other operator (◆ on the Council / Community fields map). The operator has to agree first, and the council still issues the permit.
+            Some council parks are run by a club, trust or other operator (◆ on the All Auckland fields map). The operator has to agree first, and the council still issues the permit.
             Some grounds can only be booked through a particular club: for example <b>BOOKING ONLY AVAILABLE THROUGH Ellerslie Ultimate Club</b> (Michaels Ave) or <b>TPU</b> (Fergusson Domain).
             GTEC's grounds (Cornwall Park, Orakei, Shore Road) are <b>BOOKING ONLY AVAILABLE THROUGH AMUA</b> — use the CPSA / GTEC process.
           </p>
           <h3 style={{margin:"12px 0 8px",fontSize:14,fontWeight:700,color:"#0f172a"}}>Approval Process</h3>
           <AboutStep n="1/8" col="#6366f1" title="Submit booking request">Book on your active field at that park. Status <Badge status="pending_amua" wf="council_private"/>.</AboutStep>
           <div style={arrow}>↓</div>
-          <AboutStep n="2/8" col="#a855f7" title="AMUA asks the operator">AMUA contacts the club or operator (their contact is on the Council fields page) for permission. Status <Badge status="op_permission" wf="council_private"/>.</AboutStep>
+          <AboutStep n="2/8" col="#a855f7" title="AMUA asks the operator">AMUA contacts the club or operator (their contact is on the All Auckland fields page) for permission. Status <Badge status="op_permission" wf="council_private"/>.</AboutStep>
           <div style={arrow}>↓</div>
           <AboutStep n="3/8" col="#14b8a6" title="AMUA applies to the council">With the operator's agreement, the field goes into the next council application. Status <Badge status="council_apply" wf="council_private"/>.</AboutStep>
           <div style={arrow}>↓</div>
@@ -140,12 +140,12 @@ export function AboutTab() {
         {howTab==="community"&&(<>
           <p style={{margin:"0 0 12px",fontSize:13,color:"#475569"}}>
             Schools and trusts that hire their fields to AMUA, such as Auckland Normal Intermediate ($20/hr), St Cuthbert's College and Sacred Heart College.
-            Add the field on the <a href={import.meta.env.BASE_URL+"vetting.html"} style={link}>Council / Community fields</a> map (rate it, then mark it bookable in 📌 My fields),
+            Add the field on the <a href={import.meta.env.BASE_URL+"vetting.html"} style={link}>All Auckland fields</a> map (rate it, then mark it bookable in 📌 My fields),
             then book dates here under Vendor → 📍 Location. These are <b>booked only through AMUA</b>.
           </p>
           <AboutMap src={communityMap} maxWidth={440} alt="A school with its two playing fields outlined and a community field marker labelled">
             A community facility (here a school with two fields). Its field markers work like council fields: add them to your cart on the
-            Council / Community fields page, and AMUA asks the school by email for you.
+            All Auckland fields page, and AMUA asks the school by email for you.
           </AboutMap>
           <h3 style={{margin:"12px 0 8px",fontSize:14,fontWeight:700,color:"#0f172a"}}>Approval Process</h3>
           <AboutStep n="1/4" col="#6366f1" title="Submit booking request">Book the dates and times on your active community field. Status <Badge status="pending_amua" wf="community"/>.</AboutStep>

@@ -6,11 +6,12 @@ Auckland Mixed Ultimate Association's booking system. Two pages on GitHub Pages
 - **Bookings** (`index.html`): book AMUA's facilities (GTEC/CPSA at Cornwall Park, St
   Cuthbert's, council parks, community facilities). Admins approve requests, sync with
   GTEC's schedule, apply to the council, and invoice.
-- **Council fields** (`vetting.html`): a map of Auckland's council sports parks for rating
+- **All Auckland fields** (`vetting.html`): a map of Auckland's sports fields (council parks, club-run
+  parks, schools, club and trust grounds) for rating
   fields for ultimate. Bookers save the good ones to **My fields**; a field marked bookable
   becomes bookable on the booking site.
 
-Stack: **React 19 + Vite** (booking site), vanilla JS + **Leaflet** (Council fields),
+Stack: **React 19 + Vite** (booking site), vanilla JS + **Leaflet** (All Auckland fields),
 **Supabase** (Postgres, Google sign-in, row-level security), **EmailJS** behind a Supabase Edge
 Function, deployed by GitHub Actions.
 

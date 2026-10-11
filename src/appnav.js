@@ -1,12 +1,12 @@
 // The two apps on this site and the switcher between them, shared by the booking site
-// (React, src/booking-system.jsx) and the Council fields page (vanilla, src/vetting/main.js).
+// (React, src/booking-system.jsx) and the All Auckland fields page (vanilla, src/vetting/main.js).
 // Both render the same markup and classes (src/appnav.css); links stay in the same tab.
 
 import "./appnav.css";
 
 export const APPS = [
   { id: "bookings", icon: "📅", label: "Bookings",       path: "",             title: "Facility bookings: calendar, requests, billing" },
-  { id: "fields",   icon: "🗺", label: "Council fields", path: "vetting.html", title: "Council / Community fields: rate parks, add fields to book" },
+  { id: "fields",   icon: "🗺", label: "All Auckland fields", path: "vetting.html", title: "All Auckland fields: rate council parks, schools and club grounds; add fields to book" },
 ];
 
 export const appHref = (app, base = import.meta.env.BASE_URL) => base + app.path;

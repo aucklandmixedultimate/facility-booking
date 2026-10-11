@@ -1,6 +1,7 @@
 import { useState, useRef, Fragment } from "react";
 import { T, parseVendorVariance, setVendorVariance, vendorVarianceText, stepLabel, BILLED_RE, Badge, CAL_SLOTS, CAL_START, CAL_TOTAL, DAY_EVENING_CUTOFF, DURATIONS, EmailChip, FACILITIES, FACILITY_TINT, FLOODLIT_FIELD_ID, FacilityOptions, INVOICED_META, Modal, ProviderVenuePicker, REVIEW_STATUSES, S, SLOTS_PER_HOUR, SLOT_HOURS, START_TIMES, STATUS_META, addDays, councilContactOk, emailColor, facColLabel, facShort, fmtCost, fmtDate, fmtDuration, fmtLoggedAt, fmtRefDate, fmtTime, fmtTimeShort, getCrossFacilityOverlaps, getSameFacilityOverlaps, isAdminBooking, newGroupRef, newId, parseCouncilInfo, parseFunctionCost, parseGroupRef, parseGtecSnapshot, parseMismatchNote, parseSlotLink, parseSplit, setCouncilInfo, setFunctionCost, setGroupRef, setSplit, slotGroupMembers, slotGroupName, splitReason, stripMismatchNote, timeOverlaps, todayKey, useMobile, vendorShortFor, venueFacilities, workflowOf, isDraftItem } from "./core.jsx";
 import { OverlapWarning } from "./modals.jsx";
+import { FacilityPicker } from "./facilityPicker.jsx";
 import { GUEST } from "../actor.js";
 import { isClosed } from "../statuses.js";
 // ─── Single Booking Row Form ──────────────────────────────────────────────────
@@ -206,7 +207,7 @@ export function InlineDayPicker({ date, bookings, onPick, onConfirm, multi=false
 }
 // One slot (facility/date/time/duration) within a grouped booking request. Shared
 // purpose / notes / repetition live on the parent form, so this row stays compact.
-function SlotRow({ slot, idx, onChange, onRemove, canRemove, allBookings }) {
+function SlotRow({ slot, idx, onChange, onRemove, canRemove, allBookings, onSplit }) {
   const isMobile = useMobile();
   const upd = (k,v) => onChange(idx, { ...slot, [k]:v });
   const facName = FACILITIES.find(f=>f.id===slot.facility_id)?.name || slot.facility_id;
@@ -220,15 +221,15 @@ function SlotRow({ slot, idx, onChange, onRemove, canRemove, allBookings }) {
   return (
     <div style={{border:"1.5px solid #e2e8f0",borderRadius:10,padding:12,background:"#fafafa",display:"flex",flexDirection:"column",gap:8,position:"relative"}}>
       {canRemove && <button onClick={()=>onRemove(idx)} title="Remove slot" style={{position:"absolute",top:8,right:8,background:"#fff1f2",border:"1px solid #fda4af",borderRadius:6,color:"#f43f5e",cursor:"pointer",fontSize:12,fontWeight:700,padding:"1px 7px",lineHeight:1.5}}>✕</button>}
-      <ProviderVenuePicker facilityId={slot.facility_id} onPick={id=>upd("facility_id",id)}/>
-      <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr 1fr":"1.5fr 1.3fr 1fr 1fr",gap:8}}>
-        <div>
-          <label style={S.lbl}>Facility *</label>
-          <select style={S.inp} value={slot.facility_id} onChange={e=>upd("facility_id",e.target.value)}>
-            <FacilityOptions keepId={slot.facility_id}/>
-          </select>
-        </div>
-        <div>
+      {/* New bookings can take several fields (or a whole location / vendor) that are free at
+          this time: each becomes a slot. Editing a booking picks one field. */}
+      <div style={{paddingRight:canRemove?28:0}}>
+        <label style={S.lbl}>Field *</label>
+        <FacilityPicker value={slot.facility_id} slot={slot} allBookings={allBookings} multi={canRemove}
+          onPick={id=>upd("facility_id",id)} onPickMany={ids=>onSplit(idx, ids)}/>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr 1fr 1fr":"1.3fr 1fr 1fr",gap:8}}>
+        <div style={isMobile?{gridColumn:"1 / -1"}:undefined}>
           <label style={S.lbl}>Date *</label>
           <input style={S.inp} type="date" value={slot.date} min={todayKey()} onChange={e=>upd("date",e.target.value)}/>
         </div>
@@ -780,6 +781,13 @@ export function BookingForm({ booking, allBookings, onAddToCart, onClose, isAdmi
 
   function updateSlot(idx, patch) { setSlots(ss=>ss.map((s,i)=>i===idx?patch:s)); }
   function removeSlot(idx) { setSlots(ss=>ss.filter((_,i)=>i!==idx)); }
+  // Several fields picked for one slot: that slot takes the first, and each other field gets
+  // its own slot at the same date and time.
+  function splitSlot(idx, ids) {
+    setSlots(ss => { const s0 = ss[idx]; if (!s0 || !ids.length) return ss;
+      const { id: _id, ...rest } = s0;
+      return [...ss.slice(0, idx), { ...s0, facility_id: ids[0] }, ...ids.slice(1).map(fid => blankSlot({ ...rest, facility_id: fid })), ...ss.slice(idx + 1)]; });
+  }
   // New manual slots inherit the previous slot's field/time/duration (propagate details).
   function addManualSlot() {
     const last = slots[slots.length-1];
@@ -1064,7 +1072,7 @@ export function BookingForm({ booking, allBookings, onAddToCart, onClose, isAdmi
               No slots yet — <strong>Pick on day grid</strong> (select across any fields) or <strong>Add manually</strong>.
             </div>
           : slots.map((slot,i)=>(
-              <SlotRow key={i} slot={slot} idx={i} onChange={updateSlot} onRemove={removeSlot} canRemove={!isEditing} allBookings={allBookings}/>
+              <SlotRow key={i} slot={slot} idx={i} onChange={updateSlot} onRemove={removeSlot} canRemove={!isEditing} allBookings={allBookings} onSplit={splitSlot}/>
             ))}
       </div>
 

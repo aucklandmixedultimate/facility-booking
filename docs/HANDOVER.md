@@ -25,7 +25,8 @@ mindmap
         shared UI: Modal, Badge, pickers
       Always loaded
         calendar.jsx — Week, Month, day timeline
-        facilityStrip.jsx — facility chips, Fields menu
+        facilityStrip.jsx — facility chips, Fields menu, top-rated venues
+        bookingsList.jsx — the Bookings tab's two lists
         forms.jsx — booking form, cart, detail
         modals.jsx — user mgmt, activity log, dialogs
         schedule.jsx — Grouped view, pricing rules
@@ -36,12 +37,13 @@ mindmap
         billing.jsx — billing pipeline, Drive
         admin.jsx — Admin, Allocation
         about.jsx — how to book
-    Council fields<br/>vetting.html
+    All Auckland fields<br/>vetting.html
       vetting/main.js — Leaflet map, rating, My fields
       public/council-maps — parks, maps, operators
     Shared modules
       statuses.js — the status model
       html.js — escHtml, csvCell
+      venues.js — scoring, owner type, vendor ids
       actor.js, people.js — who, privacy
       seasons.js, councilSeasons.js
       holidays.js, appnav.js, theme.css
@@ -87,7 +89,7 @@ Things the picture shows:
 - **`booking-system.jsx` holds most of the booking site's state** in one ~2,900-line `App`
   component. It passes it down as props (the Admin tab takes 40+).
 - **The two pages share only small modules:** `actor`, `people`, `councilSeasons`,
-  `appnav` and `html`, plus the `settings` table.
+  `appnav`, `html` and `venues` (scoring, owner type, vendor ids), plus the `settings` table.
 - **The shared modules are plain JavaScript** with no imports of their own. They are the
   easiest code to hand over and the only code with unit tests.
 
@@ -99,19 +101,19 @@ Things the picture shows:
 |---|---|---|
 | Sign-in and identity | `core.jsx` `EmailLoginScreen`, `actor.js` | Google sign-in. A "who's using this login" prompt for shared accounts. Admins can "view as" a booker. |
 | Calendars | `calendar.jsx` | Week view: drag to create, NZ holidays. Month view: select and bulk actions. Day timeline per facility. |
-| Facility strip | `facilityStrip.jsx` | Facility chips, the 📍 Fields menu (vendor › location › field), Reset. |
-| Booking form | `forms.jsx` `BookingForm` | Several slots, a day-grid picker, weekly repeat, council application details, booking on someone's behalf. |
+| Facility strip | `facilityStrip.jsx`, `topVenues.js` | Facility chips, the 📍 Fields menu (vendor › location › field, plus ⭐ All venues · top rated, which previews unbooked venues), Reset. Also used as the All Bookings list's location filter. |
+| Booking form | `forms.jsx` `BookingForm`, `facilityPicker.jsx` | Several slots, a day-grid picker, weekly repeat, council application details, booking on someone's behalf. Each slot's field comes from one vendor › location › field dropdown: several fields, a whole location or vendor at once (free ones only; taken ones show what they clash with). |
 | Cart | `forms.jsx` `CartModal`, `App.handleCartSubmit` | The single outbox: new bookings and edits, status changes, notices, room requests, invoice emails, shared-slot changes. Nothing is written until **Submit**. |
-| Bookings list | `App` itemised table, `schedule.jsx` Grouped view | Filters, bulk status changes, clashes. |
+| Bookings tab | `bookingsList.jsx` (`BookingsList`, Itemised table or `schedule.jsx` Grouped view) | Two lists: **Filtered Bookings** follows the page's 📍 Fields selection; **All Bookings** has its own location filter (default: every location except Cornwall Park). Each has its own filters, sort and view. |
 | Booking detail | `forms.jsx` `BookingDetail` | Status, GTEC mismatch, cost split or fixed price, shared slot, removal. |
 | GTEC sync | `App.handleSyncMonth`, `gtec.jsx` | Every 4 h for admins, or by hand. Matches the vendor feed to bookings, flags clashes and mismatches, adds GTEC's own blocks. |
-| Council | `App`, `admin.jsx` `CouncilAllocationTab`, `councilMail.js` | Send to council, with the fee split. Reads council replies from Gmail. Allocate outcomes. |
+| Council | `App`, `admin.jsx` `CouncilAllocationTab`, `councilMail.js` | Send to council, with the fee split. The council extension reads AMUA's applications from the council portal into `council_outcomes` (and `council_portal_sync`); **🏛 Load portal results** queues the booking changes. Reading the council's replies from Gmail stays as a fallback. Allocate outcomes. |
 | Summary | `summary.jsx` | Hours and costs by booker, pricing rules, schedule summary. Invoice / PO builder (draft and official). |
 | Billing | `billing.jsx` | Pipeline of official documents, receipts, Drive sync, invoice emails. |
 | Admin | `admin.jsx` `AdminPanel` | Activity log, sync results, clashes, mismatch triage, track changes, pricing rules, GTEC purge requests, bookings table. |
 | Admin menu | `App`, `modals.jsx` | Rates, player counts, log retention, AMUA details, user management, backup. |
 
-### Council fields (`vetting.html`)
+### All Auckland fields (`vetting.html`)
 
 - **Auckland map:** parks coloured by suitability, club and operator markers, council field
   shapes when zoomed in.
