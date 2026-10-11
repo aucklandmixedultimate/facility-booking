@@ -603,7 +603,7 @@ function bookableFacilities(keepId) {
   const keep = keepId && !vis.some(f => f.id === keepId) ? FACILITIES.find(f => f.id === keepId) : null;
   return keep ? [...vis, keep] : vis;
 }
-function bookableVenues(keepId) {
+export function bookableVenues(keepId) {
   const cur = activeVenueKey(), facs = bookableFacilities(keepId), order = listVenues().map(v => v.key);
   const byKey = new Map();
   facs.forEach(f => { const k = venueKeyOf(f), [pid, site] = k.split("|");
