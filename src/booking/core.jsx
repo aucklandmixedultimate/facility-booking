@@ -165,7 +165,7 @@ export function councilContactOk(email) {
   const e = (email || "").toLowerCase(), c = _bookerContacts[e] || _bookerContacts[_emailAliases[e] || e];
   return !!(c?.full_name?.trim() && c?.phone?.trim());
 }
-export function visibleFacilities() { return FACILITIES.filter(f => !f.inactive && (!f.adminOnly || _isAdminView) && (!f.council || _isAdminView || ownsCouncilFacility(f))); }
+export function visibleFacilities() { return FACILITIES.filter(f => !f.inactive && (!f.adminOnly || _isAdminView) && (!f.council || f.preview || _isAdminView || ownsCouncilFacility(f))); }
 // Council fields are added per booker (Council fields page → Book), so a booker sees only
 // the ones added for them (any of their linked emails); admins see all.
 function ownsCouncilFacility(f) {
@@ -468,13 +468,26 @@ export function councilFeeSplit(bkgs) {
   return { fees, byBooker, fields, total: fields * COUNCIL_APPLICATION_FEE };
 }
 const COUNCIL_COLORS = ["#0d9488","#0891b2","#7c3aed","#be185d","#b45309","#15803d","#4338ca","#9f1239"];
+// Venues previewed from the 📍 Fields menu's "All venues (top rated)" list: My fields
+// entries (src/venues.js venueFieldEntries) shown to this viewer as facilities even though no
+// booker has made them bookable yet. Kept on this device; booking one saves it to the
+// booker's My fields (App.handleCartSubmit).
+let _previewEntries = (() => { try { const v = JSON.parse(localStorage.getItem("fb_preview_venues") || "[]"); return Array.isArray(v) ? v : []; } catch { return []; } })();
+let _lastCouncilMap = {};
+export const previewEntries = () => _previewEntries;
+export function setPreviewEntries(entries) {
+  _previewEntries = entries;
+  try { localStorage.setItem("fb_preview_venues", JSON.stringify(entries)); } catch { /* storage blocked */ }
+  applyCouncilFacilities(_lastCouncilMap);
+}
 export function applyCouncilFacilities(map) {
+  _lastCouncilMap = map || {};
   for (let i = FACILITIES.length - 1; i >= 0; i--) if (FACILITIES[i].council) FACILITIES.splice(i, 1);
   Object.keys(PROVIDERS).forEach(k => { if (PROVIDERS[k].dynamic) delete PROVIDERS[k]; });
   const byId = new Map();
   // Only fields saved as active bookings are offered; cart ("still choosing") ones are kept
   // as inactive facilities so bookings already on them still show their name.
-  Object.entries(map || {}).forEach(([email, list]) => (Array.isArray(list) ? list : []).forEach(e => {
+  const add = (e, email) => {
     if (!e?.id || !e.park) return;
     const owner = email.toLowerCase(), have = byId.get(e.id), active = e.status === "active";
     if (have) { if (active) { have.inactive = false; if (!have.owners.includes(owner)) have.owners.push(owner); } return; }
@@ -495,7 +508,10 @@ export function applyCouncilFacilities(map) {
     }
     byId.set(e.id, { id: e.id, name: `${e.park} – ${e.field}${e.frisbee > 1 ? ` (${e.frisbee} field areas)` : ""}`, capacity: 50, color: COUNCIL_COLORS[byId.size % COUNCIL_COLORS.length],
       kind: "field", site: e.park, provider: pid, defaultRate: e.kind === "community" ? (COMMUNITY_RATES[e.operator?.id] || 0) : 0, council: e, owners: active ? [owner] : [], inactive: !active });
-  }));
+  };
+  Object.entries(_lastCouncilMap).forEach(([email, list]) => (Array.isArray(list) ? list : []).forEach(e => add(e, email)));
+  // Previews: shown to this viewer (a saved facility of the same id wins).
+  _previewEntries.forEach(e => { if (!e?.id || byId.has(e.id)) return; add({ ...e, status: "active" }, ""); byId.get(e.id).preview = true; });
   FACILITIES.push(...byId.values());
 }
 export function workflowOf(facilityId) {

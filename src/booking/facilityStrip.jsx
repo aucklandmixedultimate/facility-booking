@@ -2,7 +2,9 @@
 // (click to show just that one, again for all), a "📍 Fields" menu to add or remove fields and
 // locations, and Reset back to Cornwall Park (the default venue, nothing removed).
 import { useState, useRef, useEffect } from "react";
-import { ALL_VENUES, PROVIDERS, VENUE_SEP, activeVenueKeys, defaultVenueKey, listVenues, venueFacilities, venueKeyOf, visibleFacilities } from "./core.jsx";
+import { ALL_VENUES, PROVIDERS, VENUE_SEP, activeVenueKeys, defaultVenueKey, listVenues, previewEntries, setPreviewEntries, venueFacilities, venueKeyOf, visibleFacilities } from "./core.jsx";
+import { loadTopVenues } from "./topVenues.js";
+import { ownerTypeMeta, suitWord } from "../venues.js";
 
 
 // Fixed-width chips (name cut with …, in full on hover via title) that wrap on desktop and
@@ -35,12 +37,19 @@ const STYLE = `
 .fs-box{width:16px;height:16px;flex:none;border-radius:4px;border:1.5px solid var(--c-faint);display:inline-flex;align-items:center;justify-content:center;font-size:11px;color:#fff}
 .fs-box.on{background:var(--c-ink);border-color:var(--c-ink)}
 .fs-box.part{background:var(--c-muted);border-color:var(--c-muted)}
+.fs-top{background:var(--c-surface-2)}
+.fs-menu button.fs-toph{width:100%;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--c-muted);padding:8px 12px}
+.fs-note{padding:4px 12px 8px;font-size:12px;color:var(--c-muted)}
+.fs-tag{font-size:10px;font-weight:700;color:var(--c-muted);border:1px solid var(--c-line);border-radius:var(--r-pill);padding:0 6px;margin-left:6px}
 `;
 
 const vendorLabel = pid => PROVIDERS[pid]?.label || PROVIDERS[pid]?.short || PROVIDERS[pid]?.name || pid;
 
 export function FacilityStrip({ isMobile, isAdmin, selFac, setSelFac, setVenue, hiddenFacs, setHiddenFacs }) {
   const [open, setOpen] = useState(false), [exp, setExp] = useState(null), ref = useRef(null);
+  // "All venues (top rated)": null = not loaded yet.
+  const [topOpen, setTopOpen] = useState(false), [top, setTop] = useState(null);
+  const toggleTop = () => { const o = !topOpen; setTopOpen(o); if (o && top === null) loadTopVenues().then(setTop); };
   useEffect(() => { if (!open) return;
     const off = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
     const esc = e => { if (e.key === "Escape") setOpen(false); };
@@ -69,13 +78,30 @@ export function FacilityStrip({ isMobile, isAdmin, selFac, setSelFac, setVenue, 
     if (selFac === f.id) setSelFac("all");
     if (facsAt(k).every(x => next.has(x.id)) && shownKeys.length > 1) { facsAt(k).forEach(x => next.delete(x.id)); setHiddenFacs(next); saveKeys(shownKeys.filter(x => x !== k)); return; }
     setHiddenFacs(next); };
-  const reset = () => { setVenue(null); setHiddenFacs(new Set()); setSelFac("all"); setOpen(false); };
+  const reset = () => { if (previewEntries().length) setPreviewEntries([]); setVenue(null); setHiddenFacs(new Set()); setSelFac("all"); setOpen(false); };
+  // Show a top-rated venue's fields on the calendars, alongside what's shown now.
+  const preview = x => {
+    setPreviewEntries([...previewEntries().filter(e => e.park_id !== x.park.id), ...x.entries]);
+    const k = `${x.provider}|${x.park.name}`;
+    setHiddenFacs(unhide(x.entries.map(e => e.id))); saveKeys([...shownKeys.filter(y => y !== k), k]); setOpen(false);
+  };
 
   // Menu: vendor › location (tick = shown; ▸ lists its fields) › fields.
   const pids = [...new Set(venues.map(v => v.providerId))];
   const box = (on, part) => <span aria-hidden className={`fs-box${on ? " on" : ""}${part ? " part" : ""}`}>{on ? (part ? "–" : "✓") : ""}</span>;
   const menu = open && (
     <div className="fs-menu" role="menu">
+      <div className="fs-vendor fs-top">
+        <button type="button" className="fs-toph" aria-expanded={topOpen} onClick={toggleTop} title="The best-rated venues of every type on All Auckland fields, bookable or not">
+          ⭐ All venues · top rated <span className="fs-n">{topOpen ? "▾" : "▸"}</span>
+        </button>
+        {topOpen && (top === null ? <div className="fs-note">Loading…</div>
+          : !top.length ? <div className="fs-note">No rated venues yet: rate them on All Auckland fields.</div>
+          : top.map(x => { const t = ownerTypeMeta(x.owner); return (
+            <button key={x.park.id} type="button" role="menuitem" className="fs-fac" onClick={() => preview(x)} title={`${t.label} · ${suitWord(x.score)}: show its fields on the calendars`}>
+              <span aria-hidden>{t.icon}</span><span className="fs-t">{x.park.name}</span><span className="fs-n">{suitWord(x.score)}</span>
+            </button>); }))}
+      </div>
       {pids.map(pid => (
         <div key={pid} className="fs-vendor">
           <div className="fs-vh">{vendorLabel(pid)}</div>
@@ -84,7 +110,7 @@ export function FacilityStrip({ isMobile, isAdmin, selFac, setSelFac, setVenue, 
               <div key={v.key}>
                 <div className="fs-site">
                   <button type="button" role="menuitemcheckbox" aria-checked={on} onClick={() => toggleSite(v.key)} title={on ? `Remove ${v.site}` : `Add every field at ${v.site}`}>
-                    {box(on, on && n < fs.length)}<b>📍 {v.site}</b>{on && <span className="fs-n">{n}/{fs.length}</span>}
+                    {box(on, on && n < fs.length)}<b>📍 {v.site}</b>{fs.some(f => f.preview) && <span className="fs-tag" title="From the top-rated list: not in anyone's My fields yet">preview</span>}{on && <span className="fs-n">{n}/{fs.length}</span>}
                   </button>
                   <button type="button" className="fs-exp" aria-expanded={ex} onClick={() => setExp(ex ? null : v.key)} title={ex ? "Hide its fields" : "Choose its fields"}>{fs.length} {ex ? "▾" : "▸"}</button>
                 </div>
@@ -111,7 +137,7 @@ export function FacilityStrip({ isMobile, isAdmin, selFac, setSelFac, setVenue, 
       </div>
       <div className="fs-tools" ref={ref}>
         <button type="button" className="fs-btn" aria-haspopup="menu" aria-expanded={open} onClick={openMenu} title="Add or remove fields and locations">📍 Fields ▾</button>
-        {!isDefault && <button type="button" className="fs-btn ghost" onClick={reset} title="Back to the Cornwall Park facilities">↺ Reset</button>}
+        {(!isDefault || previewEntries().length > 0) && <button type="button" className="fs-btn ghost" onClick={reset} title="Back to the Cornwall Park facilities">↺ Reset</button>}
         {menu}
       </div>
     </div>

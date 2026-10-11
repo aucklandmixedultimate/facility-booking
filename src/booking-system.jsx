@@ -4,7 +4,7 @@ import { gmailToken, fetchCouncilEmails, parseCouncilEmail } from "./councilMail
 import { driveConfigured, getDriveToken, renameFile, ensureFolderPath, DRIVE_ROOT_FOLDER, ensureFolder, findChildFile, uploadFile, keepLatestRevisionForever } from "./drive-client.js";
 import { htmlToPdfBlob } from "./pdf-utils.js";
 import { currentLeagueSeason, LEAGUE_SEASONS, seasonOfBooker } from "./seasons.js";
-import { Badge, COUNCIL_APPLICATION_FEE, COUNCIL_APPLICATION_URL, COUNCIL_APP_RE, CPSA_FIELD_IDS, CopyableTable, EmailLoginScreen, FACILITIES, LOGO_SRC, MOBILE_STYLE, MONTHS, Modal, PROVIDERS, REVIEW_STATUSES, S, STATUS_META, SUPABASE_URL, T, TableViewToggle, groupStatusLabel, _emailAliases, applyAmuaOrg, applyCouncilFacilities, authHeaders, isDraftItem, buildApprovalEmailHtml, buildClashEmailHtml, buildInformCpsaEmailHtml, buildMismatchEmailHtml, buildOrderEmailHtml, buildRoomRequestEmailHtml, canSendToCouncil, clearSlotLink, councilFeeSplit, councilOverlaps, emailColor, evenSlotShares, facShort, fmt24, fmtCost, fmtDate, fmtDateShort, fmtDateShortDow, fmtTime, fmtTimeShort, getBillingDrift, getClashes, inActiveVenue, isAdminBooking, linkCouncilChildren, logActivity, newId, newSlotRef, parseClashPrevStatus, parseCouncilApp, parseCpsaOrig, parseCpsaRefs, parseCpsaResolution, parseMismatchNote, parseSlotLink, reachedGtecQueue, sb, sendApprovalEmail, sendEmail, setBilledSnapshot, setClashPrevStatus, setCpsaResolution, setGtecSnapshot, setMismatchNote, setModuleState, setSlotLink, setVendorVariance, slotGroupMembers, stripClashPrevStatus, stripMismatchNote, supabase, timeOverlaps, todayKey, useMobile, useTableView, venueFacilities, visibleFacilities, workflowOf } from "./booking/core.jsx";
+import { Badge, COUNCIL_APPLICATION_FEE, COUNCIL_APPLICATION_URL, COUNCIL_APP_RE, CPSA_FIELD_IDS, CopyableTable, EmailLoginScreen, FACILITIES, LOGO_SRC, MOBILE_STYLE, MONTHS, Modal, PROVIDERS, REVIEW_STATUSES, S, STATUS_META, SUPABASE_URL, T, TableViewToggle, groupStatusLabel, _emailAliases, applyAmuaOrg, applyCouncilFacilities, authHeaders, isDraftItem, previewEntries, setPreviewEntries, buildApprovalEmailHtml, buildClashEmailHtml, buildInformCpsaEmailHtml, buildMismatchEmailHtml, buildOrderEmailHtml, buildRoomRequestEmailHtml, canSendToCouncil, clearSlotLink, councilFeeSplit, councilOverlaps, emailColor, evenSlotShares, facShort, fmt24, fmtCost, fmtDate, fmtDateShort, fmtDateShortDow, fmtTime, fmtTimeShort, getBillingDrift, getClashes, inActiveVenue, isAdminBooking, linkCouncilChildren, logActivity, newId, newSlotRef, parseClashPrevStatus, parseCouncilApp, parseCpsaOrig, parseCpsaRefs, parseCpsaResolution, parseMismatchNote, parseSlotLink, reachedGtecQueue, sb, sendApprovalEmail, sendEmail, setBilledSnapshot, setClashPrevStatus, setCpsaResolution, setGtecSnapshot, setMismatchNote, setModuleState, setSlotLink, setVendorVariance, slotGroupMembers, stripClashPrevStatus, stripMismatchNote, supabase, timeOverlaps, todayKey, useMobile, useTableView, venueFacilities, visibleFacilities, workflowOf } from "./booking/core.jsx";
 import { FacilityStrip } from "./booking/facilityStrip.jsx";
 import { councilAppBookings, mergeCouncilOutcomes } from "./booking/councilData.jsx";
 import { cjrMonthUrl, extractCPSATeam, extractEventDetailsEmail, fetchCJREvents, parseFeedText, findMatchingUserBooking, purgeObsolete, gtecTeamKey, mapCJRFacility, parseCJRDate, parseCJRDateTime } from "./booking/gtec.jsx";
@@ -1038,6 +1038,38 @@ export default function App() {
   if(session === undefined) return null; // auth session still loading
   if(!session) return <EmailLoginScreen/>;
 
+  // A booking on a previewed venue (📍 Fields → All venues · top rated) adds the venue's field
+  // to that booker's My fields as bookable, so it stays a facility for them and for admins.
+  // Bookers save their own list (set_my_council_facilities); admins any booker's
+  // (settings_merge). Best-effort: the bookings are already saved.
+  async function savePreviewFields(drafts) {
+    const byEmail = {};
+    drafts.forEach(d => { const f = FACILITIES.find(x => x.id === d.facility_id);
+      if (f?.preview) (byEmail[(d.email || "").toLowerCase()] ||= new Map()).set(f.id, f.council); });
+    if (!Object.keys(byEmail).length || !supabase) return;
+    try {
+      const { data } = await supabase.from("settings").select("value").eq("key", "council_facilities").maybeSingle();
+      let map = data?.value && typeof data.value === "object" ? data.value : {};
+      const at = new Date().toISOString(), by = { added_by: realLoggedInEmail, ...(actor ? { added_by_name: actor, activated_by_name: actor } : {}) };
+      for (const [email, fields] of Object.entries(byEmail)) {
+        if (!email || (!realIsAdmin && email !== realLoggedInEmail)) continue;
+        const list = (map[email] || []).filter(x => !fields.has(x.id));
+        fields.forEach(e => { const { status: _s, ...rest } = e; list.push({ ...rest, status: "active", decision: "yes", added_at: at, activated_at: at, ...by }); });
+        const { data: next, error } = realIsAdmin
+          ? await supabase.rpc("settings_merge", { setting_key: "council_facilities", patch: { [email]: list } })
+          : await supabase.rpc("set_my_council_facilities", { entries: list });
+        if (error) throw error;
+        if (next && typeof next === "object") map = next;
+      }
+      const saved = new Set(Object.values(byEmail).flatMap(m => [...m.keys()]));
+      setPreviewEntries(previewEntries().filter(e => !saved.has(e.id)));
+      applyCouncilFacilities(map); setCouncilFacRev(n => n + 1);
+      try { localStorage.setItem("fb_council_facilities", JSON.stringify(map)); } catch { /* ignore */ }
+    } catch (e) {
+      showToast("Booked — but the venue couldn't be added to My fields (" + (e.message || e) + "). Add it on All Auckland fields.", "error");
+    }
+  }
+
   // Saves drafts (new or edited bookings). Returns false if the save failed.
   async function handleSave(drafts, bookerName, bookerEmail, { skipEmail = false } = {}) {
     skipEmail = skipEmail || silentMode;
@@ -1926,6 +1958,7 @@ export default function App() {
       const name = (saveItems[0]||{}).name, email = (saveItems[0]||{}).email;
       // On failure the cart is kept (nothing below runs), so the bookings aren't lost.
       if (!(await handleSave(allDrafts, name, email, { skipEmail: true }))) return;
+      await savePreviewFields(allDrafts);
     }
 
     // 1b. Shared-slot changes: insert the split's new booking, then rewrite every
