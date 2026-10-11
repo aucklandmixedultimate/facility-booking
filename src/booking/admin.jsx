@@ -1,5 +1,5 @@
 import { useState, useRef, Fragment } from "react";
-import { AMUA_INBOX, AMUA_INFO, Badge, rowSelect, isMultiSelectClick, venueKeyOf, bareStatusLabel, groupStatusLabel, COUNCIL_APPLICATION_FEE, ClashPair, CopyableTable, EmailChip, FACILITIES, INVOICED_META, Modal, PROVIDERS, REVIEW_STATUSES, S, STATUS_META, SUPABASE_URL, TableViewToggle, _contactReviews, _currentUser, _sessionStartIso, authHeaders, bookingCost, buildCouncilPayload, canSendToCouncil, councilFeeSplit, councilOverlaps, emailColor, extractCpsaAmendValues, facCellLabel, fmt24, fmtCost, fmtDate, fmtDateShort, fmtDateShortDow, fmtDuration, fmtGtecEvent, fmtLoggedAt, fmtTime, getBillingDrift, getCrossFacilityOverlaps, getSameFacilityOverlaps, isAdminBooking, isCouncilBooking, isSocialFac, nextWorkflowStatus, parseClashPrevStatus, parseCouncilApp, parseCpsaRefs, parseCpsaResolution, parseGtecSnapshot, parseMismatchNote, parseSlotLink, providerOfFacility, sb, setCpsaOrig, setCpsaResolution, setModuleState, stripMismatchNote, todayKey, useTableView, vendorShortFor, vendorsIn, visibleFacilities, workflowOf, workflowStep } from "./core.jsx";
+import { AMUA_INBOX, AMUA_INFO, Badge, buildCommunityRequestItem, rowSelect, isMultiSelectClick, venueKeyOf, bareStatusLabel, groupStatusLabel, COUNCIL_APPLICATION_FEE, ClashPair, CopyableTable, EmailChip, FACILITIES, INVOICED_META, Modal, PROVIDERS, REVIEW_STATUSES, S, STATUS_META, SUPABASE_URL, TableViewToggle, _contactReviews, _currentUser, _sessionStartIso, authHeaders, bookingCost, buildCouncilPayload, canSendToCouncil, councilFeeSplit, councilOverlaps, emailColor, extractCpsaAmendValues, facCellLabel, fmt24, fmtCost, fmtDate, fmtDateShort, fmtDateShortDow, fmtGtecEvent, fmtLoggedAt, fmtTime, getBillingDrift, getCrossFacilityOverlaps, getSameFacilityOverlaps, isAdminBooking, isCouncilBooking, isSocialFac, nextWorkflowStatus, parseClashPrevStatus, parseCouncilApp, parseCpsaRefs, parseCpsaResolution, parseGtecSnapshot, parseMismatchNote, parseSlotLink, providerOfFacility, sb, setCpsaOrig, setCpsaResolution, setModuleState, stripMismatchNote, todayKey, useTableView, vendorShortFor, vendorsIn, visibleFacilities, workflowOf, workflowStep } from "./core.jsx";
 import { councilAppBookings } from "./councilData.jsx";
 import { ActivityLogModal, DateRangePicker } from "./modals.jsx";
 import { PatternModal, PricingConditionsManager, ReassignControl, ScheduleSummaryModal } from "./schedule.jsx";
@@ -272,22 +272,6 @@ export function CouncilAllocationTab({ outcomes = {}, bookings = [], syncing, sy
 }
 
 // ─── Admin Panel with action queue, bulk approve, facility rates ──────────────
-// The request to a community facility, drafted for AMUA's inbox (the app never emails
-// facilities: see the email rule at sendEmail). Queued in the email cart as a pre-rendered item.
-function buildCommunityRequestItem(b) {
-  const pid = providerOfFacility(b.facility_id), pr = PROVIDERS[pid] || {}, rv = _contactReviews[pid] || {}, c = pr.contact || {};
-  const f = FACILITIES.find(x => x.id === b.facility_id), to = rv.email || c.email || AMUA_INBOX;
-  const when = `${fmtDate(b.date)} ${fmtTime(b.start_hour)}–${fmtTime(b.start_hour + b.duration)}`;
-  const rate = f?.defaultRate ? `$${f.defaultRate}/hr` : "your usual rate";
-  const ops = AMUA_INFO.contacts?.operations || {};
-  const html = `<p>Kia ora ${escHtml(rv.contact_name || c.contact_name || pr.name || "")},</p>
-    <p>Auckland Mixed Ultimate Association would like to hire <b>${f?.name || "your field"}</b> for ultimate frisbee training:</p>
-    <ul><li><b>${when}</b> (${fmtDuration(b.duration)})</li><li>Group: ${escHtml(b.name || "")}${b.purpose ? ` — ${escHtml(b.purpose)}` : ""}</li><li>Rate: ${rate}</li></ul>
-    <p>Could you let us know if that slot is available?</p>
-    <p>Ngā mihi,<br>${ops.name || "AMUA"}${ops.position ? `, ${ops.position}` : ""}<br>${AMUA_INFO.name || "Auckland Mixed Ultimate Association"}${ops.phone ? `<br>${ops.phone}` : ""}<br>${AMUA_INBOX}</p>`;
-  return { notifyOnly: true, invoiceEmail: true, amuaDraft: true, email: to, name: pr.name || pid, drafts: [], count: 1, refs: [b.id.slice(0, 8)], total: 0,
-    subject: `Field hire request — ${pr.short || pr.name || ""} — ${when}`, html };
-}
 // Saves the reviewed contact for a community facility (settings "provider_contact_reviews").
 async function saveContactReview(pid, data) {
   const entry = { ...data, by: _currentUser?.email || "", at: new Date().toISOString() };
@@ -319,7 +303,7 @@ function ContactReviewModal({ booking, onClose, onConfirm }) {
       </div>
     </Modal>);
 }
-export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,clashes=[],deleteIds=new Set(),facilityRates={},onResolveOldUnapproved,onReassign,bookers=[],onBulkApply,onSaveMismatch,onInformCpsa,onRequestRoom,onQueueNotifications,onMarkAdjustmentSettled,onLinkClash,loggedInEmail,syncResults=[],onClearSyncResults,showSyncResults=false,onToggleSyncResults,bookerFilter=new Set(),onToggleBooker,onSetBookerFilter,aliasNames={},emailAliases={},pricingConditions=[],onAddPricingCondition,onUpdatePricingCondition,onRemovePricingCondition,cpsaDeleteLog=[],onClearDeleteLogEntry,onClearDeleteLog,onSendToCouncil,approxPlayers={},syncFeed=null,onPasteFeed,cjrMonthUrl}) {
+export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDelete,clashes=[],deleteIds=new Set(),facilityRates={},onResolveOldUnapproved,onReassign,bookers=[],onBulkApply,onSaveMismatch,onInformCpsa,onRequestRoom,onQueueNotifications,onDropVendorRequest,onMarkAdjustmentSettled,onLinkClash,loggedInEmail,syncResults=[],onClearSyncResults,showSyncResults=false,onToggleSyncResults,bookerFilter=new Set(),onToggleBooker,onSetBookerFilter,aliasNames={},emailAliases={},pricingConditions=[],onAddPricingCondition,onUpdatePricingCondition,onRemovePricingCondition,cpsaDeleteLog=[],onClearDeleteLogEntry,onClearDeleteLog,onSendToCouncil,approxPlayers={},syncFeed=null,onPasteFeed,cjrMonthUrl}) {
   // Pasted GTEC calendar text per month key, for the manual sync fallback.
   const [feedPaste, setFeedPaste] = useState({});
   // Stale purge requests are pruned as bookings and the synced feed change (booking-system.jsx);
@@ -540,11 +524,12 @@ export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDel
     });
   }
 
-  // Community facility: queue "Requested from facility" and add the AMUA-inbox draft to the cart.
+  // Community facility: queue "Requested from facility" and add the booking to that facility's
+  // AMUA-inbox draft in the cart (one draft per facility, however many bookings); again undoes both.
   function requestCommunity(b) {
-    if (actionQueue.some(a => a.id === b.id && a.newStatus === "community_request")) { queueAction(b.id, "community_request"); return; }
+    if (actionQueue.some(a => a.id === b.id && a.newStatus === "community_request")) { queueAction(b.id, "community_request"); onDropVendorRequest?.(b.id); return; }
     queueAction(b.id, "community_request");
-    onQueueNotifications?.([buildCommunityRequestItem(b)], "draft request for AMUA's inbox");
+    onQueueNotifications?.([buildCommunityRequestItem([b])], "draft request for AMUA's inbox");
   }
   async function submitActionQueue() {
     if(!actionQueue.length) return;
