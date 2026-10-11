@@ -109,6 +109,8 @@ export default function App() {
   // Council email sync (🏛 Allocation): outcomes per council application number, from the
   // council's replies in AMUA's Gmail (settings "council_outcomes"), and a log of sync runs.
   const [councilOutcomes, setCouncilOutcomes] = useState(()=>{ try{ return JSON.parse(localStorage.getItem("fb_council_outcomes")||"{}"); }catch{ return {}; } });
+  // The council extension's last portal sync (settings "council_portal_sync": {at, apps, bookings, changed, by}).
+  const [councilPortalSync, setCouncilPortalSync] = useState(null);
   const [councilSyncLog, setCouncilSyncLog] = useState(()=>{ try{ return JSON.parse(localStorage.getItem("fb_council_sync_log")||"[]"); }catch{ return []; } });
   const [councilSyncing, setCouncilSyncing] = useState(false);
   const councilOpenCount = Object.values(councilOutcomes).filter(o => o.outcome === "action" || (o.outcome === "confirmed" && !o.allocated)).length;
@@ -431,6 +433,25 @@ export default function App() {
       showToast("Council email sync: "+(e?.message||e), "error");
     } finally { setCouncilSyncing(false); }
   }
+  // The council extension writes the portal's application statuses into "council_outcomes"
+  // (🔄 Sync with portal). Load them, then queue the bookings' status changes, as the email
+  // sync does.
+  async function handleApplyPortal() {
+    if (councilSyncing || !supabase) return;
+    setCouncilSyncing(true);
+    try {
+      const [{ data: o }, { data: ps }] = await Promise.all([
+        supabase.from("settings").select("value").eq("key", "council_outcomes").maybeSingle(),
+        supabase.from("settings").select("value").eq("key", "council_portal_sync").maybeSingle()]);
+      const next = o?.value && typeof o.value === "object" ? o.value : councilOutcomes;
+      setCouncilOutcomes(next); if (ps?.value) setCouncilPortalSync(ps.value);
+      try{localStorage.setItem("fb_council_outcomes",JSON.stringify(next));}catch{ /* ignore */ }
+      const queued = queueCouncilOutcomeChanges(next);
+      logActivity("council_portal_apply", { apps: Object.keys(next).length, queued });
+      showToast(`🏛 Council portal: ${Object.values(next).filter(x => x.portal).length} application${Object.values(next).filter(x => x.portal).length!==1?"s":""} · ${queued} booking change${queued!==1?"s":""} queued`);
+    } catch(e) { showToast("Couldn't load the portal results: "+(e?.message||e), "error"); }
+    finally { setCouncilSyncing(false); }
+  }
   // Bookings on an application move with its outcome: an offer → council_action, a
   // confirmation → council_granted (both silent), a decline → rejected (the booker is told
   // why). Never backwards, and never twice: bookings already queued in the cart are skipped.
@@ -519,6 +540,7 @@ export default function App() {
         applyCouncilFacilities(map.council_facilities); setCouncilFacRev(n => n + 1);
         try{localStorage.setItem("fb_council_facilities",JSON.stringify(map.council_facilities));}catch{ /* ignore */ }
       }
+      if (map.council_portal_sync && typeof map.council_portal_sync === "object") setCouncilPortalSync(map.council_portal_sync);
       if (map.council_outcomes && typeof map.council_outcomes === "object") {
         setCouncilOutcomes(map.council_outcomes);
         try{localStorage.setItem("fb_council_outcomes",JSON.stringify(map.council_outcomes));}catch{ /* ignore */ }
@@ -2429,7 +2451,7 @@ export default function App() {
         {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<Suspense fallback={<TabLoading/>}><SummaryTab bookings={bookings} loggedInEmail={loggedInEmail} onRemoveBookings={queueMultiForRemoval} facilityRates={facilityRates} pricingConditions={pricingConditions} onAddPricingCondition={addPricingCondition} onUpdatePricingCondition={updatePricingCondition} onRemovePricingCondition={removePricingCondition} isAdmin={isAdmin} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onUpdateFacilityRate={updateFacilityRate} pricingMode={pricingMode} onSetPricingMode={setPricingMode} onProposeMerge={handleProposeMerge} onBulkApply={handleBulkApply} onMarkInvoiced={handleMarkInvoiced} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} bookerFilter={listBookerFilter} profiles={profiles} emailAliases={emailAliases} aliasNames={aliasNames} onCreateOfficialInvoice={handleCreateOfficialInvoice} onEmailInvoice={handleEmailInvoicePreview} loadRequest={summaryLoadRequest}/></Suspense>}</div>}
         {tab==="billing"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<Suspense fallback={<TabLoading/>}><BillingTab billingRecords={billingRecords} onUpdateRecord={handleUpdateBillingRecord} onDeleteRecord={id=>setBillingRecords(prev=>prev.filter(r=>r.id!==id))} onCreateReceipt={handleCreateReceipt} onLoadToSummary={handleLoadBillingToSummary} isAdmin={isAdmin} loggedInEmail={loggedInEmail} emailAliases={emailAliases} aliasNames={aliasNames} driveEnabled={driveConfigured()} onDriveSync={handleDriveSync} onRenameBatch={handleRenameBatch} onDriveAttach={handleDriveAttachGtec} onEmailOfficial={handleEmailOfficialInvoices} onQueueInvoiceEmails={handleQueueInvoiceEmails} silentMode={silentMode} onToggleSilent={isAdmin?setSilentMode:undefined}/></Suspense>}</div>}
         {tab==="about"&&<div style={{padding:"8px 0"}}><Suspense fallback={<TabLoading/>}><AboutTab/></Suspense></div>}
-        {tab==="allocation"&&isAdmin&&<div style={S.card}><Suspense fallback={<TabLoading/>}><CouncilAllocationTab outcomes={councilOutcomes} bookings={bookings} syncing={councilSyncing} syncLog={councilSyncLog} onSync={handleCouncilMailSync} onSaveOutcomes={saveCouncilOutcomes} onBulkStatusChange={handleBulkStatusChange} onQueueNotifications={queueNotifications} onLinkApp={handleLinkCouncilApp} aliasNames={aliasNames} loggedInEmail={loggedInEmail}/></Suspense></div>}
+        {tab==="allocation"&&isAdmin&&<div style={S.card}><Suspense fallback={<TabLoading/>}><CouncilAllocationTab outcomes={councilOutcomes} bookings={bookings} syncing={councilSyncing} syncLog={councilSyncLog} onSync={handleCouncilMailSync} portalSync={councilPortalSync} onApplyPortal={handleApplyPortal} onSaveOutcomes={saveCouncilOutcomes} onBulkStatusChange={handleBulkStatusChange} onQueueNotifications={queueNotifications} onLinkApp={handleLinkCouncilApp} aliasNames={aliasNames} loggedInEmail={loggedInEmail}/></Suspense></div>}
         {tab==="admin"&&isAdmin&&<div style={S.card}>
           {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<Suspense fallback={<TabLoading/>}><AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onView={setViewing} onQueueDelete={queueForRemovalSilent} clashes={allClashes} deleteIds={new Set(deleteQueue.map(b=>b.id))} facilityRates={facilityRates} onResolveOldUnapproved={handleResolveOldUnapproved} onReassign={handleBulkReassign} bookers={knownBookers} approxPlayers={approxPlayers} onBulkApply={handleBulkApply} onSaveMismatch={handleSaveMismatch} onInformCpsa={setInformCpsaFor} onRequestRoom={setRoomRequestFor} onQueueNotifications={queueNotifications} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} onLinkClash={handleLinkClashToGtec} loggedInEmail={loggedInEmail} syncResults={syncResults} onClearSyncResults={()=>setSyncResults([])} showSyncResults={showSyncPanel} onToggleSyncResults={()=>setShowSyncPanel(v=>!v)} bookerFilter={listBookerFilter} onToggleBooker={toggleBooker} onSetBookerFilter={setListBookerFilter} aliasNames={aliasNames} emailAliases={emailAliases} pricingConditions={pricingConditions} onAddPricingCondition={addPricingCondition} onUpdatePricingCondition={updatePricingCondition} onRemovePricingCondition={removePricingCondition} cpsaDeleteLog={cpsaDeleteLog} onClearDeleteLogEntry={id=>setCpsaDeleteLog(prev=>prev.filter(e=>e.id!==id))} onClearDeleteLog={()=>setCpsaDeleteLog([])} syncFeed={syncFeed} onPasteFeed={handlePasteFeed} cjrMonthUrl={cjrMonthUrl} onSendToCouncil={handleSendToCouncil}/></Suspense>}
         </div>}

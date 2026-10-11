@@ -134,7 +134,7 @@ function buildCouncilReplyItem(o, kind, rationale) {
   return { notifyOnly: true, invoiceEmail: true, amuaDraft: true, email: o.coordinator?.email || AMUA_INBOX, name: o.coordinator?.name || "Auckland Council",
     drafts: [], count: 1, refs: [o.id], total: 0, subject: `Re: Application # ${o.id}${kind === "accept" ? " — AMUA confirms" : " — AMUA withdraws"}`, html };
 }
-export function CouncilAllocationTab({ outcomes = {}, bookings = [], syncing, syncLog = [], onSync, onSaveOutcomes, onBulkStatusChange, onQueueNotifications, onLinkApp, aliasNames = {}, loggedInEmail }) {
+export function CouncilAllocationTab({ outcomes = {}, bookings = [], syncing, syncLog = [], onSync, portalSync = null, onApplyPortal, onSaveOutcomes, onBulkStatusChange, onQueueNotifications, onLinkApp, aliasNames = {}, loggedInEmail }) {
   const [filter, setFilter] = useState("open");
   const [sel, setSel] = useState({});        // appId → Set of booking ids picked for allocation
   const [notes, setNotes] = useState({});    // appId → rationale for the reply to the council
@@ -178,11 +178,15 @@ export function CouncilAllocationTab({ outcomes = {}, bookings = [], syncing, sy
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
         <h2 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: "#0f172a" }}>🏛 Council allocation</h2>
-        <button onClick={onSync} disabled={syncing} style={S.btn({ background: "#0d9488", color: "#fff", opacity: syncing ? 0.6 : 1, cursor: syncing ? "wait" : "pointer" })}>{syncing ? "Reading council emails…" : "🔄 Sync council emails"}</button>
+        <button onClick={onApplyPortal} disabled={syncing} title="Load the application statuses the council extension read from the council portal, and queue the booking changes"
+          style={S.btn({ background: "#0d9488", color: "#fff", opacity: syncing ? 0.6 : 1, cursor: syncing ? "wait" : "pointer" })}>🏛 Load portal results</button>
+        <button onClick={onSync} disabled={syncing} title="Fallback: read the council's replies from AMUA's Gmail" style={S.btn({ background: "#fff", color: "#0f766e", border: "1.5px solid #5eead4", opacity: syncing ? 0.6 : 1, cursor: syncing ? "wait" : "pointer" })}>{syncing ? "Syncing…" : "✉ Sync council emails"}</button>
         <span style={small}>{lastRun ? (lastRun.error ? `Last sync failed: ${lastRun.error}` : `Last sync ${new Date(lastRun.at).toLocaleString("en-NZ")} · ${lastRun.emails} email${lastRun.emails !== 1 ? "s" : ""} read · ${lastRun.queued} booking change${lastRun.queued !== 1 ? "s" : ""} queued`) : "Not synced yet: sign in with the AMUA Google account when asked (read-only Gmail access)."}</span>
       </div>
+      <div style={small}>{portalSync?.at ? `Council portal: synced ${new Date(portalSync.at).toLocaleString("en-NZ")} · ${portalSync.apps} application${portalSync.apps !== 1 ? "s" : ""}, ${portalSync.bookings} booking${portalSync.bookings !== 1 ? "s" : ""}${portalSync.changed?.length ? ` · ${portalSync.changed.length} updated` : ""}`
+        : "Council portal: not synced yet. In the council extension (🏛 side panel), open the council portal and press 🔄 Sync with portal."}</div>
       <p style={{ margin: 0, fontSize: 13, color: "#475569" }}>
-        Reads Auckland Council's replies about AMUA's field applications from the AMUA Gmail. An <b>offer</b> needs AMUA's answer: draft an acceptance or a withdrawal below.
+        The council extension reads AMUA's applications from the council portal (🔄 Sync with portal in its side panel); <b>Load portal results</b> brings them in. The AMUA Gmail sync reads the council's emails as a fallback. An <b>offer</b> needs AMUA's answer: draft an acceptance or a withdrawal below.
         Replies are drafted to AMUA's own inbox with the council's address on top (the app never emails the council) — send them from Gmail in the thread.
         Once the council <b>grants</b> an application, allocate its fields to the bookers who applied: they're approved and emailed; the rest are told it wasn't allocated.
         Booking changes go to the cart for you to submit.
@@ -191,7 +195,7 @@ export function CouncilAllocationTab({ outcomes = {}, bookings = [], syncing, sy
         {[["open", "Needs AMUA"], ["action", "Offers"], ["confirmed", "Granted"], ["declined", "Declined"], ["info", "Updates"], ["all", "All"]].map(([k, l]) => (
           <button key={k} onClick={() => setFilter(k)} style={S.btn({ padding: "5px 12px", fontSize: 12, background: filter === k ? "#0f172a" : "#fff", color: filter === k ? "#fff" : "#334155", border: "1px solid #e2e8f0" })}>{l} ({count(k)})</button>))}
       </div>
-      {!shown.length && <div style={{ ...small, padding: 20, textAlign: "center" }}>{apps.length ? "Nothing here." : "No council applications yet. Press 🔄 Sync council emails."}</div>}
+      {!shown.length && <div style={{ ...small, padding: 20, textAlign: "center" }}>{apps.length ? "Nothing here." : "No council applications yet. Sync with the council portal (council extension), then press 🏛 Load portal results."}</div>}
       {shown.map(o => {
         const m = COUNCIL_OUTCOME_META[o.outcome] || COUNCIL_OUTCOME_META.info, linked = councilAppBookings(bookings, o.id), pick = picked(o, linked);
         const cands = linked.length ? [] : unlinked(o), lpick = linkSel[o.id] || new Set();
@@ -202,9 +206,10 @@ export function CouncilAllocationTab({ outcomes = {}, bookings = [], syncing, sy
               <span style={{ padding: "2px 10px", borderRadius: 999, background: m.bg, border: `1px solid ${m.border}`, color: m.text, fontSize: 12, fontWeight: 700 }}>{m.label}{o.manual ? " · set by AMUA" : ""}</span>
               {o.replied && <span style={{ ...small, fontWeight: 600 }}>✉ {o.replied.kind === "accept" ? "Acceptance" : "Withdrawal"} drafted {new Date(o.replied.at).toLocaleDateString("en-NZ")}</span>}
               {o.allocated && <span style={{ ...small, fontWeight: 600, color: "#166534" }}>✅ Allocated {new Date(o.allocated.at).toLocaleDateString("en-NZ")}</span>}
+              {o.portal && <span title={`Council portal status, synced ${new Date(o.portal.syncedAt).toLocaleString("en-NZ")}`} style={{ padding: "2px 10px", borderRadius: 999, border: "1px solid #99f6e4", background: "#f0fdfa", color: "#115e59", fontSize: 12, fontWeight: 600 }}>Portal: {o.portal.statusLabel || o.portal.status}</span>}
               {o.threadId && <a href={`https://mail.google.com/mail/u/0/#all/${o.threadId}`} target="_blank" rel="noreferrer" style={{ marginLeft: "auto", fontSize: 12, color: "#0e7490" }}>Gmail thread ↗</a>}
             </div>
-            <div style={{ fontSize: 13, color: "#0f172a" }}><b>{o.park || "Park not given"}</b>{o.fields ? ` · ${o.fields}` : ""}{o.start ? ` · ${o.start}${o.end ? " – " + o.end : ""}` : ""}</div>
+            <div style={{ fontSize: 13, color: "#0f172a" }}><b>{o.park || o.portal?.name || "Park not given"}</b>{o.fields ? ` · ${o.fields}` : ""}{o.start ? ` · ${o.start}${o.end ? " – " + o.end : ""}` : ""}</div>
             <div style={small}>{o.coordinator?.name || o.coordinator?.email ? `From ${o.coordinator.name || ""}${o.coordinator.email ? ` <${o.coordinator.email}>` : ""} · ` : ""}{(o.outcomeAt || o.date) ? new Date(o.outcomeAt || o.date).toLocaleDateString("en-NZ", { day: "numeric", month: "short", year: "numeric" }) : ""}{o.history?.length > 1 ? ` · ${o.history.length} emails` : ""}</div>
             {o.reason && <div style={{ fontSize: 13, color: "#881337", background: "#fff1f2", borderRadius: 8, padding: "6px 10px" }}>{o.reason}</div>}
             {linked.length ? (

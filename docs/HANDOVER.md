@@ -107,7 +107,7 @@ Things the picture shows:
 | Bookings tab | `bookingsList.jsx` (`BookingsList`, Itemised table or `schedule.jsx` Grouped view) | Two lists: **Filtered Bookings** follows the page's 📍 Fields selection; **All Bookings** has its own location filter (default: every location except Cornwall Park). Each has its own filters, sort and view. |
 | Booking detail | `forms.jsx` `BookingDetail` | Status, GTEC mismatch, cost split or fixed price, shared slot, removal. |
 | GTEC sync | `App.handleSyncMonth`, `gtec.jsx` | Every 4 h for admins, or by hand. Matches the vendor feed to bookings, flags clashes and mismatches, adds GTEC's own blocks. |
-| Council | `App`, `admin.jsx` `CouncilAllocationTab`, `councilMail.js` | Send to council, with the fee split. Reads council replies from Gmail. Allocate outcomes. |
+| Council | `App`, `admin.jsx` `CouncilAllocationTab`, `councilMail.js` | Send to council, with the fee split. The council extension reads AMUA's applications from the council portal into `council_outcomes` (and `council_portal_sync`); **🏛 Load portal results** queues the booking changes. Reading the council's replies from Gmail stays as a fallback. Allocate outcomes. |
 | Summary | `summary.jsx` | Hours and costs by booker, pricing rules, schedule summary. Invoice / PO builder (draft and official). |
 | Billing | `billing.jsx` | Pipeline of official documents, receipts, Drive sync, invoice emails. |
 | Admin | `admin.jsx` `AdminPanel` | Activity log, sync results, clashes, mismatch triage, track changes, pricing rules, GTEC purge requests, bookings table. |
