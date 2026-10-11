@@ -4,7 +4,7 @@ import { gmailToken, fetchCouncilEmails, parseCouncilEmail } from "./councilMail
 import { driveConfigured, getDriveToken, renameFile, ensureFolderPath, DRIVE_ROOT_FOLDER, ensureFolder, findChildFile, uploadFile, keepLatestRevisionForever } from "./drive-client.js";
 import { htmlToPdfBlob } from "./pdf-utils.js";
 import { currentLeagueSeason, LEAGUE_SEASONS, seasonOfBooker } from "./seasons.js";
-import { COUNCIL_APPLICATION_FEE, COUNCIL_APPLICATION_URL, COUNCIL_APP_RE, EmailLoginScreen, FACILITIES, LOGO_SRC, MOBILE_STYLE, MONTHS, Modal, PROVIDERS, REVIEW_STATUSES, S, STATUS_META, SUPABASE_URL, T, _emailAliases, applyAmuaOrg, applyCouncilFacilities, authHeaders, isDraftItem, previewEntries, setPreviewEntries, buildApprovalEmailHtml, buildClashEmailHtml, buildInformCpsaEmailHtml, buildMismatchEmailHtml, buildOrderEmailHtml, buildRoomRequestEmailHtml, canSendToCouncil, clearSlotLink, councilFeeSplit, councilOverlaps, emailColor, evenSlotShares, facShort, fmtDate, fmtDateShortDow, fmtTime, fmtTimeShort, getClashes, inActiveVenue, isAdminBooking, linkCouncilChildren, logActivity, newId, newSlotRef, parseClashPrevStatus, parseCouncilApp, parseCpsaOrig, parseCpsaRefs, parseCpsaResolution, parseSlotLink, reachedGtecQueue, sb, sendApprovalEmail, sendEmail, setBilledSnapshot, setClashPrevStatus, setCpsaResolution, setGtecSnapshot, setMismatchNote, setModuleState, setSlotLink, setVendorVariance, slotGroupMembers, stripClashPrevStatus, stripMismatchNote, supabase, timeOverlaps, todayKey, useMobile, venueFacilities, visibleFacilities, workflowOf, ALL_VENUES, activeFacilities, listVenues, venueKeyOf } from "./booking/core.jsx";
+import { COUNCIL_APPLICATION_FEE, COUNCIL_APPLICATION_URL, COUNCIL_APP_RE, EmailLoginScreen, FACILITIES, LOGO_SRC, MOBILE_STYLE, MONTHS, Modal, PROVIDERS, REVIEW_STATUSES, S, STATUS_META, SUPABASE_URL, T, _emailAliases, applyAmuaOrg, applyCouncilFacilities, authHeaders, isDraftItem, previewEntries, setPreviewEntries, buildApprovalEmailHtml, buildClashEmailHtml, buildInformCpsaEmailHtml, buildMismatchEmailHtml, buildOrderEmailHtml, buildRoomRequestEmailHtml, canSendToCouncil, clearSlotLink, councilFeeSplit, councilOverlaps, emailColor, evenSlotShares, facShort, fmtDate, fmtDateShortDow, fmtTime, fmtTimeShort, getClashes, inActiveVenue, isAdminBooking, linkCouncilChildren, logActivity, newId, newSlotRef, parseClashPrevStatus, parseCouncilApp, parseCpsaOrig, parseCpsaRefs, parseCpsaResolution, parseSlotLink, reachedGtecQueue, sb, sendApprovalEmail, sendEmail, setBilledSnapshot, setClashPrevStatus, setCpsaResolution, setGtecSnapshot, setMismatchNote, setModuleState, setSlotLink, setVendorVariance, slotGroupMembers, stripClashPrevStatus, stripMismatchNote, supabase, timeOverlaps, todayKey, useMobile, venueFacilities, visibleFacilities, workflowOf, ALL_VENUES, activeFacilities, defaultVenueKey, listVenues, venueKeyOf } from "./booking/core.jsx";
 import { FacilityStrip } from "./booking/facilityStrip.jsx";
 import { BookingsList } from "./booking/bookingsList.jsx";
 import { councilAppBookings, mergeCouncilOutcomes } from "./booking/councilData.jsx";
@@ -312,9 +312,10 @@ export default function App() {
   useEffect(()=>{ try{ localStorage.setItem("fb_booker_filter",JSON.stringify([...listBookerFilter])); }catch{ /* ignore */ } },[listBookerFilter]);
   // Toggle a booker; if it's a primary with linked secondaries, toggle the whole profile group.
   // The Bookings tab's "All Bookings" list has its own location filter: null = the default,
-  // every active venue (any booker's active fields); otherwise the venue keys picked, or
-  // ALL_VENUES. Its removed fields are kept separately from the page's. (Key bumped from
-  // fb_all_list_venues when the default changed, so everyone starts on the new default.)
+  // every active venue (any booker's active fields) except Cornwall Park's (GTEC / CPSA);
+  // otherwise the venue keys picked, or ALL_VENUES. Its removed fields are kept separately
+  // from the page's. (Key bumped from fb_all_list_venues when the default changed, so
+  // everyone starts on the new default.)
   const [allListKeys, setAllListKeysState] = useState(()=>{ try{ const v=JSON.parse(localStorage.getItem("fb_all_list_venues2")||"null"); return v===ALL_VENUES||Array.isArray(v)?v:null; }catch{ return null; } });
   const setAllListKeys = v => { setAllListKeysState(v); try{ localStorage.setItem("fb_all_list_venues2", JSON.stringify(v)); }catch{ /* ignore */ } };
   const [allListHidden, setAllListHidden] = useState(()=>new Set());
@@ -2221,11 +2222,11 @@ export default function App() {
   const emailLegend = Object.keys(bookerGroups).sort();
 
   // Bookings tab: "Filtered Bookings" follows the page's 📍 Fields selection; "All Bookings"
-  // has its own location filter (default: every active venue).
+  // has its own location filter (default: every active venue except Cornwall Park).
   const listProps = { bookings, loading, isAdmin, isMobile, loggedInEmail, allClashes, bookerGroups, emailLegend, canonEmail, displayNameFor,
     aliasNames, emailAliases, facilityRates, knownBookers, listBookerFilter, setListBookerFilter, toggleBooker,
     addPricingCondition, handleBulkApply, handleBulkReassign, handleBulkStatusChange, queueMultiForRemoval, setViewing };
-  const allListDefault = listVenues(activeFacilities()).map(v => v.key);
+  const allListDefault = listVenues(activeFacilities()).map(v => v.key).filter(k => k !== defaultVenueKey());
   const allListShown = allListKeys ?? allListDefault;
   const allListOk = id => { const f = FACILITIES.find(x => x.id === id); if (!f || allListHidden.has(id)) return !f && allListShown === ALL_VENUES;
     return allListShown === ALL_VENUES || allListShown.includes(venueKeyOf(f)); };
