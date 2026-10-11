@@ -4,7 +4,7 @@ import { gmailToken, fetchCouncilEmails, parseCouncilEmail } from "./councilMail
 import { driveConfigured, getDriveToken, renameFile, ensureFolderPath, DRIVE_ROOT_FOLDER, ensureFolder, findChildFile, uploadFile, keepLatestRevisionForever } from "./drive-client.js";
 import { htmlToPdfBlob } from "./pdf-utils.js";
 import { currentLeagueSeason, LEAGUE_SEASONS, seasonOfBooker } from "./seasons.js";
-import { COUNCIL_APPLICATION_FEE, COUNCIL_APPLICATION_URL, COUNCIL_APP_RE, EmailLoginScreen, FACILITIES, LOGO_SRC, MOBILE_STYLE, MONTHS, Modal, PROVIDERS, REVIEW_STATUSES, S, STATUS_META, SUPABASE_URL, T, _emailAliases, applyAmuaOrg, applyCouncilFacilities, authHeaders, isDraftItem, previewEntries, setPreviewEntries, buildApprovalEmailHtml, buildClashEmailHtml, buildCommunityRequestItem, buildInformCpsaEmailHtml, buildMismatchEmailHtml, buildOrderEmailHtml, buildRoomRequestEmailHtml, canSendToCouncil, clearSlotLink, councilFeeSplit, councilOverlaps, emailColor, evenSlotShares, facShort, fmtDate, fmtDateShortDow, fmtTime, fmtTimeShort, getClashes, inActiveVenue, isAdminBooking, linkCouncilChildren, logActivity, newId, newSlotRef, parseClashPrevStatus, parseCouncilApp, parseCpsaOrig, parseCpsaRefs, parseCpsaResolution, parseSlotLink, reachedGtecQueue, sb, sendApprovalEmail, sendEmail, setBilledSnapshot, setClashPrevStatus, setCpsaResolution, setGtecSnapshot, setMismatchNote, setModuleState, setSlotLink, setVendorVariance, slotGroupMembers, stripClashPrevStatus, stripMismatchNote, supabase, timeOverlaps, todayKey, useMobile, venueFacilities, visibleFacilities, workflowOf, ALL_VENUES, activeFacilities, defaultVenueKey, listVenues, venueKeyOf } from "./booking/core.jsx";
+import { COUNCIL_APPLICATION_FEE, COUNCIL_APPLICATION_URL, COUNCIL_APP_RE, EmailLoginScreen, FACILITIES, LOGO_SRC, MOBILE_STYLE, MONTHS, Modal, PROVIDERS, REVIEW_STATUSES, S, STATUS_META, SUPABASE_URL, T, _emailAliases, applyAmuaOrg, applyCouncilFacilities, authHeaders, isDraftItem, previewEntries, setPreviewEntries, buildApprovalEmailHtml, buildClashEmailHtml, buildCommunityRequestItem, setVendorReqDraft, vendorRequestItems, buildInformCpsaEmailHtml, buildMismatchEmailHtml, buildOrderEmailHtml, buildRoomRequestEmailHtml, canSendToCouncil, clearSlotLink, councilFeeSplit, councilOverlaps, emailColor, evenSlotShares, facShort, fmtDate, fmtDateShortDow, fmtTime, fmtTimeShort, getClashes, inActiveVenue, isAdminBooking, linkCouncilChildren, logActivity, newId, newSlotRef, parseClashPrevStatus, parseCouncilApp, parseCpsaOrig, parseCpsaRefs, parseCpsaResolution, parseSlotLink, reachedGtecQueue, sb, sendApprovalEmail, sendEmail, setBilledSnapshot, setClashPrevStatus, setCpsaResolution, setGtecSnapshot, setMismatchNote, setModuleState, setSlotLink, setVendorVariance, slotGroupMembers, stripClashPrevStatus, stripMismatchNote, supabase, timeOverlaps, todayKey, useMobile, venueFacilities, visibleFacilities, workflowOf, ALL_VENUES, activeFacilities, defaultVenueKey, listVenues, venueKeyOf } from "./booking/core.jsx";
 import { FacilityStrip } from "./booking/facilityStrip.jsx";
 import { BookingsList } from "./booking/bookingsList.jsx";
 import { councilAppBookings, mergeCouncilOutcomes } from "./booking/councilData.jsx";
@@ -1987,8 +1987,16 @@ export default function App() {
     const notifyItems = cart.filter(item => item.notifyOnly);
     const slotItems   = cart.filter(item => item.slotChange);
 
-    // 1. New bookings + edits.
-    const allDrafts = saveItems.flatMap(item => item.drafts);
+    // 1. New bookings + edits. New bookings at school / club / trust grounds get a field hire
+    // request drafted to AMUA's inbox, one per vendor (sent after the save, below), and are
+    // tagged [VREQ] so the Admin panel's "Requested from facility" step doesn't draft it again.
+    // Silent mode blocks every email, these drafts included: nothing is tagged then, so the
+    // Admin step still drafts the request later.
+    const newIds = new Set(saveItems.filter(item => !item.isEdit && !item.isMultiEdit).flatMap(item => item.drafts.map(d => d.id)));
+    const vendorReqs = silentMode ? [] : vendorRequestItems(saveItems.flatMap(item => item.drafts).filter(d => newIds.has(d.id) && !bookings.some(b => b.id === d.id)));
+    const reqAt = new Date().toISOString(), reqRef = new Map();
+    vendorReqs.forEach((it, i) => { const ref = `VREQ-${Date.now().toString(36).toUpperCase()}${i ? "-" + i : ""}`; it.requests.forEach(d => reqRef.set(d.id, ref)); });
+    const allDrafts = saveItems.flatMap(item => item.drafts).map(d => reqRef.has(d.id) ? { ...d, system_notes: setVendorReqDraft(d.system_notes, reqRef.get(d.id), reqAt) } : d);
     if (allDrafts.length) {
       const name = (saveItems[0]||{}).name, email = (saveItems[0]||{}).email;
       // On failure the cart is kept (nothing below runs), so the bookings aren't lost.
@@ -2055,6 +2063,12 @@ export default function App() {
         try { await sb.update("bookings", d.id, { status: "pending_cpsa", system_notes: sys, updated_at: at }); } catch(e) { showToast("Couldn't update the booking: "+e.message, "error"); }
       }
     }
+    // Vendor request drafts for the new bookings (none in silent mode).
+    for (const it of vendorReqs) {
+      await sendEmail({ to: it.email, subject: it.subject, html: it.html });
+      logActivity("facility_request_drafted", { intended: it.email, subject: it.subject, ids: it.requests.map(d => d.id) });
+    }
+    if (vendorReqs.length) showToast(`${vendorReqs.length} vendor request draft${vendorReqs.length > 1 ? "s" : ""} (one per vendor) sent to AMUA's inbox.`);
     if (!silentMode) {
       const noEmailStatuses = new Set(["pending_cpsa","op_permission","council_apply","council_action","op_confirm"]);
       // Status-change emails — grouped into one email per booker + status, so a booker

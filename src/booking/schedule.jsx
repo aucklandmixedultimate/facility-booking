@@ -1,5 +1,5 @@
 import { useState, useRef, Fragment } from "react";
-import { Badge, rowSelect, isMultiSelectClick, groupStatusLabel, CopyableTable, DURATIONS, FACILITIES, Modal, S, STATUS_META, T, emailColor, fmtCost, fmtDate, fmtDateShort, fmtTime, isAdminBooking, newId, parseGroupRef, todayKey, venueFacilities, visibleFacilities } from "./core.jsx";
+import { Badge, rowSelect, isMultiSelectClick, groupStatusLabel, CopyableTable, DURATIONS, FACILITIES, Modal, PROVIDERS, S, STATUS_META, T, providerOfFacility, emailColor, fmtCost, fmtDate, fmtDateShort, fmtTime, isAdminBooking, newId, parseGroupRef, todayKey, venueFacilities, visibleFacilities } from "./core.jsx";
 import { DateRangePicker } from "./modals.jsx";
 import { isLive } from "../statuses.js";
 // `canon` folds a (lowercased) email onto its canonical primary so linked
@@ -283,8 +283,11 @@ export function OneOffModal({ email, name, bkgs, isAdmin, canEdit, onClose, onVi
 
 // The Grouped view of the bookings list (booker → recurring pattern → status), shown in
 // place of the itemised table.
-export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkApply, onBulkStatusChange, onRemove, onReassign, onAddPricingRule, bookers=[], onView, aliasNames={}, emailAliases={} }) {
+export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkApply, onBulkStatusChange, onRemove, onReassign, onAddPricingRule, bookers=[], onView, aliasNames={}, emailAliases={}, canRequestVendors, onRequestVendors }) {
   const [facSensitive, setFacSensitive] = useState(false);
+  // Vendor-sensitive: each booker's row splits into one row per vendor (patterns, statuses,
+  // one-offs and totals all per vendor), so a status chip selects one booker × vendor group.
+  const [vendorSensitive, setVendorSensitive] = useState(false);
   const [splitPatterns, setSplitPatterns] = useState(new Set());
   // The group expanded inline into its itemised bookings (BookingSubsetPanel) — one at a time:
   // {email, kind:"pattern"|"status"|"oneoff"|"selected", pk?, sh?, status?, title}.
@@ -315,9 +318,14 @@ export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkA
   // totals), not just which bookers are listed.
   const active = schedStatusFilter.size ? pool.filter(b=>schedStatusFilter.has(b.status)) : pool;
   const canonEmail = em => (emailAliases[(em||"").toLowerCase()] || (em||"").toLowerCase());
-  const patternMap = buildOverlapPatternMap(active, facSensitive, canonEmail);
+  const vendorOf = b => providerOfFacility(b.facility_id);
+  const vendorLabel = pid => PROVIDERS[pid]?.label || PROVIDERS[pid]?.short || PROVIDERS[pid]?.name || pid;
+  // [vendor id | null, bookings]: the whole pool, or one slice per vendor.
+  const slices = vendorSensitive ? [...new Set(active.map(vendorOf))].map(pid => [pid, active.filter(b => vendorOf(b) === pid)]) : [[null, active]];
 
-  const rows = Object.entries(patternMap).map(([email,pats])=>{
+  const rows = slices.flatMap(([vendor, slice]) => Object.entries(buildOverlapPatternMap(slice, facSensitive, canonEmail)).map(([email,pats])=>{
+    // A row's key: the booker, or booker × vendor when vendor-sensitive.
+    const key = vendor ? `${email}|${vendor}` : email;
     const nameDisplay=(Object.values(pats)[0]||[])[0]?.name||email;
     const recurring=Object.entries(pats).filter(([,bs])=>bs.length>=2);
     const oneOffs=Object.values(pats).filter(bs=>bs.length===1).flat();
@@ -337,8 +345,11 @@ export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkA
     filteredBkgs.forEach(b=>{ statusCounts[b.status] = (statusCounts[b.status]||0) + 1; });
     // Apply status filter — skip row if filter is active and no bookings match
     if(schedStatusFilter.size>0 && !filteredBkgs.some(b=>schedStatusFilter.has(b.status))) return null;
-    return {email,nameDisplay,recurring,oneOffs,totalBkgs,filteredBkgs,patternDateFrom,patternDateTo,statusCounts};
-  }).filter(Boolean).sort((a,b)=>b.totalBkgs-a.totalBkgs);
+    return {key,email,vendor,nameDisplay,recurring,oneOffs,totalBkgs,filteredBkgs,patternDateFrom,patternDateTo,statusCounts};
+  })).filter(Boolean);
+  // Busiest bookers first; a booker's vendor rows stay together, busiest vendor first.
+  const bookerTotal = {}; rows.forEach(r => { bookerTotal[r.email] = (bookerTotal[r.email]||0) + r.totalBkgs; });
+  rows.sort((a,b)=>bookerTotal[b.email]-bookerTotal[a.email] || a.email.localeCompare(b.email) || b.totalBkgs-a.totalBkgs || vendorLabel(a.vendor||"").localeCompare(vendorLabel(b.vendor||"")));
 
   // All unique statuses present in the active pool for the status filter chips
   const allStatuses = [...new Set(pool.map(b=>b.status))];
@@ -346,8 +357,9 @@ export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkA
   const thS2={textAlign:"left",padding:"6px 8px",fontWeight:600,color:"#64748b",fontSize:12,borderBottom:"1px solid #e2e8f0"};
   const tdS2={padding:"6px 8px",verticalAlign:"top",fontSize:13};
 
-  function renderChips(email, nameDisplay, recurring) {
-    const ec = emailColor(email);
+  // `email` is the row key (booker, or booker|vendor); `color` the booker's colour.
+  function renderChips(email, nameDisplay, recurring, color) {
+    const ec = color;
     const chips = [];
     for (const [pk, bkgs] of recurring) {
       if (pk.startsWith("grp:")) {
@@ -412,8 +424,8 @@ export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkA
 
   const colCount = 5;
   const groupSelectable = isAdmin && onBulkStatusChange;
-  function toggleGroup(email, status) {
-    const k = `${email}::${status}`;
+  function toggleGroup(key, status) {
+    const k = `${key}::${status}`;
     setSelectedGroups(prev=>{
       const s = new Set(prev);
       if (s.has(k)) s.delete(k); else s.add(k);
@@ -443,7 +455,7 @@ export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkA
     const out = [];
     for (const row of rows) {
       for (const b of row.filteredBkgs) {
-        if (selectedGroups.has(`${row.email}::${b.status}`)) out.push(b);
+        if (selectedGroups.has(`${row.key}::${b.status}`)) out.push(b);
       }
     }
     return out;
@@ -456,6 +468,10 @@ export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkA
           <label style={{display:"flex",alignItems:"center",gap:6,fontSize:12,cursor:"pointer",color:"#475569"}}>
             <input type="checkbox" checked={facSensitive} onChange={e=>setFacSensitive(e.target.checked)}/>
             Facility-sensitive
+          </label>
+          <label style={{display:"flex",alignItems:"center",gap:6,fontSize:12,cursor:"pointer",color:"#475569"}} title="One row per booker and vendor: patterns, statuses and totals split by vendor">
+            <input type="checkbox" checked={vendorSensitive} onChange={e=>{ setVendorSensitive(e.target.checked); setSelectedGroups(new Set()); setExpanded(null); }}/>
+            Vendor-sensitive
           </label>
           <div style={{marginLeft:4}}>
             <DateRangePicker from={schedDateFrom} to={schedDateTo} onApply={(f,t)=>{setSchedDateFrom(f);setSchedDateTo(t);}}/>
@@ -488,6 +504,7 @@ export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkA
             <thead>
               <tr style={{background:"#f8fafc"}}>
                 <th style={thS2}>Booker</th>
+                {vendorSensitive&&<th style={thS2}>Vendor</th>}
                 <th style={thS2}>Recurring Patterns <span style={{fontWeight:400,fontSize:11,color:"#94a3b8"}}>(click to itemise)</span></th>
                 <th style={{...thS2,minWidth:100}}>
                   <div style={{display:"flex",alignItems:"center",gap:4}}>
@@ -501,21 +518,26 @@ export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkA
               </tr>
             </thead>
             <tbody>
-              {rows.map(row=>{
+              {rows.map((row,ri)=>{
                 const ec = emailColor(row.email);
-                const open = expanded && expanded.email===row.email && expanded.kind!=="selected" ? expanded : null;
+                const open = expanded && expanded.email===row.key && expanded.kind!=="selected" ? expanded : null;
+                // Vendor-sensitive: the booker's name heads their first vendor row only.
+                const firstOfBooker = ri===0 || rows[ri-1].email!==row.email;
                 return (
-                  <Fragment key={row.email}>
-                  <tr style={{borderBottom:open?"none":"1px solid #f1f5f9"}}>
+                  <Fragment key={row.key}>
+                  <tr style={{borderBottom:open?"none":"1px solid #f1f5f9",...(vendorSensitive&&firstOfBooker&&ri>0?{borderTop:"2px solid #e2e8f0"}:null)}}>
                     <td style={tdS2}>
-                      <span style={{display:"inline-block",padding:"3px 10px",borderRadius:12,background:ec,color:"#fff",fontSize:12,fontWeight:700}}>
+                      {firstOfBooker&&<span style={{display:"inline-block",padding:"3px 10px",borderRadius:12,background:ec,color:"#fff",fontSize:12,fontWeight:700}}>
                         {schedAlias(row.email)}
-                      </span>
+                      </span>}
                     </td>
+                    {vendorSensitive&&<td style={{...tdS2,whiteSpace:"nowrap"}}>
+                      <span style={{display:"inline-block",padding:"2px 8px",borderRadius:6,border:"1px solid #cbd5e1",background:"#f8fafc",color:"#334155",fontSize:11,fontWeight:700}}>{vendorLabel(row.vendor)}</span>
+                    </td>}
                     <td style={tdS2}>
                       <div style={{display:"flex",flexWrap:"wrap",gap:4,alignItems:"center"}}>
                         {row.recurring.length===0&&<span style={{fontSize:12,color:"#94a3b8"}}>—</span>}
-                        {renderChips(row.email, row.nameDisplay, row.recurring)}
+                        {renderChips(row.key, row.nameDisplay, row.recurring, ec)}
                       </div>
                     </td>
                     <td style={{...tdS2,fontSize:12,color:"#475569",whiteSpace:"nowrap"}}>
@@ -528,14 +550,14 @@ export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkA
                       <div style={{display:"flex",flexWrap:"wrap",gap:3}}>
                         {Object.entries(row.statusCounts).map(([st,cnt])=>{
                           const m=STATUS_META[st]||STATUS_META.pending_amua;
-                          const sel=selectedGroups.has(`${row.email}::${st}`);
+                          const sel=selectedGroups.has(`${row.key}::${st}`);
                           const short=groupStatusLabel(st, row.filteredBkgs.filter(b=>b.status===st));
-                          const desc={email:row.email,kind:"status",status:st,title:`${short} — ${row.nameDisplay}`};
+                          const desc={email:row.key,kind:"status",status:st,title:`${short} — ${row.nameDisplay}${row.vendor?` · ${vendorLabel(row.vendor)}`:""}`};
                           const chip={display:"inline-flex",alignItems:"center",gap:3,padding:"2px 7px",background:sel?m.dot:m.bg,color:sel?"#fff":m.text,border:`1.5px solid ${sel?m.dot:m.border}`,fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit",outline:"none"};
                           return(
                             <span key={st} style={{display:"inline-flex",borderRadius:8,boxShadow:sel?`0 0 0 2px ${m.dot}33`:"none",...openRing(desc)}}>
                               <button title={groupSelectable?`Click to select ${cnt} ${short}`:`Show ${cnt} ${short}`}
-                                onClick={groupSelectable?()=>toggleGroup(row.email,st):()=>toggleExpand(desc)}
+                                onClick={groupSelectable?()=>toggleGroup(row.key,st):()=>toggleExpand(desc)}
                                 style={{...chip,borderRadius:"8px 0 0 8px",borderRight:"none"}}>
                                 {sel&&<span style={{fontSize:9}}>✓</span>}
                                 <span style={{width:5,height:5,borderRadius:"50%",background:sel?"#fff":m.dot,flexShrink:0}}/>
@@ -552,8 +574,8 @@ export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkA
                     </td>
                     <td style={{...tdS2,textAlign:"right"}}>
                       {row.oneOffs.length>0
-                        ? <span title="Click to itemise" style={{cursor:"pointer",color:"#6366f1",textDecoration:"underline dotted",fontSize:13,borderRadius:6,padding:"0 4px",...openRing({email:row.email,kind:"oneoff"})}}
-                            onClick={()=>toggleExpand({email:row.email,kind:"oneoff",title:`One-off bookings — ${row.nameDisplay}`})}>
+                        ? <span title="Click to itemise" style={{cursor:"pointer",color:"#6366f1",textDecoration:"underline dotted",fontSize:13,borderRadius:6,padding:"0 4px",...openRing({email:row.key,kind:"oneoff"})}}
+                            onClick={()=>toggleExpand({email:row.key,kind:"oneoff",title:`One-off bookings — ${row.nameDisplay}${row.vendor?` · ${vendorLabel(row.vendor)}`:""}`})}>
                             {row.oneOffs.length}
                           </span>
                         : <span style={{color:"#94a3b8"}}>—</span>}
@@ -561,7 +583,7 @@ export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkA
                     <td style={{...tdS2,textAlign:"right",fontWeight:700}}>{row.totalBkgs}</td>
                   </tr>
                   {open&&(
-                    <tr style={{borderBottom:"1px solid #f1f5f9"}}><td colSpan={6} style={{padding:"0 8px 10px"}}>
+                    <tr style={{borderBottom:"1px solid #f1f5f9"}}><td colSpan={vendorSensitive?7:6} style={{padding:"0 8px 10px"}}>
                       {/* Pinned to the visible width when the wide table scrolls sideways (phones). */}
                       <div style={{position:"sticky",left:0,maxWidth:"calc(100vw - 110px)"}}>{panelFor(open, groupBkgs(row, open), row)}</div>
                     </td></tr>
@@ -569,7 +591,7 @@ export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkA
                   </Fragment>
                 );
               })}
-              {rows.length===0&&<tr><td colSpan={colCount} style={{...tdS2,textAlign:"center",color:"#94a3b8"}}>No active bookings.</td></tr>}
+              {rows.length===0&&<tr><td colSpan={colCount+(vendorSensitive?2:1)} style={{...tdS2,textAlign:"center",color:"#94a3b8"}}>No active bookings.</td></tr>}
             </tbody>
           </table>
           </CopyableTable>
@@ -590,6 +612,12 @@ export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkA
               style={{padding:"3px 9px",fontSize:11,borderRadius:6,border:"1.5px solid #334155",background:expanded?.kind==="selected"?"#334155":"transparent",color:"#cbd5e1",cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>
               {expanded?.kind==="selected"?"▴ Hide itemised":"▾ Itemised"}
             </button>
+            {onRequestVendors&&canRequestVendors?.(selectedBkgs)>0&&(
+              <button onClick={()=>{ onRequestVendors(selectedBkgs); setSelectedGroups(new Set()); }} title="Pending-AMUA bookings at school / club / trust grounds: one draft per vendor to AMUA's inbox, and they move to Requested from facility"
+                style={{padding:"5px 12px",fontSize:11,borderRadius:6,border:"none",background:"#0369a1",color:"#fff",cursor:"pointer",fontFamily:"inherit",fontWeight:700}}>
+                ✉ Request {canRequestVendors(selectedBkgs)} from vendors
+              </button>
+            )}
             <div style={{marginLeft:"auto",display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
               <span style={{fontSize:11,color:"#94a3b8"}}>Set status to:</span>
               <select value={bulkStatusTarget} onChange={e=>setBulkStatusTarget(e.target.value)}

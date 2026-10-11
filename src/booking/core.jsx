@@ -1737,6 +1737,23 @@ export function buildCommunityRequestItem(bookings) {
     subject: many ? `Field hire request — ${pr.short || pr.name || ""} — ${bs.length} slots from ${fmtDate(bs[0].date)}` : `Field hire request — ${pr.short || pr.name || ""} — ${when(bs[0])}`, html };
 }
 
+// [VREQ ref at]: a field hire request for this booking was drafted to AMUA's inbox when it was
+// submitted, so the Admin panel's "Requested from facility" step doesn't draft it again.
+const VREQ_RE = /\[VREQ (\S+) (\S+)\]/;
+export const parseVendorReqDraft = sys => { const m = VREQ_RE.exec(sys || ""); return m ? { ref: m[1], at: m[2] } : null; };
+export function setVendorReqDraft(sys, ref, at) {
+  const rest = (sys || "").replace(VREQ_RE, "").trim();
+  return `${rest}${rest ? "\n" : ""}[VREQ ${ref} ${at}]`;
+}
+// New bookings at community facilities (school, club and trust grounds) → one request item per
+// vendor, each summarising every slot asked of it.
+export function vendorRequestItems(drafts) {
+  const byVendor = new Map();
+  drafts.filter(d => workflowOf(d.facility_id) === "community").forEach(d => {
+    const pid = providerOfFacility(d.facility_id); byVendor.set(pid, [...(byVendor.get(pid) || []), d]); });
+  return [...byVendor.values()].map(buildCommunityRequestItem);
+}
+
 // Scheduling-clash email shown to a booker whose booking overlaps an admin/field
 // reservation. Top-level so the cart outbox can send it on submit.
 export function buildClashEmailHtml({ name, email, clashes }) {

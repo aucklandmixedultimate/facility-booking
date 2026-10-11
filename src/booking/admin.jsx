@@ -1,5 +1,5 @@
 import { useState, useRef, Fragment } from "react";
-import { AMUA_INBOX, AMUA_INFO, Badge, buildCommunityRequestItem, rowSelect, isMultiSelectClick, venueKeyOf, bareStatusLabel, groupStatusLabel, COUNCIL_APPLICATION_FEE, ClashPair, CopyableTable, EmailChip, FACILITIES, INVOICED_META, Modal, PROVIDERS, REVIEW_STATUSES, S, STATUS_META, SUPABASE_URL, TableViewToggle, _contactReviews, _currentUser, _sessionStartIso, authHeaders, bookingCost, buildCouncilPayload, canSendToCouncil, councilFeeSplit, councilOverlaps, emailColor, extractCpsaAmendValues, facCellLabel, fmt24, fmtCost, fmtDate, fmtDateShort, fmtDateShortDow, fmtGtecEvent, fmtLoggedAt, fmtTime, getBillingDrift, getCrossFacilityOverlaps, getSameFacilityOverlaps, isAdminBooking, isCouncilBooking, isSocialFac, nextWorkflowStatus, parseClashPrevStatus, parseCouncilApp, parseCpsaRefs, parseCpsaResolution, parseGtecSnapshot, parseMismatchNote, parseSlotLink, providerOfFacility, sb, setCpsaOrig, setCpsaResolution, setModuleState, stripMismatchNote, todayKey, useTableView, vendorShortFor, vendorsIn, visibleFacilities, workflowOf, workflowStep } from "./core.jsx";
+import { AMUA_INBOX, AMUA_INFO, Badge, buildCommunityRequestItem, parseVendorReqDraft, vendorRequestItems, rowSelect, isMultiSelectClick, venueKeyOf, bareStatusLabel, groupStatusLabel, COUNCIL_APPLICATION_FEE, ClashPair, CopyableTable, EmailChip, FACILITIES, INVOICED_META, Modal, PROVIDERS, REVIEW_STATUSES, S, STATUS_META, SUPABASE_URL, TableViewToggle, _contactReviews, _currentUser, _sessionStartIso, authHeaders, bookingCost, buildCouncilPayload, canSendToCouncil, councilFeeSplit, councilOverlaps, emailColor, extractCpsaAmendValues, facCellLabel, fmt24, fmtCost, fmtDate, fmtDateShort, fmtDateShortDow, fmtGtecEvent, fmtLoggedAt, fmtTime, getBillingDrift, getCrossFacilityOverlaps, getSameFacilityOverlaps, isAdminBooking, isCouncilBooking, isSocialFac, nextWorkflowStatus, parseClashPrevStatus, parseCouncilApp, parseCpsaRefs, parseCpsaResolution, parseGtecSnapshot, parseMismatchNote, parseSlotLink, providerOfFacility, sb, setCpsaOrig, setCpsaResolution, setModuleState, stripMismatchNote, todayKey, useTableView, vendorShortFor, vendorsIn, visibleFacilities, workflowOf, workflowStep } from "./core.jsx";
 import { councilAppBookings } from "./councilData.jsx";
 import { ActivityLogModal, DateRangePicker } from "./modals.jsx";
 import { PatternModal, PricingConditionsManager, ReassignControl, ScheduleSummaryModal } from "./schedule.jsx";
@@ -529,7 +529,20 @@ export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDel
   function requestCommunity(b) {
     if (actionQueue.some(a => a.id === b.id && a.newStatus === "community_request")) { queueAction(b.id, "community_request"); onDropVendorRequest?.(b.id); return; }
     queueAction(b.id, "community_request");
-    onQueueNotifications?.([buildCommunityRequestItem([b])], "draft request for AMUA's inbox");
+    // Already drafted when the booking was submitted ([VREQ]): just record the step.
+    if (!parseVendorReqDraft(b.system_notes)) onQueueNotifications?.([buildCommunityRequestItem([b])], "draft request for AMUA's inbox");
+  }
+  // Bulk "request from vendors": pending-AMUA bookings at school / club / trust grounds move to
+  // Requested from facility, and each vendor gets one draft (bookings already drafted on submit,
+  // [VREQ], aren't drafted again). A vendor whose contact isn't reviewed yet is reviewed first.
+  const vendorRequestable = bs => bs.filter(b => workflowOf(b.facility_id) === "community" && (b.status === "pending_amua" || b.status === "contact_review"));
+  function requestVendors(bs) {
+    const list = vendorRequestable(bs); if (!list.length) return;
+    const unreviewed = list.find(b => !_contactReviews[providerOfFacility(b.facility_id)]);
+    if (unreviewed) { setReviewFor({ ...unreviewed, _then: list }); return; }
+    onBulkStatusChange(list.map(b => b.id), "community_request", "", false);
+    const items = vendorRequestItems(list.filter(b => !parseVendorReqDraft(b.system_notes)));
+    if (items.length) onQueueNotifications?.(items, "vendor request draft");
   }
   async function submitActionQueue() {
     if(!actionQueue.length) return;
@@ -599,9 +612,9 @@ export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDel
 
   return (
     <div style={{display:"flex",flexDirection:"column",gap:16}}>
-      {reviewFor&&<ContactReviewModal booking={reviewFor} onClose={()=>setReviewFor(null)}
+      {reviewFor&&<ContactReviewModal key={reviewFor.id} booking={reviewFor} onClose={()=>setReviewFor(null)}
         onConfirm={async (pid, data)=>{ try { await saveContactReview(pid, data); } catch(e) { alert("Couldn't save the reviewed contact: "+(e.message||e)); return; }
-          const b=reviewFor; setReviewFor(null); requestCommunity(b); }}/>}
+          const b=reviewFor; setReviewFor(null); if (b._then) requestVendors(b._then); else requestCommunity(b); }}/>}
       {/* Top action bar: on phones an even two-column grid of section toggles. */}
       <div style={window.innerWidth<768?{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:6}:{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
         {oldUnapproved.length>0&&(
@@ -953,6 +966,12 @@ export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDel
                   <button onClick={()=>onSendToCouncil(ready.map(b=>b.id))} style={S.btn({background:"#0d9488",color:"#fff"})}>🏛 Send {ready.length} to council</button>
                   <span style={{fontSize:12,color:"#115e59"}}>{sp.fields} field{sp.fields!==1?"s":""} · fee ${sp.total.toFixed(2)} ({Object.entries(sp.byBooker).map(([e,v])=>`${adminAlias(e)} $${v.toFixed(2)}`).join(", ")})</span>
                   <CouncilOccupancyNotes bookings={bookings} ids={new Set(ready.map(b=>b.id))} who={adminAlias}/>
+                </div>; })()}
+              {(()=>{ const ready=vendorRequestable(bookings.filter(b=>selected.has(b.id))); if(!ready.length) return null;
+                const vendors=[...new Set(ready.map(b=>providerOfFacility(b.facility_id)))];
+                return <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",background:"#f0f9ff",border:"1px solid #7dd3fc",borderRadius:10,padding:"8px 10px"}}>
+                  <button onClick={()=>{ requestVendors(ready); setSelected(new Set()); }} style={S.btn({background:"#0369a1",color:"#fff"})}>✉ Request {ready.length} from {vendors.length} vendor{vendors.length!==1?"s":""}</button>
+                  <span style={{fontSize:12,color:"#0369a1"}}>{vendors.map(pid=>PROVIDERS[pid]?.short||PROVIDERS[pid]?.name||pid).join(", ")} · one draft per vendor to AMUA&apos;s inbox, and they move to Requested from facility</span>
                 </div>; })()}
               {onReassign&&<ReassignControl count={selected.size} bookers={bookers} onReassign={to=>{ onReassign([...selected].filter(id=>bookings.find(b=>b.id===id)), to); setSelected(new Set()); }}/>}
               <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:12,color:"#64748b"}}>
@@ -1672,7 +1691,7 @@ export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDel
         </select>
       </TableViewToggle>
       {adminView==="grouped"
-        ? <ScheduleSummaryModal bookings={bookings.filter(b=>inBookerFilter(b.email)&&vendorOk(b))} isAdmin={true} loggedInEmail={loggedInEmail} onBulkApply={onBulkApply} onBulkStatusChange={onBulkStatusChange} onRemove={ids=>ids.forEach(id=>onQueueDelete&&onQueueDelete(id))} onReassign={onReassign} onAddPricingRule={onAddPricingCondition} bookers={bookers} onView={onView} aliasNames={aliasNames} emailAliases={emailAliases}/>
+        ? <ScheduleSummaryModal bookings={bookings.filter(b=>inBookerFilter(b.email)&&vendorOk(b))} isAdmin={true} loggedInEmail={loggedInEmail} onBulkApply={onBulkApply} onBulkStatusChange={onBulkStatusChange} onRemove={ids=>ids.forEach(id=>onQueueDelete&&onQueueDelete(id))} onReassign={onReassign} onAddPricingRule={onAddPricingCondition} bookers={bookers} onView={onView} aliasNames={aliasNames} emailAliases={emailAliases} canRequestVendors={bs=>vendorRequestable(bs).length} onRequestVendors={requestVendors}/>
       : list.length===0
         ? <div style={{textAlign:"center",padding:"40px 0",color:"#94a3b8",fontSize:14}}>No bookings found.</div>
         : (
