@@ -1,5 +1,8 @@
 # Multi-provider bookings — implementation plan
 
+> **Design history (2026-10):** phase 0 shipped; later phases are unbuilt or superseded (see the note
+> at the top of the design doc). Current state: [`HANDOVER.md`](HANDOVER.md).
+
 Companion to [`multi-provider-design.md`](multi-provider-design.md), which explains the
 *why* and the data model. This file is the *how*: work items in build order, with the
 files they touch, their acceptance criteria and their dependencies.
@@ -169,7 +172,7 @@ Orbeon document exposes the §5.3 control names read-only. It blocks 2.3b only.
   link them to an application. This writes `booking_ids` and adds
   `[COUNCIL <yyyy-mm-dd>] App <applicationNumber> · <STATUS>` to each booking's
   `system_notes`, following the same conventions as `[CPSA …]`. Document it in
-  `HANDOFF_SUPABASE_AUTH.md`.
+  `docs/HANDOVER.md`.
 - **Status mapping,** applied on every sync/load, through the existing
   `updateBookingStatus` / queue flow:
 
@@ -356,7 +359,7 @@ Depends on 1.5.
     reads it. The app's fallbacks mean the order is not fragile.
   - Deploy edge functions with `supabase functions deploy`.
   - Release the extension through its tag workflow.
-- **Docs:** update `HANDOFF_SUPABASE_AUTH.md`, which covers the extension contract and
+- **Docs:** update `docs/HANDOVER.md`, which covers the extension contract and
   the new `[COUNCIL …]` marker, `README.md` (setup), and the design doc's phase table as
   items land.
 

@@ -1,6 +1,6 @@
 # Vetting council fields — lights, fit for ultimate, and quality tiers
 
-Part of the multi-provider work (see [`HANDOFF_MULTI_PROVIDER.md`](../HANDOFF_MULTI_PROVIDER.md)).
+Part of the multi-provider work. How it fits the rest of the system: [`HANDOVER.md`](HANDOVER.md).
 Extends [design §7](multi-provider-design.md#7-council-park-catalogue) and
 [plan phase 4](multi-provider-plan.md#phase-4--council-reference-data).
 
@@ -245,7 +245,7 @@ harvest):
 
 ## Vetting tool (live)
 
-**Admin menu → Council fields** opens `vetting.html` on the booking site. Its source is
+**Council fields** in the app switcher (both page headers) opens `vetting.html`. Its source is
 `vetting.html` and `src/vetting/`; the maps and park data are in `public/council-maps/`.
 The page always fits one screen: nothing scrolls except the map, where the wheel zooms.
 - **Auckland view** (C toggles it). It opens framed from North Harbour Stadium to Opaheke
@@ -257,7 +257,8 @@ The page always fits one screen: nothing scrolls except the map, where the wheel
   - Suitability starts from quality (x/5).
   - Fit adjusts it: +0.2 for 2+ fields, +0.1 for 1 full field, −0.15 for reduced size.
   - Lights add 0.1, and a top pick adds 0.15.
-  - A rejected park scores 0.
+  - A park whose fit is "no" scores 0. (A reviewer's Reject is per-profile: it hides the
+    park from their own list but doesn't change its score.)
 - **Park view.** One park per card. Swipe the title bar, or use ← → ↑: reject, shortlist or
   top pick. **Later** (S) moves the park to the back of the queue, and **Undo** (Z) takes
   back the last decision.
@@ -317,83 +318,28 @@ The page always fits one screen: nothing scrolls except the map, where the wheel
   - Fergusson Domain: Te Papapa Ultimate (fields managed by Te Papapa Onehunga RFC).
   They're entries with `code: "ultimate"` in `private-managed.json`, and there's an
   "Ultimate club" CSV column.
-- **⭐ Rate | 📅 Book modes (B toggles).** Both use the same Auckland → Park navigation.
-  - **Rate mode:** everything above (the ultimate field, orientation, fit, lights and
-    decisions).
-  - **Book mode:** the rating tools hide, including the ultimate field outline, which is
-    only for setting orientation in Rate mode. Clicking a council field area adds it to or
-    removes it from the booker's cart. The bar under the map shows:
-    - the booker, which defaults to you (admins can type any booker's email);
-    - that park's fields in the cart, and a "Whole park" option;
-    - the booking workflow and its contact, and the $10 per field council fee.
-  - **Unrated fields:** adding a field that hasn't been rated yet switches to Rate mode on
-    it, so its orientation and fit get set.
-  - **Auckland map:** in Book mode, parks with active booking fields have a solid dark-teal
-    ring, and parks with only cart fields have a dashed teal ring. On the park map, active
-    fields are solid dark teal (📌) and cart fields are dashed teal (🛒). Clicking an active
-    field doesn't remove it; that's done in the Cart tab.
-- **🛒 Cart tab: cart, then active bookings.** A field starts in the cart, which is
-  "still choosing" and not bookable yet.
-  - **✅ Save N fields as active bookings** (also offered in the bar under the park map)
-    moves the cart fields to **📌 Active bookings**.
-  - Only active fields appear in the booking site, under **Provider → 📍 Location →
-    Facility**, for that booker (admins see all).
-  - Each active field has "book dates ↗", which opens the booking site at that location,
-    and ✕, which removes it after a confirmation. Bookings already made on a removed field
-    keep their name.
-  - Entries saved before this change have no status, so they count as cart fields; save
-    them once to make them active.
-
-  See multi-provider design §7.1.
-- **Managing club vs booking contact.** At a privately managed park, the booking is filed
-  under the club that manages the fields, but requests go to its booking contact. For
-  example, Michaels Ave is managed by Ellerslie AFC and booked only through Ellerslie
-  Ultimate Club; Fergusson Domain is managed by Te Papapa RFC and booked through TPU.
-- **Provider amendment (✎).** When a park's provider listing needs changing, press
-  **✎ Provider?** on the card. For example, Liston Park is listed as council but is
-  privately operated by Ellerslie AFC.
-  - Pick what's wrong: "Privately operated by", "Operator changed to" or "Other provider
-    change". Then name the provider (known providers are suggested) and press Save.
-  - Once it's tagged, the row asks for the provider's **contact person**. Typing a space ends
-    the first name, and only one more letter is taken as the last initial: "rory hughes"
-    becomes "Rory H.".
-  - It saves straight away, with no decision needed, to `field_flags` (`kind` and `contact`
-    columns in `supabase-setup.sql`; until it's run, amendments stay in the
-    browser).
-  - Unlisted parks with an amendment get a dashed purple ring on the Auckland map. The
-    tooltip and the CSV's "Provider amendment" column show it.
-  - Promote confirmed amendments into `private-managed.json`.
-- **Save · next field (💾).** After rating a field's fit, the fit bar stays open with
-  **💾 Save · next field**.
-  - It saves the park's field ratings without a decision, kept as "rating in progress"
-    (decision `rating`). An existing decision is kept instead.
-  - It stays on the park and moves the field onto the next unrated council field, ready to
-    rate.
-  - In-progress parks stay in "To review" and don't count as reviewed until they get a top
-    pick, shortlist or reject.
-- **Council only (🏛).** Some parks in the private list have a club on site, but bookings go
-  straight to the council, with no club permission step (e.g. Thompson Park). Press
-  **🏛 Council only?** on the card to drop the private-operator workflow. Press it again to
-  restore the workflow. The card shows a blue "Council booking only" box and the map marker
-  becomes a plain council park. Overrides are stored in the `council_only_parks` setting; a
-  data-file entry can set `council_only: true` as the default. Fields already in carts are
-  re-filed under the new workflow. AMUA grounds (GTEC) can't be switched.
-- **Lights.** Drag a 💡 bulb from the dispenser at the top right of the map onto each light
-  pole. Drag a placed bulb to move it, or drag it back onto the dispenser (or click it) to
-  remove it. Any bulb marks the park as lit. **No lights** records that you checked and
-  there aren't any. Lights only matter for evening slots.
+- **📌 My fields.** Deciding a park (★ Top or ✓ Shortlist) saves its fields to your My fields
+  list; ✕ Reject marks them rejected for you.
+  - Each field there has a state (★ Top / ✓ Shortlist / ✕ Rejected), a quality rating, and a
+    **bookable** toggle.
+  - Bookable fields appear on the booking site under **Vendor → 📍 Location → Facility**, for
+    that booker (admins see all).
+  - Bookings already made on a field that's later removed keep their name.
+  - Admins can pick any booker in My fields and change their list.
+  - (A separate "Book mode" for picking council areas into a cart was retired in 2026-10.)
 - **Saving the position.** Once a spot is confirmed and at least three of quality, fit,
   lights and fields are set, a decision asks whether to save the confirmed spot. The position is the centre
   lat/lon, the angle and the dimensions. Saved positions are restored next time and
   place the park on the Auckland map.
-- **Saving.** Decisions go to Supabase `field_reviews`, admin-only
-  (`supabase-setup.sql`; re-run it for the "2+ fields" option).
+- **Saving.** Decisions go to Supabase `field_reviews` (`supabase-setup.sql`). Every signed-in
+  user can rate and decide (v5); each change is logged in `vetting_history`, where admins can
+  reject it.
   `placement` holds the field position and the light poles. Until the migration is run,
   decisions stay in the browser. **Download CSV** exports them.
 
-## Manual data entry, until the app screens exist
+## Manual data entry (historical)
 
-Use [`docs/data/council-field-vetting.xlsx`](data/council-field-vetting.xlsx). Yellow
+Before the vetting tool existed, fields were entered in [`docs/data/council-field-vetting.xlsx`](data/council-field-vetting.xlsx). Yellow
 cells are inputs and grey cells are calculated.
 - **Parks:** all 254 parks, with priority, status, amenities and notes. Rollups show
   fields entered and vetted, the count per tier, and the best tier.
@@ -409,7 +355,7 @@ be imported when 4.4 lands.
 
 ## Decisions
 
-- **Who vets:** admins only. Others contribute through field reports.
+- **Who vets:** everyone signed in (since v5); admins review the change history.
 - **Lights:** needed for evening slots only, and not part of the tier.
 
 ## Open questions
@@ -423,9 +369,9 @@ be imported when 4.4 lands.
 
 ## Access for bookers
 
-Every signed-in user can open Council fields (User menu → 🗺 Council fields). Bookers who
-aren't admins see the Auckland and park maps with the ratings, read-only, and Book mode for
-their own cart only. Rating, decisions, flags and the council-only toggle stay admin-only.
+Every signed-in user can open Council fields (the app switcher in the header) and rate,
+decide and amend vendors; admins can reject any change from the history. Deleting a review
+stays admin-only.
 This needs `supabase-setup.sql`, which makes these changes:
 - lets signed-in users read `field_reviews` and `field_flags`;
 - adds `set_my_council_facilities(entries)`, a security-definer function that replaces only the
@@ -495,10 +441,10 @@ short categorical fields rather than prose.
 
 ## Community facilities in the cart
 
-In 📅 Book mode, a community facility's popup (ANI, ANI (lower), St Cuthbert's, Sacred Heart)
-has **📅 Add to cart**. The entry is `cm-<operator id>` with `kind: "community"`.
-- **Booking site:** once saved as active, the facility appears under Provider →
-  📍 Location as provider `cm_<operator id>`. ANI's rate is $20/hr; set the others in Facility
+Community facilities (ANI, ANI (lower), St Cuthbert's, Sacred Heart) are saved to My fields like
+parks. The entry is `cm-<operator id>` with `kind: "community"`.
+- **Booking site:** once saved as active, the facility appears under Vendor →
+  📍 Location as vendor `cm_<operator id>`. ANI's rate is $20/hr; set the others in Facility
   Rates.
 - **Workflow:** AMUA review → 🔎 contact review → ✉ requested from facility → approved. The
   contact review only happens before the first request to that facility (settings key

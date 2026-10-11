@@ -28,7 +28,6 @@ export function WeekCalendar({ bookings, onNewBooking, onNewBookingRange, onBook
   // enough to be considered a drag (vs a plain click)
   const [dragState, setDragState] = useState(null);
   const dragMoved = useRef(false);
-  const gridRef   = useRef(null);
 
   const days    = getWeekDates(weekBase);
   const today   = todayKey();
@@ -112,7 +111,7 @@ export function WeekCalendar({ bookings, onNewBooking, onNewBookingRange, onBook
         <span style={{ fontSize:15, fontWeight:700, color:"#0f172a", marginLeft:4, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", minWidth:0 }}>{days[0].toLocaleDateString("en-NZ",{month:window.innerWidth<768?"short":"long",year:"numeric"})}</span>
         {window.innerWidth>=768&&<span style={{ fontSize:12, color:"#94a3b8", marginLeft:8 }}>Click or drag a day; drag across days for a grouped booking</span>}
       </div>
-      <div style={{ overflowX:narrow?"hidden":"auto" }} ref={gridRef} onMouseLeave={()=>{ dragMoved.current=false; setDragState(null); }}>
+      <div style={{ overflowX:narrow?"hidden":"auto" }} onMouseLeave={()=>{ dragMoved.current=false; setDragState(null); }}>
         <div style={{ minWidth:narrow?0:680 }}>
           {/* Day headers */}
           <div style={{ display:"flex", marginLeft:axisW }}>
@@ -277,24 +276,6 @@ export function MonthCalendar({ bookings, onBookingClick, onNewBooking, onNewBoo
     return b.email?.toLowerCase()===loggedInEmail?.toLowerCase() && b.date>=today;
   }
   const allSelDeletable = selIds.size > 0 && selectedBookings.every(canDelete);
-
-  function StatusDot({status}) {
-    const cfg={
-      approved:           {c:"#22c55e",l:"✓"},
-      cpsa_confirmed:     {c:"#0891b2",l:"✓"},
-      cpsa_review_needed: {c:"#a16207",l:"?"},
-      rejected:           {c:"#f43f5e",l:"✗"},
-      cancelled:          {c:"#94a3b8",l:"—"},
-      clash:              {c:"#d97706",l:"!"},
-      pending_amua:       {c:"#f59e0b",l:"⏳"},
-      queued_cpsa:        {c:"#3b82f6",l:"→"},
-      amua_submit:        {c:"#3b82f6",l:"→"},
-      pending_cpsa:       {c:"#0ea5e9",l:"⏳"},
-      pending:            {c:"#f59e0b",l:"⏳"},
-    };
-    const {c,l}=cfg[status]||{c:"#94a3b8",l:"?"};
-    return <span style={{fontSize:8,fontWeight:800,background:c,color:"#fff",borderRadius:3,padding:"1px 3px",lineHeight:"14px",flexShrink:0}}>{l}</span>;
-  }
 
   const selBtn = {border:"1.5px solid #e2e8f0",background:"#fff",color:"#475569"};
   const selBtnActive = {border:"1.5px solid #6366f1",background:"#eef2ff",color:"#6366f1"};

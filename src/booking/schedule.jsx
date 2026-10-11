@@ -1,7 +1,7 @@
 import { useState, useRef, Fragment } from "react";
-import { Badge, rowSelect, isMultiSelectClick, COUNCIL_STAGE_STATUSES, groupStatusLabel, CopyableTable, DURATIONS, FACILITIES, Modal, S, STATUS_META, T, emailColor, fmtCost, fmtDate, fmtDateShort, fmtTime, isAdminBooking, newId, parseGroupRef, todayKey, venueFacilities, visibleFacilities } from "./core.jsx";
+import { Badge, rowSelect, isMultiSelectClick, groupStatusLabel, CopyableTable, DURATIONS, FACILITIES, Modal, S, STATUS_META, T, emailColor, fmtCost, fmtDate, fmtDateShort, fmtTime, isAdminBooking, newId, parseGroupRef, todayKey, venueFacilities, visibleFacilities } from "./core.jsx";
 import { DateRangePicker } from "./modals.jsx";
-import { isLive, isLegacyStatus } from "../statuses.js";
+import { isLive } from "../statuses.js";
 // `canon` folds a (lowercased) email onto its canonical primary so linked
 // secondary bookers group under one entry. Defaults to identity.
 export function buildOverlapPatternMap(active, facSensitive, canon) {
@@ -63,7 +63,7 @@ export function ReassignControl({ count, bookers=[], onReassign, dark=false }) {
 // Admin: a pricing rule from a set of bookings — their bookers and facilities over their
 // first–last dates (editable), at a day and/or evening $/hr. Like every rule it then applies
 // to all of those bookers' bookings on those facilities in that range.
-export function PricingRuleControl({ ticked, onAdd }) {
+function PricingRuleControl({ ticked, onAdd }) {
   const dates = ticked.map(b=>b.date).sort();
   const [from, setFrom] = useState(dates[0]||"");
   const [to, setTo] = useState(dates[dates.length-1]||"");
@@ -113,7 +113,7 @@ export function PricingRuleControl({ ticked, onAdd }) {
 //   onReassign(ids, {email, name})  admin: move the ticked bookings to another booker
 //   onAddPricingRule(rule)  admin: a pricing rule (PricingConditionsManager's shape) for the
 //     ticked bookings' bookers and facilities over their date range
-export function BookingSubsetPanel({ title, subtitle, email, pk, bkgs, isAdmin, canEdit, onBulkApply, onBulkStatusChange, onRemove, onReassign, onAddPricingRule, bookers=[], onView, onClose, maxHeight=260 }) {
+function BookingSubsetPanel({ title, subtitle, email, pk, bkgs, isAdmin, canEdit, onBulkApply, onBulkStatusChange, onRemove, onReassign, onAddPricingRule, bookers=[], onView, onClose, maxHeight=260 }) {
   const sorted = [...bkgs].sort((a,b)=>a.date.localeCompare(b.date)||a.start_hour-b.start_hour);
   const [unticked, setUnticked] = useState(()=>new Set());
   const ticked = sorted.filter(b=>!unticked.has(b.id));
@@ -204,7 +204,7 @@ export function BookingSubsetPanel({ title, subtitle, email, pk, bkgs, isAdmin, 
             {actTab==="status"&&canStatus&&(
               <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
                 <select value={statusTarget} onChange={e=>setStatusTarget(e.target.value)} aria-label="New status" style={si}>
-                  {Object.keys(STATUS_META).filter(k=>!isLegacyStatus(k)&&k!=="clash").map(k=><option key={k} value={k}>{groupStatusLabel(k, ticked)}</option>)}
+                  {Object.keys(STATUS_META).filter(k=>k!=="clash").map(k=><option key={k} value={k}>{groupStatusLabel(k, ticked)}</option>)}
                 </select>
                 {go(n, `Set ${n}`, ()=>onBulkStatusChange(ticked.map(b=>b.id),statusTarget))}
               </div>
@@ -281,8 +281,9 @@ export function OneOffModal({ email, name, bkgs, isAdmin, canEdit, onClose, onVi
   );
 }
 
-// embedded: rendered as a table view (Grouped) — no panel heading or close.
-export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkApply, onBulkStatusChange, onRemove, onReassign, onAddPricingRule, bookers=[], onView, onClose, inline=false, embedded=false, aliasNames={}, emailAliases={} }) {
+// The Grouped view of the bookings list (booker → recurring pattern → status), shown in
+// place of the itemised table.
+export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkApply, onBulkStatusChange, onRemove, onReassign, onAddPricingRule, bookers=[], onView, aliasNames={}, emailAliases={} }) {
   const [facSensitive, setFacSensitive] = useState(false);
   const [splitPatterns, setSplitPatterns] = useState(new Set());
   // The group expanded inline into its itemised bookings (BookingSubsetPanel) — one at a time:
@@ -409,10 +410,6 @@ export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkA
     return chips;
   }
 
-  // A function (not a component) so the panel isn't remounted on every render.
-  const Wrapper = children => embedded ? <div>{children}</div> : inline
-    ? <div style={{background:"#f0f9ff",border:"1.5px solid #bae6fd",borderRadius:12,padding:16}}><div style={{fontSize:14,fontWeight:700,color:"#0369a1",marginBottom:10}}>📅 Schedule Summary</div>{children}</div>
-    : <Modal title="📅 Schedule Summary" onClose={onClose}>{children}</Modal>;
   const colCount = 5;
   const groupSelectable = isAdmin && onBulkStatusChange;
   function toggleGroup(email, status) {
@@ -453,7 +450,7 @@ export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkA
   })();
   return (
     <>
-      {Wrapper(<>
+      <div>
         {/* Toolbar: facility-sensitive + date range filter + status filter */}
         <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",marginBottom:10}}>
           <label style={{display:"flex",alignItems:"center",gap:6,fontSize:12,cursor:"pointer",color:"#475569"}}>
@@ -597,7 +594,7 @@ export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkA
               <span style={{fontSize:11,color:"#94a3b8"}}>Set status to:</span>
               <select value={bulkStatusTarget} onChange={e=>setBulkStatusTarget(e.target.value)}
                 style={{fontSize:11,padding:"4px 8px",borderRadius:6,border:"1.5px solid #334155",background:"#1e293b",color:"#fff",fontFamily:"inherit",fontWeight:600}}>
-                {Object.keys(STATUS_META).filter(k=>!isLegacyStatus(k) && k!=="clash").map(k=>(
+                {Object.keys(STATUS_META).filter(k=>k!=="clash").map(k=>(
                   <option key={k} value={k}>{groupStatusLabel(k, selectedBkgs)}</option>
                 ))}
               </select>
@@ -612,7 +609,7 @@ export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkA
             </div>
           </div>
         )}
-      </>)}
+      </div>
     </>
   );
 }
@@ -637,9 +634,9 @@ export function defaultFacRates(facilityRates, facId) {
 // A rule targets one or more bookers and facilities. New rules store arrays
 // (bookerEmails/facilityIds); legacy rules and invoice-locked snapshots store the
 // singular bookerEmail/facilityId — both are normalised here.
-export function condBookerList(c)   { return (c.bookerEmails && c.bookerEmails.length) ? c.bookerEmails : (c.bookerEmail ? [c.bookerEmail] : []); }
-export function condFacilityList(c) { return (c.facilityIds  && c.facilityIds.length)  ? c.facilityIds  : (c.facilityId  ? [c.facilityId]  : []); }
-export function matchingConditions(conditions, facId, bookerEmail, dateStr) {
+function condBookerList(c)   { return (c.bookerEmails && c.bookerEmails.length) ? c.bookerEmails : (c.bookerEmail ? [c.bookerEmail] : []); }
+function condFacilityList(c) { return (c.facilityIds  && c.facilityIds.length)  ? c.facilityIds  : (c.facilityId  ? [c.facilityId]  : []); }
+function matchingConditions(conditions, facId, bookerEmail, dateStr) {
   const be = (bookerEmail || "").toLowerCase();
   return (conditions || []).filter(c => {
     if (!c) return false;

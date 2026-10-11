@@ -1,4 +1,5 @@
 import { AMUA_INFO, PROVIDERS, amuaContactLine, fmtCost, fmtDate, fmtDateShortDow } from "./core.jsx";
+import { escHtml } from "../html.js";
 // Invoice modal sub-components defined at module level so their references
 // are stable across SummaryTab re-renders — prevents focus loss on the Name input.
 export function InvoiceOptionRow({label, children}) {
@@ -32,14 +33,14 @@ export function InvoicePill({active, onClick, children}) {
 // page 1 (letterhead + Bill To) against 78px on later pages (one-line header strip).
 // That allows 33 and 41 rows; these leave room for the carry/subtotal rows plus slack so
 // a sheet never spills onto a second physical page and strands its subtotal there.
-export const INV_ROWS_PAGE_1 = 28, INV_ROWS_PAGE_N = 34, INV_ROWS_FOR_TOTALS = 2;
+const INV_ROWS_PAGE_1 = 28, INV_ROWS_PAGE_N = 34, INV_ROWS_FOR_TOTALS = 2;
 // A page-1 banner (receipt "PAID", preview notice) costs roughly this many rows of height.
-export const INV_ROWS_PER_BANNER = 2;
+const INV_ROWS_PER_BANNER = 2;
 
 // A shared line also prints a footnote on its sheet, so it costs a second row.
 // A line's footnotes: a shared-field cost note, and vendor mismatches kept on record
 // (vendorNotes: [{date, text}], added when the invoice option to asterisk them is on).
-export function invLineFootnotes(l) {
+function invLineFootnotes(l) {
   const desc = l.desc || l.description || l.label || "";
   const day = d => d ? `${fmtDateShortDow(d)} — ` : "";
   return [
@@ -47,9 +48,9 @@ export function invLineFootnotes(l) {
     ...(l.vendorNotes || []).map(n => `${day(n.date)}${n.text}`),
   ];
 }
-export const invLineRows = l => 1 + invLineFootnotes(l).length;
+const invLineRows = l => 1 + invLineFootnotes(l).length;
 
-export function paginateInvoiceLines(lines, { bannerRows = 0 } = {}) {
+function paginateInvoiceLines(lines, { bannerRows = 0 } = {}) {
   if (!lines.length) return [[]];
   const firstCap = Math.max(1, INV_ROWS_PAGE_1 - bannerRows);
   const pages = [[]];
@@ -75,12 +76,12 @@ export function invLineLabel(l) {
 
 // Rate and Duration cells for a document line. Shared lines show the rate after their
 // share is applied, marked with an asterisk that points at the sheet's footnote.
-export function invLineRate(l) {
+function invLineRate(l) {
   if (l.fixedPrice) return `Fixed${l.sharedNote ? "*" : ""}`;
   if (l.rate == null) return "—";
   return `${fmtCost(l.rate)}/hr${l.sharedNote ? "*" : ""}`;
 }
-export function invLineDuration(l) {
+function invLineDuration(l) {
   if (l.hours == null) return "—";
   const mins = Math.round(Math.abs(l.hours) * 60), h = Math.floor(mins / 60), m = mins % 60;
   return (l.hours < 0 ? "−" : "") + [h ? `${h}h` : "", m ? `${m}m` : ""].filter(Boolean).join(" ") || "0h";
@@ -90,8 +91,8 @@ export function invLineDuration(l) {
 // time range inside desc ("Mon, 14 Sept 2026 · Field #1 · 6:30 PM–8:30 PM"), and the
 // hours/rate or sharing inside detail ("6h 30m @ $60.00/hr", "· shared field, 50% of …").
 // Recover the structured fields from that text so old records fill the new columns.
-export const INV_MONTHS = { jan:1, feb:2, mar:3, apr:4, may:5, jun:6, jul:7, aug:8, sep:9, oct:10, nov:11, dec:12 };
-export function normaliseInvLine(l) {
+const INV_MONTHS = { jan:1, feb:2, mar:3, apr:4, may:5, jun:6, jul:7, aug:8, sep:9, oct:10, nov:11, dec:12 };
+function normaliseInvLine(l) {
   if (l.hours != null || l.rate != null || l.fixedPrice) return l;
   const out = { ...l };
   let desc = l.desc || l.description || l.label || "";
@@ -181,9 +182,9 @@ export function renderInvoiceDocHtml({
     const rows = pageLines.map(l => `
       <tr>
         <td style="${tdDate}">${l.date ? fmtDateShortDow(l.date) : ""}</td>
-        <td style="${tdDesc}">${l.desc || l.description || l.label || "—"}${l.vendorNotes?.length ? " *" : ""}</td>
+        <td style="${tdDesc}">${escHtml(l.desc || l.description || l.label || "—")}${l.vendorNotes?.length ? " *" : ""}</td>
         ${l.hours == null && l.rate == null && !l.fixedPrice && l.detail
-          ? `<td colspan="2" style="${cellBase};color:#64748b;font-size:10.5px"><div style="${clip};max-width:200px">${l.detail}</div></td>`
+          ? `<td colspan="2" style="${cellBase};color:#64748b;font-size:10.5px"><div style="${clip};max-width:200px">${escHtml(l.detail)}</div></td>`
           : `<td style="${tdAmt};color:#475569">${invLineRate(l)}</td><td style="${tdAmt};color:#475569">${invLineDuration(l)}</td>`}
         ${money(l.cost || 0)}
       </tr>`).join("");
@@ -192,7 +193,7 @@ export function renderInvoiceDocHtml({
     const notes = pageLines.flatMap(invLineFootnotes);
     const footnotes = notes.length ? `
       <tr><td colspan="5" style="padding:6px 28px 2px;font-size:10px;line-height:14px;color:#64748b">
-        ${notes.map(n => `<div>* ${n}</div>`).join("")}
+        ${notes.map(n => `<div>* ${escHtml(n)}</div>`).join("")}
       </td></tr>` : "";
 
     // Per-sheet figures cover only the rows printed above them. The whole-invoice figure
@@ -215,7 +216,7 @@ export function renderInvoiceDocHtml({
             <div style="font-size:11px;color:#94a3b8;margin-top:2px">#${docId}</div>
             ${bankRef ? `<div style="font-size:11px;color:#cbd5e1;margin-top:1px">Bank reference: <strong style="color:#fff;font-family:monospace;letter-spacing:0.04em">${bankRef}</strong></div>` : ""}
             <div style="font-size:11px;color:#94a3b8">Date: ${dateStr}</div>
-            ${orderName ? `<div style="font-size:11px;color:#94a3b8">Order: ${orderName}</div>` : ""}
+            ${orderName ? `<div style="font-size:11px;color:#94a3b8">Order: ${escHtml(orderName)}</div>` : ""}
           </td>
         </tr>
       </table>
@@ -225,8 +226,8 @@ export function renderInvoiceDocHtml({
         <tr>
           <td style="padding:14px 28px;vertical-align:top">
             <div style="${cap}">Bill To</div>
-            <div style="font-size:14px;font-weight:700;margin-top:2px;color:#0f172a">${billToName || "(see email)"}</div>
-            <div style="font-size:11px;color:#475569">${billToEmail || ""}</div>
+            <div style="font-size:14px;font-weight:700;margin-top:2px;color:#0f172a">${escHtml(billToName || "(see email)")}</div>
+            <div style="font-size:11px;color:#475569">${escHtml(billToEmail || "")}</div>
             ${billToExtra}
           </td>
           <td style="padding:14px 28px;vertical-align:top;text-align:right">
@@ -236,7 +237,7 @@ export function renderInvoiceDocHtml({
         </tr>
       </table>` : `
       <div style="background:#0f172a;color:#cbd5e1;padding:8px 28px;font-size:11px">
-        <strong style="color:#fff">${docLabel} #${docId}</strong> · ${billToName || billToEmail || ""} · ${periodStr}
+        <strong style="color:#fff">${docLabel} #${docId}</strong> · ${escHtml(billToName || billToEmail || "")} · ${periodStr}
       </div>`;
 
     return `<section class="sheet" style="background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);margin:0 auto 20px;max-width:720px">
@@ -303,7 +304,7 @@ export function billingDocFields(rec, docType, lines) {
     orderName: rec.orderName||"",
     billToName: rec.bookerName, billToEmail: rec.bookerEmail,
     billToExtra: [
-      rec.bookerAddress?`<div style="font-size:11px;color:#475569;margin-top:3px;white-space:pre-line">${rec.bookerAddress}</div>`:"",
+      rec.bookerAddress?`<div style="font-size:11px;color:#475569;margin-top:3px;white-space:pre-line">${escHtml(rec.bookerAddress)}</div>`:"",
       rec.bookerGst?`<div style="font-size:11px;color:#94a3b8">GST: ${rec.bookerGst}</div>`:"",
     ].join(""),
     periodStr: rec.dateFrom&&rec.dateTo ? `${fmtD(rec.dateFrom)} – ${fmtD(rec.dateTo)}` : "All periods",
@@ -318,7 +319,7 @@ export function buildBillingDocHtml(rec, docType, lines) {
 
 // Drive file/folder naming for billing documents. Names are deterministic so
 // re-syncs find-or-update the same files even across browsers/devices.
-export const sanitizeDriveName = s => String(s||"").replace(/[/\\]+/g,"-").replace(/\s+/g," ").trim();
+const sanitizeDriveName = s => String(s||"").replace(/[/\\]+/g,"-").replace(/\s+/g," ").trim();
 export function billingDocBaseName(rec) {
   const isPO = rec.type === "purchase_order";
   const docTag = isPO ? "PO" : rec.type === "receipt" ? "Receipt" : "Invoice";

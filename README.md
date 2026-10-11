@@ -1,118 +1,63 @@
-# Facility Booking (AMUA)
+# FacilityBook (AMUA)
 
-Single-page React app for booking AMUA facilities, with an admin workflow for
-approvals, CPSA sync reconciliation, and billing/invoicing. The entire app lives
-in one file: [`src/booking-system.jsx`](src/booking-system.jsx).
+Auckland Mixed Ultimate Association's booking system. Two pages on GitHub Pages
+(`/facility-booking/`), one Supabase project:
 
-Stack: **React 19 + Vite**, **Supabase** (Postgres + Google OAuth + Row Level
-Security) for data/auth, **EmailJS** for notification emails (sent server-side
-via a Supabase Edge Function), deployed to **GitHub Pages** via GitHub Actions.
+- **Bookings** (`index.html`): book AMUA's facilities (GTEC/CPSA at Cornwall Park, St
+  Cuthbert's, council parks, community facilities). Admins approve requests, sync with
+  GTEC's schedule, apply to the council, and invoice.
+- **Council fields** (`vetting.html`): a map of Auckland's council sports parks for rating
+  fields for ultimate. Bookers save the good ones to **My fields**; a field marked bookable
+  becomes bookable on the booking site.
 
-> Auth & data-contract details (RLS policies, the `system_notes` marker
-> catalogue, the CPSA browser extension) live in
-> [`HANDOFF_SUPABASE_AUTH.md`](HANDOFF_SUPABASE_AUTH.md). Read it before changing
-> anything that writes to Supabase.
+Stack: **React 19 + Vite** (booking site), vanilla JS + **Leaflet** (Council fields),
+**Supabase** (Postgres, Google sign-in, row-level security), **EmailJS** behind a Supabase Edge
+Function, deployed by GitHub Actions.
 
----
+**Start here:** [`docs/HANDOVER.md`](docs/HANDOVER.md). It covers the architecture map, the
+features by module, the data model and `system_notes` markers, external services and
+operations. The project rules are in [`CLAUDE.md`](CLAUDE.md), the review checklist is in
+[`REVIEW.md`](REVIEW.md), and the latest review and backlog are in
+[`docs/REVIEW-2026-10.md`](docs/REVIEW-2026-10.md).
 
-## Configuration (environment variables)
-
-The client reads two `VITE_*` env vars, injected at build time — nothing is
-hardcoded in source. Copy [`.env.example`](.env.example) to `.env.local` for
-local dev:
+## Develop
 
 ```bash
-cp .env.example .env.local   # then fill in the values
+npm ci
+cp .env.example .env.local   # fill in the values below
+npm run dev                  # http://localhost:5173/facility-booking/
+npm run check                # lint (0 errors) + unit tests + build — CI runs the same
 ```
 
 | Variable | Required | Purpose |
 |---|---|---|
 | `VITE_SUPABASE_URL` | ✅ | Supabase project URL |
-| `VITE_SUPABASE_ANON` | ✅ | Supabase publishable anon key (safe to expose; protected by RLS) |
+| `VITE_SUPABASE_ANON` | ✅ | Supabase anon key (public; row-level security protects the data) |
+| `VITE_GOOGLE_CLIENT_ID` | for Drive | Google OAuth client for the billing documents and backups on Drive |
 
-Both values are embedded in the shipped JS bundle, so treat them as
-**publishable, not secret** — Supabase **RLS** is what protects the data.
+These are build-time values embedded in the bundle, so treat them as public. Email keys are
+never in the client: they are Supabase secrets used by the `send-email` function.
 
-**Email has no client-side keys.** It is sent server-side by the `send-email`
-Supabase Edge Function (see
-[`supabase/functions/send-email/README.md`](supabase/functions/send-email/README.md)),
-which holds the EmailJS credentials as Supabase secrets and only accepts calls
-from a signed-in user. If the function isn't deployed, the app simply skips
-sending email (no crash).
+## Database
 
----
+Run **`supabase-setup.sql`** in the Supabase SQL editor, the whole file. It is safe to re-run
+and sets up every table, policy and function. Re-run it after any change to it;
+`select version from schema_version` shows which version ran. Making someone an admin is at
+the end of the file.
 
-## Local development
+## Deploy
 
-```bash
-npm install
-npm run dev      # http://localhost:5173
-npm run lint     # ESLint
-npm run build    # production build into dist/
-```
+- **Web app:** pushing to `main` runs `.github/workflows/deploy.yml`. It lints, tests, builds
+  and publishes `dist/` to the `gh-pages` branch (GitHub Pages source: *Deploy from branch →
+  `gh-pages`*).
+- **Repo secrets:** `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON`, `VITE_GOOGLE_CLIENT_ID`.
+- **Deploy only through CI:** the workflow keeps earlier bundles so cached pages keep working.
+- **Email function:** deploy `supabase/functions/send-email` and set its EmailJS secrets; see
+  [its README](supabase/functions/send-email/README.md). Re-deploy it after changing it.
 
----
+## Hard rule: the app only emails bookers
 
-## Database (Supabase)
-
-Run **`supabase-setup.sql`** in the Supabase **SQL Editor** — the whole file, once. It sets up
-everything (settings, bookings columns and RLS, activity and mismatch logs, booker contacts,
-council-field tables, vetting history, `settings_merge()`), and it is safe to re-run after any
-update: tables and columns are created only if missing, policies and functions are replaced.
-`select version from schema_version` shows which version last ran. (It replaces the older
-`supabase-schema.sql` / `supabase-migration-*.sql` files, which are in git history.)
-
-Admin is granted via `app_metadata.role = 'admin'` (see `HANDOFF_SUPABASE_AUTH.md`
-for the exact SQL). There is no client-side admin password.
-
----
-
-## Deployment
-
-### Web app → GitHub Pages
-
-Pushing to `main` triggers [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml),
-which builds the app and publishes `dist/` to the `gh-pages` branch.
-
-**Required one-time setup** — add these as repo secrets under
-**Settings → Secrets and variables → Actions**:
-
-- `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON` (the build fails fast without them)
-
-GitHub Pages source: **Deploy from branch → `gh-pages`**. Vite `base` is
-`/facility-booking/` (see `vite.config.js`) to match the repo-pages URL.
-
-Manual deploy fallback (uses your local `.env.local`): `npm run deploy`.
-
-### Email → Supabase Edge Function
-
-One-time: deploy the `send-email` function and set its EmailJS secrets — full
-steps in [`supabase/functions/send-email/README.md`](supabase/functions/send-email/README.md).
-
----
-
-## Booking rules
-
-| Situation | Behaviour |
-|---|---|
-| Same facility, same time | ⚠️ Warning shown — user can proceed (shared use allowed) |
-| Different facility, same time | ⚠️ Warning shown — user can proceed |
-| New booking | Status starts **Pending** until an admin approves |
-| Past booking (non-admin) | 🔒 Read-only — cannot be edited or cancelled |
-| Edit / cancel | Only on your own bookings |
-
-CPSA-confirmed bookings, mismatch review, and invoicing are admin-only flows;
-see the in-app Admin tab and `HANDOFF_SUPABASE_AUTH.md`.
-
-## Hard rule: who the app emails
-
-The booking app (and its `send-email` Edge Function) only ever emails **bookers**: people with
-bookings, or user/admin profiles. It never emails vendors, private operators, community
-facilities or the council.
-- **Redirected to AMUA:** anything addressed to someone else is turned into a **draft sent to
-  AMUA's own inbox** (aucklandmixedultimate@gmail.com). The subject starts with
-  `[DRAFT for <recipients>]`, and the intended recipients are listed above the draft. AMUA
-  reviews it and sends it from Gmail, which is outside this app.
-- **Where it's enforced:** both `sendEmail()` in `src/booking-system.jsx` and the Edge Function,
-  as a server-side backstop. Redeploy the function after changing it
-  (`supabase functions deploy send-email`).
+Mail meant for vendors, operators or the council is never sent from the app. It becomes a
+draft to AMUA's inbox (`[DRAFT for <recipients>] …`, with the intended recipients listed
+above it), and AMUA sends it from Gmail. This is enforced in `sendEmail()`
+(`src/booking/core.jsx`) and again in the edge function.

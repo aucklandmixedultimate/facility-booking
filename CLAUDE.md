@@ -15,7 +15,11 @@ Two apps on GitHub Pages (`/facility-booking/`), one Supabase project:
 - Shared: `src/actor.js` (who's using a shared login), `src/people.js`, `src/seasons.js`,
   `src/councilSeasons.js`, `src/drive-client.js`, `src/councilMail.js`, `src/statuses.js` (the status model),
   `src/holidays.js` (NZ public holidays from date.nager.at, Mondayised, cached a week on the device),
+  `src/html.js` (`escHtml`, `csvCell` — escape any user text put into HTML or CSV),
   `src/appnav.js` (the Bookings / Council fields switcher in both headers — add a page there).
+
+Architecture map, data model, `system_notes` markers and operations: `docs/HANDOVER.md`.
+Latest review and backlog: `docs/REVIEW-2026-10.md`.
 
 ## Commands
 

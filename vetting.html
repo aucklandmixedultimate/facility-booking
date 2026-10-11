@@ -29,10 +29,6 @@
             <button id="parkTab" role="tab" aria-selected="true" title="One park at a time (C)">🔍 Park</button>
             <button id="bookTab" role="tab" aria-selected="false" title="My fields: saved fields (★ Top / ✓ Shortlist), their quality and whether they're bookable">📌 My fields</button>
           </div>
-          <div class="modetabs" role="radiogroup" aria-label="Mode">
-            <button id="modeRate" role="radio" aria-checked="true" title="Rate parks and fields (B toggles)">⭐ Rate</button>
-            <button id="modeBook" role="radio" aria-checked="false" title="Click field areas to add them to the booker's cart (B toggles)">📅 Book</button>
-          </div>
           <select id="region" aria-label="Region"><option value="">All regions</option></select>
           <select id="mode" aria-label="Queue">
             <option value="todo">To review</option>
@@ -160,7 +156,6 @@
                 <div class="infopanel" id="infoPanel" hidden></div>
                 <div class="links"><a id="gmaps" target="_blank" rel="noopener">Google Maps ↗</a><span id="scaleNote" hidden></span><span id="fieldList"></span></div>
               </div>
-              <div class="info bookbar" id="bookBar" hidden></div>
               <div class="info cityinfo" id="cityInfo" hidden></div>
               <div class="booksplit">
               <div class="bookpanel" id="bookPanel" hidden></div>

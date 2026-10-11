@@ -4,7 +4,7 @@ import { gmailToken, fetchCouncilEmails, parseCouncilEmail } from "./councilMail
 import { driveConfigured, getDriveToken, renameFile, ensureFolderPath, DRIVE_ROOT_FOLDER, ensureFolder, findChildFile, uploadFile, keepLatestRevisionForever } from "./drive-client.js";
 import { htmlToPdfBlob } from "./pdf-utils.js";
 import { currentLeagueSeason, LEAGUE_SEASONS, seasonOfBooker } from "./seasons.js";
-import { Badge, COUNCIL_APPLICATION_FEE, COUNCIL_APPLICATION_URL, COUNCIL_APP_RE, CPSA_FIELD_IDS, CopyableTable, EmailLoginScreen, FACILITIES, LOGO_SRC, MOBILE_STYLE, MONTHS, Modal, PROVIDERS, REVIEW_STATUSES, S, STATUS_META, SUPABASE_ANON, SUPABASE_URL, T, TableViewToggle, groupStatusLabel, _emailAliases, applyAmuaOrg, applyCouncilFacilities, authHeaders, buildApprovalEmailHtml, buildClashEmailHtml, buildInformCpsaEmailHtml, buildMismatchEmailHtml, buildOrderEmailHtml, buildRoomRequestEmailHtml, canSendToCouncil, clearSlotLink, councilFeeSplit, councilOverlaps, emailColor, evenSlotShares, facShort, fmt24, fmtCost, fmtDate, fmtDateShort, fmtDateShortDow, fmtTime, fmtTimeShort, getBillingDrift, getClashes, inActiveVenue, isAdminBooking, linkCouncilChildren, logActivity, newId, newSlotRef, parseClashPrevStatus, parseCouncilApp, parseCpsaOrig, parseCpsaRefs, parseCpsaResolution, parseMismatchNote, parseSlotLink, reachedGtecQueue, sb, sendApprovalEmail, sendEmail, setBilledSnapshot, setClashPrevStatus, setCpsaResolution, setGtecSnapshot, setMismatchNote, setModuleState, setSlotLink, setVendorVariance, slotGroupMembers, stripClashPrevStatus, stripMismatchNote, supabase, timeOverlaps, todayKey, useMobile, useTableView, venueFacilities, visibleFacilities, workflowOf } from "./booking/core.jsx";
+import { Badge, COUNCIL_APPLICATION_FEE, COUNCIL_APPLICATION_URL, COUNCIL_APP_RE, CPSA_FIELD_IDS, CopyableTable, EmailLoginScreen, FACILITIES, LOGO_SRC, MOBILE_STYLE, MONTHS, Modal, PROVIDERS, REVIEW_STATUSES, S, STATUS_META, SUPABASE_URL, T, TableViewToggle, groupStatusLabel, _emailAliases, applyAmuaOrg, applyCouncilFacilities, authHeaders, isDraftItem, buildApprovalEmailHtml, buildClashEmailHtml, buildInformCpsaEmailHtml, buildMismatchEmailHtml, buildOrderEmailHtml, buildRoomRequestEmailHtml, canSendToCouncil, clearSlotLink, councilFeeSplit, councilOverlaps, emailColor, evenSlotShares, facShort, fmt24, fmtCost, fmtDate, fmtDateShort, fmtDateShortDow, fmtTime, fmtTimeShort, getBillingDrift, getClashes, inActiveVenue, isAdminBooking, linkCouncilChildren, logActivity, newId, newSlotRef, parseClashPrevStatus, parseCouncilApp, parseCpsaOrig, parseCpsaRefs, parseCpsaResolution, parseMismatchNote, parseSlotLink, reachedGtecQueue, sb, sendApprovalEmail, sendEmail, setBilledSnapshot, setClashPrevStatus, setCpsaResolution, setGtecSnapshot, setMismatchNote, setModuleState, setSlotLink, setVendorVariance, slotGroupMembers, stripClashPrevStatus, stripMismatchNote, supabase, timeOverlaps, todayKey, useMobile, useTableView, venueFacilities, visibleFacilities, workflowOf } from "./booking/core.jsx";
 import { FacilityStrip } from "./booking/facilityStrip.jsx";
 import { councilAppBookings, mergeCouncilOutcomes } from "./booking/councilData.jsx";
 import { cjrMonthUrl, extractCPSATeam, extractEventDetailsEmail, fetchCJREvents, parseFeedText, findMatchingUserBooking, purgeObsolete, gtecTeamKey, mapCJRFacility, parseCJRDate, parseCJRDateTime } from "./booking/gtec.jsx";
@@ -13,7 +13,7 @@ import { ScheduleSummaryModal, resolveRates } from "./booking/schedule.jsx";
 import { ActivityLogModal, AmuaDetailsModal, Banner, CouncilContactModal, DateRangePicker, UserMenuItem, UserMgmtModal } from "./booking/modals.jsx";
 import { DayTimelinePopup, MonthCalendar, WeekCalendar } from "./booking/calendar.jsx";
 import { BookingDetail, BookingForm, CartModal, DeleteCartModal } from "./booking/forms.jsx";
-import { isLegacyStatus, ST } from "./statuses.js";
+import { ST } from "./statuses.js";
 import { APPS, appHref } from "./appnav.js";
 
 // Tabs loaded on first use, so the calendars open without downloading Summary, Billing,
@@ -162,7 +162,6 @@ export default function App() {
   const [contactFor, setContactFor] = useState("");   // booker whose council contact is being edited (admins booking for someone)
   const [bookerContacts, setBookerContacts] = useState(null);
   async function loadBookerContacts() {
-    if (!configured) return;
     try {
       const r = await fetch(`${SUPABASE_URL}/rest/v1/booker_contacts?select=*`, { headers: authHeaders() });
       if (!r.ok) return;   // table not set up yet: nothing is gated
@@ -320,7 +319,6 @@ export default function App() {
   });
   const [listShowClashes, setListShowClashes]   = useState(false);
   const [listView, setListView] = useTableView("fb_list_view");   // Bookings tab: grouped | itemised
-  const [showAdminScheduleModal, setShowAdminScheduleModal] = useState(false);
   const [showExtensionModal, setShowExtensionModal] = useState(false);
   const [approxPlayers, setApproxPlayers] = useState(()=>{
     try{return JSON.parse(localStorage.getItem("fb_approx_players")||"{}");}catch{return {};}
@@ -338,7 +336,10 @@ export default function App() {
   const [listSortDir,     setListSortDir]       = useState("asc");
 
   const isMobile = useMobile();
-  const configured = !!SUPABASE_URL && !!SUPABASE_ANON;
+  // Drafts in the cart, shown on the calendars: new bookings (not edits of existing ones), and
+  // the bookings being edited.
+  const cartNewDrafts = cart.flatMap(i => isDraftItem(i) && !(i.sourceIds||[]).length ? i.drafts : []);
+  const cartSourceIds = new Set(cart.flatMap(i => i.sourceIds||[]));
 
   // Bootstrap auth session and subscribe to changes
   useEffect(() => {
@@ -467,14 +468,12 @@ export default function App() {
   }
 
   async function loadBookings() {
-    if(!configured){setLoading(false);return;}
     try{setBookings(await sb.select("bookings"));setDbError("");}
     catch(e){setDbError("Could not connect to database. ("+e.message+")");}
     finally{setLoading(false);}
   }
 
   async function loadSettings() {
-    if(!configured) return;
     try {
       const rows = await sb.selectAll("settings");
       const map = {};
@@ -541,7 +540,6 @@ export default function App() {
   }
 
   async function persistSetting(key, value) {
-    if(!configured) return true;
     try { await sb.upsert("settings", { key, value, updated_at: new Date().toISOString() }, "key"); return true; }
     catch(e) { console.warn("persistSetting "+key+":", e.message); return false; }
   }
@@ -556,7 +554,7 @@ export default function App() {
       const addedBookings = []; // snapshots of bookings added this sync (for the expandable log)
       const reviewBookings = []; // user bookings flagged needing review (mismatch) this sync
       const clashBookings = [];  // user bookings flagged as clash this sync
-      const currentBookings = configured ? (await sb.select("bookings")) : bookings;
+      const currentBookings = await sb.select("bookings");
       const matchedUserIds = new Set();
       const cpsaNotifications = []; // notify-only cart items for first-time CPSA status changes
 
@@ -583,11 +581,7 @@ export default function App() {
         !feedKeys.has(`${b.date}|${b.facility_id}|${b.start_hour}|${b.purpose}`)
       );
       for (const sb_bk of staleAdminBks) {
-        if (configured) {
-          await sb.remove("bookings", sb_bk.id);
-        } else {
-          setBookings(prev => prev.filter(b => b.id !== sb_bk.id));
-        }
+        await sb.remove("bookings", sb_bk.id);
         removed++;
         logActivity("cpsa_admin_booking_remove", { id: sb_bk.id, date: sb_bk.date, facility_id: sb_bk.facility_id, purpose: sb_bk.purpose });
       }
@@ -606,8 +600,7 @@ export default function App() {
         return false;
       });
       for (const dupBk of dupAdminBks) {
-        if (configured) await sb.remove("bookings", dupBk.id);
-        else setBookings(prev => prev.filter(b => b.id !== dupBk.id));
+        await sb.remove("bookings", dupBk.id);
         removed++;
         logActivity("cpsa_admin_booking_remove", { id: dupBk.id, date: dupBk.date, facility_id: dupBk.facility_id, purpose: dupBk.purpose, duplicate: true });
       }
@@ -729,15 +722,9 @@ export default function App() {
         const statusChanged = booking.status !== targetStatus;
         const sysNotesChanged = (booking.system_notes || "") !== newSysNotes;
         if (statusChanged || sysNotesChanged) {
-          if (configured) {
-            // Always update status first — this is the critical write.
-            if (statusChanged) await sb.update("bookings", booking.id, { status: targetStatus, updated_at: new Date().toISOString() });
-            // system_notes is best-effort: silently no-ops until migration is run.
-            if (sysNotesChanged) sb.update("bookings", booking.id, { system_notes: newSysNotes }).catch(() => {});
-          } else {
-            const patch = { status: targetStatus, system_notes: newSysNotes, updated_at: new Date().toISOString() };
-            setBookings(prev => prev.map(b => b.id === booking.id ? { ...b, ...patch } : b));
-          }
+          if (statusChanged) await sb.update("bookings", booking.id, { status: targetStatus, updated_at: new Date().toISOString() });
+          // system_notes is best-effort: silently no-ops until migration is run.
+          if (sysNotesChanged) sb.update("bookings", booking.id, { system_notes: newSysNotes }).catch(() => {});
         }
         if (statusChanged) {
           if (effectiveExact) cpsaConfirmed++; else {
@@ -763,8 +750,7 @@ export default function App() {
           const slotBk = { date: slot.date, facility_id, start_hour: slot.start_hour, duration: slot.duration, id: "_sentinel_" };
           const oldAdmin = currentBookings.find(b => isAdminBooking(b) && timeOverlaps(b, slotBk));
           if (oldAdmin) {
-            if (configured) await sb.remove("bookings", oldAdmin.id);
-            else setBookings(prev => prev.filter(b => b.id !== oldAdmin.id));
+            await sb.remove("bookings", oldAdmin.id);
           }
         }
       }
@@ -792,17 +778,13 @@ export default function App() {
             status: "approved",
             created_at: new Date().toISOString(),
           };
-          if (configured) {
-            await sb.insert("bookings", newBk);
-          } else {
-            setBookings(prev => [...prev, newBk]);
-          }
+          await sb.insert("bookings", newBk);
           added++;
           addedBookings.push({ id: newBk.id, facility_id, date, start_hour, duration, purpose });
           logActivity("cpsa_admin_booking_add", { date, facility_id, start_hour, duration, purpose });
         }
       }
-      if (configured) await loadBookings();
+      await loadBookings();
 
       // Clear the CPSA flag on bookings nothing in the feed links to any more. The test
       // is whether some event would STILL match this booking — not whether one merely
@@ -826,17 +808,13 @@ export default function App() {
       });
       for (const cb of cpsaLinkedUnmatched) {
         const strippedSysNotes = stripMismatchNote(cb.system_notes);
-        if (configured) {
-          await sb.update("bookings", cb.id, { status: "approved", updated_at: new Date().toISOString() });
-          sb.update("bookings", cb.id, { system_notes: strippedSysNotes }).catch(() => {});
-        } else {
-          setBookings(prev => prev.map(b => b.id === cb.id ? { ...b, status: "approved", system_notes: strippedSysNotes, updated_at: new Date().toISOString() } : b));
-        }
+        await sb.update("bookings", cb.id, { status: "approved", updated_at: new Date().toISOString() });
+        sb.update("bookings", cb.id, { system_notes: strippedSysNotes }).catch(() => {});
       }
-      if (configured && cpsaLinkedUnmatched.length > 0) await loadBookings();
+      if (cpsaLinkedUnmatched.length > 0) await loadBookings();
 
       // Auto-detect clashes with newly imported admin events and set user bookings to "clash"
-      const freshBookings = configured ? (await sb.select("bookings")) : bookings;
+      const freshBookings = await sb.select("bookings");
       const today = todayKey();
       const adminBks = freshBookings.filter(b => isAdminBooking(b) && b.date >= today);
       const userBks  = freshBookings.filter(b => !isAdminBooking(b) && b.date >= today);
@@ -853,12 +831,8 @@ export default function App() {
         if (hasClash && ub.status !== "clash") {
           // Flag as clash, remembering the stage it was at so it can be restored later.
           const sysNotes = setClashPrevStatus(ub.system_notes, ub.status);
-          if (configured) {
-            await sb.update("bookings", ub.id, { status: "clash", updated_at: new Date().toISOString() });
-            sb.update("bookings", ub.id, { system_notes: sysNotes }).catch(() => {});
-          } else {
-            setBookings(prev => prev.map(b => b.id === ub.id ? {...b, status:"clash", system_notes: sysNotes} : b));
-          }
+          await sb.update("bookings", ub.id, { status: "clash", updated_at: new Date().toISOString() });
+          sb.update("bookings", ub.id, { system_notes: sysNotes }).catch(() => {});
           clashBookings.push({ id:ub.id, date:ub.date, facility_id:ub.facility_id, start_hour:ub.start_hour, duration:ub.duration, purpose:ub.purpose, name:ub.name, email:ub.email,
             gtec: clashAdmins.map(ab=>({ name: ab.purpose||"", date: ab.date, start_hour: ab.start_hour, duration: ab.duration, facilityIds: [ab.facility_id] })) });
           clashUpdates++;
@@ -866,16 +840,12 @@ export default function App() {
           // Clash resolved (admin slot gone) → restore the prior workflow stage.
           const restored = parseClashPrevStatus(ub.system_notes) || "pending_amua";
           const sysNotes = stripClashPrevStatus(ub.system_notes);
-          if (configured) {
-            await sb.update("bookings", ub.id, { status: restored, updated_at: new Date().toISOString() });
-            sb.update("bookings", ub.id, { system_notes: sysNotes }).catch(() => {});
-          } else {
-            setBookings(prev => prev.map(b => b.id === ub.id ? {...b, status: restored, system_notes: sysNotes} : b));
-          }
+          await sb.update("bookings", ub.id, { status: restored, updated_at: new Date().toISOString() });
+          sb.update("bookings", ub.id, { system_notes: sysNotes }).catch(() => {});
           clashResolved++;
         }
       }
-      if (configured && (clashUpdates > 0 || clashResolved > 0)) await loadBookings();
+      if (clashUpdates > 0 || clashResolved > 0) await loadBookings();
 
       // Queue CPSA status-change notifications in the cart (notify-only, no booking edits).
       if (cpsaNotifications.length) {
@@ -937,7 +907,7 @@ export default function App() {
       const today = todayKey();
       // Compute the month set from a fresh booking source so a deferred/auto sync doesn't
       // miss future months due to a stale `bookings` closure.
-      const srcBookings = configured ? (await sb.select("bookings")) : bookings;
+      const srcBookings = await sb.select("bookings");
       const future = srcBookings.filter(b => b.date >= today);
       // Sync a CONTIGUOUS run of months, not just the months we happen to hold bookings
       // in. The old set was {this month} ∪ {months of our future bookings}, which left
@@ -1068,7 +1038,7 @@ export default function App() {
   if(session === undefined) return null; // auth session still loading
   if(!session) return <EmailLoginScreen/>;
 
-  // handleSave now accepts an array of drafts + name/email for multi-booking support
+  // Saves drafts (new or edited bookings). Returns false if the save failed.
   async function handleSave(drafts, bookerName, bookerEmail, { skipEmail = false } = {}) {
     skipEmail = skipEmail || silentMode;
     const draftsArr = Array.isArray(drafts) ? drafts : [drafts];
@@ -1080,22 +1050,19 @@ export default function App() {
     // is the parent; shares split evenly). The parent's side is written here when allowed,
     // and otherwise completed when the batch goes to the council.
     const slotPatches = linkCouncilChildren(draftsArr.filter(d => !bookings.some(b => b.id === d.id)), bookings, canonEmail);
-    if(configured){
-      try{
-        for(const pt of slotPatches){ try{ await sb.update("bookings", pt.id, { system_notes: pt.system_notes, updated_at: new Date().toISOString() }); }catch{ /* not this booker's booking: completed on send to council */ } }
-        for(const d of draftsArr){
-          const exists=bookings.find(b=>b.id===d.id);
-          if(exists) await sb.update("bookings",d.id,toDb(d));
-          else       await sb.insert("bookings",{...toDb(d), user_id: userId});
-        }
-        await loadBookings();
-      }catch(e){showToast("Save failed: "+e.message,"error");return;}
-    } else {
-      setBookings(prev=>{
-        let next=prev.map(b=>{ const pt=slotPatches.find(x=>x.id===b.id); return pt?{...b,system_notes:pt.system_notes}:b; });
-        draftsArr.forEach(d=>{next=next.filter(b=>b.id!==d.id);next.push(d);});
-        return next;
-      });
+    try{
+      for(const pt of slotPatches){ try{ await sb.update("bookings", pt.id, { system_notes: pt.system_notes, updated_at: new Date().toISOString() }); }catch{ /* not this booker's booking: completed on send to council */ } }
+      for(const d of draftsArr){
+        const exists=bookings.find(b=>b.id===d.id);
+        if(exists) await sb.update("bookings",d.id,toDb(d));
+        else       await sb.insert("bookings",{...toDb(d), user_id: userId});
+      }
+      await loadBookings();
+    }catch(e){
+      showToast("Save failed: "+e.message,"error");
+      // Reload, so a retry updates the drafts that did save instead of inserting them again.
+      loadBookings();
+      return false;
     }
     setShowForm(false);setViewing(null);
     logActivity(isNew?"booking_create":"booking_edit", {
@@ -1124,6 +1091,7 @@ export default function App() {
           : buildApprovalEmailHtml({name,email,bookings:draftsArr,newStatus:draftsArr[0].status,adminNote:""}),
       });
     }
+    return true;
   }
 
   function handleStatusChange(booking,newStatus) {
@@ -1141,12 +1109,8 @@ export default function App() {
   // detail's cost-splitting / fixed-price editor to persist system_notes changes.
   async function handlePatchBooking(booking, patch) {
     const full = { ...patch, updated_at: new Date().toISOString() };
-    if (configured) {
-      try { await sb.update("bookings", booking.id, full); await loadBookings(); }
-      catch(e){ showToast("Save failed: "+e.message, "error"); return; }
-    } else {
-      setBookings(prev => prev.map(b => b.id===booking.id ? { ...b, ...full } : b));
-    }
+    try { await sb.update("bookings", booking.id, full); await loadBookings(); }
+    catch(e){ showToast("Save failed: "+e.message, "error"); return; }
     setViewing(prev => prev && prev.id===booking.id ? { ...prev, ...full } : prev);
     logActivity("booking_edit", { ids:[booking.id], booker: booking.email, pricing: true });
     showToast("Booking updated.");
@@ -1164,12 +1128,8 @@ export default function App() {
     let sysNotes = setCpsaResolution(booking.system_notes || "", "confirmed", "none");
     sysNotes = setGtecSnapshot(sysNotes, { name: booking.purpose||"", date: booking.date, start_hour: booking.start_hour, duration: booking.duration, facilityIds: [booking.facility_id] });
     const patch = { email: canonEm, name: bkName, status: "cpsa_confirmed", system_notes: sysNotes, updated_at: new Date().toISOString() };
-    if (configured) {
-      try { await sb.update("bookings", booking.id, patch); await loadBookings(); }
-      catch(e){ showToast("Convert failed: "+e.message, "error"); return; }
-    } else {
-      setBookings(prev => prev.map(b => b.id===booking.id ? { ...b, ...patch } : b));
-    }
+    try { await sb.update("bookings", booking.id, patch); await loadBookings(); }
+    catch(e){ showToast("Convert failed: "+e.message, "error"); return; }
     const teachKey = gtecTeamKey(booking.purpose||"");
     if (teachKey && teachKey.length >= 3) setGtecLinks(prev => ({ ...prev, [teachKey]: canonEm }));
     logActivity("cpsa_admin_convert", { booking_id: booking.id, to: canonEm, date: booking.date, facility_id: booking.facility_id, start_hour: booking.start_hour, duration: booking.duration });
@@ -1382,7 +1342,7 @@ export default function App() {
     cutoff.setMonth(cutoff.getMonth() - m);
     const cutoffISO = cutoff.toISOString();
     setSyncResults(prev => prev.filter(r => !r.syncedAt || r.syncedAt >= cutoffISO));
-    if (configured && isAdmin) {
+    if (isAdmin) {
       try { await sb.removeWhere("activity_log", `created_at=lt.${cutoffISO}`); }
       catch(e) { console.warn("purgeOldLogs activity_log:", e.message); }
     }
@@ -1454,22 +1414,17 @@ export default function App() {
       const gtecSnap = { name: admin.purpose||"", date: admin.date, start_hour: admin.start_hour, duration: admin.duration, facilityIds: [admin.facility_id] };
       let sys = stripClashPrevStatus(live.system_notes || "");
       sys = targetStatus === "cpsa_review_needed" ? setGtecSnapshot(setMismatchNote(sys, reasons), gtecSnap) : stripMismatchNote(sys);
-      if (configured) {
-        await sb.update("bookings", live.id, { status: targetStatus, system_notes: sys, updated_at: new Date().toISOString() });
-      } else {
-        setBookings(prev => prev.map(b => b.id === live.id ? { ...b, status: targetStatus, system_notes: sys } : b));
-      }
+      await sb.update("bookings", live.id, { status: targetStatus, system_notes: sys, updated_at: new Date().toISOString() });
       adminIds.add(admin.id);
       const key = gtecTeamKey(admin.purpose);
       if (remember && key && live.email) taught[key] = live.email.toLowerCase();
       logActivity("clash_linked", { booking_id: live.id, gtec: admin.purpose, status: targetStatus });
     }
     for (const id of adminIds) {
-      if (configured) await sb.remove("bookings", id);
-      else setBookings(prev => prev.filter(b => b.id !== id));
+      await sb.remove("bookings", id);
     }
     if (remember && Object.keys(taught).length) setGtecLinks(prev => ({ ...prev, ...taught }));
-    if (configured) await loadBookings();
+    await loadBookings();
     showToast(`Linked ${list.length} booking${list.length!==1?"s":""} to GTEC${remember?" — future syncs will auto-link this org":""}.`);
   }
 
@@ -1482,15 +1437,10 @@ export default function App() {
     const patch={...(bulkTime!=null&&{start_hour:bulkTime}),...(bulkDur!=null&&{duration:bulkDur}),...(bulkFac&&{facility_id:bulkFac})};
     const changes=toUpdate.filter(b=>Object.entries(patch).some(([k,v])=>b[k]!==v));
     if(changes.length>0){
-      if(configured){
-        try{
-          for(const b of changes) await sb.update("bookings",b.id,{...patch,updated_at:new Date().toISOString()});
-          await loadBookings();
-        }catch(e){showToast("Bulk apply failed: "+e.message,"error");return;}
-      } else {
-        const updateIds=new Set(changes.map(b=>b.id));
-        setBookings(prev=>prev.map(b=>updateIds.has(b.id)?{...b,...patch}:b));
-      }
+      try{
+        for(const b of changes) await sb.update("bookings",b.id,{...patch,updated_at:new Date().toISOString()});
+        await loadBookings();
+      }catch(e){showToast("Bulk apply failed: "+e.message,"error");return;}
     }
     if(toCancel.length>0){
       setDeleteQueue(prev => { const have=new Set(prev.map(b=>b.id)); return [...prev, ...toCancel.filter(b=>!have.has(b.id))]; });
@@ -1513,19 +1463,15 @@ export default function App() {
     if (!res) return;
     const sysNotes = setCpsaResolution(booking.system_notes, res.resolution, newBillingState);
     const patch = { system_notes: sysNotes, updated_at: new Date().toISOString() };
-    if (configured) {
-      try {
-        await sb.update("bookings", booking.id, patch);
-        sb.insert("mismatch_log", {
-          booking_id: booking.id,
-          resolution: res.resolution,
-          billing_state: newBillingState,
-        }).catch(()=>{});
-        await loadBookings();
-      } catch(e) { showToast("Update failed: "+e.message, "error"); return; }
-    } else {
-      setBookings(prev => prev.map(b => b.id === booking.id ? { ...b, ...patch } : b));
-    }
+    try {
+      await sb.update("bookings", booking.id, patch);
+      sb.insert("mismatch_log", {
+        booking_id: booking.id,
+        resolution: res.resolution,
+        billing_state: newBillingState,
+      }).catch(()=>{});
+      await loadBookings();
+    } catch(e) { showToast("Update failed: "+e.message, "error"); return; }
     logActivity("mismatch_billing_settled", { booking_id: booking.id, billing_state: newBillingState });
     showToast(newBillingState === "credited" ? "Marked as credited." : "Marked as invoiced.");
   }
@@ -1533,24 +1479,20 @@ export default function App() {
   // Persist a mismatch resolution — called from AdminPanel via onSaveMismatch prop.
   // Returns true on success so AdminPanel can clear its local pending state.
   async function handleSaveMismatch(booking, patch, logPayload) {
-    if (configured) {
-      try {
-        await sb.update("bookings", booking.id, patch);
-        const orig = parseCpsaOrig(patch.system_notes) || { facility_id:booking.facility_id, start_hour:booking.start_hour, duration:booking.duration };
-        sb.insert("mismatch_log", {
-          booking_id: booking.id,
-          reasons: logPayload.reasons,
-          orig_facility_id: orig.facility_id,
-          orig_start_hour: orig.start_hour,
-          orig_duration: orig.duration,
-          resolution: logPayload.resolution,
-          billing_state: logPayload.billing_state || "none",
-        }).catch(()=>{}); // best-effort — silently no-ops until migration is run
-        await loadBookings();
-      } catch(e) { showToast("Save failed: "+e.message, "error"); return false; }
-    } else {
-      setBookings(prev => prev.map(b => b.id === booking.id ? { ...b, ...patch } : b));
-    }
+    try {
+      await sb.update("bookings", booking.id, patch);
+      const orig = parseCpsaOrig(patch.system_notes) || { facility_id:booking.facility_id, start_hour:booking.start_hour, duration:booking.duration };
+      sb.insert("mismatch_log", {
+        booking_id: booking.id,
+        reasons: logPayload.reasons,
+        orig_facility_id: orig.facility_id,
+        orig_start_hour: orig.start_hour,
+        orig_duration: orig.duration,
+        resolution: logPayload.resolution,
+        billing_state: logPayload.billing_state || "none",
+      }).catch(()=>{}); // best-effort — silently no-ops until migration is run
+      await loadBookings();
+    } catch(e) { showToast("Save failed: "+e.message, "error"); return false; }
     logActivity("mismatch_resolution", { booking_id:booking.id, resolution:logPayload.resolution, billing_state:logPayload.billing_state, ...(logPayload.swap_to ? { swap_from: logPayload.swap_from, swap_to: logPayload.swap_to } : {}) });
     const msg = logPayload.resolution === "amended"
       ? "Booking updated to GTEC values."
@@ -1570,18 +1512,13 @@ export default function App() {
   async function handleMarkInvoiced(bkgs) {
     const targets = bkgs.filter(b => !isAdminBooking(b) && !b.invoiced);
     if (!targets.length) { showToast("Already invoiced."); return; }
-    if (configured) {
-      try {
-        for (const b of targets) {
-          await sb.update("bookings", b.id, { invoiced:true, updated_at:new Date().toISOString() });
-          sb.update("bookings", b.id, { system_notes:setBilledSnapshot(b.system_notes, b) }).catch(()=>{});
-        }
-        await loadBookings();
-      } catch(e) { showToast("Mark invoiced failed: "+e.message, "error"); return; }
-    } else {
-      const ids = new Set(targets.map(b=>b.id));
-      setBookings(prev => prev.map(b => ids.has(b.id) ? { ...b, invoiced:true, system_notes:setBilledSnapshot(b.system_notes, b) } : b));
-    }
+    try {
+      for (const b of targets) {
+        await sb.update("bookings", b.id, { invoiced:true, updated_at:new Date().toISOString() });
+        sb.update("bookings", b.id, { system_notes:setBilledSnapshot(b.system_notes, b) }).catch(()=>{});
+      }
+      await loadBookings();
+    } catch(e) { showToast("Mark invoiced failed: "+e.message, "error"); return; }
     logActivity("invoiced", { count: targets.length, ids: targets.map(b=>b.id) });
     showToast(`${targets.length} booking${targets.length>1?"s":""} marked invoiced.`);
   }
@@ -1829,10 +1766,8 @@ export default function App() {
       id: b.id, name: b.name, email: b.email, date: b.date, facility_id: b.facility_id,
       start_hour: b.start_hour, duration: b.duration, status: b.status, deletedAt: new Date().toISOString(),
     }));
-    if(configured){
-      try{ await Promise.all(ids.map(id=>sb.remove("bookings",id))); await loadBookings(); }
-      catch(e){showToast("Delete failed: "+e.message,"error");return;}
-    } else { setBookings(prev=>prev.filter(b=>!ids.includes(b.id))); }
+    try{ await Promise.all(ids.map(id=>sb.remove("bookings",id))); await loadBookings(); }
+    catch(e){showToast("Delete failed: "+e.message,"error");return;}
     if(purgeEntries.length){
       // De-dupe by booking id so re-deleting (shouldn't happen) can't double-list a slot.
       setCpsaDeleteLog(prev => { const have=new Set(prev.map(e=>e.id)); return [...prev, ...purgeEntries.filter(e=>!have.has(e.id))]; });
@@ -1875,12 +1810,8 @@ export default function App() {
     if (!ids.length) { showToast("Those bookings are already with that booker."); return; }
     const patch = { email: to, name: name || to.split("@")[0], user_id: null, updated_at: new Date().toISOString() };
     const from = [...new Set(bookings.filter(b=>ids.includes(b.id)).map(b=>b.email))];
-    if (configured) {
-      try { for (const id of ids) await sb.update("bookings", id, patch); await loadBookings(); }
-      catch(e){ showToast("Reassign failed: "+e.message, "error"); return; }
-    } else {
-      const set = new Set(ids); setBookings(prev => prev.map(b => set.has(b.id) ? { ...b, ...patch } : b));
-    }
+    try { for (const id of ids) await sb.update("bookings", id, patch); await loadBookings(); }
+    catch(e){ showToast("Reassign failed: "+e.message, "error"); return; }
     logActivity("booking_edit", { ids, reassigned_from: from, reassigned_to: to });
     showToast(`${ids.length} booking${ids.length!==1?"s":""} reassigned to ${patch.name}.`);
   }
@@ -1897,13 +1828,8 @@ export default function App() {
     if (notes.length) {
       const now = new Date().toISOString();
       const patched = notes.map(d=>({ id:d.id, system_notes:setVendorVariance(byId[d.id].system_notes, d.variance) }));
-      if (configured) {
-        try { for (const p of patched) await sb.update("bookings", p.id, { system_notes:p.system_notes, updated_at:now }); await loadBookings(); }
-        catch(e){ showToast("Couldn't save the mismatch notes: "+e.message, "error"); return; }
-      } else {
-        const m = Object.fromEntries(patched.map(p=>[p.id,p.system_notes]));
-        setBookings(prev => prev.map(b => m[b.id]!=null ? { ...b, system_notes:m[b.id], updated_at:now } : b));
-      }
+      try { for (const p of patched) await sb.update("bookings", p.id, { system_notes:p.system_notes, updated_at:now }); await loadBookings(); }
+      catch(e){ showToast("Couldn't save the mismatch notes: "+e.message, "error"); return; }
       logActivity("booking_edit", { ids:notes.map(d=>d.id), vendorMismatch:true });
     }
     // The vendor approving means "vendor confirmed" for GTEC/CPSA facilities, "approved" elsewhere.
@@ -1982,7 +1908,7 @@ export default function App() {
 
   async function handleCartSubmit() {
     if (cart.length === 0) return;
-    // The cart is the single outbox. Three kinds of work:
+    // The cart is the single outbox. Kinds of work:
     //  • statusChange — deferred admin actions; the status mutation is applied here,
     //    then the booker is emailed (sync-style "mutate on submit, then notify").
     //  • save items   — new bookings + edits (notify-only items are never re-saved).
@@ -1990,7 +1916,7 @@ export default function App() {
     //  • slotChange   — shared-slot split / merge / unlink: relinks members and, for a
     //    split, inserts the new team's booking.
     let statusItems = cart.filter(item => item.statusChange);
-    const saveItems   = cart.filter(item => !item.notifyOnly && !item.statusChange && !item.slotChange);
+    const saveItems   = cart.filter(isDraftItem);
     const notifyItems = cart.filter(item => item.notifyOnly);
     const slotItems   = cart.filter(item => item.slotChange);
 
@@ -1998,7 +1924,8 @@ export default function App() {
     const allDrafts = saveItems.flatMap(item => item.drafts);
     if (allDrafts.length) {
       const name = (saveItems[0]||{}).name, email = (saveItems[0]||{}).email;
-      await handleSave(allDrafts, name, email, { skipEmail: true });
+      // On failure the cart is kept (nothing below runs), so the bookings aren't lost.
+      if (!(await handleSave(allDrafts, name, email, { skipEmail: true }))) return;
     }
 
     // 1b. Shared-slot changes: insert the split's new booking, then rewrite every
@@ -2006,19 +1933,11 @@ export default function App() {
     for (const it of slotItems) {
       try {
         if (it.newBooking) {
-          if (configured) await sb.insert("bookings", { ...it.newBooking, user_id: userId });
-          else setBookings(prev => [...prev, it.newBooking]);
+          await sb.insert("bookings", { ...it.newBooking, user_id: userId });
         }
         const now = new Date().toISOString();
-        if (configured) {
-          await Promise.all((it.patches||[]).map(p2 =>
-            sb.update("bookings", p2.id, { system_notes: p2.system_notes, updated_at: now })));
-        } else {
-          setBookings(prev => prev.map(b => {
-            const p2 = (it.patches||[]).find(x => x.id === b.id);
-            return p2 ? { ...b, system_notes: p2.system_notes, updated_at: now } : b;
-          }));
-        }
+        await Promise.all((it.patches||[]).map(p2 =>
+          sb.update("bookings", p2.id, { system_notes: p2.system_notes, updated_at: now })));
         logActivity(it.kind === "share" ? "slot_shared" : it.kind === "merge" ? "slot_merged" : "slot_unlinked", it.meta || {});
       } catch(e) { showToast("Shared-slot change failed: "+e.message, "error"); return; }
     }
@@ -2031,7 +1950,7 @@ export default function App() {
       // after a sync quietly put a confirmed booking back to "Pending GTEC review".
       try {
         const ids = [...new Set(statusItems.flatMap(it => it.ids))];
-        const fresh = configured ? await sb.select("bookings", `id=in.(${ids.map(id => `"${id}"`).join(",")})`) : bookings;
+        const fresh = await sb.select("bookings", `id=in.(${ids.map(id => `"${id}"`).join(",")})`);
         const nowStatus = new Map(fresh.map(b => [b.id, b.status]));
         const vendorAnswered = new Set([ST.VENDOR_CONFIRMED, ST.VENDOR_MISMATCH]);
         const kept = [];
@@ -2052,14 +1971,10 @@ export default function App() {
     }
     if (statusItems.length) {
       const now = new Date().toISOString();
-      if (configured) {
-        try {
-          await Promise.all(statusItems.flatMap(it => it.ids.map(id => sb.update("bookings", id, { status: it.newStatus, updated_at: now }))));
-          await loadBookings();
-        } catch(e) { showToast("Status update failed: "+e.message, "error"); return; }
-      } else {
-        setBookings(prev => prev.map(b => { const it = statusItems.find(s => s.ids.includes(b.id)); return it ? {...b, status: it.newStatus, updated_at: now} : b; }));
-      }
+      try {
+        await Promise.all(statusItems.flatMap(it => it.ids.map(id => sb.update("bookings", id, { status: it.newStatus, updated_at: now }))));
+        await loadBookings();
+      } catch(e) { showToast("Status update failed: "+e.message, "error"); return; }
       statusItems.forEach(it => logActivity("status_change", { ids: it.ids, to: it.newStatus, count: it.ids.length }));
     }
 
@@ -2069,8 +1984,7 @@ export default function App() {
       const at = new Date().toISOString();
       for (const d of item.drafts) {
         const sys = `${(d.system_notes||"").trim()}${d.system_notes?"\n":""}[ROOM-REQ ${item.ref} ${at}]`;
-        if (configured) { try { await sb.update("bookings", d.id, { status: "pending_cpsa", system_notes: sys, updated_at: at }); } catch(e) { showToast("Couldn't update the booking: "+e.message, "error"); } }
-        else setBookings(prev => prev.map(x => x.id===d.id ? { ...x, status: "pending_cpsa", system_notes: sys } : x));
+        try { await sb.update("bookings", d.id, { status: "pending_cpsa", system_notes: sys, updated_at: at }); } catch(e) { showToast("Couldn't update the booking: "+e.message, "error"); }
       }
     }
     if (!silentMode) {
@@ -2169,7 +2083,6 @@ export default function App() {
   // Admin → Backup / upload to Drive: every table in supabase-setup.sql (all rows, paged), plus this
   // browser's device-only data (profiles, billing records, sync logs…), as one JSON file.
   async function handleBackupDatabase() {
-    if (!configured) { showToast("No database configured.", "error"); return; }
     showToast("Preparing the backup…");
     const TABLES = ["bookings","settings","activity_log","mismatch_log","booker_contacts","field_reviews","field_flags","field_ratings","vetting_history","schema_version"];
     const PAGE = 1000, tables = {}, problems = {};
@@ -2280,7 +2193,6 @@ export default function App() {
             <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
               <img src={LOGO_SRC} alt="AMUA" style={{width:34,height:34,borderRadius:8,objectFit:"cover"}}/>
               {!isMobile&&<span style={{fontSize:15,fontWeight:800,color:T.ink,letterSpacing:"-0.02em"}}>FacilityBook</span>}
-              {!configured&&<span style={{fontSize:10,background:"#fef3c7",color:"#92400e",padding:"2px 6px",borderRadius:6,fontWeight:600}}>Demo</span>}
               <nav className="appnav" aria-label="Apps">
                 {APPS.map(a=><a key={a.id} href={appHref(a)} title={a.title} aria-current={a.id==="bookings"?"page":undefined}><span className="ai" aria-hidden="true">{a.icon}</span><span className="al">{a.label}</span></a>)}
               </nav>
@@ -2400,7 +2312,6 @@ export default function App() {
       {/* Body */}
       <div style={{maxWidth:1300,margin:"0 auto",padding:"16px 12px"}}>
         {dbError&&<Banner type="error" msg={dbError}/>}
-        {!configured&&<Banner type="info" msg="⚙️  Demo Mode — add Supabase credentials to enable persistent storage."/>}
 
         {emailLegend.length>0&&(tab==="calendar"||tab==="month"||tab==="list"||tab==="summary"||(tab==="admin"&&isAdmin))&&(()=>{
           // Top header: one pill per canonical booker (by alias). The All/None chip
@@ -2458,8 +2369,8 @@ export default function App() {
 
         {(tab==="calendar"||tab==="month"||tab==="list")&&<FacilityStrip isMobile={isMobile} isAdmin={isAdmin} selFac={selFac} setSelFac={setSelFac} setVenue={setVenue} hiddenFacs={hiddenFacs} setHiddenFacs={setHiddenFacs}/>}
 
-        {tab==="calendar"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<WeekCalendar bookings={bookings} selectedFacility={selFac} onNewBooking={openNew} onNewBookingRange={openNewRange} onBookingClick={setViewing} cartSourceIds={new Set(cart.flatMap(i=>i.sourceIds||[]))} deleteIds={new Set(deleteQueue.map(b=>b.id))} cartNewDrafts={cart.flatMap(i=>!i.notifyOnly&&!i.statusChange&&(i.sourceIds||[]).length===0?i.drafts:[])} focusedDate={focusedDate} setFocusedDate={setFocusedDate} onOpenDay={openDay} bookerFilter={listBookerFilter} aliasNames={aliasNames} emailAliases={emailAliases}/>}</div>}
-        {tab==="month"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<MonthCalendar bookings={bookings} selectedFacility={selFac} onBookingClick={setViewing} onNewBooking={openNew} onNewBookingRange={openNewRange} onMultiDelete={queueMultiForRemoval} onMultiAddToCart={handleMultiAddToCart} loggedInEmail={loggedInEmail} isAdmin={isAdmin} cartSourceIds={new Set(cart.flatMap(i=>i.sourceIds||[]))} deleteIds={new Set(deleteQueue.map(b=>b.id))} cartNewDrafts={cart.flatMap(i=>!i.notifyOnly&&!i.statusChange&&(i.sourceIds||[]).length===0?i.drafts:[])} onOpenDay={openDay} onGotoWeek={dk=>{ setFocusedDate(new Date(dk+"T00:00:00")); setTab("calendar"); }} bookerFilter={listBookerFilter} aliasNames={aliasNames} emailAliases={emailAliases}/>}</div>}
+        {tab==="calendar"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<WeekCalendar bookings={bookings} selectedFacility={selFac} onNewBooking={openNew} onNewBookingRange={openNewRange} onBookingClick={setViewing} cartSourceIds={cartSourceIds} deleteIds={new Set(deleteQueue.map(b=>b.id))} cartNewDrafts={cartNewDrafts} focusedDate={focusedDate} setFocusedDate={setFocusedDate} onOpenDay={openDay} bookerFilter={listBookerFilter} aliasNames={aliasNames} emailAliases={emailAliases}/>}</div>}
+        {tab==="month"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<MonthCalendar bookings={bookings} selectedFacility={selFac} onBookingClick={setViewing} onNewBooking={openNew} onNewBookingRange={openNewRange} onMultiDelete={queueMultiForRemoval} onMultiAddToCart={handleMultiAddToCart} loggedInEmail={loggedInEmail} isAdmin={isAdmin} cartSourceIds={cartSourceIds} deleteIds={new Set(deleteQueue.map(b=>b.id))} cartNewDrafts={cartNewDrafts} onOpenDay={openDay} onGotoWeek={dk=>{ setFocusedDate(new Date(dk+"T00:00:00")); setTab("calendar"); }} bookerFilter={listBookerFilter} aliasNames={aliasNames} emailAliases={emailAliases}/>}</div>}
 
         {tab==="list"&&(
           <div style={S.card}>
@@ -2510,7 +2421,7 @@ export default function App() {
                   {/* Grouped (schedule summary, the default) or Itemised (one row per booking). */}
                   <TableViewToggle value={listView} onChange={setListView}/>
                   {listView==="grouped" ? (
-                    <ScheduleSummaryModal bookings={bookings.filter(b=>inActiveVenue(b.facility_id)&&(selFac==="all"||b.facility_id===selFac)&&(listBookerFilter.size===0||listBookerFilter.has(b.email?.toLowerCase()))&&(!listShowClashes||allClashIds.has(b.id)))} isAdmin={isAdmin} loggedInEmail={loggedInEmail} onBulkApply={handleBulkApply} onBulkStatusChange={handleBulkStatusChange} onRemove={queueMultiForRemoval} onReassign={isAdmin?handleBulkReassign:undefined} onAddPricingRule={isAdmin?addPricingCondition:undefined} bookers={knownBookers} onView={setViewing} aliasNames={aliasNames} emailAliases={emailAliases} embedded/>
+                    <ScheduleSummaryModal bookings={bookings.filter(b=>inActiveVenue(b.facility_id)&&(selFac==="all"||b.facility_id===selFac)&&(listBookerFilter.size===0||listBookerFilter.has(b.email?.toLowerCase()))&&(!listShowClashes||allClashIds.has(b.id)))} isAdmin={isAdmin} loggedInEmail={loggedInEmail} onBulkApply={handleBulkApply} onBulkStatusChange={handleBulkStatusChange} onRemove={queueMultiForRemoval} onReassign={isAdmin?handleBulkReassign:undefined} onAddPricingRule={isAdmin?addPricingCondition:undefined} bookers={knownBookers} onView={setViewing} aliasNames={aliasNames} emailAliases={emailAliases}/>
                   ) : isMobile ? (
                     // Phones: filters in a compact grid (bookers via the pills above), then one
                     // card per booking — date, time, field and status on top, booker and purpose below.
@@ -2525,7 +2436,7 @@ export default function App() {
                         <select value={listStatusFilter} onChange={e=>setListStatusFilter(e.target.value)} aria-label="Status"
                           style={{...S.inp,fontSize:12,padding:"6px 8px",minWidth:0}}>
                           <option value="all">All statuses</option>
-                          {Object.keys(STATUS_META).filter(k=>!isLegacyStatus(k)).map(k=><option key={k} value={k}>{groupStatusLabel(k, bookings.filter(b=>b.status===k))}</option>)}
+                          {Object.keys(STATUS_META).map(k=><option key={k} value={k}>{groupStatusLabel(k, bookings.filter(b=>b.status===k))}</option>)}
                         </select>
                         <input placeholder="Search purpose…" value={listColPurpose} onChange={e=>setListColPurpose(e.target.value)}
                           style={{...S.inp,fontSize:12,padding:"6px 8px",minWidth:0,gridColumn:anyListFilter?"auto":"1 / -1"}}/>
@@ -2644,7 +2555,7 @@ export default function App() {
                                 <select value={listStatusFilter} onChange={e=>setListStatusFilter(e.target.value)}
                                   style={{padding:"3px 4px",fontSize:11,border:"1px solid #cbd5e1",borderRadius:4,background:"#fff",width:"100%"}}>
                                   <option value="all">All</option>
-                                  {Object.keys(STATUS_META).filter(k=>!isLegacyStatus(k)).map(k=><option key={k} value={k}>{groupStatusLabel(k, bookings.filter(b=>b.status===k))}</option>)}
+                                  {Object.keys(STATUS_META).map(k=><option key={k} value={k}>{groupStatusLabel(k, bookings.filter(b=>b.status===k))}</option>)}
                                 </select>
                               </th>
                               <th style={{padding:"3px 4px"}}/>
@@ -2736,16 +2647,15 @@ export default function App() {
         )}
 
         {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<Suspense fallback={<TabLoading/>}><SummaryTab bookings={bookings} loggedInEmail={loggedInEmail} onRemoveBookings={queueMultiForRemoval} facilityRates={facilityRates} pricingConditions={pricingConditions} onAddPricingCondition={addPricingCondition} onUpdatePricingCondition={updatePricingCondition} onRemovePricingCondition={removePricingCondition} isAdmin={isAdmin} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onUpdateFacilityRate={updateFacilityRate} pricingMode={pricingMode} onSetPricingMode={setPricingMode} onProposeMerge={handleProposeMerge} onBulkApply={handleBulkApply} onMarkInvoiced={handleMarkInvoiced} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} bookerFilter={listBookerFilter} profiles={profiles} emailAliases={emailAliases} aliasNames={aliasNames} onCreateOfficialInvoice={handleCreateOfficialInvoice} onEmailInvoice={handleEmailInvoicePreview} loadRequest={summaryLoadRequest}/></Suspense>}</div>}
-        {tab==="billing"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<Suspense fallback={<TabLoading/>}><BillingTab billingRecords={billingRecords} onUpdateRecord={handleUpdateBillingRecord} onDeleteRecord={id=>setBillingRecords(prev=>prev.filter(r=>r.id!==id))} onCreateReceipt={handleCreateReceipt} onLoadToSummary={handleLoadBillingToSummary} isAdmin={isAdmin} loggedInEmail={loggedInEmail} emailAliases={emailAliases} aliasNames={aliasNames} profiles={profiles} driveEnabled={driveConfigured()} onDriveSync={handleDriveSync} onRenameBatch={handleRenameBatch} onDriveAttach={handleDriveAttachGtec} onEmailOfficial={handleEmailOfficialInvoices} onQueueInvoiceEmails={handleQueueInvoiceEmails} silentMode={silentMode} onToggleSilent={isAdmin?setSilentMode:undefined}/></Suspense>}</div>}
+        {tab==="billing"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<Suspense fallback={<TabLoading/>}><BillingTab billingRecords={billingRecords} onUpdateRecord={handleUpdateBillingRecord} onDeleteRecord={id=>setBillingRecords(prev=>prev.filter(r=>r.id!==id))} onCreateReceipt={handleCreateReceipt} onLoadToSummary={handleLoadBillingToSummary} isAdmin={isAdmin} loggedInEmail={loggedInEmail} emailAliases={emailAliases} aliasNames={aliasNames} driveEnabled={driveConfigured()} onDriveSync={handleDriveSync} onRenameBatch={handleRenameBatch} onDriveAttach={handleDriveAttachGtec} onEmailOfficial={handleEmailOfficialInvoices} onQueueInvoiceEmails={handleQueueInvoiceEmails} silentMode={silentMode} onToggleSilent={isAdmin?setSilentMode:undefined}/></Suspense>}</div>}
         {tab==="about"&&<div style={{padding:"8px 0"}}><Suspense fallback={<TabLoading/>}><AboutTab/></Suspense></div>}
         {tab==="allocation"&&isAdmin&&<div style={S.card}><Suspense fallback={<TabLoading/>}><CouncilAllocationTab outcomes={councilOutcomes} bookings={bookings} syncing={councilSyncing} syncLog={councilSyncLog} onSync={handleCouncilMailSync} onSaveOutcomes={saveCouncilOutcomes} onBulkStatusChange={handleBulkStatusChange} onQueueNotifications={queueNotifications} onLinkApp={handleLinkCouncilApp} aliasNames={aliasNames} loggedInEmail={loggedInEmail}/></Suspense></div>}
         {tab==="admin"&&isAdmin&&<div style={S.card}>
-          {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<Suspense fallback={<TabLoading/>}><AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onView={setViewing} onQueueDelete={queueForRemovalSilent} clashes={allClashes} deleteIds={new Set(deleteQueue.map(b=>b.id))} facilityRates={facilityRates} onUpdateFacilityRate={updateFacilityRate} onResolveOldUnapproved={handleResolveOldUnapproved} onReassign={handleBulkReassign} bookers={knownBookers} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onSyncDB={handleSyncDB} onBulkApply={handleBulkApply} onSaveMismatch={handleSaveMismatch} onInformCpsa={setInformCpsaFor} onRequestRoom={setRoomRequestFor} onQueueNotifications={queueNotifications} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} onLinkClash={handleLinkClashToGtec} loggedInEmail={loggedInEmail} syncResults={syncResults} onClearSyncResults={()=>setSyncResults([])} showSyncResults={showSyncPanel} onToggleSyncResults={()=>setShowSyncPanel(v=>!v)} bookerFilter={listBookerFilter} onToggleBooker={toggleBooker} onSetBookerFilter={setListBookerFilter} aliasNames={aliasNames} emailAliases={emailAliases} pricingConditions={pricingConditions} onAddPricingCondition={addPricingCondition} onUpdatePricingCondition={updatePricingCondition} onRemovePricingCondition={removePricingCondition} cpsaDeleteLog={cpsaDeleteLog} onClearDeleteLogEntry={id=>setCpsaDeleteLog(prev=>prev.filter(e=>e.id!==id))} onClearDeleteLog={()=>setCpsaDeleteLog([])} syncFeed={syncFeed} onPasteFeed={handlePasteFeed} cjrMonthUrl={cjrMonthUrl} onSendToCouncil={handleSendToCouncil}/></Suspense>}
+          {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<Suspense fallback={<TabLoading/>}><AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onView={setViewing} onQueueDelete={queueForRemovalSilent} clashes={allClashes} deleteIds={new Set(deleteQueue.map(b=>b.id))} facilityRates={facilityRates} onResolveOldUnapproved={handleResolveOldUnapproved} onReassign={handleBulkReassign} bookers={knownBookers} approxPlayers={approxPlayers} onBulkApply={handleBulkApply} onSaveMismatch={handleSaveMismatch} onInformCpsa={setInformCpsaFor} onRequestRoom={setRoomRequestFor} onQueueNotifications={queueNotifications} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} onLinkClash={handleLinkClashToGtec} loggedInEmail={loggedInEmail} syncResults={syncResults} onClearSyncResults={()=>setSyncResults([])} showSyncResults={showSyncPanel} onToggleSyncResults={()=>setShowSyncPanel(v=>!v)} bookerFilter={listBookerFilter} onToggleBooker={toggleBooker} onSetBookerFilter={setListBookerFilter} aliasNames={aliasNames} emailAliases={emailAliases} pricingConditions={pricingConditions} onAddPricingCondition={addPricingCondition} onUpdatePricingCondition={updatePricingCondition} onRemovePricingCondition={removePricingCondition} cpsaDeleteLog={cpsaDeleteLog} onClearDeleteLogEntry={id=>setCpsaDeleteLog(prev=>prev.filter(e=>e.id!==id))} onClearDeleteLog={()=>setCpsaDeleteLog([])} syncFeed={syncFeed} onPasteFeed={handlePasteFeed} cjrMonthUrl={cjrMonthUrl} onSendToCouncil={handleSendToCouncil}/></Suspense>}
         </div>}
       </div>
 
       {/* Modals */}
-      {showAdminScheduleModal && <ScheduleSummaryModal bookings={bookings} isAdmin={true} loggedInEmail={loggedInEmail} onBulkApply={handleBulkApply} onBulkStatusChange={handleBulkStatusChange} onRemove={queueMultiForRemoval} onReassign={isAdmin?handleBulkReassign:undefined} onAddPricingRule={isAdmin?addPricingCondition:undefined} bookers={knownBookers} onView={b=>{setShowAdminScheduleModal(false);setViewing(b);}} aliasNames={aliasNames} emailAliases={emailAliases} onClose={()=>setShowAdminScheduleModal(false)}/>}
       {showExtensionModal&&(
         <Modal title="🧩 Install AMUA Extensions" onClose={()=>setShowExtensionModal(false)} width={560}>
           <div style={{display:"flex",flexDirection:"column",gap:16,fontSize:14,color:"#0f172a"}}>
@@ -2810,11 +2720,9 @@ export default function App() {
             <span style={{fontSize:13,color:"#64748b"}}>month{logRetentionMonths===1?"":"s"}</span>
           </div>
           <div style={{fontSize:11,color:"#94a3b8",marginTop:8}}>Set to 0 to keep logs forever (no automatic purge).</div>
-          {configured&&(
-            <div style={{fontSize:11,color:"#94a3b8",marginTop:10,background:"#f8fafc",border:"1px solid #f1f5f9",borderRadius:6,padding:"6px 10px"}}>
+          {<div style={{fontSize:11,color:"#94a3b8",marginTop:10,background:"#f8fafc",border:"1px solid #f1f5f9",borderRadius:6,padding:"6px 10px"}}>
               Activity-log purging needs the admin <code>DELETE</code> policy from <code>supabase-setup.sql</code>.
-            </div>
-          )}
+            </div>}
           <div style={{marginTop:16,display:"flex",justifyContent:"flex-end",gap:8}}>
             <button onClick={()=>{purgeOldLogs();setShowRetentionModal(false);showToast("Old logs purged.");}} style={S.btn({background:"#fff",color:"#0f172a",border:"1.5px solid #e2e8f0",fontSize:12})}>Purge now</button>
             <button onClick={()=>setShowRetentionModal(false)} style={S.btn({background:"#0f172a",color:"#fff",fontSize:12})}>Done</button>
@@ -2921,7 +2829,7 @@ export default function App() {
           <BookingForm
             booking={editing!==null?editing:(Array.isArray(prefill.dates)&&prefill.dates.length?{_dates:prefill.dates,start_hour:prefill.startHour,duration:prefill.duration,...(prefill.facility?{facility_id:prefill.facility}:{})}:prefill.date?{date:prefill.date,start_hour:prefill.startHour,duration:prefill.duration,...(prefill.facility?{facility_id:prefill.facility}:{})}:null)}
             allBookings={bookings}
-            onSave={handleSave}
+           
             onAddToCart={handleAddToCart}
             onClose={()=>{setShowForm(false);setEditing(null);}}
             isAdmin={isAdmin}
@@ -3026,8 +2934,8 @@ export default function App() {
         <DayTimelinePopup date={dayPopupDate} focusHour={dayPopupFocus} focusDuration={dayPopupDur} bookings={bookings} onClose={()=>{setDayPopupDate(null);setDayPopupFocus(null);setDayPopupDur(null);}}
           onBookingClick={b=>{ setDayPopupDate(null);setDayPopupFocus(null); setViewing(b); }}
           onNewBooking={openNew}
-          cartNewDrafts={cart.flatMap(i=>!i.notifyOnly&&!i.statusChange&&(i.sourceIds||[]).length===0?i.drafts:[])}
-          deleteIds={new Set(deleteQueue.map(b=>b.id))} cartSourceIds={new Set(cart.flatMap(i=>i.sourceIds||[]))}/>
+          cartNewDrafts={cartNewDrafts}
+         />
       )}
     </div>
   );

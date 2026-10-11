@@ -13,7 +13,7 @@
 //     a reason (spring renovation, allocated to cricket) and suggestions;
 //   - a confirmation once the booking is made (booking confirmed / permit / invoice).
 
-export const GOOGLE_CLIENT_ID = "812224293255-g0rst80pg5f072im787g50h54euq67ig.apps.googleusercontent.com";
+const GOOGLE_CLIENT_ID = "812224293255-g0rst80pg5f072im787g50h54euq67ig.apps.googleusercontent.com";
 const SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
 const GMAIL = "https://gmail.googleapis.com/gmail/v1/users/me";
 

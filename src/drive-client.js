@@ -170,7 +170,7 @@ export async function keepLatestRevisionForever(fileId) {
   });
 }
 
-export async function driveAbout() {
+async function driveAbout() {
   return driveFetch("about", { query: { fields: "user(displayName,emailAddress)" } });
 }
 

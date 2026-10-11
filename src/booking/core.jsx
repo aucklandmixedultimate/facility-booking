@@ -2,12 +2,13 @@ import logoUrl from "../assets/logo.jpg";
 import { createClient } from "@supabase/supabase-js";
 import { getActor } from "../actor.js";
 import { useState, useRef, useEffect } from "react";
-import { isClosed, isAmuaReview, isLegacyStatus, normaliseStatus, stepTag, WORKFLOW_STEPS, VENDOR_QUEUE_STATUSES } from "../statuses.js";
+import { escHtml } from "../html.js";
+import { isClosed, isAmuaReview, isLegacyStatus, normaliseStatus, stepOf, stepTag, WORKFLOW_STEPS, VENDOR_QUEUE_STATUSES } from "../statuses.js";
 // ─── LOGO ─────────────────────────────────────────────────────────────────────
 export const LOGO_SRC = logoUrl;
 // ─── SUPABASE ─────────────────────────────────────────────────────────────────
 export const SUPABASE_URL  = import.meta.env.VITE_SUPABASE_URL;
-export const SUPABASE_ANON = import.meta.env.VITE_SUPABASE_ANON;
+const SUPABASE_ANON = import.meta.env.VITE_SUPABASE_ANON;
 export const supabase = SUPABASE_URL && SUPABASE_ANON
   ? createClient(SUPABASE_URL, SUPABASE_ANON, {
       auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, flowType: "pkce" },
@@ -19,11 +20,11 @@ export let _currentUser = null; // { id, email } — kept in sync by onAuthState
 // state so module-level sendEmail can CC a booker's primary address on mail sent
 // to one of their linked secondary addresses.
 export let _emailAliases = {};
-export function primaryEmailFor(em) {
+function primaryEmailFor(em) {
   if (!em) return null;
   return _emailAliases[em.toLowerCase()] || null;
 }
-export const _sessionId = (crypto?.randomUUID?.() || `sess-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+const _sessionId = (crypto?.randomUUID?.() || `sess-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 // Timestamp of this page load. Used to scope "new" sync-result highlighting to the
 // current session, so changes from a previous session read as old/seen on reload.
 export const _sessionStartIso = new Date().toISOString();
@@ -55,7 +56,7 @@ export async function logActivity(action, detail = {}) {
 
 // Uncaught errors in the browser go to the activity log (admins only, "App error"), at most
 // five per page load, so problems people hit are visible without a monitoring service.
-export let _errorsLogged = 0;
+let _errorsLogged = 0;
 export function logClientError(message, where) {
   if (_errorsLogged >= 5 || !message) return;
   _errorsLogged++;
@@ -167,7 +168,7 @@ export function councilContactOk(email) {
 export function visibleFacilities() { return FACILITIES.filter(f => !f.inactive && (!f.adminOnly || _isAdminView) && (!f.council || _isAdminView || ownsCouncilFacility(f))); }
 // Council fields are added per booker (Council fields page → Book), so a booker sees only
 // the ones added for them (any of their linked emails); admins see all.
-export function ownsCouncilFacility(f) {
+function ownsCouncilFacility(f) {
   const me = (_currentUser?.email || "").toLowerCase(); if (!me) return false;
   const prim = _emailAliases[me] || me;
   return (f.owners || []).some(o => o === me || o === prim || (_emailAliases[o] || o) === prim);
@@ -176,7 +177,7 @@ export function ownsCouncilFacility(f) {
 export const FACILITY_TINT = { f1:"#f5f3ff", f2:"#ede9fe", f3:"#dcfce7", f4:"#ecfdf5", f5:"#f0fdf4", g1:"#cffafe", g2:"#ecfeff", g3:"#f0fdff", s1:"#ffedd5", a1:"#fff1f2", n1:"#eff6ff" };
 export function isSocialFac(id) { return FACILITIES.find(f=>f.id===id)?.kind==="social"; }
 export const EMAIL_COLORS = ["#6366f1","#ec4899","#f59e0b","#10b981","#ef4444","#8b5cf6","#06b6d4","#84cc16","#f97316","#14b8a6","#e879f9","#fb7185","#34d399","#60a5fa","#fbbf24"];
-export const _ecc = {}; export let _eci = 0;
+const _ecc = {}; let _eci = 0;
 // { primaryEmail: "#hex" } — admin-set colour overrides, kept in sync from the
 // component's aliasColors state. Colour is resolved per canonical booker so linked
 // secondaries share their primary's colour (and override).
@@ -230,8 +231,6 @@ export const STATUS_META = {
   rejected:     {bg:"#fff1f2",border:"#f43f5e",text:"#881337",dot:"#f43f5e",label:"Rejected", desc:"Declined by AMUA or the vendor"},
   cancelled:    {bg:"#f8f8f8",border:"#94a3b8",text:"#475569",dot:"#94a3b8",label:"Cancelled", desc:"Withdrawn"},
   clash:        {bg:"#fef3c7",border:"#d97706",text:"#92400e",dot:"#d97706",label:"Clash", desc:"Overlaps another booking or a vendor block"},
-  amua_submit:  {bg:"#dbeafe",border:"#93c5fd",text:"#1e40af",dot:"#3b82f6",label:"(2/4) Queued for vendor", tpl:"(2/4) Queued for {vendor}"},
-  pending:      {bg:"#fff8e1",border:"#f59e0b",text:"#92400e",dot:"#f59e0b",label:"(1/4) Pending AMUA Review"},
   // Council workflows (see WORKFLOW_STEPS): AMUA review → [ask the private operator] →
   // apply to council → council decision → [confirm with the operator] → approved.
   op_permission:  {bg:"#f3e8ff",border:"#a855f7",text:"#6b21a8",dot:"#a855f7",label:"🤝 Asking operator permission", desc:"AMUA is asking the club or trust that runs the field"},
@@ -249,23 +248,23 @@ export const STATUS_META = {
 };
 // Each provider kind walks its own steps. Stored statuses stay provider-neutral keys.
 // The stages, groups and workflows live in src/statuses.js (the status model).
-export { COUNCIL_STAGE_STATUSES, WORKFLOW_STEPS, REVIEW_STATUSES } from "../statuses.js";
+export { REVIEW_STATUSES } from "../statuses.js";
 // Community facility rates ($/hr) by operator id; the rest are set in Facility Rates.
-export const COMMUNITY_RATES = { "ani-epsom": 20, "ani-lower": 20 };
+const COMMUNITY_RATES = { "ani-epsom": 20, "ani-lower": 20 };
 // Contact details AMUA has reviewed before its first request to a community facility
 // (settings "provider_contact_reviews": { providerId: {email, phone, contact_name, by, at} }).
 export let _contactReviews = {};
-export const isContactReviewed = pid => !!_contactReviews[pid];
+const isContactReviewed = pid => !!_contactReviews[pid];
 // invoiced is an orthogonal billing flag (booking.invoiced boolean), not a workflow status.
 export const INVOICED_META = {bg:"#f5f3ff",border:"#7c3aed",text:"#5b21b6",dot:"#7c3aed",label:"🧾 Invoiced"};
 // Solid status colours used as the primary background in week/month calendar blocks.
 // Field colour becomes the left-border accent; booker email colour appears as a small dot.
 // Matches STATUS_META.dot exactly so calendar chips and status badges use the same palette.
 export const STATUS_CAL_COLOR = {
-  pending_amua:"#f59e0b", queued_cpsa:"#3b82f6", amua_submit:"#3b82f6",
+  pending_amua:"#f59e0b", queued_cpsa:"#3b82f6",
   op_permission:"#a855f7", council_apply:"#14b8a6", council_pending:"#0d9488", council_action:"#ea580c", council_granted:"#65a30d", op_confirm:"#7c3aed",
   contact_review:"#ca8a04", community_request:"#2563eb",
-  pending_cpsa:"#0ea5e9", pending:"#f59e0b",     approved:"#22c55e",
+  pending_cpsa:"#0ea5e9", approved:"#22c55e",
   cpsa_confirmed:"#0891b2", cpsa_review_needed:"#fef9c3",
   clash:"#d97706", rejected:"#f43f5e", cancelled:"#94a3b8",
 };
@@ -330,7 +329,7 @@ export const MONTHS=["January","February","March","April","May","June","July","A
 //   └──────────────────────────── type: P=PO, I=Invoice, R=Receipt
 // e.g. P260607GTE10 — PO, Jun→Jul 2026, recipient GTE, issued the 10th.
 export const RECIPIENT_CODE_AMUA = "AMU";
-export const RECIPIENT_CODE_GTEC = "GTE";
+const RECIPIENT_CODE_GTEC = "GTE";
 
 // Facility providers — who AMUA hires from and raises purchase orders to. Keyed by the
 // `provider` on each facility. `short` names the provider in Drive folder names.
@@ -368,7 +367,7 @@ export function parseCouncilApp(sysNotes) {
 // areas, and a booking of that slot books all of them. Bookings at overlapping times on the
 // same slot share it; while fewer bookings share it than it has field areas, the council
 // batch shows extra occupancy available (CouncilOccupancyNotes).
-export const councilCap = b => FACILITIES.find(f => f.id === b.facility_id)?.council?.frisbee || 1;
+const councilCap = b => FACILITIES.find(f => f.id === b.facility_id)?.council?.frisbee || 1;
 export function councilOverlaps(bookings) {
   const live = (bookings || []).filter(b => !isClosed(b.status) && FACILITIES.find(f => f.id === b.facility_id)?.council);
   const byKey = {};
@@ -468,7 +467,7 @@ export function councilFeeSplit(bkgs) {
   const fields = Object.keys(byField).length;
   return { fees, byBooker, fields, total: fields * COUNCIL_APPLICATION_FEE };
 }
-export const COUNCIL_COLORS = ["#0d9488","#0891b2","#7c3aed","#be185d","#b45309","#15803d","#4338ca","#9f1239"];
+const COUNCIL_COLORS = ["#0d9488","#0891b2","#7c3aed","#be185d","#b45309","#15803d","#4338ca","#9f1239"];
 export function applyCouncilFacilities(map) {
   for (let i = FACILITIES.length - 1; i >= 0; i--) if (FACILITIES[i].council) FACILITIES.splice(i, 1);
   Object.keys(PROVIDERS).forEach(k => { if (PROVIDERS[k].dynamic) delete PROVIDERS[k]; });
@@ -505,7 +504,7 @@ export function workflowOf(facilityId) {
 }
 export function nextWorkflowStatus(b) {
   const steps = WORKFLOW_STEPS[workflowOf(b.facility_id)] || WORKFLOW_STEPS.direct;
-  const i = steps.indexOf(b.status === "pending" ? "pending_amua" : b.status);
+  const i = steps.indexOf(b.status);
   const nxt = i >= 0 && i < steps.length - 1 ? steps[i + 1] : null;
   // The contact review only happens before the first request to that facility.
   return nxt === "contact_review" && isContactReviewed(providerOfFacility(b.facility_id)) ? "community_request" : nxt;
@@ -513,10 +512,10 @@ export function nextWorkflowStatus(b) {
 // "Step 2 of 6" for council workflows, shown beside the status.
 export function workflowStep(b) {
   const wf = workflowOf(b.facility_id); if (wf !== "council" && wf !== "council_private" && wf !== "community") return "";
-  const steps = WORKFLOW_STEPS[wf], i = steps.indexOf(b.status === "pending" ? "pending_amua" : b.status);
-  return i >= 0 ? `${i + 1}/${steps.length}` : "";
+  const p = stepOf(b.status, wf);
+  return p ? `${p.n}/${p.of}` : "";
 }
-export function defaultProviderId() {
+function defaultProviderId() {
   return Object.keys(PROVIDERS).find(k => PROVIDERS[k].isDefault) || Object.keys(PROVIDERS)[0];
 }
 
@@ -563,7 +562,7 @@ export function activeVenueKeys() {
   const d = vs.find(v => v.key === defaultVenueKey())?.key || vs[0]?.key;
   return d ? [d] : ALL_VENUES;
 }
-export function activeVenueKey() { const ks = activeVenueKeys(); return ks === ALL_VENUES ? ALL_VENUES : ks[0]; }
+function activeVenueKey() { const ks = activeVenueKeys(); return ks === ALL_VENUES ? ALL_VENUES : ks[0]; }
 // Facilities the viewer removed from the calendars' options (✕ on a facility pill).
 export let _hiddenFacs = new Set();
 export function inActiveVenue(facilityId) {
@@ -583,12 +582,12 @@ export function venueFacilities(keepId) {
 // facility. Every facility the viewer can book is offered (council fields added on the
 // Council fields page included), not just the calendar's current venue. `keepId` keeps a
 // booking's current facility listed even if the viewer can no longer see it.
-export function bookableFacilities(keepId) {
+function bookableFacilities(keepId) {
   const vis = visibleFacilities();
   const keep = keepId && !vis.some(f => f.id === keepId) ? FACILITIES.find(f => f.id === keepId) : null;
   return keep ? [...vis, keep] : vis;
 }
-export function bookableVenues(keepId) {
+function bookableVenues(keepId) {
   const cur = activeVenueKey(), facs = bookableFacilities(keepId), order = listVenues().map(v => v.key);
   const byKey = new Map();
   facs.forEach(f => { const k = venueKeyOf(f), [pid, site] = k.split("|");
@@ -612,7 +611,7 @@ export function providerGroupOf(pid) {
   if (pid !== "stcuthberts" && (k === "community" || pid === "ani")) return "community";
   return pid;
 }
-export const providerMemberLabel = pid => pid === "akl_council" ? "Council-operated" : PROVIDERS[pid]?.kind === "council_private" ? `◆ ${providerLabel(pid)}` : providerLabel(pid);
+const providerMemberLabel = pid => pid === "akl_council" ? "Council-operated" : PROVIDERS[pid]?.kind === "council_private" ? `◆ ${providerLabel(pid)}` : providerLabel(pid);
 // A cascading provider menu: groups first; hovering (or clicking) a group shows its
 // providers, each with the venues it runs (all of them in the tooltip). `sites(pid)` lists a
 // provider's venues; `extra` adds rows at the end (e.g. All providers).
@@ -805,12 +804,12 @@ export function fmtTimeShort(h) {
   const hh=Math.floor(h), m=Math.round((h%1)*60), dh=hh>12?hh-12:hh===0?12:hh;
   return `${dh}${m?":"+String(m).padStart(2,"0"):""}${hh>=12?"p":"a"}`;
 }
-export const FAC_SHORT = { f1:"Mtg", f2:"Fn", f3:"Fld1", f4:"Fld2", f5:"Fld3", g1:"Ork1", g2:"Ork2", g3:"Ork3" };
+const FAC_SHORT = { f1:"Mtg", f2:"Fn", f3:"Fld1", f4:"Fld2", f5:"Fld3", g1:"Ork1", g2:"Ork2", g3:"Ork3" };
 export function facShort(id) { return FAC_SHORT[id] || (FACILITIES.find(x=>x.id===id)?.name) || id; }
 // Which ground a facility belongs to. Cornwall Park facilities carry no `site`, so they
 // share the empty default and still compare equal to each other.
-export function facSite(id) { return FACILITIES.find(f => f.id === id)?.site || ""; }
-export function sameSite(a, b) { return facSite(a) === facSite(b); }
+function facSite(id) { return FACILITIES.find(f => f.id === id)?.site || ""; }
+function sameSite(a, b) { return facSite(a) === facSite(b); }
 // Labels for tight spaces. A facility at a named site uses its short code — spelling out
 // "GTEC Orakei – Field 1" in a 96px calendar column or a table cell doesn't fit — while
 // the unqualified Cornwall Park facilities keep the wording they already had.
@@ -839,15 +838,6 @@ export const MOBILE_STYLE = `
   .fac-social-tex {
     background-image: repeating-linear-gradient(45deg, rgba(255,255,255,0.20) 0 4px, rgba(255,255,255,0) 4px 9px);
   }
-  /* Location and facility pills on desktop: one row that never overflows — the pills share
-     the width (up to 150px each, shrinking evenly), names cut with … and in full on hover. */
-  @media (min-width: 768px) {
-    .facpills { flex-wrap: nowrap !important; overflow-x: auto !important; scrollbar-width: none; }
-    .facpills .facpill { flex: 0 1 150px !important; min-width: 40px; transition: flex-basis .15s ease; }
-    .facpills .facpill .facpill-n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-    .facpills .facpill:hover { flex: 0 0 auto !important; max-width: 420px; }
-  }
-  .facpills .facpill .facpill-n { white-space: nowrap; }
   .fac-social-tex-dark {
     background-image: repeating-linear-gradient(45deg, rgba(0,0,0,0.10) 0 4px, rgba(0,0,0,0) 4px 9px);
   }
@@ -944,8 +934,8 @@ export function layoutOverlapLanes(items) {
 // Serialises a live <table> DOM node to clean HTML + tab-separated text so it
 // pastes as a real table into Sheets/Excel/Docs/email (same idea as the mismatch
 // "copy" action, but generic). <CopyableTable> wraps a table and adds the button.
-export function escTableText(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
-export function serializeTableEl(table){
+function escTableText(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function serializeTableEl(table){
   if(!table) return { html:"", text:"" };
   const rows = [...table.rows];
   const cellText = c => (c.innerText||c.textContent||"").replace(/\s+/g," ").trim();
@@ -986,8 +976,8 @@ export function CopyableTable({ children, style, align="left" }){
 // System markers (CPSA mismatch, billing snapshot, CPSA submission refs) live in
 // booking.system_notes — separate from user-editable booking.notes. All read helpers
 // fall back to booking.notes for rows that pre-date the system_notes column migration.
-export const CPSA_MISMATCH_RE = /\[CPSA-MISMATCH\][^\n]*/g;
-export const CPSA_GTEC_RE = /\[CPSA-GTEC\][^\n]*/g;
+const CPSA_MISMATCH_RE = /\[CPSA-MISMATCH\][^\n]*/g;
+const CPSA_GTEC_RE = /\[CPSA-GTEC\][^\n]*/g;
 export function setMismatchNote(sysNotes, reasons) {
   const base = (sysNotes||"").replace(CPSA_MISMATCH_RE,"").trim();
   if (!reasons || !reasons.length) return base;
@@ -1099,8 +1089,8 @@ export function parseBilledSnapshot(sysNotes, notesLegacy) {
 }
 // CPSA mismatch resolution state stored in system_notes as [CPSA-RES] resolution|billingState|loggedAtISO.
 // Billing states: none | credit_pending | invoice_pending | credited | invoiced
-export const CPSA_RES_RE_G = /\[CPSA-RES\][^\n]*/g;
-export const CPSA_ORIG_RE_G = /\[CPSA-ORIG\][^\n]*/g;
+const CPSA_RES_RE_G = /\[CPSA-RES\][^\n]*/g;
+const CPSA_ORIG_RE_G = /\[CPSA-ORIG\][^\n]*/g;
 export function parseCpsaResolution(sysNotes) {
   const m = (sysNotes||"").match(/\[CPSA-RES\]\s*([^\n]*)/);
   if (!m) return null;
@@ -1128,7 +1118,7 @@ export function setCpsaOrig(sysNotes, b) {
 // Pre-clash workflow status, stored in system_notes when a sync flags a booking as
 // "clash". A later sync that finds the clash resolved restores this prior stage
 // (e.g. pending_amua, queued_cpsa) instead of leaving the booking stuck on "clash".
-export const CLASH_PREV_RE = /\[CLASH-PREV\][^\n]*/g;
+const CLASH_PREV_RE = /\[CLASH-PREV\][^\n]*/g;
 export function setClashPrevStatus(sysNotes, status) {
   const base = (sysNotes||"").replace(CLASH_PREV_RE,"").trim();
   const marker = `[CLASH-PREV] ${status}`;
@@ -1143,14 +1133,14 @@ export function stripClashPrevStatus(sysNotes) { return (sysNotes||"").replace(C
 // and beyond). Once here, GTEC holds the slot, so a later cancellation must be
 // requested from GTEC for purging — not just removed from our records. A booking
 // flagged "clash" hides its real stage in [CLASH-PREV]; resolve through to that.
-export const GTEC_QUEUE_STATUSES = VENDOR_QUEUE_STATUSES;
+const GTEC_QUEUE_STATUSES = VENDOR_QUEUE_STATUSES;
 export function reachedGtecQueue(b) {
   let s = b?.status;
   if (s === "clash") s = parseClashPrevStatus(b?.system_notes) || s;
   return GTEC_QUEUE_STATUSES.has(s);
 }
 // Parse the compact time strings produced by fmtTimeShort, e.g. "6p" → 18, "6:30p" → 18.5.
-export function parseFmtTimeShort(s) {
+function parseFmtTimeShort(s) {
   const m = (s||"").trim().toLowerCase().match(/^(\d+)(?::(\d+))?([ap])$/);
   if (!m) return NaN;
   let h = parseInt(m[1], 10);
@@ -1191,7 +1181,7 @@ export function parseCpsaRefs(sysNotes, notesLegacy) {
 // Co-booker cost split, stored as [SPLIT] email:weight|email:weight in system_notes.
 // The primary booker is always one of the participants. Each booker is invoiced their
 // weight / total-weight share of the booking's cost. Absent ⇒ no split (primary pays all).
-export const SPLIT_RE = /\[SPLIT\][^\n]*/g;
+const SPLIT_RE = /\[SPLIT\][^\n]*/g;
 export function parseSplit(sysNotes) {
   const m = (sysNotes||"").match(/\[SPLIT\]\s*([^\n]*)/);
   if (!m) return null;
@@ -1212,7 +1202,7 @@ export function setSplit(sysNotes, parts) {
 }
 // Fixed total cost that overrides the hourly calc, stored as [FNCOST] amount.
 // Used for function-room bookings AMUA prices by hand. Absent ⇒ use hourly rates.
-export const FNCOST_RE = /\[FNCOST\][^\n]*/g;
+const FNCOST_RE = /\[FNCOST\][^\n]*/g;
 export function parseFunctionCost(sysNotes) {
   const m = (sysNotes||"").match(/\[FNCOST\]\s*(-?[\d.]+)/);
   if (!m) return null;
@@ -1237,7 +1227,7 @@ export function setFunctionCost(sysNotes, amount) {
 //           the GTEC-facing name carries both
 // share is this member's fraction of the slot's cost. Shares sum to 1 across the group,
 // so the slot is billed once between the teams rather than once per team.
-export const SLOT_RE = /\[SLOT\][^\n]*/g;
+const SLOT_RE = /\[SLOT\][^\n]*/g;
 export function parseSlotLink(sysNotes) {
   const m = (sysNotes||"").match(/\[SLOT\]\s*([^\n]*)/);
   if (!m) return null;
@@ -1288,7 +1278,7 @@ export function evenSlotShares(n) {
 // Bookings created together — a recurrence, a multi-day span, a multi-facility pick or
 // any grouped variant — share a group id so the cart and summary present them as one
 // group (the same treatment weekly recurrences already get). Stored as [GRP] id.
-export const GRP_RE = /\[GRP\][^\n]*/g;
+const GRP_RE = /\[GRP\][^\n]*/g;
 export function parseGroupRef(sysNotes) { const m=(sysNotes||"").match(/\[GRP\]\s*(\S+)/); return m?m[1]:null; }
 export function setGroupRef(sysNotes, id) {
   const base=(sysNotes||"").replace(GRP_RE,"").trim();
@@ -1300,7 +1290,7 @@ export function setGroupRef(sysNotes, id) {
 // system_notes as [COUNCIL_INFO] {"players":14,"use":"training","grade":"…","notes":"…"}.
 // The council widget reads them for player numbers, training/competition and the
 // participant details.
-export const CINFO_RE = /\[COUNCIL_INFO\][^\n]*/g;
+const CINFO_RE = /\[COUNCIL_INFO\][^\n]*/g;
 export function parseCouncilInfo(sysNotes) { const m=(sysNotes||"").match(/\[COUNCIL_INFO\]\s*(\{.*\})/); if(!m) return null; try{ return JSON.parse(m[1]); }catch{ return null; } }
 export function setCouncilInfo(sysNotes, info) {
   const base=(sysNotes||"").replace(CINFO_RE,"").trim();
@@ -1384,7 +1374,7 @@ export function getClashes(allBookings) {
 // characters like / & ' arrive as codes ("(2&#x2F;4) Queued for GTEC"). Drop the
 // "(2/4)" pipeline-step prefix from status labels and swap the rest for characters that
 // survive escaping.
-export function cleanEmailSubject(subject) {
+function cleanEmailSubject(subject) {
   return String(subject || "")
     .replace(/\(\d+\s*\/\s*\d+\)\s*/g, "")
     .replace(/\s*\/\s*/g, " - ")
@@ -1406,6 +1396,9 @@ export function cleanEmailSubject(subject) {
 export const AMUA_INBOX = "aucklandmixedultimate@gmail.com";
 export let _bookerEmails = new Set();   // every booking's email (and its alias primary), kept in sync by the App
 export let _vendorEmails = new Set();   // vendor profile emails: never bookers, even if they appear in bookings
+// A cart item that carries bookings to save (new or edited drafts), as opposed to a status
+// change, notification, invoice email or shared-slot change, which have no `drafts`.
+export const isDraftItem = i => !i.notifyOnly && !i.statusChange && !i.slotChange;
 export function isBookerAddress(email) {
   const e = (email || "").trim().toLowerCase(); if (!e) return false;
   if (e === AMUA_INBOX) return true;
@@ -1417,7 +1410,7 @@ export function toAmuaDraft({ to, cc, subject, html }) {
   return { to: AMUA_INBOX, cc: undefined, subject: `[DRAFT for ${list}] ${subject}`,
     html: `<div style="font-family:sans-serif;border:2px dashed #b45309;background:#fffbeb;padding:10px 14px;margin-bottom:14px;border-radius:8px">
       <b>Draft — not sent.</b> AMUA doesn't email vendors, operators or the council from the booking app.<br>
-      <b>Intended recipients:</b> ${String(to || "").replace(/</g, "&lt;")}${cc ? `<br><b>Cc:</b> ${String(cc).replace(/</g, "&lt;")}` : ""}<br>
+      <b>Intended recipients:</b> ${escHtml(to)}${cc ? `<br><b>Cc:</b> ${escHtml(cc)}` : ""}<br>
       Review it, then send it from Gmail.</div><hr>${html}` };
 }
 export async function sendEmail({ to, subject: rawSubject, html, kind = "order", cc }) {
@@ -1461,10 +1454,10 @@ export async function sendApprovalEmail({ to, subject, html }) {
 }
 
 // Public link surfaced to bookers: the live GTEC field calendar.
-export const GTEC_CALENDAR_URL = "https://www.carltonjuniorsrugby.co.nz/venue-hire-fields-1/field-calendar";
+const GTEC_CALENDAR_URL = "https://www.carltonjuniorsrugby.co.nz/venue-hire-fields-1/field-calendar";
 // Reusable "useful links" block for booker-facing emails — links the GTEC calendar so
 // bookers can cross-check. (No field hire request form: bookings go through AMUA.)
-export function emailLinksBlock() {
+function emailLinksBlock() {
   return `<div style="margin-top:20px;padding:14px 16px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px">
     <div style="font-size:10px;font-weight:700;color:#0369a1;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px">Useful links</div>
     <div style="font-size:13px;line-height:2">
@@ -1485,7 +1478,7 @@ export function buildOrderEmailHtml({ name, email, bookings: bkgs=[], deletedBoo
         <td style="padding:10px 14px;border-bottom:1px solid ${borderColor};font-size:13px;color:${textColor};font-weight:600">${f?.name||b.facility_id}</td>
         <td style="padding:10px 14px;border-bottom:1px solid ${borderColor};font-size:13px;color:${textColor}">${fmtDate(b.date)}</td>
         <td style="padding:10px 14px;border-bottom:1px solid ${borderColor};font-size:13px;color:${textColor};white-space:nowrap">${fmtTime(b.start_hour)}–${fmtTime(b.start_hour+b.duration)}</td>
-        <td style="padding:10px 14px;border-bottom:1px solid ${borderColor};font-size:13px;color:${textColor}">${b.purpose||""}</td>
+        <td style="padding:10px 14px;border-bottom:1px solid ${borderColor};font-size:13px;color:${textColor}">${escHtml(b.purpose||"")}</td>
       </tr>`;
     }).join("");
   }
@@ -1537,13 +1530,13 @@ export function buildOrderEmailHtml({ name, email, bookings: bkgs=[], deletedBoo
     </tr></table>
   </td></tr>
   <tr><td style="padding:28px 36px">
-    <p style="margin:0 0 4px;font-size:15px;color:#334155">Hi <strong style="color:#0f172a">${name}</strong>,</p>
+    <p style="margin:0 0 4px;font-size:15px;color:#334155">Hi <strong style="color:#0f172a">${escHtml(name)}</strong>,</p>
     ${addedSection}
     ${deletedSection}
     ${hasAdded?emailLinksBlock():""}
     <p style="margin:24px 0 0;font-size:12px;color:#94a3b8">If you have questions, please contact the facility administrator directly.</p>
   </td></tr>
-  <tr><td style="padding:14px 36px 20px;background:#f8fafc;font-size:11px;color:#94a3b8;text-align:center">FacilityBook · Automated notification · ${email}</td></tr>
+  <tr><td style="padding:14px 36px 20px;background:#f8fafc;font-size:11px;color:#94a3b8;text-align:center">FacilityBook · Automated notification · ${escHtml(email)}</td></tr>
 </table>
 </td></tr></table></body></html>`;
 }
@@ -1551,12 +1544,19 @@ export function buildOrderEmailHtml({ name, email, bookings: bkgs=[], deletedBoo
 // Build HTML for approval/rejection/status notification
 export function buildApprovalEmailHtml({ name, email, bookings: bkgs, newStatus, adminNote }) {
   const isApproved = newStatus === "approved";
-  const isQueued = newStatus === "queued_cpsa" || newStatus === "amua_submit";
+  const isQueued = newStatus === "queued_cpsa";
   const isCpsaConfirmed = newStatus === "cpsa_confirmed";
   const isCpsaReview = newStatus === "cpsa_review_needed";
-  const color = isApproved ? "#22c55e" : isCpsaConfirmed ? "#0891b2" : isQueued ? "#3b82f6" : isCpsaReview ? "#d97706" : "#f43f5e";
+  const isRejected = newStatus === "rejected";
+  const isCancelled = newStatus === "cancelled";
+  const color = isApproved ? "#22c55e" : isCpsaConfirmed ? "#0891b2" : isQueued ? "#3b82f6" : isCpsaReview ? "#d97706"
+    : isRejected ? "#f43f5e" : isCancelled ? "#64748b" : (STATUS_META[newStatus]?.dot || "#3b82f6");
   const vendor = vendorShortFor(bkgs[0]?.facility_id);
-  const label = isApproved ? "Approved ✓" : isCpsaConfirmed ? `Confirmed by ${vendor} ✓` : isQueued ? `Queued for ${vendor} review` : isCpsaReview ? `Needs review — ${vendor} mismatch` : "Rejected ✗";
+  // Any other stage (council steps, contact review, clash…) gets a neutral "status updated"
+  // email naming the stage, rather than reading as a rejection.
+  const stage = bareStatusLabel(newStatus, bkgs[0]?.facility_id);
+  const label = isApproved ? "Approved ✓" : isCpsaConfirmed ? `Confirmed by ${vendor} ✓` : isQueued ? `Queued for ${vendor} review` : isCpsaReview ? `Needs review — ${vendor} mismatch`
+    : isRejected ? "Rejected ✗" : isCancelled ? "Cancelled" : "Updated";
   const bodyText = isApproved
     ? "Great news — your booking request has been approved!"
     : isCpsaConfirmed
@@ -1565,14 +1565,18 @@ export function buildApprovalEmailHtml({ name, email, bookings: bkgs, newStatus,
     ? `Your booking request has been reviewed by AMUA and is now queued to be submitted to ${vendor} for final approval. We'll notify you once a decision has been made.`
     : isCpsaReview
     ? `The details ${vendor} holds for your booking currently differ from your original request. AMUA is clarifying this with ${vendor} — nothing is final yet, and we'll do our best to align it to your original request.`
-    : "We're sorry — your booking request could not be approved.";
+    : isRejected
+    ? "We're sorry — your booking request could not be approved."
+    : isCancelled
+    ? "Your booking has been cancelled."
+    : `Your booking's status is now: ${stage}. We'll let you know when anything changes.`;
   const rows = bkgs.map(b => {
     const f = FACILITIES.find(x=>x.id===b.facility_id);
     return `<tr>
       <td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;font-size:13px;color:#0f172a">${f?.name||b.facility_id}</td>
       <td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;font-size:13px;color:#0f172a">${fmtDate(b.date)}</td>
       <td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;font-size:13px;color:#0f172a">${fmtTime(b.start_hour)}–${fmtTime(b.start_hour+b.duration)}</td>
-      <td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;font-size:13px;color:#0f172a">${b.purpose}</td>
+      <td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;font-size:13px;color:#0f172a">${escHtml(b.purpose)}</td>
     </tr>`;
   }).join("");
   return `<!DOCTYPE html><html><body style="margin:0;padding:0;background:#f8fafc;font-family:'Segoe UI',sans-serif">
@@ -1582,7 +1586,7 @@ export function buildApprovalEmailHtml({ name, email, bookings: bkgs, newStatus,
     <div style="font-size:22px;font-weight:800;color:#fff;letter-spacing:-0.02em">Booking ${label}</div>
   </td></tr>
   <tr><td style="padding:28px 32px">
-    <p style="margin:0 0 6px;font-size:15px;color:#0f172a">Hi <strong>${name}</strong>,</p>
+    <p style="margin:0 0 6px;font-size:15px;color:#0f172a">Hi <strong>${escHtml(name)}</strong>,</p>
     <p style="margin:0 0 24px;font-size:14px;color:#475569;line-height:1.6">${bodyText}</p>
     <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #f1f5f9;border-radius:10px;overflow:hidden">
       <thead><tr style="background:#f8fafc">
@@ -1593,11 +1597,11 @@ export function buildApprovalEmailHtml({ name, email, bookings: bkgs, newStatus,
       </tr></thead>
       <tbody>${rows}</tbody>
     </table>
-    ${adminNote?`<div style="margin-top:16px;padding:14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:13px;color:#475569"><strong>Note from admin:</strong> ${adminNote}</div>`:""}
+    ${adminNote?`<div style="margin-top:16px;padding:14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:13px;color:#475569"><strong>Note from admin:</strong> ${escHtml(adminNote)}</div>`:""}
     ${emailLinksBlock()}
     <p style="margin:24px 0 0;font-size:12px;color:#94a3b8">If you have questions, please contact the facility manager.</p>
   </td></tr>
-  <tr><td style="padding:16px 32px 24px;background:#f8fafc;font-size:11px;color:#94a3b8;text-align:center">FacilityBook · Sent to ${email}</td></tr>
+  <tr><td style="padding:16px 32px 24px;background:#f8fafc;font-size:11px;color:#94a3b8;text-align:center">FacilityBook · Sent to ${escHtml(email)}</td></tr>
 </table></td></tr></table></body></html>`;
 }
 
@@ -1613,11 +1617,11 @@ export function buildMismatchEmailHtml({ name, email, bookings: bkgs }) {
     const cfac = FACILITIES.find(x => x.id === cv.facility_id);
     const facNote = b.facility_id !== cv.facility_id ? " (" + (cfac?.name || cv.facility_id) + ")" : "";
     return "<tr>"
-      + "<td style='padding:6px 8px'>" + (b.purpose || "Booking") + "</td>"
+      + "<td style='padding:6px 8px'>" + escHtml(b.purpose || "Booking") + "</td>"
       + "<td style='padding:6px 8px'>" + (fac?.name || b.facility_id) + "</td>"
       + "<td style='padding:6px 8px'>" + fmtDate(b.date) + "</td>"
       + "<td style='padding:6px 8px'><span style='text-decoration:line-through;color:#94a3b8'>" + fmtTime(b.start_hour) + "–" + fmtTime(b.start_hour + b.duration) + "</span> → <span style='color:#a16207;font-weight:700'>" + fmtTime(cv.start_hour) + "–" + fmtTime(cv.start_hour + cv.duration) + facNote + "</span></td>"
-      + "<td style='padding:6px 8px;color:#64748b'>" + reasons.join("; ") + "</td>"
+      + "<td style='padding:6px 8px;color:#64748b'>" + escHtml(reasons.join("; ")) + "</td>"
       + "</tr>";
   }).join("");
   return "<div style='font-family:sans-serif;max-width:640px'>"
@@ -1650,7 +1654,7 @@ export function buildInformCpsaEmailHtml({ vendorName, booking, refs = [], submi
     + "<p>Hi " + (vendorName || "there") + ",</p>"
     + "<p>AMUA's record for the booking below differs from what GTEC currently holds. Please review and correct GTEC's schedule to match our record (the <strong>AMUA</strong> values).</p>"
     + "<table style='width:100%;border-collapse:collapse;font-size:13px;margin:12px 0;border:1px solid #e2e8f0'><tbody>"
-    + "<tr><td style='padding:6px 8px;color:#64748b;width:96px'>Booker</td><td style='padding:6px 8px;color:#0f172a'>" + (booking.name || "") + "</td></tr>"
+    + "<tr><td style='padding:6px 8px;color:#64748b;width:96px'>Booker</td><td style='padding:6px 8px;color:#0f172a'>" + escHtml(booking.name || "") + "</td></tr>"
     + "<tr><td style='padding:6px 8px;color:#64748b'>Field</td><td style='padding:6px 8px;color:#0f172a'>" + (fac?.name || booking.facility_id) + facNote + "</td></tr>"
     + "<tr><td style='padding:6px 8px;color:#64748b'>Date</td><td style='padding:6px 8px;color:#0f172a'>" + fmtDate(booking.date) + "</td></tr>"
     + "<tr><td style='padding:6px 8px;color:#64748b'>Time (AMUA)</td><td style='padding:6px 8px;color:#0f172a;font-weight:700'>" + fmtTime(booking.start_hour) + "–" + fmtTime(booking.start_hour + booking.duration) + " (" + booking.duration + "h)</td></tr>"
@@ -1673,7 +1677,7 @@ export function buildRoomRequestEmailHtml({ vendorName, bookings, ref, players =
       + "<td style='padding:6px 8px;border-top:1px solid #e2e8f0;font-weight:600;color:#0f172a'>" + (fac?.name || b.facility_id) + "</td>"
       + "<td style='padding:6px 8px;border-top:1px solid #e2e8f0'>" + fmtDate(b.date) + "</td>"
       + "<td style='padding:6px 8px;border-top:1px solid #e2e8f0'>" + fmtTime(b.start_hour) + "–" + fmtTime(b.start_hour + b.duration) + "</td>"
-      + "<td style='padding:6px 8px;border-top:1px solid #e2e8f0'>" + (b.purpose || "") + (n ? " · about " + n + " people" : "") + "</td>"
+      + "<td style='padding:6px 8px;border-top:1px solid #e2e8f0'>" + escHtml(b.purpose || "") + (n ? " · about " + n + " people" : "") + "</td>"
       + "</tr>";
   }).join("");
   return "<div style='font-family:sans-serif;max-width:640px'>"
@@ -1693,7 +1697,7 @@ export function buildRoomRequestEmailHtml({ vendorName, bookings, ref, players =
 export function buildClashEmailHtml({ name, email, clashes }) {
   const rows = (clashes || []).map(c => {
     const f = FACILITIES.find(x => x.id === c.admin.facility_id);
-    return "<tr><td style='padding:6px 8px'>" + (c.admin.purpose || "Admin booking") + "</td><td style='padding:6px 8px'>" + (f?.name || "") + "</td><td style='padding:6px 8px'>" + fmtDate(c.admin.date) + "</td><td style='padding:6px 8px'>" + fmtTime(c.admin.start_hour) + "–" + fmtTime(c.admin.start_hour + c.admin.duration) + "</td><td style='padding:6px 8px'>" + (c.user.purpose || "Your booking") + "</td></tr>";
+    return "<tr><td style='padding:6px 8px'>" + escHtml(c.admin.purpose || "Admin booking") + "</td><td style='padding:6px 8px'>" + (f?.name || "") + "</td><td style='padding:6px 8px'>" + fmtDate(c.admin.date) + "</td><td style='padding:6px 8px'>" + fmtTime(c.admin.start_hour) + "–" + fmtTime(c.admin.start_hour + c.admin.duration) + "</td><td style='padding:6px 8px'>" + (c.user.purpose || "Your booking") + "</td></tr>";
   }).join("");
   return "<div style='font-family:sans-serif;max-width:600px'>"
     + "<h2 style='color:#9f1239'>⚠️ Scheduling Clash Notice</h2>"
@@ -1860,7 +1864,7 @@ export function Modal({title,onClose,children,width=560,side=false}) {
 // ─── Activity-log presentation helpers ───────────────────────────────────────
 // Friendly action names + a human-readable summary, so the log reads as plain
 // English instead of raw JSON like {"ids":[...],"count":1}.
-export const ACTIVITY_ADMIN_ACTIONS = new Set([
+const ACTIVITY_ADMIN_ACTIONS = new Set([
   "cpsa_sync_start","cpsa_sync_complete","cpsa_confirm","cpsa_review_flag",
   "cpsa_admin_booking_add","cpsa_admin_booking_remove","cpsa_admin_convert","mismatch_resolution",
   "mismatch_billing_settled","status_change","invoiced","official_invoice_created",
@@ -1892,13 +1896,13 @@ export function activityActor(r) {
   if (by === "admin" || by === "booker") return by;
   return ACTIVITY_ADMIN_ACTIONS.has(r.action) ? "admin" : "booker";
 }
-export function activityFacName(fid) { const f = FACILITIES.find(x=>x.id===fid); return f ? f.name : (fid||"?"); }
+function activityFacName(fid) { const f = FACILITIES.find(x=>x.id===fid); return f ? f.name : (fid||"?"); }
 export function activitySlot(it) {
   if (!it || !it.date) return "";
   const t = (typeof it.start_hour==="number") ? ` ${fmtTime(it.start_hour)}–${fmtTime(it.start_hour+(it.duration||0))}` : "";
   return `${fmtDateShort(it.date)}${t} · ${activityFacName(it.facility_id)}`;
 }
-export function activityItemsSummary(items, count) {
+function activityItemsSummary(items, count) {
   const n = count || (items?items.length:0);
   if (!items || !items.length) return n ? `${n} booking${n!==1?"s":""}` : "";
   const head = items.slice(0,3).map(activitySlot).filter(Boolean).join("; ");
@@ -1950,10 +1954,8 @@ export function setModuleState(patch) {
   if ("_accessToken" in patch) _accessToken = patch._accessToken;
   if ("_currentUser" in patch) _currentUser = patch._currentUser;
   if ("_emailAliases" in patch) _emailAliases = patch._emailAliases;
-  if ("_errorsLogged" in patch) _errorsLogged = patch._errorsLogged;
   if ("_isAdminView" in patch) _isAdminView = patch._isAdminView;
   if ("_bookerContacts" in patch) _bookerContacts = patch._bookerContacts;
-  if ("_eci" in patch) _eci = patch._eci;
   if ("_emailColorOverrides" in patch) _emailColorOverrides = patch._emailColorOverrides;
   if ("_contactReviews" in patch) _contactReviews = patch._contactReviews;
   if ("_activeVenue" in patch) _activeVenue = patch._activeVenue;

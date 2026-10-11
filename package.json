@@ -10,9 +10,7 @@
     "test": "node --test tests/*.test.mjs",
     "check": "npm run lint && npm test && npm run build",
     "preview": "vite preview",
-    "suburbs": "node scripts/build-suburbs.mjs",
-    "predeploy": "node scripts/check-deploy-env.js && npm run build",
-    "deploy": "gh-pages -d dist"
+    "suburbs": "node scripts/build-suburbs.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.106.2",
@@ -27,12 +25,14 @@
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.1",
-    "babel-plugin-react-compiler": "^1.0.0",
     "eslint": "^9.39.1",
+    "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.24",
-    "gh-pages": "^6.3.0",
     "globals": "^16.5.0",
     "vite": "^7.3.1"
+  },
+  "engines": {
+    "node": ">=20.11"
   }
 }

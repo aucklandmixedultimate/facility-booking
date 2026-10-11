@@ -11,6 +11,8 @@ export async function htmlToPdfBlob(html) {
 
   const iframe = document.createElement("iframe");
   iframe.style.cssText = "position:fixed;left:-10000px;top:0;width:780px;height:1400px;border:0;visibility:hidden;";
+  // No scripts run in the document (it holds booker-typed text); same-origin so html2canvas can read it.
+  iframe.setAttribute("sandbox", "allow-same-origin");
   document.body.appendChild(iframe);
   try {
     await new Promise((resolve) => { iframe.onload = resolve; iframe.srcdoc = html; });

@@ -245,7 +245,7 @@ export function ActivityLogModal({onClose, inline=false, bookers=[], isAdmin=tru
 // Admin UI: map secondary emails into a primary profile + manage profile details.
 // A vendor profile's provider: set in User Management, else guessed from its email / name
 // (CPSA, Cornwall Park, Grammar or GTEC → GTEC / CPSA).
-export function vendorProviderOf(email, prof = {}) {
+function vendorProviderOf(email, prof = {}) {
   if (prof.providerId && PROVIDERS[prof.providerId]) return prof.providerId;
   const hay = `${email} ${prof.fullName || ""}`.toLowerCase();
   if (/cpsa|cornwall|gtec|grammar/.test(hay)) return "gtec";
@@ -255,7 +255,7 @@ export function vendorProviderOf(email, prof = {}) {
 // Vendors grouped like the provider picker: GTEC / CPSA (with GTEC and CPSA as default
 // entries), St Cuthbert's, Auckland Council (and the clubs that run council fields),
 // Community / Schools, then anything else.
-export function groupVendors(vendors, profiles) {
+function groupVendors(vendors, profiles) {
   const groups = new Map();
   const add = (id, label, sub, pid) => { if (!groups.has(id)) groups.set(id, { id, label, sub, pid, members: [], defaults: [] }); return groups.get(id); };
   add("gtec", providerLabel("gtec"), "Cornwall Park", "gtec");

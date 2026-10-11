@@ -1,10 +1,9 @@
-import { COUNCIL_STAGE_STATUSES, facShort, fmtTimeShort } from "./core.jsx";
+import { facShort, fmtTimeShort } from "./core.jsx";
 import { isClosed, isLive } from "../statuses.js";
-// ─── Main App ─────────────────────────────────────────────────────────────────
 // ─── CARLTON JUNIORS RUGBY SYNC ──────────────────────────────────────────────
 // (sync bookings use empty email/name and are deduped by date+facility+time+purpose)
-export const CJR_ORG_ID = "14520";
-export const CJR_ICAL   = "https://ics.teamup.com/feed/ksooqhdi7ua5ucp58j/15068031.ics";
+const CJR_ORG_ID = "14520";
+const CJR_ICAL   = "https://ics.teamup.com/feed/ksooqhdi7ua5ucp58j/15068031.ics";
 
 // Extract team identifier from CPSA EventName ("AU Ultimate Club (Field 3)" → "AU Ultimate Club")
 export function extractCPSATeam(eventName) {
@@ -12,14 +11,14 @@ export function extractCPSATeam(eventName) {
   return (m ? m[1] : eventName||"").trim();
 }
 
-export function normalizeId(s) { return (s||"").toLowerCase().replace(/[^a-z0-9]/g,""); }
+function normalizeId(s) { return (s||"").toLowerCase().replace(/[^a-z0-9]/g,""); }
 
-export function tokenize(s) { return (s||"").toLowerCase().replace(/[^a-z0-9\s]/g," ").split(/\s+/).filter(Boolean); }
+function tokenize(s) { return (s||"").toLowerCase().replace(/[^a-z0-9\s]/g," ").split(/\s+/).filter(Boolean); }
 
 // Does a CPSA team/event name look like our own organisation (AMUA)?
 // When it does, the name is NOT an inconsistency even if the matched booking is
 // under an individual member's name.
-export function resemblesAMUA(name) {
+function resemblesAMUA(name) {
   const t = tokenize(name);
   if (t.includes("amua")) return true;
   const hasUltimate = t.includes("ultimate");
@@ -27,7 +26,7 @@ export function resemblesAMUA(name) {
 }
 
 // Token-overlap (Jaccard) similarity between two names, 0..1, with acronym handling.
-export function nameSimilarity(a, b) {
+function nameSimilarity(a, b) {
   const ta = tokenize(a), tb = tokenize(b);
   if (!ta.length || !tb.length) return 0;
   const acr = toks => toks.map(w => w[0]).join("");
@@ -40,15 +39,15 @@ export function nameSimilarity(a, b) {
 
 // Activity/booking-type words that describe WHAT a slot is for, not WHO booked it.
 // Stripped before identity comparison so "Euphoria Training" reads as "Euphoria".
-export const GTEC_ACTIVITY_WORDS = new Set(["training","train","trainings","trials","trial","game","games","practice","practise","session","sessions","scrim","scrimmage","scrimmages","match","matches","fixture","fixtures","league","tournament","tourney","hat","social","dev","development","clinic","camp","mixed","womens","mens","open"]);
-export function stripActivityTokens(name) { return tokenize(name).filter(t => !GTEC_ACTIVITY_WORDS.has(t)); }
+const GTEC_ACTIVITY_WORDS = new Set(["training","train","trainings","trials","trial","game","games","practice","practise","session","sessions","scrim","scrimmage","scrimmages","match","matches","fixture","fixtures","league","tournament","tourney","hat","social","dev","development","clinic","camp","mixed","womens","mens","open"]);
+function stripActivityTokens(name) { return tokenize(name).filter(t => !GTEC_ACTIVITY_WORDS.has(t)); }
 // Place and filler words that appear in half the organisation names in Auckland and
 // identify nobody on their own. "Auckland Lacrosse Summer League" and a booking under
 // aucklandmixedultimate@gmail.com share only "auckland" — enough for the fuzzy tier to
 // link two unrelated tenants, which then surfaced as a mismatch where it should have
 // been a clash. Skipped as the SOLE basis for a fuzzy match; a whole-name match on the
 // stripped org string is a much stronger signal and is left alone.
-export const GTEC_GENERIC_TOKENS = new Set([
+const GTEC_GENERIC_TOKENS = new Set([
   "auckland","newzealand","zealand","city","central","north","south","east","west",
   "club","clubs","association","assoc","incorporated","team","teams",
   "senior","seniors","junior","juniors","youth","summer","winter","spring","autumn",
@@ -56,7 +55,7 @@ export const GTEC_GENERIC_TOKENS = new Set([
 ]);
 
 // Bounded Levenshtein (early-exit beyond max) for typo tolerance on org tokens.
-export function editDistance(a, b, max=2) {
+function editDistance(a, b, max=2) {
   if (a === b) return 0;
   const la=a.length, lb=b.length;
   if (Math.abs(la-lb) > max) return max+1;
@@ -88,7 +87,7 @@ export function extractEventDetailsEmail(details) {
 
 // 0..4 identity confidence that GTEC event `team` refers to booking `b`.
 // 4 = definitive (email from EventDetails, or a previously-taught manual link).
-export function gtecIdentityScore(team, b, { detailEmail, gtecLinks, canon }) {
+function gtecIdentityScore(team, b, { detailEmail, gtecLinks, canon }) {
   const bEmail = canon(b.email);
   // 1. Email straight from EventDetails — definitive, beats every other signal.
   if (detailEmail && canon(detailEmail) === bEmail) return 4;
@@ -231,7 +230,7 @@ export function findMatchingUserBooking(allBookings, ev, facilityIds, gtecLinks=
 
 // Maps facility mentions in EventName to internal facility IDs
 // Internal ids for the three playing fields, by the number GTEC writes.
-export const FIELD_ID_BY_NUM = { 1:"f3", 2:"f4", 3:"f5" };
+const FIELD_ID_BY_NUM = { 1:"f3", 2:"f4", 3:"f5" };
 // Every field referenced in a fragment of text, in the order written:
 //   "Field 2"            → ["f4"]
 //   "Field 1 & 2"        → ["f3","f4"]
@@ -239,7 +238,7 @@ export const FIELD_ID_BY_NUM = { 1:"f3", 2:"f4", 3:"f5" };
 //   "Carlton Park - Fld #2" → ["f4"]
 // A keyword must precede the number, so times/dates elsewhere in the string can't be
 // mistaken for field references. Digits only chain through an explicit separator.
-export function fieldIdsFromText(s) {
+function fieldIdsFromText(s) {
   // Names arrive HTML-escaped ("Fields 1, 2 &amp; 3"), which would otherwise break the
   // digit chain at the entity and drop every field after the first "&".
   const txt = (s || "").toLowerCase().replace(/&amp;/g, "&").replace(/&#(?:38|x26);/g, "&");
@@ -261,7 +260,7 @@ export function fieldIdsFromText(s) {
 // unrelated key that merely matches the name pattern can't shadow the real one. Key names
 // only — free text such as EventDetails is never scanned, since it can mention a field other
 // than the one booked.
-export function locationFieldIds(ev) {
+function locationFieldIds(ev) {
   if (!ev) return [];
   const firstNaming = keys => {
     for (const k of keys) {
@@ -301,7 +300,7 @@ export function parseCJRDate(s) {
 }
 
 // Parse "6:30 pm" → 18.5
-export function parseCJRTime(t) {
+function parseCJRTime(t) {
   const m = (t||"").trim().match(/^(\d+):(\d+)\s*(am|pm)$/i);
   if (!m) return null;
   let h = parseInt(m[1]), min = parseInt(m[2]), ampm = m[3].toLowerCase();
@@ -314,9 +313,9 @@ export function parseCJRTime(t) {
 // Treated as 8am–8pm: it previously ended at 4pm, which left the evening looking free
 // even though the field was taken, so evening bookings were neither clashed nor matched
 // against it. 8pm sits inside the calendar grid (which runs to CAL_END, 10pm).
-export const CJR_ALLDAY_START = 8, CJR_ALLDAY_END = 20;
+const CJR_ALLDAY_START = 8, CJR_ALLDAY_END = 20;
 // allDay marks the stand-in so the matcher doesn't report its 8am–8pm as a time difference.
-export const cjrAllDay = () => ({ start_hour: CJR_ALLDAY_START, duration: CJR_ALLDAY_END - CJR_ALLDAY_START, allDay: true });
+const cjrAllDay = () => ({ start_hour: CJR_ALLDAY_START, duration: CJR_ALLDAY_END - CJR_ALLDAY_START, allDay: true });
 
 // Parse EventDateTime string for start_hour and duration
 // e.g. "08/06/2026, 6:30 pm to 8:30 pm"  or  "08/06/2026" (no time = all day)
@@ -336,7 +335,7 @@ export function parseCJRDateTime(dt) {
 // "paste the feed" fallback (a top-level page isn't subject to CORS, so it always shows the JSON).
 export function cjrMonthUrl(year, month) {
   const dateStr = `${year}-${String(month+1).padStart(2,"0")}-01`;
-  return `https://www.carltonjuniorsrugby.co.nz/api/v1/calendar/MonthCalendarEvents?organisationId=%2014520&sportId=0&ical=${encodeURIComponent(CJR_ICAL)}&date=${dateStr}`;
+  return `https://www.carltonjuniorsrugby.co.nz/api/v1/calendar/MonthCalendarEvents?organisationId=%20${CJR_ORG_ID}&sportId=0&ical=${encodeURIComponent(CJR_ICAL)}&date=${dateStr}`;
 }
 // The feed as an array of events, from raw JSON text or a relay's wrapper ({ contents: "…" }).
 export function parseFeedText(text) {

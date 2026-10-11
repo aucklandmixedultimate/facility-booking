@@ -3,6 +3,7 @@ import { AMUA_INFO, Badge, vendorVarianceText, COUNCIL_APPLICATION_FEE, Copyable
 import { OneOffModal, PatternModal, PricingConditionsManager, buildOverlapPatternMap, defaultFacRates, resolveRates } from "./schedule.jsx";
 import { InvoiceOptionRow, InvoicePill, invLineLabel, renderInvoiceDocHtml } from "./billingDocs.jsx";
 import { isClosed } from "../statuses.js";
+import { csvCell } from "../html.js";
 export function SummaryTab({ bookings, loggedInEmail, onRemoveBookings, facilityRates = {}, pricingConditions = [], onAddPricingCondition, onUpdatePricingCondition, onRemovePricingCondition, isAdmin = false, approxPlayers = {}, onUpdateApproxPlayers, approxDurations = {}, onUpdateApproxDuration, onUpdateFacilityRate, pricingMode = "hourly", onSetPricingMode, onProposeMerge, onBulkApply, onMarkInvoiced, onMarkAdjustmentSettled, bookerFilter=new Set(), profiles={}, emailAliases={}, aliasNames={}, onCreateOfficialInvoice, onEmailInvoice, loadRequest=null }) {
   const now = new Date();
   const thisYear = now.getFullYear();
@@ -536,7 +537,7 @@ export function SummaryTab({ bookings, loggedInEmail, onRemoveBookings, facility
     } else if (format === "csv") {
       const subtotal = lines.reduce((s, l) => s + l.cost, 0);
       const { pre, gst, total } = gstAmounts(subtotal, invGst);
-      const esc = v => `"${String(v||"").replace(/"/g,'""')}"`;
+      const esc = csvCell;
       const docLabel = invDocType === "purchase_order" ? "Purchase Order" : "Invoice";
       const csvRows = lines.map(l => [invNumber, bookerName, bookerEmail, invLineLabel(l), l.detail, l.cost.toFixed(2)].map(esc).join(","));
       csvRows.push(["","","","","Subtotal",pre.toFixed(2)].map(esc).join(","));
@@ -769,10 +770,11 @@ export function SummaryTab({ bookings, loggedInEmail, onRemoveBookings, facility
     });
   }
 
-  // CSV export — all columns from every booking (not filtered)
+  // CSV export — all columns from every booking (not filtered). Admins only.
   function exportCSV() {
+    if (!isAdmin) return;
     const cols = ["id","name","email","phone","facility_id","facility_name","date","start_hour","start_time","duration","end_time","purpose","notes","status","created_at","updated_at"];
-    const esc  = v => `"${String(v||"").replace(/"/g,'""')}"`;
+    const esc  = csvCell;
     const rows = bookings.map(b => {
       const f=FACILITIES.find(x=>x.id===b.facility_id);
       return [b.id,b.name,b.email,b.phone||"",b.facility_id,f?.name||"",b.date,b.start_hour,fmtTime(b.start_hour),b.duration,fmtTime(b.start_hour+b.duration),b.purpose,b.notes||"",b.status,b.created_at,b.updated_at||""].map(esc).join(",");
@@ -825,9 +827,10 @@ export function SummaryTab({ bookings, loggedInEmail, onRemoveBookings, facility
         {/* Bookers are filtered by the shared booker pill bar above (grouped by category). */}
         <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
           <div style={{marginLeft:"auto",display:"flex",gap:6,...(narrow?{width:"100%"}:{})}}>
-            <button onClick={exportCSV} style={S.btn({ background:"#0f172a", color:"#fff", display:"flex", alignItems:"center", gap:6, ...(narrow?{flex:1,justifyContent:"center"}:{}) })}>
+            {/* Every booking with contact details: admins only. */}
+            {isAdmin && <button onClick={exportCSV} style={S.btn({ background:"#0f172a", color:"#fff", display:"flex", alignItems:"center", gap:6, ...(narrow?{flex:1,justifyContent:"center"}:{}) })}>
               ⬇ Export All Data (CSV)
-            </button>
+            </button>}
             {anyRates && (
               <button onClick={openInvoice} style={S.btn({ background:"#15803d", color:"#fff", display:"flex", alignItems:"center", gap:6, ...(narrow?{flex:1,justifyContent:"center"}:{}) })}>
                 🧾 Export Invoice
@@ -993,7 +996,7 @@ export function SummaryTab({ bookings, loggedInEmail, onRemoveBookings, facility
             Hire Usage &amp; Cost by Booker — {PRESETS.find(p=>p.key===preset)?.label}{dateFrom&&dateTo?` (${dateFrom} – ${dateTo})`:""}{emailFilterSet.size===1?` · ${[...emailFilterSet][0]}`:emailFilterSet.size>1?` · ${emailFilterSet.size} bookers`:""}
           </h3>
           {rows.length>0&&<button onClick={()=>{
-            const esc = v => `"${String(v||"").replace(/"/g,'""')}"`;
+            const esc = csvCell;
             const hdrs = isPerBooking
               ? ["Booker","Email","Bookings","Day Bookings","Eve Bookings","Total Hrs (approx)",
                   ...(anyRates?["Total Cost"]:[]),
@@ -1740,9 +1743,6 @@ export function SummaryTab({ bookings, loggedInEmail, onRemoveBookings, facility
           {...patternModal}
           isAdmin={isAdmin}
           canEdit={isAdmin || (patternModal.email||"").toLowerCase()===(loggedInEmail||"").toLowerCase()}
-          facilityRates={facilityRates}
-          pricingMode={pricingMode}
-          approxDurations={approxDurations}
           onClose={()=>setPatternModal(null)}
           onBulkApply={args=>{onBulkApply&&onBulkApply(args);}}
           onRemove={onRemoveBookings}
@@ -1765,8 +1765,6 @@ export function SummaryTab({ bookings, loggedInEmail, onRemoveBookings, facility
         const allBkgs = scopes.flatMap(s => s.bkgs);
         const totalCostInv = allBkgs.reduce((s,b)=>s+getBookingCost(b),0);
         const docLabel = invMode==="official" ? "Invoice" : (invDocType === "purchase_order" ? "Purchase Order" : "Invoice");
-        const OptionRow = InvoiceOptionRow;
-        const Pill = InvoicePill;
         const officialReady = invMode==="official" && invOrderName.trim().length>0 && allBkgs.length>0;
         return (
           <div style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.45)",zIndex:999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
@@ -1786,8 +1784,8 @@ export function SummaryTab({ bookings, loggedInEmail, onRemoveBookings, facility
               </div>
 
               {/* Booker filter — shared across both modes */}
-              <OptionRow label="Bookers">
-                <Pill active={invSelectedEmails.size===0} onClick={()=>setInvSelectedEmails(new Set())}>All</Pill>
+              <InvoiceOptionRow label="Bookers">
+                <InvoicePill active={invSelectedEmails.size===0} onClick={()=>setInvSelectedEmails(new Set())}>All</InvoicePill>
                 {allInvoiceEmails.map(e=>{
                   const sel=invSelectedEmails.has(e.toLowerCase());
                   const c=emailColor(e);
@@ -1803,7 +1801,7 @@ export function SummaryTab({ bookings, loggedInEmail, onRemoveBookings, facility
                     </button>
                   );
                 })}
-              </OptionRow>
+              </InvoiceOptionRow>
 
               {/* Include previously-invoiced bookings toggle (both modes) */}
               {isAdmin&&(
@@ -1856,32 +1854,32 @@ export function SummaryTab({ bookings, loggedInEmail, onRemoveBookings, facility
 
               {invMode==="draft" && (
                 <div style={{display:"flex",flexDirection:"column",gap:12}}>
-                  <OptionRow label="Document">
-                    <Pill active={invDocType==="invoice"} onClick={()=>setInvDocType("invoice")}>Invoice</Pill>
-                    <Pill active={invDocType==="purchase_order"} onClick={()=>setInvDocType("purchase_order")}>Purchase Order</Pill>
-                  </OptionRow>
-                  <OptionRow label="Name">
+                  <InvoiceOptionRow label="Document">
+                    <InvoicePill active={invDocType==="invoice"} onClick={()=>setInvDocType("invoice")}>Invoice</InvoicePill>
+                    <InvoicePill active={invDocType==="purchase_order"} onClick={()=>setInvDocType("purchase_order")}>Purchase Order</InvoicePill>
+                  </InvoiceOptionRow>
+                  <InvoiceOptionRow label="Name">
                     <input value={invName} onChange={e=>setInvName(e.target.value)} placeholder="e.g. Pilot"
                       style={{...S.inp,fontSize:12,maxWidth:200}}/>
                     <span style={{fontSize:11,color:"#94a3b8",alignSelf:"center",wordBreak:"break-all"}}>
                       {`AMUA ${invDocType==="purchase_order"?"PO":"Invoice"}${invName.trim()?` - ${invName.trim()}`:""} - ${(dateFrom||"…").replace(/-/g,"")}-${(dateTo||"…").replace(/-/g,"")}`}
                     </span>
-                  </OptionRow>
+                  </InvoiceOptionRow>
                   {invSelectedEmails.size !== 1 && allInvoiceEmails.length > 1 && (
-                    <OptionRow label="Output">
-                      <Pill active={invScope==="combined"} onClick={()=>setInvScope("combined")}>Combined</Pill>
-                      <Pill active={invScope==="per_booker"} onClick={()=>setInvScope("per_booker")}>Per booker</Pill>
-                    </OptionRow>
+                    <InvoiceOptionRow label="Output">
+                      <InvoicePill active={invScope==="combined"} onClick={()=>setInvScope("combined")}>Combined</InvoicePill>
+                      <InvoicePill active={invScope==="per_booker"} onClick={()=>setInvScope("per_booker")}>Per booker</InvoicePill>
+                    </InvoiceOptionRow>
                   )}
-                  <OptionRow label="Line items">
-                    <Pill active={invDetail==="grouped"} onClick={()=>setInvDetail("grouped")}>Grouped</Pill>
-                    <Pill active={invDetail==="individual"} onClick={()=>setInvDetail("individual")}>Individual</Pill>
-                  </OptionRow>
-                  <OptionRow label="GST">
-                    <Pill active={invGst==="inclusive"} onClick={()=>setInvGst("inclusive")}>Inclusive</Pill>
-                    <Pill active={invGst==="exclusive"} onClick={()=>setInvGst("exclusive")}>Exclusive (add on)</Pill>
-                    <Pill active={invGst==="note"} onClick={()=>setInvGst("note")}>Note only</Pill>
-                  </OptionRow>
+                  <InvoiceOptionRow label="Line items">
+                    <InvoicePill active={invDetail==="grouped"} onClick={()=>setInvDetail("grouped")}>Grouped</InvoicePill>
+                    <InvoicePill active={invDetail==="individual"} onClick={()=>setInvDetail("individual")}>Individual</InvoicePill>
+                  </InvoiceOptionRow>
+                  <InvoiceOptionRow label="GST">
+                    <InvoicePill active={invGst==="inclusive"} onClick={()=>setInvGst("inclusive")}>Inclusive</InvoicePill>
+                    <InvoicePill active={invGst==="exclusive"} onClick={()=>setInvGst("exclusive")}>Exclusive (add on)</InvoicePill>
+                    <InvoicePill active={invGst==="note"} onClick={()=>setInvGst("note")}>Note only</InvoicePill>
+                  </InvoiceOptionRow>
                   {isAdmin&&(
                     <div style={{display:"flex",flexDirection:"column",gap:6}}>
                       <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"#5b21b6",cursor:"pointer",background:"#f5f3ff",border:"1px solid #ddd6fe",borderRadius:8,padding:"8px 12px"}}>
@@ -1939,15 +1937,15 @@ export function SummaryTab({ bookings, loggedInEmail, onRemoveBookings, facility
 
               {invMode==="official" && isAdmin && onCreateOfficialInvoice && (
                 <div style={{display:"flex",flexDirection:"column",gap:12}}>
-                  <OptionRow label="Order name">
+                  <InvoiceOptionRow label="Order name">
                     <input value={invOrderName} onChange={e=>setInvOrderName(e.target.value)} placeholder="e.g. Term 1 2026 (required)"
                       style={{...S.inp,fontSize:12,maxWidth:260,border:invOrderName.trim()?"1.5px solid #e2e8f0":"1.5px solid #f43f5e"}}/>
-                  </OptionRow>
-                  <OptionRow label="GST">
-                    <Pill active={invGst==="inclusive"} onClick={()=>setInvGst("inclusive")}>Inclusive (extract)</Pill>
-                    <Pill active={invGst==="exclusive"} onClick={()=>setInvGst("exclusive")}>Exclusive (add on)</Pill>
-                    <Pill active={invGst==="note"} onClick={()=>setInvGst("note")}>Note only</Pill>
-                  </OptionRow>
+                  </InvoiceOptionRow>
+                  <InvoiceOptionRow label="GST">
+                    <InvoicePill active={invGst==="inclusive"} onClick={()=>setInvGst("inclusive")}>Inclusive (extract)</InvoicePill>
+                    <InvoicePill active={invGst==="exclusive"} onClick={()=>setInvGst("exclusive")}>Exclusive (add on)</InvoicePill>
+                    <InvoicePill active={invGst==="note"} onClick={()=>setInvGst("note")}>Note only</InvoicePill>
+                  </InvoiceOptionRow>
                   {/* Document structure preview */}
                   {(()=>{
                     const sel = invSelectedEmails.size>0 ? [...invSelectedEmails] : allInvoiceEmails;
@@ -2000,7 +1998,7 @@ export function SummaryTab({ bookings, loggedInEmail, onRemoveBookings, facility
                       📋 Create Invoices + GTEC PO
                     </button>
                     <div style={{fontSize:10,color:"#94a3b8",marginTop:6}}>
-                      Creates {invSelectedEmails.size||allInvoiceEmails.length} booker invoice{(invSelectedEmails.size||allInvoiceEmails.length)!==1?"s":""} + one PO per facility provider ·
+                      Creates {invSelectedEmails.size||allInvoiceEmails.length} booker invoice{(invSelectedEmails.size||allInvoiceEmails.length)!==1?"s":""} + one PO per vendor ·
                       Bookings marked invoiced only when record leaves Draft status.
                     </div>
                   </div>

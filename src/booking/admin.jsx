@@ -6,6 +6,7 @@ import { PatternModal, PricingConditionsManager, ReassignControl, ScheduleSummar
 import { InlineDayPicker, VendorTimesFields, vendorTimesDefault } from "./forms.jsx";
 import { isClosed } from "../statuses.js";
 import { purgeHolder as gtecPurgeHolder, purgeObsolete as gtecPurgeObsolete } from "./gtec.jsx";
+import { csvCell, escHtml } from "../html.js";
 // One newly-synced CPSA field booking, expandable to reveal the AMUA bookings it
 // clashes with (same facility / same time), any simultaneous use of a different
 // facility, and the CPSA-review/mismatch status of clashing bookings. Detail is
@@ -13,7 +14,7 @@ import { purgeHolder as gtecPurgeHolder, purgeObsolete as gtecPurgeObsolete } fr
 // One flagged user booking (mismatch or clash) surfaced by a sync, with a link to
 // open it. Snapshot fields are stored on the sync result; the live row is resolved
 // by id so "View" opens the current booking (and shows if it's since been resolved).
-export function SyncFlaggedRow({ snap, bookings, onView, kind }) {
+function SyncFlaggedRow({ snap, bookings, onView, kind }) {
   const f = FACILITIES.find(x=>x.id===snap.facility_id);
   const live = snap.id ? bookings.find(b=>b.id===snap.id) : null;
   const span = `${fmtTime(snap.start_hour)}–${fmtTime(snap.start_hour+snap.duration)}`;
@@ -35,7 +36,7 @@ export function SyncFlaggedRow({ snap, bookings, onView, kind }) {
     </div>
   );
 }
-export function SyncedItemRow({ ab, bookings }) {
+function SyncedItemRow({ ab, bookings }) {
   const af = FACILITIES.find(x=>x.id===ab.facility_id);
   // Resolve the live booking (by id, else a field-block match) so overlap checks
   // exclude the item itself and stay accurate for older sync-log entries.
@@ -112,16 +113,15 @@ export function CouncilOccupancyNotes({ bookings, ids, who = e => e }) {
 // src/councilMail.js): { id, outcome: "action"|"confirmed"|"declined"|"info", park, fields,
 // start, end, reason, coordinator:{name,email}, threadId, subject, outcomeAt, history[],
 // replied:{kind,at,by}, manual }.
-export const COUNCIL_OUTCOME_META = {
+const COUNCIL_OUTCOME_META = {
   action:    { label: "Offer — AMUA to confirm", bg: "#ffedd5", border: "#ea580c", text: "#7c2d12", rank: 0 },
   confirmed: { label: "Granted — allocate",      bg: "#ecfccb", border: "#65a30d", text: "#365314", rank: 1 },
   declined:  { label: "Declined",                bg: "#fff1f2", border: "#f43f5e", text: "#881337", rank: 2 },
   info:      { label: "Update",                  bg: "#f1f5f9", border: "#94a3b8", text: "#334155", rank: 3 },
 };
-export const escHtml = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 // AMUA's reply to the council about an offer, drafted to AMUA's own inbox (the app never
 // emails the council: see the email rule at sendEmail). AMUA sends it from Gmail, in the thread.
-export function buildCouncilReplyItem(o, kind, rationale) {
+function buildCouncilReplyItem(o, kind, rationale) {
   const ops = AMUA_INFO.contacts?.operations || {}, first = (o.coordinator?.name || "").split(/[\s,]+/)[0];
   const what = [o.park, o.fields, o.start && o.end ? `${o.start} – ${o.end}` : o.start].filter(Boolean).map(escHtml).join(", ");
   const why = String(rationale || "").trim() ? `<p>${escHtml(rationale.trim()).replace(/\n+/g, "<br>")}</p>` : "";
@@ -269,22 +269,22 @@ export function CouncilAllocationTab({ outcomes = {}, bookings = [], syncing, sy
 // ─── Admin Panel with action queue, bulk approve, facility rates ──────────────
 // The request to a community facility, drafted for AMUA's inbox (the app never emails
 // facilities: see the email rule at sendEmail). Queued in the email cart as a pre-rendered item.
-export function buildCommunityRequestItem(b) {
+function buildCommunityRequestItem(b) {
   const pid = providerOfFacility(b.facility_id), pr = PROVIDERS[pid] || {}, rv = _contactReviews[pid] || {}, c = pr.contact || {};
   const f = FACILITIES.find(x => x.id === b.facility_id), to = rv.email || c.email || AMUA_INBOX;
   const when = `${fmtDate(b.date)} ${fmtTime(b.start_hour)}–${fmtTime(b.start_hour + b.duration)}`;
   const rate = f?.defaultRate ? `$${f.defaultRate}/hr` : "your usual rate";
   const ops = AMUA_INFO.contacts?.operations || {};
-  const html = `<p>Kia ora ${rv.contact_name || c.contact_name || pr.name || ""},</p>
+  const html = `<p>Kia ora ${escHtml(rv.contact_name || c.contact_name || pr.name || "")},</p>
     <p>Auckland Mixed Ultimate Association would like to hire <b>${f?.name || "your field"}</b> for ultimate frisbee training:</p>
-    <ul><li><b>${when}</b> (${fmtDuration(b.duration)})</li><li>Group: ${b.name || ""}${b.purpose ? ` — ${b.purpose}` : ""}</li><li>Rate: ${rate}</li></ul>
+    <ul><li><b>${when}</b> (${fmtDuration(b.duration)})</li><li>Group: ${escHtml(b.name || "")}${b.purpose ? ` — ${escHtml(b.purpose)}` : ""}</li><li>Rate: ${rate}</li></ul>
     <p>Could you let us know if that slot is available?</p>
     <p>Ngā mihi,<br>${ops.name || "AMUA"}${ops.position ? `, ${ops.position}` : ""}<br>${AMUA_INFO.name || "Auckland Mixed Ultimate Association"}${ops.phone ? `<br>${ops.phone}` : ""}<br>${AMUA_INBOX}</p>`;
   return { notifyOnly: true, invoiceEmail: true, amuaDraft: true, email: to, name: pr.name || pid, drafts: [], count: 1, refs: [b.id.slice(0, 8)], total: 0,
     subject: `Field hire request — ${pr.short || pr.name || ""} — ${when}`, html };
 }
 // Saves the reviewed contact for a community facility (settings "provider_contact_reviews").
-export async function saveContactReview(pid, data) {
+async function saveContactReview(pid, data) {
   const entry = { ...data, by: _currentUser?.email || "", at: new Date().toISOString() };
   let cur = {};
   try { const r = await fetch(`${SUPABASE_URL}/rest/v1/settings?key=eq.provider_contact_reviews&select=value`, { headers: authHeaders() });
@@ -294,7 +294,7 @@ export async function saveContactReview(pid, data) {
   setModuleState({ _contactReviews: next });
 }
 // First request to a community facility: review its contact before anything is drafted.
-export function ContactReviewModal({ booking, onClose, onConfirm }) {
+function ContactReviewModal({ booking, onClose, onConfirm }) {
   const pid = providerOfFacility(booking.facility_id), pr = PROVIDERS[pid] || {}, c = pr.contact || {};
   const [d, setD] = useState({ contact_name: c.contact_name || c.name || "", email: c.email || "", phone: c.phone || "" });
   const si = { ...S.inp, fontSize: 13 };
@@ -322,7 +322,6 @@ export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDel
   const canonPurge = em => (emailAliases[(em||"").toLowerCase()] || (em||"").toLowerCase());
   const purgeHolder = r => gtecPurgeHolder(r, syncFeed, canonPurge);
   const purgeNeeded = cpsaDeleteLog.filter(r => !gtecPurgeObsolete(r, bookings, syncFeed, canonPurge));
-  const [showSchedulePanel, setShowSchedulePanel] = useState(false);
   // The bookings table: Grouped (schedule summary, the default) or Itemised; and a vendor filter.
   const [adminView, setAdminView] = useTableView("fb_admin_view");
   const [adminVendor, setAdminVendor] = useState("all");
@@ -342,7 +341,7 @@ export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDel
     const primary = (emailAliases[em.toLowerCase()] || em).toLowerCase();
     return aliasNames[primary] || primary.split("@")[0];
   };
-  const [ff,setFf]=useState("all"), [vf,setVf]=useState("all"), [q]=useState("");
+  const [ff,setFf]=useState("all"), [vf,setVf]=useState("all");
   // The venue (site) a facility is at, e.g. "Cornwall Park", "GTEC Orakei".
   const venueOf = fid => { const f=FACILITIES.find(x=>x.id===fid); if(!f) return ""; return venueKeyOf(f).split("|")[1] || PROVIDERS[f.provider]?.short || ""; };
   // Status filter as an EXCLUSION set: empty shows everything, and unticking a status
@@ -402,25 +401,22 @@ export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDel
   const [showPricingRules,setShowPricingRules]=useState(false);
   const [showDeleteLogPanel,setShowDeleteLogPanel]=useState(false);
 
-  // Collapsible admin sections — only one open at a time, unless Ctrl/⌘ is held.
-  // Sync Results is parent-controlled (toggle-only), so its setter toggles to reach
-  // the desired open/closed state.
-  const sectionPanels = [
-    { open: showSchedulePanel, set: v => setShowSchedulePanel(v) },
-    { open: showActivityPanel, set: v => setShowActivityPanel(v) },
-    { open: showSyncResults,   set: v => { if (v !== showSyncResults) onToggleSyncResults?.(); } },
-    { open: showClashPanel,    set: v => setShowClashPanel(v) },
-    { open: showMismatchPanel, set: v => setShowMismatchPanel(v) },
-    { open: showTrackChanges,  set: v => setShowTrackChanges(v) },
-    { open: showPricingRules,  set: v => setShowPricingRules(v) },
-    { open: showDeleteLogPanel, set: v => setShowDeleteLogPanel(v) },
-  ];
-  // Each section opens and closes on its own; Alt-click shows only that one.
-  function toggleSection(idx, e) {
+  // Collapsible admin sections, by name. Sync Results is parent-controlled (toggle-only),
+  // so its setter toggles to reach the desired open/closed state.
+  const sectionPanels = {
+    activity: { open: showActivityPanel, set: v => setShowActivityPanel(v) },
+    sync:     { open: showSyncResults,   set: v => { if (v !== showSyncResults) onToggleSyncResults?.(); } },
+    clashes:  { open: showClashPanel,    set: v => setShowClashPanel(v) },
+    mismatch: { open: showMismatchPanel, set: v => setShowMismatchPanel(v) },
+    changes:  { open: showTrackChanges,  set: v => setShowTrackChanges(v) },
+    pricing:  { open: showPricingRules,  set: v => setShowPricingRules(v) },
+    purge:    { open: showDeleteLogPanel, set: v => setShowDeleteLogPanel(v) },
+  };
+  function toggleSection(name, e) {
     const only = e && e.altKey;
-    const willOpen = only ? true : !sectionPanels[idx].open;
-    sectionPanels.forEach((p, i) => {
-      if (i === idx) p.set(willOpen);
+    const willOpen = only ? true : !sectionPanels[name].open;
+    Object.entries(sectionPanels).forEach(([k, p]) => {
+      if (k === name) p.set(willOpen);
       else if (only && p.open) p.set(false);
     });
   }
@@ -492,11 +488,6 @@ export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDel
   const adminBookerRoster = adminBookerPrimaries.map(pri=>({
     email: pri, name: aliasNames[pri] || pri.split("@")[0], addresses: [...adminBookerGroups[pri]],
   })).sort((a,b)=>a.name.localeCompare(b.name));
-
-  function matchesQ(b) {
-    const t=q.toLowerCase();
-    return !t||`${b.name} ${b.email} ${b.purpose} ${b.notes||""}`.toLowerCase().includes(t);
-  }
 
   const vendorOk = b => adminVendor==="all" || vendorShortFor(b.facility_id)===adminVendor;
   const list=bookings.filter(b=>{
@@ -628,27 +619,27 @@ export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDel
             🧭 Resolve old unapproved ({oldUnapproved.length})
           </button>
         )}
-        <button onClick={e=>toggleSection(1,e)} title="Open or close this section (Alt-click: show only this one)" style={S.btn({background:showActivityPanel?"#f8fafc":"#fff",color:"#475569",border:`1.5px solid ${showActivityPanel?"#94a3b8":"#e2e8f0"}`,fontSize:12,fontWeight:700})}>
+        <button onClick={e=>toggleSection("activity",e)} title="Open or close this section (Alt-click: show only this one)" style={S.btn({background:showActivityPanel?"#f8fafc":"#fff",color:"#475569",border:`1.5px solid ${showActivityPanel?"#94a3b8":"#e2e8f0"}`,fontSize:12,fontWeight:700})}>
           📜 Activity Log {showActivityPanel?"▴":"▾"}
         </button>
-        {<button onClick={e=>toggleSection(2,e)} title="Open or close this section (Alt-click: show only this one)" style={S.btn({background:showSyncResults?"#ecfeff":"#fff",color:syncResults.length>0?"#0e7490":"#94a3b8",border:`1.5px solid ${showSyncResults?"#a5f3fc":"#e2e8f0"}`,fontSize:12,fontWeight:syncResults.length>0?700:500})}>
+        {<button onClick={e=>toggleSection("sync",e)} title="Open or close this section (Alt-click: show only this one)" style={S.btn({background:showSyncResults?"#ecfeff":"#fff",color:syncResults.length>0?"#0e7490":"#94a3b8",border:`1.5px solid ${showSyncResults?"#a5f3fc":"#e2e8f0"}`,fontSize:12,fontWeight:syncResults.length>0?700:500})}>
           🔄 Sync Results ({syncResults.length}) {showSyncResults?"▴":"▾"}
         </button>}
-        <button onClick={e=>toggleSection(3,e)} title="Open or close this section (Alt-click: show only this one)" style={S.btn({border:`1.5px solid ${visibleClashes.length>0?"#fda4af":"#e2e8f0"}`,background:showClashPanel?"#fff1f2":"#fff",color:visibleClashes.length>0?"#9f1239":"#94a3b8",fontSize:12,fontWeight:visibleClashes.length>0?700:500})}>
+        <button onClick={e=>toggleSection("clashes",e)} title="Open or close this section (Alt-click: show only this one)" style={S.btn({border:`1.5px solid ${visibleClashes.length>0?"#fda4af":"#e2e8f0"}`,background:showClashPanel?"#fff1f2":"#fff",color:visibleClashes.length>0?"#9f1239":"#94a3b8",fontSize:12,fontWeight:visibleClashes.length>0?700:500})}>
           ⚠️ Clashes ({visibleClashes.length}) {showClashPanel?"▴":"▾"}
         </button>
         {(()=>{ const mc=bookings.filter(b=>b.status==="cpsa_review_needed"&&!isAdminBooking(b)&&inBookerFilter(b.email)).length; return (
-        <button onClick={e=>toggleSection(4,e)} title="Open or close this section (Alt-click: show only this one)" style={S.btn({border:`1.5px solid ${mc>0?"#fde68a":"#e2e8f0"}`,background:showMismatchPanel?"#fffbeb":"#fff",color:mc>0?"#b45309":"#94a3b8",fontSize:12,fontWeight:mc>0?700:500})}>
+        <button onClick={e=>toggleSection("mismatch",e)} title="Open or close this section (Alt-click: show only this one)" style={S.btn({border:`1.5px solid ${mc>0?"#fde68a":"#e2e8f0"}`,background:showMismatchPanel?"#fffbeb":"#fff",color:mc>0?"#b45309":"#94a3b8",fontSize:12,fontWeight:mc>0?700:500})}>
           ⚡ Mismatches ({mc}) {showMismatchPanel?"▴":"▾"}
         </button>
         );})()}
-        <button onClick={e=>toggleSection(5,e)} title="Open or close this section (Alt-click: show only this one)" style={S.btn({border:`1.5px solid ${trackedChanges.length>0?"#ddd6fe":"#e2e8f0"}`,background:showTrackChanges?"#f5f3ff":"#fff",color:trackedChanges.length>0?"#5b21b6":"#94a3b8",fontSize:12,fontWeight:trackedChanges.length>0?700:500})}>
+        <button onClick={e=>toggleSection("changes",e)} title="Open or close this section (Alt-click: show only this one)" style={S.btn({border:`1.5px solid ${trackedChanges.length>0?"#ddd6fe":"#e2e8f0"}`,background:showTrackChanges?"#f5f3ff":"#fff",color:trackedChanges.length>0?"#5b21b6":"#94a3b8",fontSize:12,fontWeight:trackedChanges.length>0?700:500})}>
           🧾 Track Changes ({trackedChanges.length}) {showTrackChanges?"▴":"▾"}
         </button>
-        {onAddPricingCondition&&<button onClick={e=>toggleSection(6,e)} title="Open or close this section (Alt-click: show only this one)" style={S.btn({border:`1.5px solid ${pricingConditions.length>0?"#c7d2fe":"#e2e8f0"}`,background:showPricingRules?"#eef2ff":"#fff",color:pricingConditions.length>0?"#4338ca":"#94a3b8",fontSize:12,fontWeight:pricingConditions.length>0?700:500})}>
+        {onAddPricingCondition&&<button onClick={e=>toggleSection("pricing",e)} title="Open or close this section (Alt-click: show only this one)" style={S.btn({border:`1.5px solid ${pricingConditions.length>0?"#c7d2fe":"#e2e8f0"}`,background:showPricingRules?"#eef2ff":"#fff",color:pricingConditions.length>0?"#4338ca":"#94a3b8",fontSize:12,fontWeight:pricingConditions.length>0?700:500})}>
           💲 Pricing Rules ({pricingConditions.length}) {showPricingRules?"▴":"▾"}
         </button>}
-        <button onClick={e=>toggleSection(7,e)} title="Cancellations of bookings already submitted to GTEC — request GTEC to purge these. Ctrl/⌘-click to keep other sections open" style={S.btn({border:`1.5px solid ${purgeNeeded.length>0?"#fecaca":"#e2e8f0"}`,background:showDeleteLogPanel?"#fef2f2":"#fff",color:purgeNeeded.length>0?"#b91c1c":"#94a3b8",fontSize:12,fontWeight:purgeNeeded.length>0?700:500})}>
+        <button onClick={e=>toggleSection("purge",e)} title="Cancellations of bookings already submitted to GTEC — request GTEC to purge these (Alt-click: show only this one)" style={S.btn({border:`1.5px solid ${purgeNeeded.length>0?"#fecaca":"#e2e8f0"}`,background:showDeleteLogPanel?"#fef2f2":"#fff",color:purgeNeeded.length>0?"#b91c1c":"#94a3b8",fontSize:12,fontWeight:purgeNeeded.length>0?700:500})}>
           🗑 GTEC Purge Requests ({purgeNeeded.length}) {showDeleteLogPanel?"▴":"▾"}
         </button>
       </div>
@@ -986,7 +977,7 @@ export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDel
       {/* Clash notification panel */}
       {showClashPanel&&visibleClashes.length>0&&(()=>{
         function clashDayName(d){return["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][new Date(d+"T12:00").getDay()];}
-        const filtered=visibleClashes.filter(c=>matchesQ(c.user)||matchesQ(c.admin));
+        const filtered=visibleClashes;
         // Group by (userEmail + facilityId + dayOfWeek)
         const groupMap={};
         filtered.forEach(c=>{
@@ -1234,7 +1225,7 @@ export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDel
         const BILLING_COLOR = {credit_pending:"#d97706",invoice_pending:"#2563eb",credited:"#15803d",invoiced:"#5b21b6"};
         const BILLING_LABEL = {none:"—",credit_pending:"Credit pending",invoice_pending:"Invoice pending",credited:"Credited ✓",invoiced:"Invoiced ✓"};
 
-        // Each row is a component so it can hold its own useState hooks.
+        // A render function (not a component), so rows aren't remounted on every render.
         const renderMismatchRow = (b, rowIdx) => {
           const reasons=parseMismatchNote(b.system_notes,b.notes);
           const cpsaVals=extractCpsaAmendValues(reasons,b);
@@ -1630,7 +1621,7 @@ export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDel
                     const reasons=parseMismatchNote(b.system_notes,b.notes);
                     const cv=extractCpsaAmendValues(reasons,b);
                     const refs=parseCpsaRefs(b.system_notes,b.notes);
-                    const esc=v=>`"${String(v).replace(/"/g,'""')}"`;
+                    const esc=csvCell;
                     return [b.name,b.email,b.date,fac?.name||b.facility_id,
                       `${fmtTime(b.start_hour)}–${fmtTime(b.start_hour+b.duration)} ${b.duration}h`,
                       `${fmtTime(cv.start_hour)}–${fmtTime(cv.start_hour+cv.duration)} ${cv.duration}h`,
@@ -1691,7 +1682,7 @@ export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDel
         </select>
       </TableViewToggle>
       {adminView==="grouped"
-        ? <ScheduleSummaryModal bookings={bookings.filter(b=>inBookerFilter(b.email)&&vendorOk(b))} isAdmin={true} loggedInEmail={loggedInEmail} onBulkApply={onBulkApply} onBulkStatusChange={onBulkStatusChange} onRemove={ids=>ids.forEach(id=>onQueueDelete&&onQueueDelete(id))} onReassign={onReassign} onAddPricingRule={onAddPricingCondition} bookers={bookers} onView={onView} aliasNames={aliasNames} emailAliases={emailAliases} embedded/>
+        ? <ScheduleSummaryModal bookings={bookings.filter(b=>inBookerFilter(b.email)&&vendorOk(b))} isAdmin={true} loggedInEmail={loggedInEmail} onBulkApply={onBulkApply} onBulkStatusChange={onBulkStatusChange} onRemove={ids=>ids.forEach(id=>onQueueDelete&&onQueueDelete(id))} onReassign={onReassign} onAddPricingRule={onAddPricingCondition} bookers={bookers} onView={onView} aliasNames={aliasNames} emailAliases={emailAliases}/>
       : list.length===0
         ? <div style={{textAlign:"center",padding:"40px 0",color:"#94a3b8",fontSize:14}}>No bookings found.</div>
         : (
@@ -1782,27 +1773,17 @@ export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDel
                 </th>
                 <th style={{padding:"3px 4px",width:100,position:"relative"}}>
                   {(()=>{
-                    // "pending" and "amua_submit" are legacy aliases of statuses already
-                    // listed, so they are not offered — but they follow whatever their
-                    // modern equivalent is set to, or nothing would ever hide them.
-                    const ALIAS = { pending:"pending_amua", amua_submit:"queued_cpsa" };
-                    const keys = Object.keys(STATUS_META).filter(k=>!ALIAS[k]);
+                    const keys = Object.keys(STATUS_META);
                     const shown = keys.filter(k=>!sfHidden.has(k));
                     const label = sfHidden.size===0 ? "All"
                       : shown.length===0 ? "None"
                       : shown.length===1 ? groupStatusLabel(shown[0], bookings.filter(b=>b.status===shown[0]))
                       : `${shown.length}/${keys.length}`;
-                    // Hiding a status hides its legacy alias with it.
-                    const withAliases = set => {
-                      const n2 = new Set(set);
-                      Object.entries(ALIAS).forEach(([legacy,modern]) => n2.has(modern) ? n2.add(legacy) : n2.delete(legacy));
-                      return n2;
-                    };
                     const toggle = k => setSfHidden(prev => {
                       const n2 = new Set(prev); n2.has(k) ? n2.delete(k) : n2.add(k);
-                      return withAliases(n2);
+                      return n2;
                     });
-                    const only = k => setSfHidden(withAliases(new Set(keys.filter(x=>x!==k))));
+                    const only = k => setSfHidden(new Set(keys.filter(x=>x!==k)));
                     return (<>
                       <button onClick={()=>setSfOpen(o2=>!o2)} title="Show or hide statuses"
                         style={{padding:"3px 4px",fontSize:10,border:`1px solid ${sfHidden.size?"#0f172a":"#cbd5e1"}`,borderRadius:4,
@@ -1860,8 +1841,8 @@ export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDel
               {list.map((b,ri)=>{
                 const f=FACILITIES.find(x=>x.id===b.facility_id);
                 const isPending=REVIEW_STATUSES.has(b.status);
-                const isAmuaStage=b.status==="pending_amua"||b.status==="pending";
-                const isCpsaStage=b.status==="queued_cpsa"||b.status==="amua_submit"||b.status==="pending_cpsa";
+                const isAmuaStage=b.status==="pending_amua";
+                const isCpsaStage=b.status==="queued_cpsa"||b.status==="pending_cpsa";
                 const queued=actionQueue.find(a=>a.id===b.id);
                 const isDeleteQueued=deleteIds.has(b.id);
                 const rowBg=isDeleteQueued?"#fff1f2":queued?"#f0fdf4":selected.has(b.id)?"#f5f3ff":"#fff";
@@ -1914,11 +1895,11 @@ export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDel
                           {/* One "<vendor> →" button: rooms send CPSA a room request (an AMUA draft) and go
                               to Pending CPSA review; Cornwall Park fields queue for GTEC. */}
                           {providerOfFacility(b.facility_id)==="gtec"&&(isSocialFac(b.facility_id)
-                            ? (onRequestRoom&&(isAmuaStage||b.status==="queued_cpsa"||b.status==="amua_submit")&&<button onClick={()=>onRequestRoom(b)} title={`Email ${vendorShortFor(b.facility_id)} a room request (it lands as a draft in AMUA's inbox)`}
+                            ? (onRequestRoom&&(isAmuaStage||b.status==="queued_cpsa")&&<button onClick={()=>onRequestRoom(b)} title={`Email ${vendorShortFor(b.facility_id)} a room request (it lands as a draft in AMUA's inbox)`}
                                 style={S.btn({padding:"3px 7px",fontSize:10,background:"#7c3aed",color:"#fff"})}>{vendorShortFor(b.facility_id)} →</button>)
                             : isAmuaStage&&<button onClick={()=>queueAction(b.id,"queued_cpsa")} title={`Queue for ${vendorShortFor(b.facility_id)}`}
                                 style={S.btn({padding:"3px 7px",fontSize:10,background:queued?.newStatus==="queued_cpsa"?"#1d4ed8":"#3b82f6",color:"#fff",outline:queued?.newStatus==="queued_cpsa"?"2px solid #1d4ed8":"none"})}>{vendorShortFor(b.facility_id)} →</button>)}
-                          {(b.status==="queued_cpsa"||b.status==="amua_submit")&&<button onClick={()=>queueAction(b.id,"pending_cpsa")} title="Mark as Pending GTEC Review (no email)"
+                          {b.status==="queued_cpsa"&&<button onClick={()=>queueAction(b.id,"pending_cpsa")} title="Mark as Pending GTEC Review (no email)"
                             style={S.btn({padding:"3px 7px",fontSize:10,background:queued?.newStatus==="pending_cpsa"?"#0369a1":"#0ea5e9",color:"#fff",outline:queued?.newStatus==="pending_cpsa"?"2px solid #0369a1":"none"})}>⏳</button>}
                           {/* Council workflows step through their stages one at a time. */}
                           {isCouncilWf&&nxt&&nxt!=="approved"&&<button onClick={()=>nxt==="contact_review"?setReviewFor(b):nxt==="community_request"?requestCommunity(b):queueAction(b.id,nxt)} title={`Next step: ${STATUS_META[nxt]?.label}${opHint}`}
