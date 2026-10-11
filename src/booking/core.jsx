@@ -1396,6 +1396,9 @@ function cleanEmailSubject(subject) {
 export const AMUA_INBOX = "aucklandmixedultimate@gmail.com";
 export let _bookerEmails = new Set();   // every booking's email (and its alias primary), kept in sync by the App
 export let _vendorEmails = new Set();   // vendor profile emails: never bookers, even if they appear in bookings
+// A cart item that carries bookings to save (new or edited drafts), as opposed to a status
+// change, notification, invoice email or shared-slot change, which have no `drafts`.
+export const isDraftItem = i => !i.notifyOnly && !i.statusChange && !i.slotChange;
 export function isBookerAddress(email) {
   const e = (email || "").trim().toLowerCase(); if (!e) return false;
   if (e === AMUA_INBOX) return true;
@@ -1544,9 +1547,16 @@ export function buildApprovalEmailHtml({ name, email, bookings: bkgs, newStatus,
   const isQueued = newStatus === "queued_cpsa";
   const isCpsaConfirmed = newStatus === "cpsa_confirmed";
   const isCpsaReview = newStatus === "cpsa_review_needed";
-  const color = isApproved ? "#22c55e" : isCpsaConfirmed ? "#0891b2" : isQueued ? "#3b82f6" : isCpsaReview ? "#d97706" : "#f43f5e";
+  const isRejected = newStatus === "rejected";
+  const isCancelled = newStatus === "cancelled";
+  const color = isApproved ? "#22c55e" : isCpsaConfirmed ? "#0891b2" : isQueued ? "#3b82f6" : isCpsaReview ? "#d97706"
+    : isRejected ? "#f43f5e" : isCancelled ? "#64748b" : (STATUS_META[newStatus]?.dot || "#3b82f6");
   const vendor = vendorShortFor(bkgs[0]?.facility_id);
-  const label = isApproved ? "Approved ✓" : isCpsaConfirmed ? `Confirmed by ${vendor} ✓` : isQueued ? `Queued for ${vendor} review` : isCpsaReview ? `Needs review — ${vendor} mismatch` : "Rejected ✗";
+  // Any other stage (council steps, contact review, clash…) gets a neutral "status updated"
+  // email naming the stage, rather than reading as a rejection.
+  const stage = bareStatusLabel(newStatus, bkgs[0]?.facility_id);
+  const label = isApproved ? "Approved ✓" : isCpsaConfirmed ? `Confirmed by ${vendor} ✓` : isQueued ? `Queued for ${vendor} review` : isCpsaReview ? `Needs review — ${vendor} mismatch`
+    : isRejected ? "Rejected ✗" : isCancelled ? "Cancelled" : "Updated";
   const bodyText = isApproved
     ? "Great news — your booking request has been approved!"
     : isCpsaConfirmed
@@ -1555,7 +1565,11 @@ export function buildApprovalEmailHtml({ name, email, bookings: bkgs, newStatus,
     ? `Your booking request has been reviewed by AMUA and is now queued to be submitted to ${vendor} for final approval. We'll notify you once a decision has been made.`
     : isCpsaReview
     ? `The details ${vendor} holds for your booking currently differ from your original request. AMUA is clarifying this with ${vendor} — nothing is final yet, and we'll do our best to align it to your original request.`
-    : "We're sorry — your booking request could not be approved.";
+    : isRejected
+    ? "We're sorry — your booking request could not be approved."
+    : isCancelled
+    ? "Your booking has been cancelled."
+    : `Your booking's status is now: ${stage}. We'll let you know when anything changes.`;
   const rows = bkgs.map(b => {
     const f = FACILITIES.find(x=>x.id===b.facility_id);
     return `<tr>

@@ -4,7 +4,7 @@ import { gmailToken, fetchCouncilEmails, parseCouncilEmail } from "./councilMail
 import { driveConfigured, getDriveToken, renameFile, ensureFolderPath, DRIVE_ROOT_FOLDER, ensureFolder, findChildFile, uploadFile, keepLatestRevisionForever } from "./drive-client.js";
 import { htmlToPdfBlob } from "./pdf-utils.js";
 import { currentLeagueSeason, LEAGUE_SEASONS, seasonOfBooker } from "./seasons.js";
-import { Badge, COUNCIL_APPLICATION_FEE, COUNCIL_APPLICATION_URL, COUNCIL_APP_RE, CPSA_FIELD_IDS, CopyableTable, EmailLoginScreen, FACILITIES, LOGO_SRC, MOBILE_STYLE, MONTHS, Modal, PROVIDERS, REVIEW_STATUSES, S, STATUS_META, SUPABASE_URL, T, TableViewToggle, groupStatusLabel, _emailAliases, applyAmuaOrg, applyCouncilFacilities, authHeaders, buildApprovalEmailHtml, buildClashEmailHtml, buildInformCpsaEmailHtml, buildMismatchEmailHtml, buildOrderEmailHtml, buildRoomRequestEmailHtml, canSendToCouncil, clearSlotLink, councilFeeSplit, councilOverlaps, emailColor, evenSlotShares, facShort, fmt24, fmtCost, fmtDate, fmtDateShort, fmtDateShortDow, fmtTime, fmtTimeShort, getBillingDrift, getClashes, inActiveVenue, isAdminBooking, linkCouncilChildren, logActivity, newId, newSlotRef, parseClashPrevStatus, parseCouncilApp, parseCpsaOrig, parseCpsaRefs, parseCpsaResolution, parseMismatchNote, parseSlotLink, reachedGtecQueue, sb, sendApprovalEmail, sendEmail, setBilledSnapshot, setClashPrevStatus, setCpsaResolution, setGtecSnapshot, setMismatchNote, setModuleState, setSlotLink, setVendorVariance, slotGroupMembers, stripClashPrevStatus, stripMismatchNote, supabase, timeOverlaps, todayKey, useMobile, useTableView, venueFacilities, visibleFacilities, workflowOf } from "./booking/core.jsx";
+import { Badge, COUNCIL_APPLICATION_FEE, COUNCIL_APPLICATION_URL, COUNCIL_APP_RE, CPSA_FIELD_IDS, CopyableTable, EmailLoginScreen, FACILITIES, LOGO_SRC, MOBILE_STYLE, MONTHS, Modal, PROVIDERS, REVIEW_STATUSES, S, STATUS_META, SUPABASE_URL, T, TableViewToggle, groupStatusLabel, _emailAliases, applyAmuaOrg, applyCouncilFacilities, authHeaders, isDraftItem, buildApprovalEmailHtml, buildClashEmailHtml, buildInformCpsaEmailHtml, buildMismatchEmailHtml, buildOrderEmailHtml, buildRoomRequestEmailHtml, canSendToCouncil, clearSlotLink, councilFeeSplit, councilOverlaps, emailColor, evenSlotShares, facShort, fmt24, fmtCost, fmtDate, fmtDateShort, fmtDateShortDow, fmtTime, fmtTimeShort, getBillingDrift, getClashes, inActiveVenue, isAdminBooking, linkCouncilChildren, logActivity, newId, newSlotRef, parseClashPrevStatus, parseCouncilApp, parseCpsaOrig, parseCpsaRefs, parseCpsaResolution, parseMismatchNote, parseSlotLink, reachedGtecQueue, sb, sendApprovalEmail, sendEmail, setBilledSnapshot, setClashPrevStatus, setCpsaResolution, setGtecSnapshot, setMismatchNote, setModuleState, setSlotLink, setVendorVariance, slotGroupMembers, stripClashPrevStatus, stripMismatchNote, supabase, timeOverlaps, todayKey, useMobile, useTableView, venueFacilities, visibleFacilities, workflowOf } from "./booking/core.jsx";
 import { FacilityStrip } from "./booking/facilityStrip.jsx";
 import { councilAppBookings, mergeCouncilOutcomes } from "./booking/councilData.jsx";
 import { cjrMonthUrl, extractCPSATeam, extractEventDetailsEmail, fetchCJREvents, parseFeedText, findMatchingUserBooking, purgeObsolete, gtecTeamKey, mapCJRFacility, parseCJRDate, parseCJRDateTime } from "./booking/gtec.jsx";
@@ -336,6 +336,10 @@ export default function App() {
   const [listSortDir,     setListSortDir]       = useState("asc");
 
   const isMobile = useMobile();
+  // Drafts in the cart, shown on the calendars: new bookings (not edits of existing ones), and
+  // the bookings being edited.
+  const cartNewDrafts = cart.flatMap(i => isDraftItem(i) && !(i.sourceIds||[]).length ? i.drafts : []);
+  const cartSourceIds = new Set(cart.flatMap(i => i.sourceIds||[]));
 
   // Bootstrap auth session and subscribe to changes
   useEffect(() => {
@@ -1034,7 +1038,7 @@ export default function App() {
   if(session === undefined) return null; // auth session still loading
   if(!session) return <EmailLoginScreen/>;
 
-  // handleSave now accepts an array of drafts + name/email for multi-booking support
+  // Saves drafts (new or edited bookings). Returns false if the save failed.
   async function handleSave(drafts, bookerName, bookerEmail, { skipEmail = false } = {}) {
     skipEmail = skipEmail || silentMode;
     const draftsArr = Array.isArray(drafts) ? drafts : [drafts];
@@ -1054,7 +1058,12 @@ export default function App() {
         else       await sb.insert("bookings",{...toDb(d), user_id: userId});
       }
       await loadBookings();
-    }catch(e){showToast("Save failed: "+e.message,"error");return;}
+    }catch(e){
+      showToast("Save failed: "+e.message,"error");
+      // Reload, so a retry updates the drafts that did save instead of inserting them again.
+      loadBookings();
+      return false;
+    }
     setShowForm(false);setViewing(null);
     logActivity(isNew?"booking_create":"booking_edit", {
       count: draftsArr.length,
@@ -1082,6 +1091,7 @@ export default function App() {
           : buildApprovalEmailHtml({name,email,bookings:draftsArr,newStatus:draftsArr[0].status,adminNote:""}),
       });
     }
+    return true;
   }
 
   function handleStatusChange(booking,newStatus) {
@@ -1898,7 +1908,7 @@ export default function App() {
 
   async function handleCartSubmit() {
     if (cart.length === 0) return;
-    // The cart is the single outbox. Three kinds of work:
+    // The cart is the single outbox. Kinds of work:
     //  • statusChange — deferred admin actions; the status mutation is applied here,
     //    then the booker is emailed (sync-style "mutate on submit, then notify").
     //  • save items   — new bookings + edits (notify-only items are never re-saved).
@@ -1906,7 +1916,7 @@ export default function App() {
     //  • slotChange   — shared-slot split / merge / unlink: relinks members and, for a
     //    split, inserts the new team's booking.
     let statusItems = cart.filter(item => item.statusChange);
-    const saveItems   = cart.filter(item => !item.notifyOnly && !item.statusChange && !item.slotChange);
+    const saveItems   = cart.filter(isDraftItem);
     const notifyItems = cart.filter(item => item.notifyOnly);
     const slotItems   = cart.filter(item => item.slotChange);
 
@@ -1914,7 +1924,8 @@ export default function App() {
     const allDrafts = saveItems.flatMap(item => item.drafts);
     if (allDrafts.length) {
       const name = (saveItems[0]||{}).name, email = (saveItems[0]||{}).email;
-      await handleSave(allDrafts, name, email, { skipEmail: true });
+      // On failure the cart is kept (nothing below runs), so the bookings aren't lost.
+      if (!(await handleSave(allDrafts, name, email, { skipEmail: true }))) return;
     }
 
     // 1b. Shared-slot changes: insert the split's new booking, then rewrite every
@@ -2358,8 +2369,8 @@ export default function App() {
 
         {(tab==="calendar"||tab==="month"||tab==="list")&&<FacilityStrip isMobile={isMobile} isAdmin={isAdmin} selFac={selFac} setSelFac={setSelFac} setVenue={setVenue} hiddenFacs={hiddenFacs} setHiddenFacs={setHiddenFacs}/>}
 
-        {tab==="calendar"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<WeekCalendar bookings={bookings} selectedFacility={selFac} onNewBooking={openNew} onNewBookingRange={openNewRange} onBookingClick={setViewing} cartSourceIds={new Set(cart.flatMap(i=>i.sourceIds||[]))} deleteIds={new Set(deleteQueue.map(b=>b.id))} cartNewDrafts={cart.flatMap(i=>!i.notifyOnly&&!i.statusChange&&(i.sourceIds||[]).length===0?i.drafts:[])} focusedDate={focusedDate} setFocusedDate={setFocusedDate} onOpenDay={openDay} bookerFilter={listBookerFilter} aliasNames={aliasNames} emailAliases={emailAliases}/>}</div>}
-        {tab==="month"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<MonthCalendar bookings={bookings} selectedFacility={selFac} onBookingClick={setViewing} onNewBooking={openNew} onNewBookingRange={openNewRange} onMultiDelete={queueMultiForRemoval} onMultiAddToCart={handleMultiAddToCart} loggedInEmail={loggedInEmail} isAdmin={isAdmin} cartSourceIds={new Set(cart.flatMap(i=>i.sourceIds||[]))} deleteIds={new Set(deleteQueue.map(b=>b.id))} cartNewDrafts={cart.flatMap(i=>!i.notifyOnly&&!i.statusChange&&(i.sourceIds||[]).length===0?i.drafts:[])} onOpenDay={openDay} onGotoWeek={dk=>{ setFocusedDate(new Date(dk+"T00:00:00")); setTab("calendar"); }} bookerFilter={listBookerFilter} aliasNames={aliasNames} emailAliases={emailAliases}/>}</div>}
+        {tab==="calendar"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<WeekCalendar bookings={bookings} selectedFacility={selFac} onNewBooking={openNew} onNewBookingRange={openNewRange} onBookingClick={setViewing} cartSourceIds={cartSourceIds} deleteIds={new Set(deleteQueue.map(b=>b.id))} cartNewDrafts={cartNewDrafts} focusedDate={focusedDate} setFocusedDate={setFocusedDate} onOpenDay={openDay} bookerFilter={listBookerFilter} aliasNames={aliasNames} emailAliases={emailAliases}/>}</div>}
+        {tab==="month"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<MonthCalendar bookings={bookings} selectedFacility={selFac} onBookingClick={setViewing} onNewBooking={openNew} onNewBookingRange={openNewRange} onMultiDelete={queueMultiForRemoval} onMultiAddToCart={handleMultiAddToCart} loggedInEmail={loggedInEmail} isAdmin={isAdmin} cartSourceIds={cartSourceIds} deleteIds={new Set(deleteQueue.map(b=>b.id))} cartNewDrafts={cartNewDrafts} onOpenDay={openDay} onGotoWeek={dk=>{ setFocusedDate(new Date(dk+"T00:00:00")); setTab("calendar"); }} bookerFilter={listBookerFilter} aliasNames={aliasNames} emailAliases={emailAliases}/>}</div>}
 
         {tab==="list"&&(
           <div style={S.card}>
@@ -2923,7 +2934,7 @@ export default function App() {
         <DayTimelinePopup date={dayPopupDate} focusHour={dayPopupFocus} focusDuration={dayPopupDur} bookings={bookings} onClose={()=>{setDayPopupDate(null);setDayPopupFocus(null);setDayPopupDur(null);}}
           onBookingClick={b=>{ setDayPopupDate(null);setDayPopupFocus(null); setViewing(b); }}
           onNewBooking={openNew}
-          cartNewDrafts={cart.flatMap(i=>!i.notifyOnly&&!i.statusChange&&(i.sourceIds||[]).length===0?i.drafts:[])}
+          cartNewDrafts={cartNewDrafts}
          />
       )}
     </div>
