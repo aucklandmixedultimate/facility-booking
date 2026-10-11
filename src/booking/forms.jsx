@@ -1,5 +1,5 @@
 import { useState, useRef, Fragment } from "react";
-import { T, parseVendorVariance, setVendorVariance, vendorVarianceText, stepLabel, BILLED_RE, Badge, CAL_SLOTS, CAL_START, CAL_TOTAL, DAY_EVENING_CUTOFF, DURATIONS, EmailChip, FACILITIES, FACILITY_TINT, FLOODLIT_FIELD_ID, FacilityOptions, INVOICED_META, Modal, ProviderVenuePicker, REVIEW_STATUSES, S, SLOTS_PER_HOUR, SLOT_HOURS, START_TIMES, STATUS_META, addDays, councilContactOk, emailColor, facColLabel, facShort, fmtCost, fmtDate, fmtDuration, fmtLoggedAt, fmtRefDate, fmtTime, fmtTimeShort, getCrossFacilityOverlaps, getSameFacilityOverlaps, isAdminBooking, newGroupRef, newId, parseCouncilInfo, parseFunctionCost, parseGroupRef, parseGtecSnapshot, parseMismatchNote, parseSlotLink, parseSplit, setCouncilInfo, setFunctionCost, setGroupRef, setSplit, slotGroupMembers, slotGroupName, splitReason, stripMismatchNote, timeOverlaps, todayKey, useMobile, vendorShortFor, venueFacilities, workflowOf, isDraftItem } from "./core.jsx";
+import { T, parseVendorVariance, setVendorVariance, vendorVarianceText, stepLabel, BILLED_RE, Badge, CAL_SLOTS, CAL_START, CAL_TOTAL, DAY_EVENING_CUTOFF, DURATIONS, EmailChip, FACILITIES, FACILITY_TINT, FLOODLIT_FIELD_ID, FacilityOptions, INVOICED_META, Modal, ProviderVenuePicker, buildCommunityRequestItem, REVIEW_STATUSES, S, SLOTS_PER_HOUR, SLOT_HOURS, START_TIMES, STATUS_META, addDays, councilContactOk, emailColor, facColLabel, facShort, fmtCost, fmtDate, fmtDuration, fmtLoggedAt, fmtRefDate, fmtTime, fmtTimeShort, getCrossFacilityOverlaps, getSameFacilityOverlaps, isAdminBooking, newGroupRef, newId, parseCouncilInfo, parseFunctionCost, parseGroupRef, parseGtecSnapshot, parseMismatchNote, parseSlotLink, parseSplit, setCouncilInfo, setFunctionCost, setGroupRef, setSplit, slotGroupMembers, slotGroupName, splitReason, stripMismatchNote, timeOverlaps, todayKey, useMobile, vendorShortFor, venueFacilities, workflowOf, isDraftItem } from "./core.jsx";
 import { OverlapWarning } from "./modals.jsx";
 import { FacilityPicker } from "./facilityPicker.jsx";
 import { GUEST } from "../actor.js";
@@ -205,7 +205,7 @@ export function InlineDayPicker({ date, bookings, onPick, onConfirm, multi=false
     </div>
   );
 }
-// One slot (facility/date/time/duration) within a grouped booking request. Shared
+// One slot (date/time/duration, then facility) within a grouped booking request. Shared
 // purpose / notes / repetition live on the parent form, so this row stays compact.
 function SlotRow({ slot, idx, onChange, onRemove, canRemove, allBookings, onSplit }) {
   const isMobile = useMobile();
@@ -221,14 +221,8 @@ function SlotRow({ slot, idx, onChange, onRemove, canRemove, allBookings, onSpli
   return (
     <div style={{border:"1.5px solid #e2e8f0",borderRadius:10,padding:12,background:"#fafafa",display:"flex",flexDirection:"column",gap:8,position:"relative"}}>
       {canRemove && <button onClick={()=>onRemove(idx)} title="Remove slot" style={{position:"absolute",top:8,right:8,background:"#fff1f2",border:"1px solid #fda4af",borderRadius:6,color:"#f43f5e",cursor:"pointer",fontSize:12,fontWeight:700,padding:"1px 7px",lineHeight:1.5}}>✕</button>}
-      {/* New bookings can take several fields (or a whole location / vendor) that are free at
-          this time: each becomes a slot. Editing a booking picks one field. */}
-      <div style={{paddingRight:canRemove?28:0}}>
-        <label style={S.lbl}>Field *</label>
-        <FacilityPicker value={slot.facility_id} slot={slot} allBookings={allBookings} multi={canRemove}
-          onPick={id=>upd("facility_id",id)} onPickMany={ids=>onSplit(idx, ids)}/>
-      </div>
-      <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr 1fr 1fr":"1.3fr 1fr 1fr",gap:8}}>
+      {/* When first: the field picker then offers the fields free at that time. */}
+      <div style={{display:"grid",paddingRight:canRemove?28:0,gridTemplateColumns:isMobile?"1fr 1fr 1fr":"1.3fr 1fr 1fr",gap:8}}>
         <div style={isMobile?{gridColumn:"1 / -1"}:undefined}>
           <label style={S.lbl}>Date *</label>
           <input style={S.inp} type="date" value={slot.date} min={todayKey()} onChange={e=>upd("date",e.target.value)}/>
@@ -245,6 +239,13 @@ function SlotRow({ slot, idx, onChange, onRemove, canRemove, allBookings, onSpli
             {(DURATIONS.some(d=>d.value===slot.duration)?DURATIONS:[...DURATIONS,{value:slot.duration,label:slot.duration+" hrs"}].sort((a,b)=>a.value-b.value)).map(d=><option key={d.value} value={d.value}>{d.label}</option>)}
           </select>
         </div>
+      </div>
+      {/* New bookings can take several fields (or a whole location / vendor) that are free at
+          this time: each becomes a slot. Editing a booking picks one field. */}
+      <div>
+        <label style={S.lbl}>Field *</label>
+        <FacilityPicker value={slot.facility_id} slot={slot} allBookings={allBookings} multi={canRemove}
+          onPick={id=>upd("facility_id",id)} onPickMany={ids=>onSplit(idx, ids)}/>
       </div>
       {ready && (
         adminClashes.length>0
@@ -265,7 +266,8 @@ export function CartModal({ cart, setCart, onClose, onSubmit, openNew, silentMod
   const totalEdits  = cart.filter(i=>i.isEdit||i.isMultiEdit).reduce((s,i)=>s+i.drafts.length,0);
   const totalStatus = cart.filter(i=>i.statusChange).reduce((s,i)=>s+(i.ids?.length||i.drafts?.length||0),0);
   const totalNotify = cart.filter(i=>i.notifyOnly&&!i.informCpsa&&!i.roomRequest&&!i.clashNotify&&!i.invoiceEmail).reduce((s,i)=>s+(i.drafts?.length||0),0);
-  const totalInvoice = cart.filter(i=>i.invoiceEmail).reduce((s,i)=>s+(i.count||1),0);
+  const totalInvoice = cart.filter(i=>i.invoiceEmail&&!i.vendorRequest).reduce((s,i)=>s+(i.count||1),0);
+  const vendorReqs = cart.filter(i=>i.vendorRequest), totalVendorReq = vendorReqs.reduce((s,i)=>s+i.count,0);
   const totalSlot    = cart.filter(i=>i.slotChange).length;
   const totalClash  = cart.filter(i=>i.clashNotify).length;
   const totalInform = cart.filter(i=>i.informCpsa).reduce((s,i)=>s+(i.drafts?.length||0),0);
@@ -285,6 +287,10 @@ export function CartModal({ cart, setCart, onClose, onSubmit, openNew, silentMod
   function removeItem(gi) { setCart(prev => prev.filter((_,i)=>i!==gi)); }
   function toggleItemSkip(gi) { setCart(prev => prev.map((it,i)=>i===gi?{...it,skipEmail:!it.skipEmail}:it)); }
 
+  // A vendor request draft (one per vendor) loses one booking and is rebuilt from the rest.
+  function removeRequest(gi, id) {
+    setCart(prev => prev.flatMap((it,i) => i!==gi ? [it] : it.requests.length>1 ? [buildCommunityRequestItem(it.requests.filter(b=>b.id!==id))] : []));
+  }
   function removeDraft(gi, di) {
     setCart(prev => prev.map((item,i) => {
       if(i!==gi) return item;
@@ -345,7 +351,7 @@ export function CartModal({ cart, setCart, onClose, onSubmit, openNew, silentMod
         : (
           <>
             <div style={{fontSize:13,color:'#64748b',marginBottom:12}}>
-              {[totalNew>0&&`${totalNew} new booking${totalNew>1?'s':''}`, totalEdits>0&&`${totalEdits} edit${totalEdits>1?'s':''}`, totalStatus>0&&`${totalStatus} status change${totalStatus>1?'s':''}`, totalClash>0&&`${totalClash} clash alert${totalClash>1?'s':''}`, totalNotify>0&&`${totalNotify} GTEC notification${totalNotify>1?'s':''}`, totalInform>0&&`${totalInform} Inform-GTEC email${totalInform>1?'s':''}`, totalRoom>0&&`${totalRoom} room request${totalRoom>1?'s':''}`, totalInvoice>0&&`${totalInvoice} invoice email${totalInvoice>1?'s':''}`, totalSlot>0&&`${totalSlot} shared-slot change${totalSlot>1?'s':''}`].filter(Boolean).join(' · ')} ready to submit.
+              {[totalNew>0&&`${totalNew} new booking${totalNew>1?'s':''}`, totalEdits>0&&`${totalEdits} edit${totalEdits>1?'s':''}`, totalStatus>0&&`${totalStatus} status change${totalStatus>1?'s':''}`, totalClash>0&&`${totalClash} clash alert${totalClash>1?'s':''}`, totalNotify>0&&`${totalNotify} GTEC notification${totalNotify>1?'s':''}`, totalInform>0&&`${totalInform} Inform-GTEC email${totalInform>1?'s':''}`, totalRoom>0&&`${totalRoom} room request${totalRoom>1?'s':''}`, totalVendorReq>0&&`${totalVendorReq} vendor request${totalVendorReq>1?'s':''} (${vendorReqs.length} draft${vendorReqs.length>1?'s':''}, one per vendor)`, totalInvoice>0&&`${totalInvoice} invoice email${totalInvoice>1?'s':''}`, totalSlot>0&&`${totalSlot} shared-slot change${totalSlot>1?'s':''}`].filter(Boolean).join(' · ')} ready to submit.
             </div>
             <div style={{flex:1,minHeight:0,overflowY:'auto',display:'flex',flexDirection:'column',gap:10,paddingRight:2}}>
               {/* Regular (non-notify) cart items */}
@@ -500,15 +506,20 @@ export function CartModal({ cart, setCart, onClose, onSubmit, openNew, silentMod
                       <EmailChip email={item.email}/>
                       <span style={{fontSize:13,fontWeight:600,color:'#0f172a',flex:1}}>{item.name}</span>
                       <span style={{fontSize:11,fontWeight:700,color:item.preview?'#92400e':'#0369a1',background:item.preview?'#fef3c7':'#e0f2fe',border:`1px solid ${item.preview?'#fcd34d':'#7dd3fc'}`,borderRadius:4,padding:'1px 7px'}}>
-                        {item.amuaDraft?'✉ Draft to AMUA inbox':item.preview?'📄 Invoice preview':'🧾 Official invoice'}
+                        {item.vendorRequest?`✉ ${item.count>1?`${item.count} requests · one draft`:'Request'} to AMUA inbox`:item.amuaDraft?'✉ Draft to AMUA inbox':item.preview?'📄 Invoice preview':'🧾 Official invoice'}
                       </span>
                       <button onClick={()=>removeItem(gi)} title="Remove" style={{background:'none',border:'none',cursor:'pointer',color:'#f43f5e',fontSize:15,padding:'2px 4px',lineHeight:1}}>✕</button>
                     </div>
-                    <div style={{padding:'8px 14px',fontSize:12,color:'#64748b',background:'#fff',display:'flex',gap:10,flexWrap:'wrap'}}>
+                    {item.vendorRequest ? item.requests.map((b,di)=>{ const f=FACILITIES.find(x=>x.id===b.facility_id); return (
+                      <div key={b.id} style={{padding:'6px 14px',fontSize:12,color:'#64748b',background:'#fff',borderTop:di?'1px solid #f1f5f9':'none',display:'flex',alignItems:'center',gap:6}}>
+                        <span style={{flex:1}}><span style={{fontWeight:600,color:'#0f172a',marginRight:6}}>{f?.name||b.facility_id}</span>{fmtDate(b.date)} · {fmtTime(b.start_hour)}–{fmtTime(b.start_hour+b.duration)}{b.name?` · ${b.name}`:''}</span>
+                        <button onClick={()=>removeRequest(gi,b.id)} title="Take this booking out of the request" style={{background:'none',border:'none',cursor:'pointer',color:'#f43f5e',fontSize:14,padding:'2px 4px',lineHeight:1}}>✕</button>
+                      </div>); })
+                    : <div style={{padding:'8px 14px',fontSize:12,color:'#64748b',background:'#fff',display:'flex',gap:10,flexWrap:'wrap'}}>
                       <span>{item.count||1} document{(item.count||1)!==1?'s':''}</span>
                       <span style={{fontFamily:'monospace',color:'#475569'}}>{(item.refs||[]).join(', ')}</span>
                       <span style={{marginLeft:'auto',fontWeight:700,color:'#0f172a'}}>{fmtCost(item.total||0)}</span>
-                    </div>
+                    </div>}
                   </div>
                 );
               })}
@@ -897,7 +908,8 @@ export function BookingForm({ booking, allBookings, onAddToCart, onClose, isAdmi
 
   const addBtn = { border:"1.5px solid #6366f1", background:"#eef2ff", color:"#4338ca", fontSize:13, padding:"8px 14px", fontWeight:700 };
 
-  // Main form — shared details first, then the staged slots.
+  // Main form — shared details, then the slots (when, then field), then repetition and the
+  // council application details.
   return (
     <div style={{display:"flex",flexDirection:"column",gap:16}}>
       {error&&<div style={{background:"#fff1f2",border:"1px solid #f43f5e",borderRadius:8,padding:"10px 14px",color:"#881337",fontSize:13}}>{error}</div>}
@@ -981,32 +993,6 @@ export function BookingForm({ booking, allBookings, onAddToCart, onClose, isAdmi
         <textarea style={{...S.inp,resize:"vertical",minHeight:48}} value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Any requirements… (applies to all slots)"/>
       </div>
 
-      {/* Council fields: what AMUA's council application needs from the booker. */}
-      {hasCouncil && (() => {
-        const okC = councilContactOk(email);
-        const half = { flex:"1 1 200px", minWidth:0 };
-        return (
-          <div style={{border:"1.5px solid #99f6e4",background:"#f0fdfa",borderRadius:10,padding:"10px 12px",display:"flex",flexDirection:"column",gap:8}}>
-            <div style={{fontWeight:700,fontSize:13,color:"#115e59"}}>🏛 Council application details</div>
-            <div style={{fontSize:12,color:"#475569"}}>AMUA applies to the council for this field and names you and your team on the application. Fields marked * are required.</div>
-            <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",fontSize:13}}>
-              <span>📇 Key holder (your council contact) *: {okC ? <b style={{color:"#15803d"}}>✓ on file</b> : <b style={{color:"#b91c1c"}}>missing — name and phone needed</b>}</span>
-              {onEditContact && <button type="button" onClick={()=>onEditContact(email)} style={S.btn({padding:"4px 10px",fontSize:12,background:okC?"#fff":"#0d9488",color:okC?"#0f766e":"#fff",border:"1.5px solid #0d9488"})}>{okC ? "Edit council contact" : "📇 Fill in council contact"}</button>}
-            </div>
-            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-              <label style={{...S.lbl,...half}}>Players expected *
-                <input style={S.inp} type="number" min="1" max="200" value={cPlayers} onChange={e=>setCPlayers(e.target.value)} placeholder="e.g. 14"/></label>
-              <label style={{...S.lbl,...half}}>Use *
-                <select style={{...S.inp,background:"#fff"}} value={cUse} onChange={e=>setCUse(e.target.value)}>
-                  <option value="training">Training</option><option value="competition">Competition / games</option></select></label>
-            </div>
-            <label style={S.lbl}>Grade / level <span style={{textTransform:"none",fontWeight:400}}>(optional)</span>
-              <input style={S.inp} value={cGrade} onChange={e=>setCGrade(e.target.value)} placeholder="e.g. Social mixed, open grade"/></label>
-            <label style={S.lbl}>Notes for the council <span style={{textTransform:"none",fontWeight:400}}>(optional)</span>
-              <input style={S.inp} value={cNotes} onChange={e=>setCNotes(e.target.value)} placeholder="e.g. lights needed after 6pm"/></label>
-          </div>);
-      })()}
-
       {/* Admin status (edit only) */}
       {isAdmin && isEditing && (
         <div>
@@ -1014,30 +1000,6 @@ export function BookingForm({ booking, allBookings, onAddToCart, onClose, isAdmi
           <select style={S.inp} value={status} onChange={e=>setStatus(e.target.value)}>
             {Object.entries(STATUS_META).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
           </select>
-        </div>
-      )}
-
-      {/* Shared repetition (new bookings only) */}
-      {!isEditing && (
-        <div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:8,padding:12}}>
-          <label style={{...S.lbl,color:"#16a34a"}}>🔁 Repetition (applies to every slot)</label>
-          <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center"}}>
-            <select style={{...S.inp,width:"auto"}} value={recurMode} onChange={e=>setRecurMode(e.target.value)}>
-              <option value="none">No repetition</option>
-              <option value="weeks">Repeat for N weeks</option>
-              <option value="until">Repeat until date</option>
-            </select>
-            {recurMode==="weeks" && (
-              <div style={{display:"flex",alignItems:"center",gap:8}}>
-                <input type="number" min={1} max={52} value={recurWeeks} onChange={e=>setRecurWeeks(parseInt(e.target.value)||1)} style={{...S.inp,width:70}}/>
-                <span style={{fontSize:13,color:"#475569"}}>weeks</span>
-              </div>
-            )}
-            {recurMode==="until" && (
-              <input type="date" value={recurUntil} min={pickDate||todayKey()} onChange={e=>setRecurUntil(e.target.value)} style={{...S.inp,width:"auto"}}/>
-            )}
-          </div>
-          {recurMode!=="none" && <div style={{fontSize:12,color:"#16a34a",marginTop:6}}>Each slot repeats weekly on its own day/time.</div>}
         </div>
       )}
 
@@ -1075,6 +1037,56 @@ export function BookingForm({ booking, allBookings, onAddToCart, onClose, isAdmi
               <SlotRow key={i} slot={slot} idx={i} onChange={updateSlot} onRemove={removeSlot} canRemove={!isEditing} allBookings={allBookings} onSplit={splitSlot}/>
             ))}
       </div>
+
+      {/* Shared repetition (new bookings only) */}
+      {!isEditing && (
+        <div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:8,padding:12}}>
+          <label style={{...S.lbl,color:"#16a34a"}}>🔁 Repetition (applies to every slot)</label>
+          <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center"}}>
+            <select style={{...S.inp,width:"auto"}} value={recurMode} onChange={e=>setRecurMode(e.target.value)}>
+              <option value="none">No repetition</option>
+              <option value="weeks">Repeat for N weeks</option>
+              <option value="until">Repeat until date</option>
+            </select>
+            {recurMode==="weeks" && (
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <input type="number" min={1} max={52} value={recurWeeks} onChange={e=>setRecurWeeks(parseInt(e.target.value)||1)} style={{...S.inp,width:70}}/>
+                <span style={{fontSize:13,color:"#475569"}}>weeks</span>
+              </div>
+            )}
+            {recurMode==="until" && (
+              <input type="date" value={recurUntil} min={pickDate||todayKey()} onChange={e=>setRecurUntil(e.target.value)} style={{...S.inp,width:"auto"}}/>
+            )}
+          </div>
+          {recurMode!=="none" && <div style={{fontSize:12,color:"#16a34a",marginTop:6}}>Each slot repeats weekly on its own day/time.</div>}
+        </div>
+      )}
+
+      {/* Council fields: what AMUA's council application needs from the booker. */}
+      {hasCouncil && (() => {
+        const okC = councilContactOk(email);
+        const half = { flex:"1 1 200px", minWidth:0 };
+        return (
+          <div style={{border:"1.5px solid #99f6e4",background:"#f0fdfa",borderRadius:10,padding:"10px 12px",display:"flex",flexDirection:"column",gap:8}}>
+            <div style={{fontWeight:700,fontSize:13,color:"#115e59"}}>🏛 Council application details</div>
+            <div style={{fontSize:12,color:"#475569"}}>AMUA applies to the council for this field and names you and your team on the application. Fields marked * are required.</div>
+            <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",fontSize:13}}>
+              <span>📇 Key holder (your council contact) *: {okC ? <b style={{color:"#15803d"}}>✓ on file</b> : <b style={{color:"#b91c1c"}}>missing — name and phone needed</b>}</span>
+              {onEditContact && <button type="button" onClick={()=>onEditContact(email)} style={S.btn({padding:"4px 10px",fontSize:12,background:okC?"#fff":"#0d9488",color:okC?"#0f766e":"#fff",border:"1.5px solid #0d9488"})}>{okC ? "Edit council contact" : "📇 Fill in council contact"}</button>}
+            </div>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+              <label style={{...S.lbl,...half}}>Players expected *
+                <input style={S.inp} type="number" min="1" max="200" value={cPlayers} onChange={e=>setCPlayers(e.target.value)} placeholder="e.g. 14"/></label>
+              <label style={{...S.lbl,...half}}>Use *
+                <select style={{...S.inp,background:"#fff"}} value={cUse} onChange={e=>setCUse(e.target.value)}>
+                  <option value="training">Training</option><option value="competition">Competition / games</option></select></label>
+            </div>
+            <label style={S.lbl}>Grade / level <span style={{textTransform:"none",fontWeight:400}}>(optional)</span>
+              <input style={S.inp} value={cGrade} onChange={e=>setCGrade(e.target.value)} placeholder="e.g. Social mixed, open grade"/></label>
+            <label style={S.lbl}>Notes for the council <span style={{textTransform:"none",fontWeight:400}}>(optional)</span>
+              <input style={S.inp} value={cNotes} onChange={e=>setCNotes(e.target.value)} placeholder="e.g. lights needed after 6pm"/></label>
+          </div>);
+      })()}
 
       <div style={{display:"flex",gap:10,justifyContent:"flex-end",alignItems:"center",paddingTop:4}}>
         {!isEditing && slots.length>0 && <span style={{fontSize:12,color:"#64748b",marginRight:"auto"}}>Will create <strong style={{color:"#0f172a"}}>{totalToCreate}</strong> booking{totalToCreate!==1?"s":""}</span>}

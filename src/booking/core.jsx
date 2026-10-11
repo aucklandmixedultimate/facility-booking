@@ -1711,6 +1711,32 @@ export function buildRoomRequestEmailHtml({ vendorName, bookings, ref, players =
     + "<p style='color:#64748b;font-size:12px'>Sent from FacilityBook – AMUA.</p></div>";
 }
 
+// Field hire request to a community facility (vendor mail: sendEmail turns it into a draft in
+// AMUA's inbox with the recipient listed). One cart item, and so one draft, per facility: every
+// booking requested from it is summarised in a single email (App.queueNotifications merges a
+// new request into the facility's item by rebuilding it from all its bookings).
+export function buildCommunityRequestItem(bookings) {
+  const bs = [...bookings].sort((a, b) => a.date.localeCompare(b.date) || a.start_hour - b.start_hour);
+  const pid = providerOfFacility(bs[0].facility_id), pr = PROVIDERS[pid] || {}, rv = _contactReviews[pid] || {}, c = pr.contact || {};
+  const to = rv.email || c.email || AMUA_INBOX, ops = AMUA_INFO.contacts?.operations || {}, many = bs.length > 1;
+  const when = b => `${fmtDate(b.date)} ${fmtTime(b.start_hour)}–${fmtTime(b.start_hour + b.duration)}`;
+  const td = "padding:6px 8px;border-top:1px solid #e2e8f0";
+  const rows = bs.map(b => { const f = FACILITIES.find(x => x.id === b.facility_id);
+    return `<tr><td style="${td};font-weight:600;color:#0f172a">${escHtml(f?.name || "Your field")}</td><td style="${td}">${when(b)} (${fmtDuration(b.duration)})</td>`
+      + `<td style="${td}">${escHtml(b.name || "")}${b.purpose ? ` — ${escHtml(b.purpose)}` : ""}</td><td style="${td}">${f?.defaultRate ? `$${f.defaultRate}/hr` : "Your usual rate"}</td></tr>`; }).join("");
+  const hours = bs.reduce((s, b) => s + b.duration, 0);
+  const html = `<p>Kia ora ${escHtml(rv.contact_name || c.contact_name || pr.name || "")},</p>
+    <p>Auckland Mixed Ultimate Association would like to hire ${many ? `these ${bs.length} slots (${fmtDuration(hours)} in all)` : "this slot"} for ultimate frisbee training:</p>
+    <table style="width:100%;border-collapse:collapse;font-size:13px;margin:12px 0;border:1px solid #e2e8f0">
+      <thead><tr style="background:#f8fafc;color:#64748b;text-align:left"><th style="padding:6px 8px">Field</th><th style="padding:6px 8px">When</th><th style="padding:6px 8px">Group</th><th style="padding:6px 8px">Rate</th></tr></thead>
+      <tbody>${rows}</tbody></table>
+    <p>Could you let us know if ${many ? "these slots are" : "that slot is"} available?</p>
+    <p>Ngā mihi,<br>${escHtml(ops.name || "AMUA")}${ops.position ? `, ${escHtml(ops.position)}` : ""}<br>${escHtml(AMUA_INFO.name || "Auckland Mixed Ultimate Association")}${ops.phone ? `<br>${escHtml(ops.phone)}` : ""}<br>${AMUA_INBOX}</p>`;
+  return { notifyOnly: true, invoiceEmail: true, amuaDraft: true, vendorRequest: pid, requests: bs, email: to, name: pr.name || pid, drafts: [],
+    count: bs.length, refs: bs.map(b => b.id.slice(0, 8)), total: 0,
+    subject: many ? `Field hire request — ${pr.short || pr.name || ""} — ${bs.length} slots from ${fmtDate(bs[0].date)}` : `Field hire request — ${pr.short || pr.name || ""} — ${when(bs[0])}`, html };
+}
+
 // Scheduling-clash email shown to a booker whose booking overlaps an admin/field
 // reservation. Top-level so the cart outbox can send it on submit.
 export function buildClashEmailHtml({ name, email, clashes }) {
