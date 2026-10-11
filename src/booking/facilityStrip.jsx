@@ -2,7 +2,7 @@
 // (click to show just that one, again for all), a "📍 Fields" menu to add or remove fields and
 // locations, and Reset back to Cornwall Park (the default venue, nothing removed).
 import { useState, useRef, useEffect } from "react";
-import { ALL_VENUES, PROVIDERS, VENUE_SEP, activeVenueKeys, defaultVenueKey, listVenues, previewEntries, setPreviewEntries, venueFacilities, venueKeyOf, visibleFacilities } from "./core.jsx";
+import { ALL_VENUES, PROVIDERS, VENUE_SEP, activeFacilities, activeVenueKeys, defaultVenueKey, listVenues, previewEntries, setPreviewEntries, venueFacilities, venueKeyOf, visibleFacilities } from "./core.jsx";
 import { loadTopVenues } from "./topVenues.js";
 import { ownerTypeMeta, suitWord } from "../venues.js";
 
@@ -49,7 +49,8 @@ const vendorLabel = pid => PROVIDERS[pid]?.label || PROVIDERS[pid]?.short || PRO
 
 // Controlled mode (the Bookings tab's "All Bookings" list): `venueKeys` (keys or ALL_VENUES),
 // `onVenueKeys`, `onReset` and `isDefault` replace the page's venue, and `menuOnly` shows just
-// the 📍 menu and Reset, without the facility chips.
+// the 📍 menu and Reset, without the facility chips. It lists every active venue (any booker's
+// active fields) in place of the page's venues and the top-rated list.
 export function FacilityStrip({ isMobile, isAdmin, selFac = "all", setSelFac = () => {}, setVenue, hiddenFacs, setHiddenFacs, venueKeys, onVenueKeys, onReset, isDefault: isDefaultProp, menuOnly = false }) {
   const [open, setOpen] = useState(false), [exp, setExp] = useState(null), ref = useRef(null);
   // "All venues (top rated)": null = not loaded yet.
@@ -61,7 +62,7 @@ export function FacilityStrip({ isMobile, isAdmin, selFac = "all", setSelFac = (
     document.addEventListener("mousedown", off); document.addEventListener("touchstart", off); document.addEventListener("keydown", esc);
     return () => { document.removeEventListener("mousedown", off); document.removeEventListener("touchstart", off); document.removeEventListener("keydown", esc); }; }, [open]);
 
-  const venues = listVenues(), vis = visibleFacilities();
+  const vis = venueKeys ? activeFacilities() : visibleFacilities(), venues = listVenues(vis);
   const ks = venueKeys ?? activeVenueKeys(), all = ks === ALL_VENUES, shownKeys = all ? venues.map(v => v.key) : ks;
   const facs = venueKeys ? vis.filter(f => shownKeys.includes(venueKeyOf(f)) && !hiddenFacs.has(f.id)) : venueFacilities();
   const facsAt = k => vis.filter(f => venueKeyOf(f) === k);
@@ -97,7 +98,8 @@ export function FacilityStrip({ isMobile, isAdmin, selFac = "all", setSelFac = (
   const box = (on, part) => <span aria-hidden className={`fs-box${on ? " on" : ""}${part ? " part" : ""}`}>{on ? (part ? "–" : "✓") : ""}</span>;
   const menu = open && (
     <div className="fs-menu" role="menu">
-      <div className="fs-vendor fs-top">
+      {onVenueKeys ? <div className="fs-vendor fs-top"><div className="fs-vh" title="Every location with active fields, whichever booker added them">Active venues · {venues.length}</div></div>
+      : <div className="fs-vendor fs-top">
         <button type="button" className="fs-toph" aria-expanded={topOpen} onClick={toggleTop} title="The best-rated venues of every type on All Auckland fields, bookable or not">
           ⭐ All venues · top rated <span className="fs-n">{topOpen ? "▾" : "▸"}</span>
         </button>
@@ -107,7 +109,7 @@ export function FacilityStrip({ isMobile, isAdmin, selFac = "all", setSelFac = (
             <button key={x.park.id} type="button" role="menuitem" className="fs-fac" onClick={() => preview(x)} title={`${t.label} · ${suitWord(x.score)}: show its fields on the calendars`}>
               <span aria-hidden>{t.icon}</span><span className="fs-t">{x.park.name}</span><span className="fs-n">{suitWord(x.score)}</span>
             </button>); }))}
-      </div>
+      </div>}
       {pids.map(pid => (
         <div key={pid} className="fs-vendor">
           <div className="fs-vh">{vendorLabel(pid)}</div>
@@ -143,7 +145,7 @@ export function FacilityStrip({ isMobile, isAdmin, selFac = "all", setSelFac = (
       </div>}
       <div className="fs-tools" ref={ref}>
         <button type="button" className="fs-btn" aria-haspopup="menu" aria-expanded={open} onClick={openMenu} title="Add or remove fields and locations">📍 Fields ▾</button>
-        {(!isDefault || (!onReset && previewEntries().length > 0)) && <button type="button" className="fs-btn ghost" onClick={reset} title={onReset ? "Back to every location except Cornwall Park (CPSA)" : "Back to the Cornwall Park facilities"}>↺ Reset</button>}
+        {(!isDefault || (!onReset && previewEntries().length > 0)) && <button type="button" className="fs-btn ghost" onClick={reset} title={onReset ? "Back to every active location" : "Back to the Cornwall Park facilities"}>↺ Reset</button>}
         {menu}
       </div>
     </div>
