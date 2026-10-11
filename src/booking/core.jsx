@@ -166,6 +166,9 @@ export function councilContactOk(email) {
   return !!(c?.full_name?.trim() && c?.phone?.trim());
 }
 export function visibleFacilities() { return FACILITIES.filter(f => !f.inactive && (!f.adminOnly || _isAdminView) && (!f.council || f.preview || _isAdminView || ownsCouncilFacility(f))); }
+// Every active facility, whichever booker's My fields it's in (not this viewer's previews):
+// the All Bookings list's locations.
+export function activeFacilities() { return FACILITIES.filter(f => !f.inactive && !f.preview && (!f.adminOnly || _isAdminView)); }
 // Council fields are added per booker (Council fields page → Book), so a booker sees only
 // the ones added for them (any of their linked emails); admins see all.
 function ownsCouncilFacility(f) {
@@ -548,10 +551,10 @@ export function venueKeyOf(f) {
   const pid = f.provider || defaultProviderId();
   return `${pid}|${f.site || PROVIDERS[pid]?.defaultSite || ""}`;
 }
-// Venues the current viewer can see, default venue first, then grouped by provider.
-export function listVenues() {
+// Venues the current viewer can see (or of `facs`), default venue first, then grouped by provider.
+export function listVenues(facs = visibleFacilities()) {
   const byKey = new Map();
-  visibleFacilities().forEach(f => {
+  facs.forEach(f => {
     const key = venueKeyOf(f);
     if (!byKey.has(key)) {
       const pid = f.provider || defaultProviderId();

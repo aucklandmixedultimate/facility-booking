@@ -2,7 +2,7 @@
 // (click to show just that one, again for all), a "📍 Fields" menu to add or remove fields and
 // locations, and Reset back to Cornwall Park (the default venue, nothing removed).
 import { useState, useRef, useEffect } from "react";
-import { ALL_VENUES, PROVIDERS, VENUE_SEP, activeVenueKeys, defaultVenueKey, listVenues, previewEntries, setPreviewEntries, venueFacilities, venueKeyOf, visibleFacilities } from "./core.jsx";
+import { ALL_VENUES, PROVIDERS, VENUE_SEP, activeFacilities, activeVenueKeys, defaultVenueKey, listVenues, previewEntries, setPreviewEntries, venueFacilities, venueKeyOf, visibleFacilities } from "./core.jsx";
 import { loadTopVenues } from "./topVenues.js";
 import { ownerTypeMeta, suitWord } from "../venues.js";
 
@@ -40,6 +40,7 @@ const STYLE = `
 .fs-top{background:var(--c-surface-2)}
 .fstrip.menuonly{margin-bottom:0}
 .fstrip.menuonly .fs-menu{left:0;right:auto}
+.fstrip.phone .fs-menu.pinned{position:fixed;left:16px;right:16px;width:auto;max-width:none}
 .fs-menu button.fs-toph{width:100%;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--c-muted);padding:8px 12px}
 .fs-note{padding:4px 12px 8px;font-size:12px;color:var(--c-muted)}
 .fs-tag{font-size:10px;font-weight:700;color:var(--c-muted);border:1px solid var(--c-line);border-radius:var(--r-pill);padding:0 6px;margin-left:6px}
@@ -49,19 +50,26 @@ const vendorLabel = pid => PROVIDERS[pid]?.label || PROVIDERS[pid]?.short || PRO
 
 // Controlled mode (the Bookings tab's "All Bookings" list): `venueKeys` (keys or ALL_VENUES),
 // `onVenueKeys`, `onReset` and `isDefault` replace the page's venue, and `menuOnly` shows just
-// the 📍 menu and Reset, without the facility chips.
+// the 📍 menu and Reset, without the facility chips. It lists every active venue (any booker's
+// active fields) in place of the page's venues and the top-rated list.
 export function FacilityStrip({ isMobile, isAdmin, selFac = "all", setSelFac = () => {}, setVenue, hiddenFacs, setHiddenFacs, venueKeys, onVenueKeys, onReset, isDefault: isDefaultProp, menuOnly = false }) {
   const [open, setOpen] = useState(false), [exp, setExp] = useState(null), ref = useRef(null);
+  // On a phone the menu is pinned to the screen's gutters under (or, short of room, over) the
+  // button, so it never runs off the edge wherever the button sits; null = the desktop dropdown.
+  const [pin, setPin] = useState(null);
   // "All venues (top rated)": null = not loaded yet.
   const [topOpen, setTopOpen] = useState(false), [top, setTop] = useState(null);
   const toggleTop = () => { const o = !topOpen; setTopOpen(o); if (o && top === null) loadTopVenues().then(setTop); };
   useEffect(() => { if (!open) return;
     const off = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
     const esc = e => { if (e.key === "Escape") setOpen(false); };
+    const shut = () => setOpen(false);
     document.addEventListener("mousedown", off); document.addEventListener("touchstart", off); document.addEventListener("keydown", esc);
-    return () => { document.removeEventListener("mousedown", off); document.removeEventListener("touchstart", off); document.removeEventListener("keydown", esc); }; }, [open]);
+    if (pin) { window.addEventListener("scroll", shut); window.addEventListener("resize", shut); }
+    return () => { document.removeEventListener("mousedown", off); document.removeEventListener("touchstart", off); document.removeEventListener("keydown", esc);
+      window.removeEventListener("scroll", shut); window.removeEventListener("resize", shut); }; }, [open, pin]);
 
-  const venues = listVenues(), vis = visibleFacilities();
+  const vis = venueKeys ? activeFacilities() : visibleFacilities(), venues = listVenues(vis);
   const ks = venueKeys ?? activeVenueKeys(), all = ks === ALL_VENUES, shownKeys = all ? venues.map(v => v.key) : ks;
   const facs = venueKeys ? vis.filter(f => shownKeys.includes(venueKeyOf(f)) && !hiddenFacs.has(f.id)) : venueFacilities();
   const facsAt = k => vis.filter(f => venueKeyOf(f) === k);
@@ -96,8 +104,9 @@ export function FacilityStrip({ isMobile, isAdmin, selFac = "all", setSelFac = (
   const pids = [...new Set(venues.map(v => v.providerId))];
   const box = (on, part) => <span aria-hidden className={`fs-box${on ? " on" : ""}${part ? " part" : ""}`}>{on ? (part ? "–" : "✓") : ""}</span>;
   const menu = open && (
-    <div className="fs-menu" role="menu">
-      <div className="fs-vendor fs-top">
+    <div className={`fs-menu${pin ? " pinned" : ""}`} role="menu" style={pin || undefined}>
+      {onVenueKeys ? <div className="fs-vendor fs-top"><div className="fs-vh" title="Every location with active fields, whichever booker added them">Active venues · {venues.length}</div></div>
+      : <div className="fs-vendor fs-top">
         <button type="button" className="fs-toph" aria-expanded={topOpen} onClick={toggleTop} title="The best-rated venues of every type on All Auckland fields, bookable or not">
           ⭐ All venues · top rated <span className="fs-n">{topOpen ? "▾" : "▸"}</span>
         </button>
@@ -107,7 +116,7 @@ export function FacilityStrip({ isMobile, isAdmin, selFac = "all", setSelFac = (
             <button key={x.park.id} type="button" role="menuitem" className="fs-fac" onClick={() => preview(x)} title={`${t.label} · ${suitWord(x.score)}: show its fields on the calendars`}>
               <span aria-hidden>{t.icon}</span><span className="fs-t">{x.park.name}</span><span className="fs-n">{suitWord(x.score)}</span>
             </button>); }))}
-      </div>
+      </div>}
       {pids.map(pid => (
         <div key={pid} className="fs-vendor">
           <div className="fs-vh">{vendorLabel(pid)}</div>
@@ -129,7 +138,11 @@ export function FacilityStrip({ isMobile, isAdmin, selFac = "all", setSelFac = (
       {(isAdmin || onVenueKeys) && <button type="button" className="fs-allv" onClick={() => { onVenueKeys ? onVenueKeys(ALL_VENUES) : setVenue(ALL_VENUES); setOpen(false); }}>Show every vendor &amp; location</button>}
     </div>);
 
-  const openMenu = () => { if (!open) setExp(shownKeys[0] || null); setOpen(!open); };
+  const openMenu = () => {
+    if (!open) { setExp(shownKeys[0] || null);
+      const r = isMobile && ref.current?.getBoundingClientRect(), below = r ? window.innerHeight - r.bottom - 20 : 0;
+      setPin(!r ? null : below >= 240 ? { top: r.bottom + 4, maxHeight: below } : { top: "auto", bottom: window.innerHeight - r.top + 4, maxHeight: r.top - 20 }); }
+    setOpen(!open); };
   return (
     <div className={`fstrip${isMobile ? " phone" : ""}${menuOnly ? " menuonly" : ""}`}>
       <style>{STYLE}</style>
@@ -143,7 +156,7 @@ export function FacilityStrip({ isMobile, isAdmin, selFac = "all", setSelFac = (
       </div>}
       <div className="fs-tools" ref={ref}>
         <button type="button" className="fs-btn" aria-haspopup="menu" aria-expanded={open} onClick={openMenu} title="Add or remove fields and locations">📍 Fields ▾</button>
-        {(!isDefault || (!onReset && previewEntries().length > 0)) && <button type="button" className="fs-btn ghost" onClick={reset} title={onReset ? "Back to every location except Cornwall Park (CPSA)" : "Back to the Cornwall Park facilities"}>↺ Reset</button>}
+        {(!isDefault || (!onReset && previewEntries().length > 0)) && <button type="button" className="fs-btn ghost" onClick={reset} title={onReset ? "Back to every active location except Cornwall Park (GTEC / CPSA)" : "Back to the Cornwall Park facilities"}>↺ Reset</button>}
         {menu}
       </div>
     </div>
