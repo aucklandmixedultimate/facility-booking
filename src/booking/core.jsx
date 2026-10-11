@@ -2,6 +2,7 @@ import logoUrl from "../assets/logo.jpg";
 import { createClient } from "@supabase/supabase-js";
 import { getActor } from "../actor.js";
 import { useState, useRef, useEffect } from "react";
+import { escHtml } from "../html.js";
 import { isClosed, isAmuaReview, isLegacyStatus, normaliseStatus, stepOf, stepTag, WORKFLOW_STEPS, VENDOR_QUEUE_STATUSES } from "../statuses.js";
 // ─── LOGO ─────────────────────────────────────────────────────────────────────
 export const LOGO_SRC = logoUrl;
@@ -1406,7 +1407,7 @@ export function toAmuaDraft({ to, cc, subject, html }) {
   return { to: AMUA_INBOX, cc: undefined, subject: `[DRAFT for ${list}] ${subject}`,
     html: `<div style="font-family:sans-serif;border:2px dashed #b45309;background:#fffbeb;padding:10px 14px;margin-bottom:14px;border-radius:8px">
       <b>Draft — not sent.</b> AMUA doesn't email vendors, operators or the council from the booking app.<br>
-      <b>Intended recipients:</b> ${String(to || "").replace(/</g, "&lt;")}${cc ? `<br><b>Cc:</b> ${String(cc).replace(/</g, "&lt;")}` : ""}<br>
+      <b>Intended recipients:</b> ${escHtml(to)}${cc ? `<br><b>Cc:</b> ${escHtml(cc)}` : ""}<br>
       Review it, then send it from Gmail.</div><hr>${html}` };
 }
 export async function sendEmail({ to, subject: rawSubject, html, kind = "order", cc }) {
@@ -1474,7 +1475,7 @@ export function buildOrderEmailHtml({ name, email, bookings: bkgs=[], deletedBoo
         <td style="padding:10px 14px;border-bottom:1px solid ${borderColor};font-size:13px;color:${textColor};font-weight:600">${f?.name||b.facility_id}</td>
         <td style="padding:10px 14px;border-bottom:1px solid ${borderColor};font-size:13px;color:${textColor}">${fmtDate(b.date)}</td>
         <td style="padding:10px 14px;border-bottom:1px solid ${borderColor};font-size:13px;color:${textColor};white-space:nowrap">${fmtTime(b.start_hour)}–${fmtTime(b.start_hour+b.duration)}</td>
-        <td style="padding:10px 14px;border-bottom:1px solid ${borderColor};font-size:13px;color:${textColor}">${b.purpose||""}</td>
+        <td style="padding:10px 14px;border-bottom:1px solid ${borderColor};font-size:13px;color:${textColor}">${escHtml(b.purpose||"")}</td>
       </tr>`;
     }).join("");
   }
@@ -1526,13 +1527,13 @@ export function buildOrderEmailHtml({ name, email, bookings: bkgs=[], deletedBoo
     </tr></table>
   </td></tr>
   <tr><td style="padding:28px 36px">
-    <p style="margin:0 0 4px;font-size:15px;color:#334155">Hi <strong style="color:#0f172a">${name}</strong>,</p>
+    <p style="margin:0 0 4px;font-size:15px;color:#334155">Hi <strong style="color:#0f172a">${escHtml(name)}</strong>,</p>
     ${addedSection}
     ${deletedSection}
     ${hasAdded?emailLinksBlock():""}
     <p style="margin:24px 0 0;font-size:12px;color:#94a3b8">If you have questions, please contact the facility administrator directly.</p>
   </td></tr>
-  <tr><td style="padding:14px 36px 20px;background:#f8fafc;font-size:11px;color:#94a3b8;text-align:center">FacilityBook · Automated notification · ${email}</td></tr>
+  <tr><td style="padding:14px 36px 20px;background:#f8fafc;font-size:11px;color:#94a3b8;text-align:center">FacilityBook · Automated notification · ${escHtml(email)}</td></tr>
 </table>
 </td></tr></table></body></html>`;
 }
@@ -1561,7 +1562,7 @@ export function buildApprovalEmailHtml({ name, email, bookings: bkgs, newStatus,
       <td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;font-size:13px;color:#0f172a">${f?.name||b.facility_id}</td>
       <td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;font-size:13px;color:#0f172a">${fmtDate(b.date)}</td>
       <td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;font-size:13px;color:#0f172a">${fmtTime(b.start_hour)}–${fmtTime(b.start_hour+b.duration)}</td>
-      <td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;font-size:13px;color:#0f172a">${b.purpose}</td>
+      <td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;font-size:13px;color:#0f172a">${escHtml(b.purpose)}</td>
     </tr>`;
   }).join("");
   return `<!DOCTYPE html><html><body style="margin:0;padding:0;background:#f8fafc;font-family:'Segoe UI',sans-serif">
@@ -1571,7 +1572,7 @@ export function buildApprovalEmailHtml({ name, email, bookings: bkgs, newStatus,
     <div style="font-size:22px;font-weight:800;color:#fff;letter-spacing:-0.02em">Booking ${label}</div>
   </td></tr>
   <tr><td style="padding:28px 32px">
-    <p style="margin:0 0 6px;font-size:15px;color:#0f172a">Hi <strong>${name}</strong>,</p>
+    <p style="margin:0 0 6px;font-size:15px;color:#0f172a">Hi <strong>${escHtml(name)}</strong>,</p>
     <p style="margin:0 0 24px;font-size:14px;color:#475569;line-height:1.6">${bodyText}</p>
     <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #f1f5f9;border-radius:10px;overflow:hidden">
       <thead><tr style="background:#f8fafc">
@@ -1582,11 +1583,11 @@ export function buildApprovalEmailHtml({ name, email, bookings: bkgs, newStatus,
       </tr></thead>
       <tbody>${rows}</tbody>
     </table>
-    ${adminNote?`<div style="margin-top:16px;padding:14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:13px;color:#475569"><strong>Note from admin:</strong> ${adminNote}</div>`:""}
+    ${adminNote?`<div style="margin-top:16px;padding:14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:13px;color:#475569"><strong>Note from admin:</strong> ${escHtml(adminNote)}</div>`:""}
     ${emailLinksBlock()}
     <p style="margin:24px 0 0;font-size:12px;color:#94a3b8">If you have questions, please contact the facility manager.</p>
   </td></tr>
-  <tr><td style="padding:16px 32px 24px;background:#f8fafc;font-size:11px;color:#94a3b8;text-align:center">FacilityBook · Sent to ${email}</td></tr>
+  <tr><td style="padding:16px 32px 24px;background:#f8fafc;font-size:11px;color:#94a3b8;text-align:center">FacilityBook · Sent to ${escHtml(email)}</td></tr>
 </table></td></tr></table></body></html>`;
 }
 
@@ -1602,11 +1603,11 @@ export function buildMismatchEmailHtml({ name, email, bookings: bkgs }) {
     const cfac = FACILITIES.find(x => x.id === cv.facility_id);
     const facNote = b.facility_id !== cv.facility_id ? " (" + (cfac?.name || cv.facility_id) + ")" : "";
     return "<tr>"
-      + "<td style='padding:6px 8px'>" + (b.purpose || "Booking") + "</td>"
+      + "<td style='padding:6px 8px'>" + escHtml(b.purpose || "Booking") + "</td>"
       + "<td style='padding:6px 8px'>" + (fac?.name || b.facility_id) + "</td>"
       + "<td style='padding:6px 8px'>" + fmtDate(b.date) + "</td>"
       + "<td style='padding:6px 8px'><span style='text-decoration:line-through;color:#94a3b8'>" + fmtTime(b.start_hour) + "–" + fmtTime(b.start_hour + b.duration) + "</span> → <span style='color:#a16207;font-weight:700'>" + fmtTime(cv.start_hour) + "–" + fmtTime(cv.start_hour + cv.duration) + facNote + "</span></td>"
-      + "<td style='padding:6px 8px;color:#64748b'>" + reasons.join("; ") + "</td>"
+      + "<td style='padding:6px 8px;color:#64748b'>" + escHtml(reasons.join("; ")) + "</td>"
       + "</tr>";
   }).join("");
   return "<div style='font-family:sans-serif;max-width:640px'>"
@@ -1639,7 +1640,7 @@ export function buildInformCpsaEmailHtml({ vendorName, booking, refs = [], submi
     + "<p>Hi " + (vendorName || "there") + ",</p>"
     + "<p>AMUA's record for the booking below differs from what GTEC currently holds. Please review and correct GTEC's schedule to match our record (the <strong>AMUA</strong> values).</p>"
     + "<table style='width:100%;border-collapse:collapse;font-size:13px;margin:12px 0;border:1px solid #e2e8f0'><tbody>"
-    + "<tr><td style='padding:6px 8px;color:#64748b;width:96px'>Booker</td><td style='padding:6px 8px;color:#0f172a'>" + (booking.name || "") + "</td></tr>"
+    + "<tr><td style='padding:6px 8px;color:#64748b;width:96px'>Booker</td><td style='padding:6px 8px;color:#0f172a'>" + escHtml(booking.name || "") + "</td></tr>"
     + "<tr><td style='padding:6px 8px;color:#64748b'>Field</td><td style='padding:6px 8px;color:#0f172a'>" + (fac?.name || booking.facility_id) + facNote + "</td></tr>"
     + "<tr><td style='padding:6px 8px;color:#64748b'>Date</td><td style='padding:6px 8px;color:#0f172a'>" + fmtDate(booking.date) + "</td></tr>"
     + "<tr><td style='padding:6px 8px;color:#64748b'>Time (AMUA)</td><td style='padding:6px 8px;color:#0f172a;font-weight:700'>" + fmtTime(booking.start_hour) + "–" + fmtTime(booking.start_hour + booking.duration) + " (" + booking.duration + "h)</td></tr>"
@@ -1662,7 +1663,7 @@ export function buildRoomRequestEmailHtml({ vendorName, bookings, ref, players =
       + "<td style='padding:6px 8px;border-top:1px solid #e2e8f0;font-weight:600;color:#0f172a'>" + (fac?.name || b.facility_id) + "</td>"
       + "<td style='padding:6px 8px;border-top:1px solid #e2e8f0'>" + fmtDate(b.date) + "</td>"
       + "<td style='padding:6px 8px;border-top:1px solid #e2e8f0'>" + fmtTime(b.start_hour) + "–" + fmtTime(b.start_hour + b.duration) + "</td>"
-      + "<td style='padding:6px 8px;border-top:1px solid #e2e8f0'>" + (b.purpose || "") + (n ? " · about " + n + " people" : "") + "</td>"
+      + "<td style='padding:6px 8px;border-top:1px solid #e2e8f0'>" + escHtml(b.purpose || "") + (n ? " · about " + n + " people" : "") + "</td>"
       + "</tr>";
   }).join("");
   return "<div style='font-family:sans-serif;max-width:640px'>"
@@ -1682,7 +1683,7 @@ export function buildRoomRequestEmailHtml({ vendorName, bookings, ref, players =
 export function buildClashEmailHtml({ name, email, clashes }) {
   const rows = (clashes || []).map(c => {
     const f = FACILITIES.find(x => x.id === c.admin.facility_id);
-    return "<tr><td style='padding:6px 8px'>" + (c.admin.purpose || "Admin booking") + "</td><td style='padding:6px 8px'>" + (f?.name || "") + "</td><td style='padding:6px 8px'>" + fmtDate(c.admin.date) + "</td><td style='padding:6px 8px'>" + fmtTime(c.admin.start_hour) + "–" + fmtTime(c.admin.start_hour + c.admin.duration) + "</td><td style='padding:6px 8px'>" + (c.user.purpose || "Your booking") + "</td></tr>";
+    return "<tr><td style='padding:6px 8px'>" + escHtml(c.admin.purpose || "Admin booking") + "</td><td style='padding:6px 8px'>" + (f?.name || "") + "</td><td style='padding:6px 8px'>" + fmtDate(c.admin.date) + "</td><td style='padding:6px 8px'>" + fmtTime(c.admin.start_hour) + "–" + fmtTime(c.admin.start_hour + c.admin.duration) + "</td><td style='padding:6px 8px'>" + (c.user.purpose || "Your booking") + "</td></tr>";
   }).join("");
   return "<div style='font-family:sans-serif;max-width:600px'>"
     + "<h2 style='color:#9f1239'>⚠️ Scheduling Clash Notice</h2>"

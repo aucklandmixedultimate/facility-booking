@@ -19,12 +19,18 @@ const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 // intended recipients listed above it. The web app does the same; this is the backstop.
 const AMUA_INBOX = "aucklandmixedultimate@gmail.com";
 export function toAmuaDraft(to: string, cc: string | undefined, subject: string, html: string) {
-  const esc = (s: string) => s.replace(/</g, "&lt;");
+  const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   return { to: AMUA_INBOX, cc: undefined, subject: `[DRAFT for ${[to, cc].filter(Boolean).join(", ")}] ${subject}`,
     html: `<div style="font-family:sans-serif;border:2px dashed #b45309;background:#fffbeb;padding:10px 14px;margin-bottom:14px;border-radius:8px">` +
       `<b>Draft — not sent.</b> AMUA doesn't email vendors, operators or the council from the booking app.<br>` +
       `<b>Intended recipients:</b> ${esc(to)}${cc ? `<br><b>Cc:</b> ${esc(cc)}` : ""}<br>Review it, then send it from Gmail.</div><hr>${html}` };
 }
+
+// One plain address: no lists, display names or header tricks (and none of PostgREST's
+// pattern characters, so the lookup below can match it exactly).
+const ONE_ADDRESS = /^[^\s@,;<>"'*%\\]+@[^\s@,;<>"'*%\\]+\.[^\s@,;<>"'*%\\]+$/;
+// EmailJS rejects bodies over ~50 KB; the app splits bigger invoice bundles.
+const MAX_HTML_BYTES = 100_000;
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -61,14 +67,37 @@ Deno.serve(async (req) => {
   }
   let { to, subject, html, kind, cc } = body ?? {};
   if (!to || !subject || !html) return json(400, { error: "missing_fields" });
+  to = String(to).trim(); cc = cc ? String(cc).trim() : undefined;
+  if (!ONE_ADDRESS.test(to) || (cc && !ONE_ADDRESS.test(cc))) return json(400, { error: "invalid_address" });
+  if (new TextEncoder().encode(String(html)).length > MAX_HTML_BYTES) return json(413, { error: "too_large" });
 
-  // 2b) Bookers only: AMUA's inbox, the caller themselves, or an address with bookings
-  //     (looked up with the caller's token, so RLS applies). Anyone else → AMUA draft.
+  // 2b) Bookers only. Looked up with the caller's token, so RLS applies.
+  //   - Anyone may mail AMUA's inbox and themselves, and the addresses an admin has linked
+  //     to theirs (the email_aliases setting, which only admins can write).
+  //   - Admins may also mail any address that has a booking.
+  //   Anything else → AMUA draft. (Non-admins can't use "has a booking": they can create a
+  //   booking under any address, which would make this an open relay.)
+  const me = String(user.email || "").toLowerCase();
+  const isAdmin = user.app_metadata?.role === "admin";
+  const rest = (path: string) => fetch(`${SUPABASE_URL}/rest/v1/${path}`,
+    { headers: { Authorization: `Bearer ${token}`, apikey: SUPABASE_ANON_KEY } });
+  let aliases: Record<string, string> | null = null;
+  const myAddresses = async () => {
+    if (!aliases) {
+      const r = await rest("settings?select=value&key=eq.email_aliases");
+      const rows = r.ok ? await r.json() as { value?: Record<string, string> }[] : [];
+      aliases = rows[0]?.value && typeof rows[0].value === "object" ? rows[0].value : {};
+    }
+    const primary = String(aliases[me] || me).toLowerCase();
+    return new Set([me, primary, ...Object.entries(aliases).filter(([, p]) => String(p).toLowerCase() === primary).map(([s]) => s.toLowerCase())]);
+  };
+  // ilike is case-insensitive; escape "_" (a single-character wildcard) so it matches exactly.
+  const likeExact = (a: string) => a.replace(/_/g, "\\_");
   const isBooker = async (addr: string) => {
-    const a = addr.trim().toLowerCase();
-    if (a === AMUA_INBOX || a === String(user.email || "").toLowerCase()) return true;
-    const r = await fetch(`${SUPABASE_URL}/rest/v1/bookings?select=id&email=ilike.${encodeURIComponent(a)}&limit=1`,
-      { headers: { Authorization: `Bearer ${token}`, apikey: SUPABASE_ANON_KEY } });
+    const a = addr.toLowerCase();
+    if (a === AMUA_INBOX || a === me || (await myAddresses()).has(a)) return true;
+    if (!isAdmin) return false;
+    const r = await rest(`bookings?select=id&email=ilike.${encodeURIComponent(likeExact(a))}&limit=1`);
     return r.ok && ((await r.json()) as unknown[]).length > 0;
   };
   if (!(await isBooker(to)) || (cc && !(await isBooker(cc)))) {

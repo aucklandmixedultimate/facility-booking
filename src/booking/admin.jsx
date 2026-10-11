@@ -6,6 +6,7 @@ import { PatternModal, PricingConditionsManager, ReassignControl, ScheduleSummar
 import { InlineDayPicker, VendorTimesFields, vendorTimesDefault } from "./forms.jsx";
 import { isClosed } from "../statuses.js";
 import { purgeHolder as gtecPurgeHolder, purgeObsolete as gtecPurgeObsolete } from "./gtec.jsx";
+import { csvCell, escHtml } from "../html.js";
 // One newly-synced CPSA field booking, expandable to reveal the AMUA bookings it
 // clashes with (same facility / same time), any simultaneous use of a different
 // facility, and the CPSA-review/mismatch status of clashing bookings. Detail is
@@ -118,7 +119,6 @@ const COUNCIL_OUTCOME_META = {
   declined:  { label: "Declined",                bg: "#fff1f2", border: "#f43f5e", text: "#881337", rank: 2 },
   info:      { label: "Update",                  bg: "#f1f5f9", border: "#94a3b8", text: "#334155", rank: 3 },
 };
-export const escHtml = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 // AMUA's reply to the council about an offer, drafted to AMUA's own inbox (the app never
 // emails the council: see the email rule at sendEmail). AMUA sends it from Gmail, in the thread.
 function buildCouncilReplyItem(o, kind, rationale) {
@@ -275,9 +275,9 @@ function buildCommunityRequestItem(b) {
   const when = `${fmtDate(b.date)} ${fmtTime(b.start_hour)}–${fmtTime(b.start_hour + b.duration)}`;
   const rate = f?.defaultRate ? `$${f.defaultRate}/hr` : "your usual rate";
   const ops = AMUA_INFO.contacts?.operations || {};
-  const html = `<p>Kia ora ${rv.contact_name || c.contact_name || pr.name || ""},</p>
+  const html = `<p>Kia ora ${escHtml(rv.contact_name || c.contact_name || pr.name || "")},</p>
     <p>Auckland Mixed Ultimate Association would like to hire <b>${f?.name || "your field"}</b> for ultimate frisbee training:</p>
-    <ul><li><b>${when}</b> (${fmtDuration(b.duration)})</li><li>Group: ${b.name || ""}${b.purpose ? ` — ${b.purpose}` : ""}</li><li>Rate: ${rate}</li></ul>
+    <ul><li><b>${when}</b> (${fmtDuration(b.duration)})</li><li>Group: ${escHtml(b.name || "")}${b.purpose ? ` — ${escHtml(b.purpose)}` : ""}</li><li>Rate: ${rate}</li></ul>
     <p>Could you let us know if that slot is available?</p>
     <p>Ngā mihi,<br>${ops.name || "AMUA"}${ops.position ? `, ${ops.position}` : ""}<br>${AMUA_INFO.name || "Auckland Mixed Ultimate Association"}${ops.phone ? `<br>${ops.phone}` : ""}<br>${AMUA_INBOX}</p>`;
   return { notifyOnly: true, invoiceEmail: true, amuaDraft: true, email: to, name: pr.name || pid, drafts: [], count: 1, refs: [b.id.slice(0, 8)], total: 0,
@@ -1621,7 +1621,7 @@ export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDel
                     const reasons=parseMismatchNote(b.system_notes,b.notes);
                     const cv=extractCpsaAmendValues(reasons,b);
                     const refs=parseCpsaRefs(b.system_notes,b.notes);
-                    const esc=v=>`"${String(v).replace(/"/g,'""')}"`;
+                    const esc=csvCell;
                     return [b.name,b.email,b.date,fac?.name||b.facility_id,
                       `${fmtTime(b.start_hour)}–${fmtTime(b.start_hour+b.duration)} ${b.duration}h`,
                       `${fmtTime(cv.start_hour)}–${fmtTime(cv.start_hour+cv.duration)} ${cv.duration}h`,

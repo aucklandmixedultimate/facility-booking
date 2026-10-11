@@ -1,4 +1,5 @@
 import { AMUA_INFO, PROVIDERS, amuaContactLine, fmtCost, fmtDate, fmtDateShortDow } from "./core.jsx";
+import { escHtml } from "../html.js";
 // Invoice modal sub-components defined at module level so their references
 // are stable across SummaryTab re-renders — prevents focus loss on the Name input.
 export function InvoiceOptionRow({label, children}) {
@@ -181,9 +182,9 @@ export function renderInvoiceDocHtml({
     const rows = pageLines.map(l => `
       <tr>
         <td style="${tdDate}">${l.date ? fmtDateShortDow(l.date) : ""}</td>
-        <td style="${tdDesc}">${l.desc || l.description || l.label || "—"}${l.vendorNotes?.length ? " *" : ""}</td>
+        <td style="${tdDesc}">${escHtml(l.desc || l.description || l.label || "—")}${l.vendorNotes?.length ? " *" : ""}</td>
         ${l.hours == null && l.rate == null && !l.fixedPrice && l.detail
-          ? `<td colspan="2" style="${cellBase};color:#64748b;font-size:10.5px"><div style="${clip};max-width:200px">${l.detail}</div></td>`
+          ? `<td colspan="2" style="${cellBase};color:#64748b;font-size:10.5px"><div style="${clip};max-width:200px">${escHtml(l.detail)}</div></td>`
           : `<td style="${tdAmt};color:#475569">${invLineRate(l)}</td><td style="${tdAmt};color:#475569">${invLineDuration(l)}</td>`}
         ${money(l.cost || 0)}
       </tr>`).join("");
@@ -192,7 +193,7 @@ export function renderInvoiceDocHtml({
     const notes = pageLines.flatMap(invLineFootnotes);
     const footnotes = notes.length ? `
       <tr><td colspan="5" style="padding:6px 28px 2px;font-size:10px;line-height:14px;color:#64748b">
-        ${notes.map(n => `<div>* ${n}</div>`).join("")}
+        ${notes.map(n => `<div>* ${escHtml(n)}</div>`).join("")}
       </td></tr>` : "";
 
     // Per-sheet figures cover only the rows printed above them. The whole-invoice figure
@@ -215,7 +216,7 @@ export function renderInvoiceDocHtml({
             <div style="font-size:11px;color:#94a3b8;margin-top:2px">#${docId}</div>
             ${bankRef ? `<div style="font-size:11px;color:#cbd5e1;margin-top:1px">Bank reference: <strong style="color:#fff;font-family:monospace;letter-spacing:0.04em">${bankRef}</strong></div>` : ""}
             <div style="font-size:11px;color:#94a3b8">Date: ${dateStr}</div>
-            ${orderName ? `<div style="font-size:11px;color:#94a3b8">Order: ${orderName}</div>` : ""}
+            ${orderName ? `<div style="font-size:11px;color:#94a3b8">Order: ${escHtml(orderName)}</div>` : ""}
           </td>
         </tr>
       </table>
@@ -225,8 +226,8 @@ export function renderInvoiceDocHtml({
         <tr>
           <td style="padding:14px 28px;vertical-align:top">
             <div style="${cap}">Bill To</div>
-            <div style="font-size:14px;font-weight:700;margin-top:2px;color:#0f172a">${billToName || "(see email)"}</div>
-            <div style="font-size:11px;color:#475569">${billToEmail || ""}</div>
+            <div style="font-size:14px;font-weight:700;margin-top:2px;color:#0f172a">${escHtml(billToName || "(see email)")}</div>
+            <div style="font-size:11px;color:#475569">${escHtml(billToEmail || "")}</div>
             ${billToExtra}
           </td>
           <td style="padding:14px 28px;vertical-align:top;text-align:right">
@@ -236,7 +237,7 @@ export function renderInvoiceDocHtml({
         </tr>
       </table>` : `
       <div style="background:#0f172a;color:#cbd5e1;padding:8px 28px;font-size:11px">
-        <strong style="color:#fff">${docLabel} #${docId}</strong> · ${billToName || billToEmail || ""} · ${periodStr}
+        <strong style="color:#fff">${docLabel} #${docId}</strong> · ${escHtml(billToName || billToEmail || "")} · ${periodStr}
       </div>`;
 
     return `<section class="sheet" style="background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);margin:0 auto 20px;max-width:720px">
@@ -303,7 +304,7 @@ export function billingDocFields(rec, docType, lines) {
     orderName: rec.orderName||"",
     billToName: rec.bookerName, billToEmail: rec.bookerEmail,
     billToExtra: [
-      rec.bookerAddress?`<div style="font-size:11px;color:#475569;margin-top:3px;white-space:pre-line">${rec.bookerAddress}</div>`:"",
+      rec.bookerAddress?`<div style="font-size:11px;color:#475569;margin-top:3px;white-space:pre-line">${escHtml(rec.bookerAddress)}</div>`:"",
       rec.bookerGst?`<div style="font-size:11px;color:#94a3b8">GST: ${rec.bookerGst}</div>`:"",
     ].join(""),
     periodStr: rec.dateFrom&&rec.dateTo ? `${fmtD(rec.dateFrom)} – ${fmtD(rec.dateTo)}` : "All periods",

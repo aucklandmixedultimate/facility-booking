@@ -331,10 +331,6 @@ alter table public.field_reviews add constraint field_reviews_fit_check
 
 alter table public.field_reviews enable row level security;
 
-drop policy if exists "field_reviews admin select" on public.field_reviews;
-create policy "field_reviews admin select" on public.field_reviews
-  for select to authenticated using (public.is_admin());
-
 drop policy if exists "field_reviews admin insert" on public.field_reviews;
 create policy "field_reviews admin insert" on public.field_reviews
   for insert to authenticated with check (public.is_admin());
@@ -389,7 +385,8 @@ create policy "field_flags select authenticated" on public.field_flags
 
 -- (v5) Every signed-in booker rates parks the same way admins do: places and rates frisbee
 -- fields, decides and amends vendors. Each change is logged in vetting_history, where admins
--- can reject it (restoring the earlier value). Deleting a review stays admin-only.
+-- can reject it (restoring the earlier value). Deleting a review stays admin-only; a vendor
+-- amendment (field_flags) can be removed by anyone, like editing it, and is logged the same way.
 drop policy if exists "field_reviews insert authenticated" on public.field_reviews;
 create policy "field_reviews insert authenticated" on public.field_reviews
   for insert to authenticated with check (true);
@@ -469,15 +466,10 @@ create policy "vetting_history update" on public.vetting_history
   with check (public.is_admin() or (by_id = auth.uid() and status = 'accepted'));
 
 -- Rejecting someone's quality stars restores their previous rating, so admins may write any
--- field_ratings row (once supabase-migration-field-ratings.sql has made the table).
-do $$
-begin
-  if to_regclass('public.field_ratings') is not null then
-    drop policy if exists "field_ratings admin all" on public.field_ratings;
-    create policy "field_ratings admin all" on public.field_ratings
-      for all to authenticated using (public.is_admin()) with check (public.is_admin());
-  end if;
-end $$;
+-- field_ratings row.
+drop policy if exists "field_ratings admin all" on public.field_ratings;
+create policy "field_ratings admin all" on public.field_ratings
+  for all to authenticated using (public.is_admin()) with check (public.is_admin());
 
 -- (v6) Venues dropped from the community list (Macleans College and ACG Strathallan:
 -- hockey turfs only): take them out of any booker's saved fields
@@ -522,7 +514,9 @@ revoke all on function public.settings_merge(text, jsonb, text[]) from public, a
 grant execute on function public.settings_merge(text, jsonb, text[]) to authenticated;
 
 -- ── Version stamp ───────────────────────────────────────────────────────────────
-insert into public.schema_version (id, version, applied_at) values (1, 8, now())
+-- v9: removed a policy that was created and then dropped, and the field_ratings guard (the
+-- table is created above). No data or permission changes.
+insert into public.schema_version (id, version, applied_at) values (1, 9, now())
 on conflict (id) do update set version = excluded.version, applied_at = now();
 
 -- ── 6. Making someone an admin ──────────────────────────────────────────────────

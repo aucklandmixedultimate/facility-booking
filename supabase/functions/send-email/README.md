@@ -5,6 +5,18 @@ The web app calls this function with the signed-in user's Supabase JWT; the
 function validates the session and sends via EmailJS using keys held as Supabase
 secrets.
 
+## Who it will email
+
+Bookers only (hard rule 1 in `CLAUDE.md`). Anything addressed to someone else is turned into a
+draft sent to AMUA's inbox, with the intended recipients listed above it.
+
+- Anyone signed in: AMUA's inbox, their own address, and addresses an admin has linked to
+  theirs (the `email_aliases` setting).
+- Admins: also any address that has a booking.
+- One plain address per field (`to`, `cc`); HTML up to 100 KB.
+
+Re-deploy the function after changing `index.ts`.
+
 ## Deploy (one-time)
 
 Requires the Supabase CLI (`npm i -g supabase`) and a login (`supabase login`).

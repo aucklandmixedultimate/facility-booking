@@ -3,6 +3,8 @@
 // "Rory H." — and their actions are stamped with it. The last 5 names are kept on the account
 // (Supabase user metadata, so every device sees them) and can be edited from the profile menu.
 // Plain DOM so the booking site (React) and the Council fields page share it.
+import { escHtml as esc } from "./html.js";
+
 const MAX = 5;
 const curKey = email => "amua-actor:" + String(email || "").toLowerCase();
 const listKey = email => "amua-actors:" + String(email || "").toLowerCase();
@@ -53,7 +55,6 @@ const CSS = `.actor-ov{position:fixed;inset:0;z-index:10000;background:rgba(15,2
 .actor-acts{display:flex;justify-content:flex-end;gap:8px}
 .actor-acts button{font:inherit;font-weight:700;border-radius:8px;padding:8px 14px;cursor:pointer;border:1.5px solid #e2e8f0;background:#fff;color:#475569}
 .actor-acts .go{background:#6366f1;border-color:#6366f1;color:#fff}`;
-const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 // Ask who's using the login. edit: opened from the profile menu (can be cancelled; names can
 // be renamed ✎ or removed ✕). Resolves with the chosen name, or null when cancelled / signed out.

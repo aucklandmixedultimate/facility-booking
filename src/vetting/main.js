@@ -15,6 +15,7 @@ import { councilState, fmtRange, fmtDay, COUNCIL_LINKS, COUNCIL_CONTACTS } from 
 import { askActor, getActor, clearActor } from "../actor.js";
 import { shortName, personFromEmail } from "../people.js";
 import { renderAppNav } from "../appnav.js";
+import { escHtml as esc, csvCell } from "../html.js";
 
 const BASE = import.meta.env.BASE_URL;
 renderAppNav(document.getElementById("appNav"), "fields", BASE);
@@ -48,7 +49,6 @@ const COMM_COLOR = "#2563eb";
 const ultimateOf = p => (PRIV_BY_PARK[p.id] || []).filter(o => o.code === "ultimate");
 
 const $ = id => document.getElementById(id);
-const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const store = { get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch { return d; } },
                 set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* storage blocked */ } } };
 function setStatus(t, warn) { $("status").textContent = t; $("status").classList.toggle("warn", !!warn); }
@@ -2572,7 +2572,7 @@ function exportCsv() {
       [privOps(p)[0]?.contact?.email, privOps(p)[0]?.contact?.phone].filter(Boolean).join(" / "),
       ultimateOf(p).map(o => o.operator + ([o.contact?.email, o.contact?.phone].filter(Boolean).length ? ` (${[o.contact?.email, o.contact?.phone].filter(Boolean).join(" / ")})` : "")).join("; "),
       fl ? amendText(fl) : "", r.by || "", r.at || "", activityOf(p.id), ...opCsv(PRIV_BY_PARK[p.id]?.[0])]); });
-  const csv = rows.map(r => r.map(v => { const s = String(v ?? ""); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }).join(",")).join("\n");
+  const csv = rows.map(r => r.map(csvCell).join(",")).join("\n");
   const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); a.download = "council-field-vetting.csv"; a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }

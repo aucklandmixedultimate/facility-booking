@@ -3,6 +3,7 @@ import { AMUA_INFO, Badge, vendorVarianceText, COUNCIL_APPLICATION_FEE, Copyable
 import { OneOffModal, PatternModal, PricingConditionsManager, buildOverlapPatternMap, defaultFacRates, resolveRates } from "./schedule.jsx";
 import { InvoiceOptionRow, InvoicePill, invLineLabel, renderInvoiceDocHtml } from "./billingDocs.jsx";
 import { isClosed } from "../statuses.js";
+import { csvCell } from "../html.js";
 export function SummaryTab({ bookings, loggedInEmail, onRemoveBookings, facilityRates = {}, pricingConditions = [], onAddPricingCondition, onUpdatePricingCondition, onRemovePricingCondition, isAdmin = false, approxPlayers = {}, onUpdateApproxPlayers, approxDurations = {}, onUpdateApproxDuration, onUpdateFacilityRate, pricingMode = "hourly", onSetPricingMode, onProposeMerge, onBulkApply, onMarkInvoiced, onMarkAdjustmentSettled, bookerFilter=new Set(), profiles={}, emailAliases={}, aliasNames={}, onCreateOfficialInvoice, onEmailInvoice, loadRequest=null }) {
   const now = new Date();
   const thisYear = now.getFullYear();
@@ -536,7 +537,7 @@ export function SummaryTab({ bookings, loggedInEmail, onRemoveBookings, facility
     } else if (format === "csv") {
       const subtotal = lines.reduce((s, l) => s + l.cost, 0);
       const { pre, gst, total } = gstAmounts(subtotal, invGst);
-      const esc = v => `"${String(v||"").replace(/"/g,'""')}"`;
+      const esc = csvCell;
       const docLabel = invDocType === "purchase_order" ? "Purchase Order" : "Invoice";
       const csvRows = lines.map(l => [invNumber, bookerName, bookerEmail, invLineLabel(l), l.detail, l.cost.toFixed(2)].map(esc).join(","));
       csvRows.push(["","","","","Subtotal",pre.toFixed(2)].map(esc).join(","));
@@ -769,10 +770,11 @@ export function SummaryTab({ bookings, loggedInEmail, onRemoveBookings, facility
     });
   }
 
-  // CSV export — all columns from every booking (not filtered)
+  // CSV export — all columns from every booking (not filtered). Admins only.
   function exportCSV() {
+    if (!isAdmin) return;
     const cols = ["id","name","email","phone","facility_id","facility_name","date","start_hour","start_time","duration","end_time","purpose","notes","status","created_at","updated_at"];
-    const esc  = v => `"${String(v||"").replace(/"/g,'""')}"`;
+    const esc  = csvCell;
     const rows = bookings.map(b => {
       const f=FACILITIES.find(x=>x.id===b.facility_id);
       return [b.id,b.name,b.email,b.phone||"",b.facility_id,f?.name||"",b.date,b.start_hour,fmtTime(b.start_hour),b.duration,fmtTime(b.start_hour+b.duration),b.purpose,b.notes||"",b.status,b.created_at,b.updated_at||""].map(esc).join(",");
@@ -825,9 +827,10 @@ export function SummaryTab({ bookings, loggedInEmail, onRemoveBookings, facility
         {/* Bookers are filtered by the shared booker pill bar above (grouped by category). */}
         <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
           <div style={{marginLeft:"auto",display:"flex",gap:6,...(narrow?{width:"100%"}:{})}}>
-            <button onClick={exportCSV} style={S.btn({ background:"#0f172a", color:"#fff", display:"flex", alignItems:"center", gap:6, ...(narrow?{flex:1,justifyContent:"center"}:{}) })}>
+            {/* Every booking with contact details: admins only. */}
+            {isAdmin && <button onClick={exportCSV} style={S.btn({ background:"#0f172a", color:"#fff", display:"flex", alignItems:"center", gap:6, ...(narrow?{flex:1,justifyContent:"center"}:{}) })}>
               ⬇ Export All Data (CSV)
-            </button>
+            </button>}
             {anyRates && (
               <button onClick={openInvoice} style={S.btn({ background:"#15803d", color:"#fff", display:"flex", alignItems:"center", gap:6, ...(narrow?{flex:1,justifyContent:"center"}:{}) })}>
                 🧾 Export Invoice
@@ -993,7 +996,7 @@ export function SummaryTab({ bookings, loggedInEmail, onRemoveBookings, facility
             Hire Usage &amp; Cost by Booker — {PRESETS.find(p=>p.key===preset)?.label}{dateFrom&&dateTo?` (${dateFrom} – ${dateTo})`:""}{emailFilterSet.size===1?` · ${[...emailFilterSet][0]}`:emailFilterSet.size>1?` · ${emailFilterSet.size} bookers`:""}
           </h3>
           {rows.length>0&&<button onClick={()=>{
-            const esc = v => `"${String(v||"").replace(/"/g,'""')}"`;
+            const esc = csvCell;
             const hdrs = isPerBooking
               ? ["Booker","Email","Bookings","Day Bookings","Eve Bookings","Total Hrs (approx)",
                   ...(anyRates?["Total Cost"]:[]),
