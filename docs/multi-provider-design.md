@@ -1,7 +1,11 @@
 # Multi-provider facilities, council bookings and email intake — design
 
 Status: **proposal** (phase 0 shipped; later phases need sign-off).
-Start at [`HANDOFF_MULTI_PROVIDER.md`](../HANDOFF_MULTI_PROVIDER.md) for what's live, what's decided and where to resume.
+> **Design history (2026-10).** Phase 0 is live: vendors are named per facility, one PO per vendor,
+> AMUA details are a setting, and council / community vendors come from Council fields' My fields.
+> Phase 1 (vendors stored in Supabase) is not built. Phase 3's email intake was superseded by
+> the in-browser Gmail read-only sync (`src/councilMail.js`, option D in §email intake). What runs
+> today is described in [`HANDOVER.md`](HANDOVER.md).
 Scope: move from "one facility authority (GTEC), hard-coded" to "any number of
 providers, defined in Supabase", with automated intake from the Auckland Council
 booking portal and from booking-related email.

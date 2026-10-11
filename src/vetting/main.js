@@ -2342,7 +2342,7 @@ async function decisionToCart(p, t, decision) {
   if (!(await saveBookLocs())) { bookLocs[who] = before; return; }
   const mine = list.filter(x => x.park_id === p.id && !isRetired(x)), nAct = mine.filter(isActive).length, nCart = mine.length - nAct;
   setStatus(decision === "no" ? `Rejected ${p.name}: its fields are marked rejected for ${who} (not bookable).`
-    : `${p.name}: ${nCart} field${nCart === 1 ? "" : "s"} in ${who}'s cart${nAct ? `, ${nAct} already active` : ""} — save the cart to make them bookable.`);
+    : `${p.name}: ${nCart} field${nCart === 1 ? "" : "s"} in ${who}'s 📌 My fields${nAct ? `, ${nAct} already bookable` : ""} — mark them bookable there to book dates.`);
   renderTabs();
 }
 function buildReview(p, t, decision, withField) {
