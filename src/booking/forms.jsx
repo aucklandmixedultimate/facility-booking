@@ -2,7 +2,7 @@ import { useState, useRef, Fragment } from "react";
 import { T, parseVendorVariance, setVendorVariance, vendorVarianceText, stepLabel, BILLED_RE, Badge, CAL_SLOTS, CAL_START, CAL_TOTAL, DAY_EVENING_CUTOFF, DURATIONS, EmailChip, FACILITIES, FACILITY_TINT, FLOODLIT_FIELD_ID, FacilityOptions, INVOICED_META, Modal, ProviderVenuePicker, REVIEW_STATUSES, S, SLOTS_PER_HOUR, SLOT_HOURS, START_TIMES, STATUS_META, addDays, councilContactOk, emailColor, facColLabel, facShort, fmtCost, fmtDate, fmtDuration, fmtLoggedAt, fmtRefDate, fmtTime, fmtTimeShort, getCrossFacilityOverlaps, getSameFacilityOverlaps, isAdminBooking, newGroupRef, newId, parseCouncilInfo, parseFunctionCost, parseGroupRef, parseGtecSnapshot, parseMismatchNote, parseSlotLink, parseSplit, setCouncilInfo, setFunctionCost, setGroupRef, setSplit, slotGroupMembers, slotGroupName, splitReason, stripMismatchNote, timeOverlaps, todayKey, useMobile, vendorShortFor, venueFacilities, workflowOf } from "./core.jsx";
 import { OverlapWarning } from "./modals.jsx";
 import { GUEST } from "../actor.js";
-import { isClosed, isLegacyStatus } from "../statuses.js";
+import { isClosed } from "../statuses.js";
 // ─── Single Booking Row Form ──────────────────────────────────────────────────
 // Used inside BookingForm to represent one item in the cart
 // onPick(facId,start,dur) fires immediately on release (single-pick / auto-complete).
@@ -206,7 +206,7 @@ export function InlineDayPicker({ date, bookings, onPick, onConfirm, multi=false
 }
 // One slot (facility/date/time/duration) within a grouped booking request. Shared
 // purpose / notes / repetition live on the parent form, so this row stays compact.
-export function SlotRow({ slot, idx, onChange, onRemove, canRemove, allBookings }) {
+function SlotRow({ slot, idx, onChange, onRemove, canRemove, allBookings }) {
   const isMobile = useMobile();
   const upd = (k,v) => onChange(idx, { ...slot, [k]:v });
   const facName = FACILITIES.find(f=>f.id===slot.facility_id)?.name || slot.facility_id;
@@ -256,10 +256,6 @@ export function SlotRow({ slot, idx, onChange, onRemove, canRemove, allBookings 
   );
 }
 
-// ─── Multi-Edit Form ──────────────────────────────────────────────────────────
-// Edits the shared start_time/duration across a set of same-weekday bookings.
-// The new dates are calculated by keeping each booking's original calendar week
-// but shifting to a new weekday if changed.
 // ─── Cart Modal ───────────────────────────────────────────────────────────────
 export function CartModal({ cart, setCart, onClose, onSubmit, openNew, silentMode=false, onToggleSilent }) {
   const [editingDraft, setEditingDraft] = useState(null); // {gi, di, draft}
@@ -636,7 +632,7 @@ export function CartModal({ cart, setCart, onClose, onSubmit, openNew, silentMod
   );
 }
 
-export function InlineDraftEditor({ draft, onSave, onCancel }) {
+function InlineDraftEditor({ draft, onSave, onCancel }) {
   const [facility, setFacility] = useState(draft.facility_id);
   const [date,     setDate]     = useState(draft.date);
   const [hour,     setHour]     = useState(draft.start_hour);
@@ -741,99 +737,9 @@ export function DeleteCartModal({ deleteQueue, setDeleteQueue, onClose, onSubmit
   );
 }
 
-export function MultiEditForm({ bookings: srcBookings, onAddToCart, onClose, allBookings }) {
-  const ref = srcBookings[0];
-  const [newHour,     setNewHour]     = useState(ref.start_hour);
-  const [newDuration, setNewDuration] = useState(ref.duration);
-  const [newDow,      setNewDow]      = useState(new Date(ref.date+"T00:00:00").getDay()); // 0=Sun
-  const [error,       setError]       = useState("");
-
-  // Day-of-week options
-  const DAYS = [{label:"Sunday",v:0},{label:"Monday",v:1},{label:"Tuesday",v:2},{label:"Wednesday",v:3},{label:"Thursday",v:4},{label:"Friday",v:5},{label:"Saturday",v:6}];
-
-  function shiftToNewDow(dateStr, targetDow) {
-    const d = new Date(dateStr+"T00:00:00");
-    const curDow = d.getDay();
-    const diff = targetDow - curDow;
-    return addDays(dateStr, diff);
-  }
-
-  function handleAddToCart() {
-    const drafts = srcBookings.map(b => ({
-      ...b,
-      start_hour:  newHour,
-      duration:    newDuration,
-      date:        shiftToNewDow(b.date, newDow),
-      status:      "pending_amua", // re-submit for approval
-      updated_at:  new Date().toISOString(),
-    }));
-    // Basic overlap check
-    const others = allBookings.filter(b => !drafts.find(d=>d.id===b.id));
-    const issues = drafts.filter(d => getSameFacilityOverlaps(d, others).length > 0);
-    if (issues.length > 0) {
-      setError(`Warning: ${issues.length} booking(s) may overlap with existing bookings. Proceeding adds them to cart for review.`);
-    }
-    onAddToCart(drafts, ref.name, ref.email);
-  }
-
-  const previewDrafts = srcBookings.map(b => ({
-    ...b, start_hour:newHour, duration:newDuration, date:shiftToNewDow(b.date, newDow)
-  }));
-
-  return (
-    <div style={{display:"flex",flexDirection:"column",gap:16}}>
-      <div style={{background:"#ede9fe",border:"1px solid #c4b5fd",borderRadius:10,padding:"12px 16px"}}>
-        <div style={{fontWeight:700,fontSize:14,color:"#5b21b6",marginBottom:4}}>✏️ Multi-Edit — {srcBookings.length} Bookings</div>
-        <div style={{fontSize:13,color:"#6d28d9"}}>Change the weekday and/or start time for all selected bookings. Other details are preserved. Edits are added to cart and require re-approval.</div>
-      </div>
-      {error&&<div style={{background:"#fff8e1",border:"1px solid #fcd34d",borderRadius:8,padding:"10px 14px",color:"#92400e",fontSize:13}}>{error}</div>}
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12}}>
-        <div>
-          <label style={S.lbl}>Day of Week</label>
-          <select style={S.inp} value={newDow} onChange={e=>setNewDow(parseInt(e.target.value))}>
-            {DAYS.map(d=><option key={d.v} value={d.v}>{d.label}</option>)}
-          </select>
-        </div>
-        <div>
-          <label style={S.lbl}>Start Time</label>
-          <select style={S.inp} value={newHour} onChange={e=>setNewHour(parseFloat(e.target.value))}>
-            {START_TIMES.map(h=><option key={h} value={h}>{fmtTime(h)}</option>)}
-          </select>
-        </div>
-        <div>
-          <label style={S.lbl}>Duration</label>
-          <select style={S.inp} value={newDuration} onChange={e=>setNewDuration(parseFloat(e.target.value))}>
-            {DURATIONS.map(d=><option key={d.value} value={d.value}>{d.label}</option>)}
-          </select>
-        </div>
-      </div>
-      <div>
-        <div style={{fontSize:11,fontWeight:700,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:8}}>Preview ({previewDrafts.length} bookings)</div>
-        <div style={{display:"flex",flexDirection:"column",gap:6,maxHeight:240,overflowY:"auto"}}>
-          {previewDrafts.map((d,i)=>{
-            const f=FACILITIES.find(x=>x.id===d.facility_id);
-            return (
-              <div key={i} style={{display:"flex",gap:8,alignItems:"center",padding:"8px 12px",background:"#f8fafc",borderRadius:8,border:"1px solid #e2e8f0"}}>
-                <span style={{width:8,height:8,borderRadius:"50%",background:f?.color,display:"inline-block",flexShrink:0}}/>
-                <span style={{fontSize:13,color:"#0f172a",flex:1}}>{f?.name} · {fmtDate(d.date)} · {fmtTime(d.start_hour)}–{fmtTime(d.start_hour+d.duration)}</span>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-      <div style={{display:"flex",gap:10,justifyContent:"flex-end",paddingTop:4}}>
-        <button onClick={onClose} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#475569"})}>Cancel</button>
-        <button onClick={handleAddToCart} style={S.btn({background:"#6366f1",color:"#fff"})}>➕ Add Changes to Cart</button>
-      </div>
-    </div>
-  );
-}
-
-
 export function BookingForm({ booking, allBookings, onAddToCart, onClose, isAdmin, loggedInEmail, actorName="", bookers=[], onEditContact }) {
   const isMobile = useMobile();
-  const isEditing  = !!booking?.id && !booking?._multiEdit;
-  const isMultiEdit = !!booking?._multiEdit;
+  const isEditing  = !!booking?.id;
 
   // A slot is just facility/date/time/duration — shared purpose/notes/repetition live
   // on the form, so creating several grouped bookings means staging several slots.
@@ -844,7 +750,7 @@ export function BookingForm({ booking, allBookings, onAddToCart, onClose, isAdmi
     ? [{ id:booking.id, facility_id:booking.facility_id, date:booking.date, start_hour:booking.start_hour, duration:booking.duration }]
     : (booking && Array.isArray(booking._dates) && booking._dates.length
         ? booking._dates.map(dt => blankSlot({ facility_id:booking.facility_id||(venueFacilities()[0]||FACILITIES[0]).id, date:dt, start_hour:booking.start_hour||9, duration:booking.duration||1 }))
-        : booking && booking.date && !isMultiEdit
+        : booking && booking.date
           ? [blankSlot({ facility_id:booking.facility_id||(venueFacilities()[0]||FACILITIES[0]).id, date:booking.date, start_hour:booking.start_hour||9, duration:booking.duration||1 })]
           : []);
 
@@ -871,11 +777,6 @@ export function BookingForm({ booking, allBookings, onAddToCart, onClose, isAdmi
   const [showPicker, setShowPicker] = useState(false);
   const [error, setError] = useState("");
   const [warn,  setWarn]  = useState(null);
-
-  // ── Multi-edit mode: simple time/weekday change across multiple bookings ──
-  if (isMultiEdit) {
-    return <MultiEditForm bookings={booking._bookings} onAddToCart={onAddToCart} onClose={onClose} allBookings={allBookings}/>;
-  }
 
   function updateSlot(idx, patch) { setSlots(ss=>ss.map((s,i)=>i===idx?patch:s)); }
   function removeSlot(idx) { setSlots(ss=>ss.filter((_,i)=>i!==idx)); }
@@ -1103,7 +1004,7 @@ export function BookingForm({ booking, allBookings, onAddToCart, onClose, isAdmi
         <div>
           <label style={S.lbl}>Status</label>
           <select style={S.inp} value={status} onChange={e=>setStatus(e.target.value)}>
-            {Object.entries(STATUS_META).filter(([k])=>!isLegacyStatus(k)).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
+            {Object.entries(STATUS_META).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
           </select>
         </div>
       )}
@@ -1234,7 +1135,7 @@ function VendorVarianceSection({ booking, onPatch }) {
 
 export function BookingDetail({booking,syncFeed=null,onEdit,onClose,onCancel,isAdmin,onStatusChange,onPatch,loggedInEmail,allClashes=[],bookers=[],onConvertAdmin,allBookings=[],onShareSlot,onMergeSlot,onUnlinkSlot}) {
   const f=FACILITIES.find(x=>x.id===booking.facility_id);
-  const m=STATUS_META[booking.status]||STATUS_META.pending;
+  const m=STATUS_META[booking.status]||STATUS_META.pending_amua;
   const isPast = booking.date < todayKey();
   const isOwn  = booking.email?.toLowerCase() === loggedInEmail?.toLowerCase();
   const isAdminBk = isAdminBooking(booking);
@@ -1283,7 +1184,7 @@ export function BookingDetail({booking,syncFeed=null,onEdit,onClose,onCancel,isA
                 onChange={e=>onStatusChange(e.target.value)}
                 style={{padding:"4px 10px",borderRadius:8,border:`1.5px solid ${m.border}`,background:m.bg,color:m.text,fontSize:13,fontWeight:600,cursor:"pointer",outline:"none"}}
               >
-                {Object.keys(STATUS_META).filter(key=>!isLegacyStatus(key)||key===booking.status).map(key=>(
+                {Object.keys(STATUS_META).map(key=>(
                   <option key={key} value={key}>{stepLabel(key, undefined, booking.facility_id)}</option>
                 ))}
               </select>

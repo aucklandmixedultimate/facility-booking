@@ -17,7 +17,7 @@ function AboutMap({ src, alt, maxWidth, children }) {
   );
 }
 // One numbered step in About → How to Book.
-export function AboutStep({ n, col, title, children }) {
+function AboutStep({ n, col, title, children }) {
   return (
     <div style={{ display:"flex", gap:12, alignItems:"flex-start", marginBottom:12 }}>
       <div style={{ minWidth:28, height:28, padding:"0 6px", boxSizing:"border-box", borderRadius:14, background:col, color:"#fff", fontWeight:700, fontSize:12,
@@ -87,8 +87,8 @@ export function AboutTab() {
           <p style={{margin:"0 0 12px",fontSize:13,color:"#475569"}}>
             Auckland Council parks are booked through the council's online services portal. AMUA batches its bookers' council fields into one application,
             and the council charges <b>${COUNCIL_APPLICATION_FEE} per field per application</b>, split between the bookers sharing each field. Pick fields on the{" "}
-            <a href={import.meta.env.BASE_URL+"vetting.html"} style={link}>Council / Community fields</a> page (📅 Book → save them as 📌 Active bookings); they then appear here under
-            Provider → 📍 Location.
+            <a href={import.meta.env.BASE_URL+"vetting.html"} style={link}>Council / Community fields</a> page (rate them, then mark them bookable in 📌 My fields); they then appear here under
+            Vendor → 📍 Location.
           </p>
           <AboutMap src={councilMap} alt="The Council / Community fields page's Auckland map with its markers labelled: rated parks coloured by suitability with lights shown as a bolt, grey not rated, red rejected, purple diamonds privately managed, round club or venue logos, and red pins for your active fields">
             The Council / Community fields page&apos;s Auckland view: each marker is a park. Tap one, switch to <b>📅 Book</b> and add its fields to your cart;
@@ -140,8 +140,8 @@ export function AboutTab() {
         {howTab==="community"&&(<>
           <p style={{margin:"0 0 12px",fontSize:13,color:"#475569"}}>
             Schools and trusts that hire their fields to AMUA, such as Auckland Normal Intermediate ($20/hr), St Cuthbert's College and Sacred Heart College.
-            Add the field on the <a href={import.meta.env.BASE_URL+"vetting.html"} style={link}>Council / Community fields</a> map (📅 Book → save it as a 📌 Active booking),
-            then book dates here under Provider → 📍 Location. These are <b>booked only through AMUA</b>.
+            Add the field on the <a href={import.meta.env.BASE_URL+"vetting.html"} style={link}>Council / Community fields</a> map (rate it, then mark it bookable in 📌 My fields),
+            then book dates here under Vendor → 📍 Location. These are <b>booked only through AMUA</b>.
           </p>
           <AboutMap src={communityMap} maxWidth={440} alt="A school with its two playing fields outlined and a community field marker labelled">
             A community facility (here a school with two fields). Its field markers work like council fields: add them to your cart on the

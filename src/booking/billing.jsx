@@ -2,14 +2,14 @@ import { useState, useMemo, useRef, Fragment } from "react";
 import { downloadDriveFile, DRIVE_ROOT_FOLDER, testDriveConnection, disconnectDrive } from "../drive-client.js";
 import { billingDocFields, buildBillingDocHtml, invLineLabel, renderInvoiceDocHtml } from "./billingDocs.jsx";
 import { AMUA_INFO, rowSelect, CopyableTable, Modal, PROVIDERS, S, VENDOR_GTEC, deriveRecipientCode, fmtCost, genBankRef, todayKey } from "./core.jsx";
-export const PIPELINE_STATES = [
+const PIPELINE_STATES = [
   { key:"draft",         label:"Draft",           color:"#94a3b8", description:"Invoice created, not yet submitted" },
   { key:"submitted",     label:"Submitted",        color:"#f59e0b", description:"Sent to Grammar TEC" },
   { key:"gtec_invoiced", label:"GTEC Invoice Rcvd",color:"#3b82f6", description:"Received invoice from Grammar TEC" },
   { key:"club_invoiced", label:"Invoiced to Club", color:"#8b5cf6", description:"Invoice sent to club for payment" },
   { key:"complete",      label:"Complete",         color:"#22c55e", description:"All payments settled" },
 ];
-export const PIPELINE_KEYS = PIPELINE_STATES.map(s=>s.key);
+const PIPELINE_KEYS = PIPELINE_STATES.map(s=>s.key);
 
 // One email carrying several official documents for the same recipient — a booker who
 // has three invoices outstanding gets one email listing all three, not three emails.
@@ -17,10 +17,10 @@ export const PIPELINE_KEYS = PIPELINE_STATES.map(s=>s.key);
 // reconciles them. Documents are unpaginated here: email has no pages.
 // The email service (EmailJS) rejects a message whose variables exceed 50KB. Bundles are
 // kept under this, leaving room for the subject and addresses.
-export const INV_EMAIL_MAX_BYTES = 45 * 1024;
-export const htmlBytes = html => new TextEncoder().encode(html).length;
+const INV_EMAIL_MAX_BYTES = 45 * 1024;
+const htmlBytes = html => new TextEncoder().encode(html).length;
 
-export function buildInvoiceBundleHtml({ recipientName, recipientEmail, docs, note = "", preview = false }) {
+function buildInvoiceBundleHtml({ recipientName, recipientEmail, docs, note = "", preview = false }) {
   const combined = docs.reduce((s, d) => s + (d.rec.total || 0), 0);
   const summaryRows = docs.map(d => {
     const f = billingDocFields(d.rec, d.docType, d.lines);

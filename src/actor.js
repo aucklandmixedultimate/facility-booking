@@ -20,10 +20,10 @@ const splitName = n => { const m = /^(\S+)\s+([A-Za-z])\.?$/.exec(String(n || ""
 // Someone who doesn't want to give a name: their actions are stamped "Guest".
 export const GUEST = "Guest";
 export const getActor = email => email ? ls.get(curKey(email)) || "" : "";
-export function setActor(email, name) { ls.set(curKey(email), name || null); window.dispatchEvent(new CustomEvent("amua-actor", { detail: name || "" })); }
+function setActor(email, name) { ls.set(curKey(email), name || null); window.dispatchEvent(new CustomEvent("amua-actor", { detail: name || "" })); }
 export const clearActor = email => setActor(email, "");
 
-export function recentActors(user) {
+function recentActors(user) {
   const meta = user?.user_metadata?.actors;
   if (Array.isArray(meta)) return meta.filter(n => typeof n === "string" && n).slice(0, MAX);
   try { return JSON.parse(ls.get(listKey(user?.email)) || "[]").slice(0, MAX); } catch { return []; }

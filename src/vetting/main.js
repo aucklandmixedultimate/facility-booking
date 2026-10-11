@@ -106,7 +106,6 @@ let fieldMode = store.get("vet-field-mode", fieldOn ? "on" : "off");
 let view = store.get("vet-view", "city");   // "city" | "park" | "book" (the cart)
 // Admins rate and book for anyone; other signed-in bookers see the ratings and book for themselves.
 let IS_ADMIN = true;
-let workMode = "rate";   // "rate" | "book": what clicking a park's field areas does
 let focusId = null;                          // park opened from the Auckland map (overrides the queue)
 let focusFrom = null;                        // "city" (opened from the map) or "back" (the Back button)
 const visited = [];                          // parks shown in park view, for Back
@@ -313,7 +312,7 @@ const FIT_WORD = { reduced: "3v3 only", full: "1 × full 7v7", multi: "2 × full
 function histValue(kind, v) {
   if (!v) return kind === "review" ? "not rated" : kind === "flag" ? "no vendor" : "no stars";
   if (kind === "rating") return "★".repeat(v.stars) + "☆".repeat(5 - v.stars);
-  if (kind === "flag") return [v.club || "provider", v.contact && `contact ${shortName(v.contact)}`].filter(Boolean).join(", ");
+  if (kind === "flag") return [v.club || "vendor", v.contact && `contact ${shortName(v.contact)}`].filter(Boolean).join(", ");
   const fields = Object.values(v.placement?.fields || {});
   return [DEC_WORD[v.decision] || v.decision, fields.length ? `${fields.length} field${fields.length > 1 ? "s" : ""}${fields.some(f => f.fit) ? " (" + fields.map(f => FIT_WORD[f.fit] || "?").join(", ") + ")" : ""}` : FIT_WORD[v.fit],
     v.lights && v.lights !== "unknown" ? (v.lights === "none" ? "no lights" : "lights") : "", v.quality && "★" + v.quality].filter(Boolean).join(" · ");
@@ -511,14 +510,13 @@ function syncFromFields(t) {
   t.fit = best ? best.fit : "unknown";
   t.spot = best ? { lat: best.lat, lon: best.lon, angle: best.angle } : null;
   if (!t.fieldsManual || !t.fields.trim()) { t.fields = rated.map(x => x.name).join(", "); t.fieldsManual = false; }
-  const n = allLights(t).length;
+  const n = t.lightPts.length;
   if (n && t.lights !== "full" && t.lights !== "training") t.lights = "full";
 }
 // Light poles belong to the venue (t.lightPts), each [lat, lon, dir, owner]: dir is the way
 // it shines (compass bearing, degrees; missing = towards the nearest field), owner the field
 // that auto-placed it (missing = placed by hand). Fields share whatever poles stand along them.
 const poleKey = q => q[0].toFixed(7) + "," + q[1].toFixed(7);
-const allLights = t => t.lightPts;
 // Poles standing along a field's long sides (within its length plus 6 m, and within 8 m of
 // the usual pole line just outside each sideline): the ones lighting that field.
 function fieldPoles(t, fr) {
@@ -1004,19 +1002,6 @@ const FIT_COLOR = { multi: "#1f7a4d", full: "#46b37b", reduced: "#e0a647", no: "
 function drawParkFields(p) {
   parkFieldsLayer.clearLayers();
   const t = tagsFor(p);
-  if (workMode === "book") {   // Book mode: field areas go in and out of the booker's cart
-    const groups = reviews[p.id]?.placement?.groups || [];
-    fieldKeys(p).forEach(({ f, key }) => {
-      const g = groups.find(x => x.council?.includes(key)), st = locState(cartId(p, g ? g.key : key));   // "active" | "cart" | null
-      L.polygon(f.p, { pane: "fieldsPane", fill: true, fillColor: st === "active" ? "#0f766e" : "#14b8a6",
-        fillOpacity: st === "active" ? 0.55 : st ? 0.3 : 0.04, color: st === "active" ? "#0f766e" : st ? "#14b8a6" : "#ffffff",
-        weight: st ? 3 : 1.4, dashArray: st === "cart" ? "7 4" : st ? null : "4 4", opacity: 0.95, bubblingMouseEvents: false })
-        .bindTooltip(`${esc(g ? g.name : key)}${g?.cap > 1 ? ` (${g.cap} field areas)` : ""} — ${st === "active" ? "📌 active booking" : st ? "🛒 in the cart (not booked yet) · click to remove" : "click to add to the cart"}`, { className: "parktip", sticky: true })
-        .on("click", () => toggleCart(p, key))
-        .addTo(parkFieldsLayer);
-    });
-    return;
-  }
   // Council areas stay neutral while fields are added (the mapping happens on venue save);
   // once saved, each is tinted by the frisbee group it belongs to.
   const groups = reviews[p.id]?.placement?.groups || [];
@@ -1402,7 +1387,7 @@ function renderDispenser(p) {
   $("dispenser").title = lit ? (fr?.lat != null ? `${t.sel}: tap to add two poles (up to ${LIGHTS_MAX}, then back to 0); drag bulbs to place them by hand` : "Lights: drag a bulb onto each pole (lock the field on a council field to place poles by tapping)")
     : t.lights === "none" ? "No lights — tap if there are lights" : "Lights unknown — tap for no lights, tap again for lights";
   $("bulbCount").hidden = !lit; $("bulbCount").textContent = arr.length;
-  $("lightsReset").hidden = !(t.lights !== "unknown" || allLights(t).length);
+  $("lightsReset").hidden = !(t.lights !== "unknown" || t.lightPts.length);
 }
 function tapLights(p) {
   const t = tagsFor(p); snap(p);
@@ -1455,11 +1440,6 @@ function buildCity() {
     const pv = privOps(p);
     const fl = !PRIV_BY_PARK[p.id]?.length && flags[p.id];
     const ult = ultimateOf(p);
-    const mineHere = workMode === "book" ? myLocs().filter(x => x.park_id === p.id) : [];
-    const nAct = mineHere.filter(isActive).length, inCart = mineHere.length - nAct;
-    // Book mode: parks with active bookings get a solid dark-teal ring; cart-only parks a dashed one.
-    if (nAct) L.circleMarker(ll, { radius: 14, color: "#0f766e", weight: 5, fill: true, fillColor: "#14b8a6", fillOpacity: 0.25, interactive: false }).addTo(cityLayer);
-    else if (inCart) L.circleMarker(ll, { radius: 13, color: "#14b8a6", weight: 3, dashArray: "4 3", fill: false, interactive: false }).addTo(cityLayer);
     // An ultimate club's home: a bigger diamond whose centre is the club's colours.
     const clubCol = ult.find(o => o.colors)?.colors;
     const isAmua = pv?.some(o => o.amua);
@@ -1484,7 +1464,7 @@ function buildCity() {
       + (ult.length ? `<br><b style="color:${ULT_COLOR}">🥏 ${ult.some(o => o.booking_only) ? "Book only through" : "Ultimate club"}: ${esc(ult.map(o => o.operator).join(", "))}</b>` : "")
       + (flags[p.id] ? `<br><b style="color:${PRIV_COLOR}">✎ ${esc(amendText(flags[p.id]))}</b>${flags[p.id].website ? `<br>🔗 ${esc(flags[p.id].website.replace(/^https?:\/\//, ""))}` : ""}` : "")
       + (diamonds(p).length ? `<br><b style="color:#c2410c">⚾ Softball / baseball ground: mounds may make it unsuitable in summer</b>` : "")
-      + (workMode === "book" ? `<br>${nAct ? `📌 ${nAct} active booking field${nAct > 1 ? "s" : ""} · ` : ""}${inCart ? `🛒 ${inCart} in the cart · ` : ""}<i>Click to book fields</i>` : `<br><i>Click to rate</i>`),
+      + `<br><i>Click to rate</i>`,
       { className: "parktip", direction: "top", offset: [0, -6] });
     mk.on("click", () => openPark(p.id));
     mk.addTo(cityLayer);
@@ -1504,12 +1484,7 @@ function buildCity() {
   // Private grounds that aren't in the council maps: hollow diamonds with the operator's contacts.
   PRIV.operators.filter(o => !o.park_id || !BYID[o.park_id]).forEach(o => {
     const ll = [o.lat, o.lon]; pts.push(ll);
-    // Community facilities can be booked like council fields: in Book mode their popup adds
-    // them to the cart, and their badge gets the cart / active ring.
-    const comm = o.category === "community", own = ownedPriv(o);
-    if (comm && workMode === "book") { const st = locState("cm-" + o.id);
-      if (st === "active") L.circleMarker(ll, { radius: 13, color: "#0f766e", weight: 4, fill: true, fillColor: "#14b8a6", fillOpacity: 0.25, interactive: false }).addTo(cityLayer);
-      else if (st) L.circleMarker(ll, { radius: 12, color: "#14b8a6", weight: 3, dashArray: "4 3", fill: false, interactive: false }).addTo(cityLayer); }
+    const own = ownedPriv(o);
     (o.icons ? logoMarker(ll, o.icons, own ? COMM_COLOR : o.amua ? "#e0a647" : PRIV_COLOR, false, o.amua ? 700 : 550, false, !!o.lit, own)
       : o.amua ? amuaMarker(ll, "#ffffff", false) : own ? ownMarker(ll) : privMarker(ll, "transparent", false, false))
       .on("click", () => { if (BYID["op-" + o.id]) openPark("op-" + o.id); })
@@ -1657,12 +1632,11 @@ function setView(v, { refit } = {}) {
   $("bookPanel").hidden = v !== "book";
   document.body.classList.toggle("bookview", v === "book");   // the queue's controls don't apply to My fields
   $("railBox").hidden = v !== "book";
-  applyModeUi();
+  applyViewUi();
   if (v === "book" && rotating) setRotating(false);
   if (v === "city") {
     if (rotating) setRotating(false);
     $("fitPop").hidden = true;
-    if (was === "park" && shownPark) { /* remember nothing: the city view keeps its own position */ }
     if (overlay) { overlay.remove(); overlay = null; }
     if (overlayPanel) { overlayPanel.remove(); overlayPanel = null; }
     shownPark = null;
@@ -1795,70 +1769,6 @@ const isRetired = x => x.status === "retired";
 // Rejected fields stay listed (under "Show rejected") but are never bookable.
 const decOf = x => x.decision === "top" ? "top" : x.decision === "no" ? "no" : "yes";
 const isRejected = x => decOf(x) === "no";
-const cartOf = () => myLocs().filter(x => !isActive(x) && !isRetired(x) && !isRejected(x));
-const locState = id => { const x = myLocs().find(y => y.id === id); return !x || isRetired(x) ? null : isActive(x) ? "active" : "cart"; };
-// Save every cart field as an active booking.
-async function saveCartActive() {
-  const who = whoBooks(), before = myLocs().map(x => ({ ...x })), n = cartOf().length;
-  if (!n) return;
-  const at = new Date().toISOString();
-  bookLocs[who] = before.map(x => isActive(x) || isRetired(x) ? x : { ...x, status: "active", activated_at: at, ...activatedBy() });
-  if (!(await saveBookLocs())) { bookLocs[who] = before; return; }
-  setStatus(`Saved ${n} field${n > 1 ? "s" : ""} as active bookings. They're now in the booking site under Vendor → Location.`);
-  render(); renderTabs(); if (view === "book") renderBook();
-}
-// Add or remove one field (or "Whole park") of a park in the booker's cart; saves at once.
-async function toggleCart(p, key) {
-  // A council area that's part of a saved frisbee group books the whole group.
-  const grp = (reviews[p.id]?.placement?.groups || []).find(g => g.council?.includes(key));
-  if (grp) key = grp.key;
-  const who = whoBooks(), before = [...(bookLocs[who] || [])], list = [...before], id = cartId(p, key);
-  let i = list.findIndex(x => x.id === id);
-  if (i >= 0 && isRetired(list[i])) { list.splice(i, 1); i = -1; }
-  if (i >= 0 && isActive(list[i])) {
-    setStatus(`${p.name} – ${key} is an active booking. Remove it under 📌 My fields.`); return;
-  }
-  if (i >= 0) list.splice(i, 1);
-  else {
-    const wf = parkWorkflow(p), f = fieldKeys(p).find(x => x.key === key)?.f, c = grp ? grp.c : f?.c || [p.lat, p.lon];
-    list.push({ id, park_id: p.id, park: p.name, region: p.region, field: grp ? grp.name : key, lat: c[0], lon: c[1], kind: wf.kind, operator: wf.operator, status: "cart",
-      ...(grp ? { council_fields: grp.council, frisbee: grp.cap, fit: grp.fit } : {}), added_at: new Date().toISOString(), ...addedBy() });
-  }
-  bookLocs[who] = list;
-  const saved = await saveBookLocs();
-  if (!saved) { bookLocs[who] = before; drawParkFields(p); renderBookBar(p); renderTabs(); return; }   // not saved: don't show it as in the cart
-  // A field added before it's been rated: switch to Rate mode on it, so its orientation
-  // and fit get set (the ultimate field jumps onto it).
-  const rt = tagsFor(p).fr[key];
-  if (IS_ADMIN && saved && i < 0 && key !== "Whole park" && !(rt?.fit && rt.fit !== "unknown")) {
-    setStatus(`Added ${p.name} – ${key} to ${who}'s cart. It isn't rated yet: set its orientation and fit, then switch back to Book.`);
-    setMode("rate"); selectField(p, key); renderTabs(); return;
-  }
-  if (saved) setStatus(`${i >= 0 ? "Removed" : "Added"} ${p.name} – ${key} ${i >= 0 ? "from" : "to"} ${who}'s cart.`);
-  drawParkFields(p); renderBookBar(p); renderTabs();
-}
-function workflowHtml(wf) {
-  return wf.kind === "council_private"
-    ? `<span class="wf"><b>◆ Council + ${esc(wf.operator.name)}</b> · contact ${esc(wf.operator.contact_name || wf.operator.name)}${wf.operator.email || wf.operator.phone ? ` (${esc([wf.operator.email, wf.operator.phone].filter(Boolean).join(" · "))})` : ""}: ask the contact → apply to council → wait → confirm with the contact</span>`
-    : `<span class="wf"><b>🏛 Council booking</b>: AMUA review → apply to council → wait for the decision</span>`;
-}
-// Book mode's bar under the park map: booker, this park's fields in the cart, workflow, fee.
-function renderBookBar(p) {
-  const who = whoBooks(), wf = parkWorkflow(p), inPark = myLocs().filter(x => x.park_id === p.id);
-  const actHere = inPark.filter(isActive), cartHere = inPark.filter(x => !isActive(x)), nCart = cartOf().length;
-  const whole = inPark.some(x => x.field === "Whole park"), known = Object.keys(bookLocs).filter(e => e !== who);
-  $("bookBar").innerHTML = `<div class="bb-row"><label>Booking for ${IS_ADMIN ? `<input id="bookWho2" list="bookWhoList2" value="${esc(who)}" title="The booker whose cart this is">` : `<b>${esc(who)}</b>`}</label>
-      <datalist id="bookWhoList2">${known.map(e => `<option value="${esc(e)}">`).join("")}</datalist>
-      <button class="b" id="bbWhole" aria-pressed="${whole}" title="Book the park without choosing fields">Whole park</button>
-      <button class="b" id="bbCart">🛒 Cart (${nCart})</button>
-      ${nCart ? `<button class="b save" id="bbSave" title="Save every cart field as an active booking">✅ Save cart as active bookings</button>` : ""}
-      ${actHere.length ? `<a href="${venueLink(wf.provider, p.name)}" target="_blank" rel="noopener">Book in Facility Booking ↗</a>` : ""}</div>
-    <div class="bb-row">${actHere.map(x => `<span class="chipf act" title="Active booking">📌 ${esc(x.field)}</span>`).join("")}
-      ${cartHere.map(x => `<span class="chipf" title="In the cart, not booked yet">🛒 ${esc(x.field)} <button data-uncart="${esc(x.field)}" title="Remove">✕</button></span>`).join("")}
-      ${inPark.length ? "" : `<span class="muted">Click a field area on the map to add it to the cart.</span>`}</div>
-    <div class="bb-row">${workflowHtml(wf)}</div>
-    <div class="bb-row muted">Council fee: $10 per field per application, pending until AMUA sends it, then split between the bookers sharing each field.</div>`;
-}
 // The booker's council contact (booker_contacts): they're the key holder on AMUA's council
 // application, and council fields can't be booked until it's filled in. undefined = unknown.
 const contactCache = {};
@@ -1896,7 +1806,6 @@ function renderBook() {
   const shown = matching.filter(({ x }) => isRejected(x) ? mfShowRej : mfStage === "all" || decOf(x) === mfStage)
     .sort((a, b) => rank[decOf(a.x)] - rank[decOf(b.x)] || qOf(b.x) - qOf(a.x) || (a.x.park || "").localeCompare(b.x.park || "") || (a.x.field || "").localeCompare(b.x.field || ""));
   const canEdit = w => IS_ADMIN || w === (session?.user?.email || "demo@local").toLowerCase();
-  if (IS_ADMIN && mfWho) bookFor = mfWho;   // admins' clicks in Book mode go to the booker shown
   const prov = x => x.kind === "community" ? "cm_" + x.operator.id : x.kind === "council_private" ? "op_" + x.operator.id : "akl_council";
   const tag = x => x.kind === "community" ? `<span class="mf-tag comm" title="Community facility">🏫</span>` : x.kind === "council_private" ? `<span class="mf-tag priv" title="${esc(x.operator?.name || "operator")} + council">◆</span>` : `<span class="mf-tag" title="Council">🏛</span>`;
   const who = w => esc(personFromEmail(w));
@@ -1935,42 +1844,25 @@ function qStars(x) {
 }
 // Change one saved field (state, bookable) for its booker and save at once.
 async function setEntry(w, id, patch) {
-  if (IS_ADMIN) bookFor = w; else if (w !== whoBooks()) return;
+  if (!IS_ADMIN && w !== whoBooks()) return;
   const before = bookLocs[w] || [], i = before.findIndex(x => x.id === id); if (i < 0) return;
   const list = [...before]; list[i] = { ...before[i], ...patch };
   bookLocs[w] = list;
-  if (!(await saveBookLocs())) { bookLocs[w] = before; }
+  // Save as booker w just for this change: an admin's own later picks stay in their own list.
+  const was = bookFor; bookFor = w;
+  try { if (!(await saveBookLocs())) bookLocs[w] = before; } finally { bookFor = was; }
   renderBook(); renderTabs(); renderRail();
 }
 function renderTabs() { const n = myLocs().filter(x => !isRetired(x) && !isRejected(x)).length;
   $("bookTab").innerHTML = `📌<span class="tl"> My fields</span>${n ? ` (${n})` : ""}`; }
-function applyModeUi() {
-  const book = workMode === "book";
-  $("modeRate").setAttribute("aria-checked", String(!book)); $("modeBook").setAttribute("aria-checked", String(book));
-  document.querySelector(".modetabs").hidden = true;
-  $("card").classList.toggle("bookmode", book);
-  $("info").hidden = view !== "park" || book; $("bookBar").hidden = view !== "park" || !book;
-  $("actions").hidden = view !== "park" || book;
-  if (book && rotating) setRotating(false);
-  if (book) $("fitPop").hidden = true;
-}
-function setMode(m) {
-  // One way into My fields for everyone: place and rate frisbee fields, then decide (they
-  // roll up to council areas on save). Book mode (picking council areas) is retired.
-  m = "rate";
-  workMode = m; store.set("vet-work-mode", m); applyModeUi();
-  const p = current(); if (p && view === "park") { drawParkFields(p); drawLights(p); }
-  render();
+// The park view's rating panel and decision buttons show only in the park view. (There used to
+// be a separate Book mode for picking council areas; fields now reach My fields by rating them.)
+function applyViewUi() {
+  $("info").hidden = view !== "park";
+  $("actions").hidden = view !== "park";
 }
 function bindBook() {
-  const who = e => { bookFor = e.target.value.trim().toLowerCase(); renderTabs(); render(); };
   $("bookPanel").addEventListener("change", e => { if (e.target.id === "mfWho") { mfWho = e.target.value; renderBook(); renderTabs(); buildCity(); } });
-  $("bookBar").addEventListener("change", e => { if (e.target.id === "bookWho2") who(e); });
-  $("bookBar").addEventListener("click", e => { const p = current(); if (!p) return;
-    const un = e.target.closest("[data-uncart]"); if (un) return toggleCart(p, un.dataset.uncart);
-    if (e.target.id === "bbWhole") return toggleCart(p, "Whole park");
-    if (e.target.id === "bbCart") setView("book");
-    if (e.target.id === "bbSave") saveCartActive(); });
   $("bookPanel").addEventListener("change", e => { if (e.target.id === "mfRej") { mfShowRej = e.target.checked; store.set("vet-mf-rejected", mfShowRej); renderBook(); } });
   $("bookPanel").addEventListener("click", async e => {
     const stage = e.target.closest("[data-mfstage]"); if (stage) { mfStage = stage.dataset.mfstage; renderBook(); return; }
@@ -1984,17 +1876,15 @@ function bindBook() {
       if ("mfbk" in b.dataset) return setEntry(w, id, isActive(x) ? { status: "cart" }
         : { status: "active", activated_at: x.activated_at || new Date().toISOString(), ...(x.activated_at ? {} : activatedBy()) });
     }
-    const op = e.target.closest("[data-bkopen]"); if (op) { if (workMode !== "book") setMode("book"); openPark(op.dataset.bkopen); }
+    const op = e.target.closest("[data-bkopen]"); if (op) openPark(op.dataset.bkopen);
   });
-  $("modeRate").onclick = () => setMode("rate");
-  $("modeBook").onclick = () => setMode("book");
 }
 
 // ── Render ───────────────────────────────────────────────────────────────────
 // The decision buttons, or (in fit mode) the fit buttons in their places.
 function updateActions() {
   const p = current(), t = p && tagsFor(p);
-  const on = !!(fitArmed && !rotating && t?.sel && workMode !== "book" && view === "park");
+  const on = !!(fitArmed && !rotating && t?.sel && view === "park");
   $("actions").classList.toggle("fitmode", on);
 }
 function renderTags(p) {
@@ -2010,7 +1900,7 @@ function renderTags(p) {
   const rated = Object.values(t.fr).filter(x => x.fit && x.fit !== "unknown");
   $("fitVal").textContent = rated.length ? rated.map(x => `${x.name}: ${FIT_LABEL[x.fit]}`).join(" · ") : "";
   $("fitVal").classList.toggle("unset", t.fit === "unknown");
-  const nl = allLights(t).length, ns = t.sel ? fieldPoles(t, t.fr[t.sel]).length : null;
+  const nl = t.lightPts.length, ns = t.sel ? fieldPoles(t, t.fr[t.sel]).length : null;
   $("lightsVal").innerHTML = nl ? `💡 ${nl}<span class="lx"> pole${nl > 1 ? "s" : ""}${ns !== null ? ` (${ns} on ${esc(t.sel)})` : ""}</span>`
     : t.lights === "none" ? "none" : t.lights === "training" || t.lights === "full" ? "yes" : "";
   $("lightsVal").classList.toggle("unset", t.lights === "unknown");
@@ -2304,14 +2194,13 @@ function renderCity() {
 }
 function renderParkHeader() {
   const p = current();
-  $("parkName").textContent = "Cart";
   $("emptyState").hidden = true; $("card").hidden = false; $("behind").hidden = true;
   $("parkName").textContent = "📌 My fields"; $("parkRegion").textContent = p ? "last park: " + p.name : "";
   $("decChip").innerHTML = ""; $("handle").title = "Council fields in the booker's cart, ready for the booking site";
 }
 function render() {
   if (view === "book") { renderParkHeader(); renderBook(); renderTabs(); renderRail(); return; }
-  renderTabs(); applyModeUi();
+  renderTabs(); applyViewUi();
   if (view === "city") return renderCity();
   const q = queue(), p = current(), next = focusId ? null : (q[cursor + 1] || (q.length > 1 ? q[0] : null));
   const card = $("card");
@@ -2350,7 +2239,6 @@ function render() {
     const fresh = shownPark !== p.id + "#" + i;
     if (fresh) { fitArmed = false; aklNext = false; if (whereMark) { whereMark.remove(); whereMark = null; } document.body.classList.remove("aklzoom"); hideSuburbs(); showMap(p); labelFitBtn(p); }
     renderTags(p);
-    if (workMode === "book") renderBookBar(p);
     // Coming back to a park with a placed field: lock the field to its saved spot and angle
     // (not the screen centre), select that field and redraw its lights.
     if (fresh) restorePlacement(p);
@@ -2384,7 +2272,7 @@ function startNextField(p) {
   setStatus(free ? `Place the next frisbee field (unrated council area: ${free.n || "unnamed"}); lock it, then rate the fit.` : "Place the next frisbee field, lock it, then rate the fit.");
 }
 async function decide(decision) {
-  const p = current(); if (!p || busy || view !== "park" || workMode === "book") return;
+  const p = current(); if (!p || busy || view !== "park") return;
   const t = tagsFor(p);
   // Spare council space: if a quarter or more of the council field area has no frisbee
   // field, ask whether to add another before saving the venue.
@@ -2531,7 +2419,7 @@ function bind() {
   $("notesIn").addEventListener("input", () => { const p = current(); if (p) tagsFor(p).notes = $("notesIn").value; });
   // Swipe on the title bar (the map itself pans and zooms).
   const h = $("handle"), card = $("card"); let sx = 0, sy = 0, dx = 0, dy = 0, drag = false;
-  h.addEventListener("pointerdown", e => { if (view !== "park" || workMode === "book") return; drag = true; sx = e.clientX; sy = e.clientY; dx = dy = 0; card.classList.remove("snap", "deal"); h.setPointerCapture(e.pointerId); });
+  h.addEventListener("pointerdown", e => { if (view !== "park") return; drag = true; sx = e.clientX; sy = e.clientY; dx = dy = 0; card.classList.remove("snap", "deal"); h.setPointerCapture(e.pointerId); });
   h.addEventListener("pointermove", e => { if (!drag) return; dx = e.clientX - sx; dy = e.clientY - sy;
     card.style.transform = `translate(${dx}px, ${Math.min(dy, 30)}px) rotate(${dx / 25}deg)`;
     const up = -dy > 70 && Math.abs(dx) < 90;
@@ -2570,7 +2458,7 @@ function bind() {
   $("actions").addEventListener("click", e => { const b = e.target.closest("[data-fit]"), p = current(); if (!b || !p) return;
     confirmSpot(p, b.dataset.fit); });
   $("fbUndo").onclick = e => { e.stopPropagation(); editUndo(); };
-  $("fbMove").onclick = e => { e.stopPropagation(); const p = current(); if (p && tagsFor(p).sel) { snap(p); setRotating(true); setStatus(`Moving ${tagsFor(p).sel}: turn and drag it, then tap 🔓 to lock it in its new spot.`); } };
+  $("fbMove").onclick = e => { e.stopPropagation(); const p = current(); if (p && tagsFor(p).sel) { snap(p); setRotating(true); setStatus(`Moving ${tagsFor(p).sel}: turn and drag it, then tap 🔒 to lock it in its new spot.`); } };
   $("fbAlign").onclick = e => { e.stopPropagation(); const p = current(); if (p) askAlign(p); };
   $("fbRemove").onclick = e => { e.stopPropagation(); const p = current(); if (p) removeField(p); };
   $("helpBtn").onclick = () => { const el = $("helpPanel"); el.hidden = !el.hidden; $("helpBtn").setAttribute("aria-expanded", String(!el.hidden)); };
@@ -2648,7 +2536,6 @@ function bind() {
     const p = current();
     if (e.key === "Escape") { if (document.body.classList.contains("mapfull")) { setFullMap(false); return; } if (infoOpenFor) { infoOpenFor = null; render(); return; } if (rotating) setRotating(false); $("sizePanel").hidden = true; $("helpPanel").hidden = true; $("fitPop").hidden = true; if (p && tagsFor(p).sel) selectField(p, null); return; }
     if (/^[cC]$/.test(e.key)) { focusId = null; setView(view === "city" ? "park" : "city"); return; }
-    if (/^[bB]$/.test(e.key)) { setMode(workMode === "book" ? "rate" : "book"); return; }
     if (view === "city") return;
     const fm = $("actions").classList.contains("fitmode") && p;
     // Deciding a park: ← back, → later, ↓ shortlist, ↑ top pick, Backspace reject.
@@ -2747,7 +2634,9 @@ function gate(html) { $("gate").innerHTML = html; $("gate").hidden = false; $("a
 async function start() {
   // "no-cache" revalidates with the server, so a data update shows on the next load instead
   // of after GitHub Pages' ~10-minute browser cache expires.
-  const res = await fetch(BASE + "council-maps/parks.json", { cache: "no-cache" }); PARKS = (await res.json()).parks; BYID = Object.fromEntries(PARKS.map(p => [p.id, p]));
+  const res = await fetch(BASE + "council-maps/parks.json", { cache: "no-cache" }).catch(() => null);
+  if (!res?.ok) { gate(`<h2>Couldn't load the council parks</h2>Check your connection and reload the page.`); return; }
+  PARKS = (await res.json()).parks; BYID = Object.fromEntries(PARKS.map(p => [p.id, p]));
   // A per-minute query string skips GitHub Pages' CDN copy (cached ~10 min after a deploy),
   // so edits to the operator list show on the next load.
   try { const pr = await fetch(BASE + "council-maps/private-managed.json?v=" + Math.floor(Date.now() / 60000), { cache: "no-cache" }); if (pr.ok) PRIV = await pr.json(); } catch { /* optional data */ }

@@ -8,7 +8,7 @@
 // is shown with "≈" until the council publishes the real dates. Replace BASE_CYCLE with the
 // new year's dates when they're out.
 
-export const BASE_CYCLE = [
+const BASE_CYCLE = [
   // Winter 2026
   { key: "winter_apps",    season: "winter", label: "Winter seasonal applications open", from: "2025-12-15", to: "2026-02-08" },
   { key: "winter_alloc",   season: "winter", label: "Winter allocation coordination",   from: "2026-02-09", to: "2026-03-20", est: true },

@@ -32,14 +32,14 @@ export function InvoicePill({active, onClick, children}) {
 // page 1 (letterhead + Bill To) against 78px on later pages (one-line header strip).
 // That allows 33 and 41 rows; these leave room for the carry/subtotal rows plus slack so
 // a sheet never spills onto a second physical page and strands its subtotal there.
-export const INV_ROWS_PAGE_1 = 28, INV_ROWS_PAGE_N = 34, INV_ROWS_FOR_TOTALS = 2;
+const INV_ROWS_PAGE_1 = 28, INV_ROWS_PAGE_N = 34, INV_ROWS_FOR_TOTALS = 2;
 // A page-1 banner (receipt "PAID", preview notice) costs roughly this many rows of height.
-export const INV_ROWS_PER_BANNER = 2;
+const INV_ROWS_PER_BANNER = 2;
 
 // A shared line also prints a footnote on its sheet, so it costs a second row.
 // A line's footnotes: a shared-field cost note, and vendor mismatches kept on record
 // (vendorNotes: [{date, text}], added when the invoice option to asterisk them is on).
-export function invLineFootnotes(l) {
+function invLineFootnotes(l) {
   const desc = l.desc || l.description || l.label || "";
   const day = d => d ? `${fmtDateShortDow(d)} — ` : "";
   return [
@@ -47,9 +47,9 @@ export function invLineFootnotes(l) {
     ...(l.vendorNotes || []).map(n => `${day(n.date)}${n.text}`),
   ];
 }
-export const invLineRows = l => 1 + invLineFootnotes(l).length;
+const invLineRows = l => 1 + invLineFootnotes(l).length;
 
-export function paginateInvoiceLines(lines, { bannerRows = 0 } = {}) {
+function paginateInvoiceLines(lines, { bannerRows = 0 } = {}) {
   if (!lines.length) return [[]];
   const firstCap = Math.max(1, INV_ROWS_PAGE_1 - bannerRows);
   const pages = [[]];
@@ -75,12 +75,12 @@ export function invLineLabel(l) {
 
 // Rate and Duration cells for a document line. Shared lines show the rate after their
 // share is applied, marked with an asterisk that points at the sheet's footnote.
-export function invLineRate(l) {
+function invLineRate(l) {
   if (l.fixedPrice) return `Fixed${l.sharedNote ? "*" : ""}`;
   if (l.rate == null) return "—";
   return `${fmtCost(l.rate)}/hr${l.sharedNote ? "*" : ""}`;
 }
-export function invLineDuration(l) {
+function invLineDuration(l) {
   if (l.hours == null) return "—";
   const mins = Math.round(Math.abs(l.hours) * 60), h = Math.floor(mins / 60), m = mins % 60;
   return (l.hours < 0 ? "−" : "") + [h ? `${h}h` : "", m ? `${m}m` : ""].filter(Boolean).join(" ") || "0h";
@@ -90,8 +90,8 @@ export function invLineDuration(l) {
 // time range inside desc ("Mon, 14 Sept 2026 · Field #1 · 6:30 PM–8:30 PM"), and the
 // hours/rate or sharing inside detail ("6h 30m @ $60.00/hr", "· shared field, 50% of …").
 // Recover the structured fields from that text so old records fill the new columns.
-export const INV_MONTHS = { jan:1, feb:2, mar:3, apr:4, may:5, jun:6, jul:7, aug:8, sep:9, oct:10, nov:11, dec:12 };
-export function normaliseInvLine(l) {
+const INV_MONTHS = { jan:1, feb:2, mar:3, apr:4, may:5, jun:6, jul:7, aug:8, sep:9, oct:10, nov:11, dec:12 };
+function normaliseInvLine(l) {
   if (l.hours != null || l.rate != null || l.fixedPrice) return l;
   const out = { ...l };
   let desc = l.desc || l.description || l.label || "";
@@ -318,7 +318,7 @@ export function buildBillingDocHtml(rec, docType, lines) {
 
 // Drive file/folder naming for billing documents. Names are deterministic so
 // re-syncs find-or-update the same files even across browsers/devices.
-export const sanitizeDriveName = s => String(s||"").replace(/[/\\]+/g,"-").replace(/\s+/g," ").trim();
+const sanitizeDriveName = s => String(s||"").replace(/[/\\]+/g,"-").replace(/\s+/g," ").trim();
 export function billingDocBaseName(rec) {
   const isPO = rec.type === "purchase_order";
   const docTag = isPO ? "PO" : rec.type === "receipt" ? "Receipt" : "Invoice";
