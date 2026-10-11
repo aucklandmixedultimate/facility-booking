@@ -36,12 +36,13 @@ mindmap
         billing.jsx — billing pipeline, Drive
         admin.jsx — Admin, Allocation
         about.jsx — how to book
-    Council fields<br/>vetting.html
+    All Auckland fields<br/>vetting.html
       vetting/main.js — Leaflet map, rating, My fields
       public/council-maps — parks, maps, operators
     Shared modules
       statuses.js — the status model
       html.js — escHtml, csvCell
+      venues.js — scoring, owner type, vendor ids
       actor.js, people.js — who, privacy
       seasons.js, councilSeasons.js
       holidays.js, appnav.js, theme.css
@@ -87,7 +88,7 @@ Things the picture shows:
 - **`booking-system.jsx` holds most of the booking site's state** in one ~2,900-line `App`
   component. It passes it down as props (the Admin tab takes 40+).
 - **The two pages share only small modules:** `actor`, `people`, `councilSeasons`,
-  `appnav` and `html`, plus the `settings` table.
+  `appnav`, `html` and `venues` (scoring, owner type, vendor ids), plus the `settings` table.
 - **The shared modules are plain JavaScript** with no imports of their own. They are the
   easiest code to hand over and the only code with unit tests.
 
@@ -111,7 +112,7 @@ Things the picture shows:
 | Admin | `admin.jsx` `AdminPanel` | Activity log, sync results, clashes, mismatch triage, track changes, pricing rules, GTEC purge requests, bookings table. |
 | Admin menu | `App`, `modals.jsx` | Rates, player counts, log retention, AMUA details, user management, backup. |
 
-### Council fields (`vetting.html`)
+### All Auckland fields (`vetting.html`)
 
 - **Auckland map:** parks coloured by suitability, club and operator markers, council field
   shapes when zoomed in.

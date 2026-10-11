@@ -245,7 +245,7 @@ harvest):
 
 ## Vetting tool (live)
 
-**Council fields** in the app switcher (both page headers) opens `vetting.html`. Its source is
+**All Auckland fields** in the app switcher (both page headers) opens `vetting.html`. It covers council parks, club-run parks, schools and club or trust grounds; 🎯 Interests filters them by area, owner type and lights. Its source is
 `vetting.html` and `src/vetting/`; the maps and park data are in `public/council-maps/`.
 The page always fits one screen: nothing scrolls except the map, where the wheel zooms.
 - **Auckland view** (C toggles it). It opens framed from North Harbour Stadium to Opaheke

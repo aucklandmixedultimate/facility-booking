@@ -1,4 +1,4 @@
-// Council / Community fields (vetting.html) — admin tool for rating Auckland Council sports parks for
+// All Auckland fields (vetting.html) — admin tool for rating Auckland Council sports parks for
 // ultimate. Two views on one Leaflet map:
 //  · Auckland: every park plotted and coloured by its overall suitability rating; click one
 //    to open it. This is how you move around between parks.
@@ -16,6 +16,7 @@ import { askActor, getActor, clearActor } from "../actor.js";
 import { shortName, personFromEmail } from "../people.js";
 import { renderAppNav } from "../appnav.js";
 import { escHtml as esc, csvCell } from "../html.js";
+import { suitScore as sharedSuitScore, parkWorkflow as sharedParkWorkflow, opVenues, ownedPriv, fieldEntryId, ownerType, OWNER_TYPES } from "../venues.js";
 
 const BASE = import.meta.env.BASE_URL;
 renderAppNav(document.getElementById("appNav"), "fields", BASE);
@@ -78,9 +79,18 @@ const COUNCIL_NOW = councilState();
 // The season's maps shown everywhere: the current season until the ☀/❄ toggle flips it.
 let seasonPick = COUNCIL_NOW.mapSeason;
 const mapIndex = p => mapIdx[p.id] ?? Math.max(0, p.maps.findIndex(m => m.season === seasonPick));
-// Interests: which parks are served. Areas (regions; none ticked = all) and provider
-// (council-run and/or privately operated).
-let interests = { regions: [], council: true, priv: true, lit: true, dark: true, ...store.get("vet-interests", {}) };
+// Interests: which parks are served. Areas (regions; none ticked = all), owner types (council-run,
+// club-run park, school, club / trust ground; see OWNER_TYPES) and lights.
+const ALL_TYPES = () => Object.fromEntries(OWNER_TYPES.map(t => [t.id, true]));
+let interests = (() => {
+  const { council, priv, ...saved } = store.get("vet-interests", {});
+  // Choices saved before owner types: "council" and "club-operated" map onto the new types.
+  const types = saved.types || { ...ALL_TYPES(), ...(council === false ? { council: false } : {}),
+    ...(priv === false ? { club_council: false, school: false, private_ground: false } : {}) };
+  return { regions: [], lit: true, dark: true, ...saved, types: { ...ALL_TYPES(), ...types } };
+})();
+const typeOf = p => ownerType(p, privOps(p));
+const typesHidden = () => OWNER_TYPES.filter(t => interests.types[t.id] === false);
 // The region dropdown starts from Interests (one region → that region, several → "🎯 My
 // interests", none → All regions). Picking another region is temporary: it isn't saved, so
 // the page opens on Interests again, and changing Interests resets it too.
@@ -94,9 +104,9 @@ function syncRegionSelect() {
   else if (o) o.remove();
   sel.value = defaultRegion();
 }
-const interestOk = p => (privOps(p).length ? interests.priv : interests.council)
+const interestOk = p => interests.types[typeOf(p)] !== false
   && (reviews[p.id]?.lights === "none" ? interests.dark : interests.lit);
-const interestsSet = () => interests.regions.length > 0 || !interests.council || !interests.priv || !interests.lit || !interests.dark;
+const interestsSet = () => interests.regions.length > 0 || typesHidden().length > 0 || !interests.lit || !interests.dark;
 let cursor = 0, busy = false;
 let dims = store.get("vet-field-dims", WFDF);
 let fieldOn = store.get("vet-field-on", true);
@@ -356,16 +366,7 @@ const qualityOf = (id, r = reviews[id]) => (id && crowdAvg(id)) ?? (r?.quality |
 const qText = q => q ? (Math.round(q * 10) / 10).toString() : "";
 // Overall suitability, 0 (unusable) … 1 (ideal); null when not rated yet. Rejecting is a
 // per-profile choice (the booker's saved fields), so a reviewer's Reject doesn't zero it.
-function suitScore(r, id) {
-  if (!r || r.decision === "rating") return null;
-  if (r.fit === "no") return 0;
-  const q = qualityOf(id, r);
-  let s = q ? q / 5 : 0.5;
-  s += { multi: 0.2, full: 0.1, reduced: -0.15, no: -0.3 }[r.fit] || 0;
-  if (r.lights === "full" || r.lights === "training") s += 0.1;
-  if (r.decision === "top") s += 0.15;
-  return Math.max(0.05, Math.min(1, s));
-}
+const suitScore = (r, id) => sharedSuitScore(r, qualityOf(id, r));
 const suitHue = s => Math.round(15 + s * 115);
 function suitColor(r, id) { const s = suitScore(r, id); return s === null ? "#8a958f" : s === 0 ? "#b3372d" : `hsl(${suitHue(s)} 72% 42%)`; }
 function suitWord(r, id) { const s = suitScore(r, id); return s === null ? (r?.decision === "rating" ? "Rating in progress" : "Not rated") : s === 0 ? "Unusable" : s >= 0.85 ? "Excellent" : s >= 0.65 ? "Good" : s >= 0.45 ? "Fair" : "Poor"; }
@@ -400,7 +401,7 @@ function renderInterests() {
   const inc = interests.regions.length ? interests.regions : allRegions();
   const btn = (k, v, label, on, title) => `<button data-int="${k}"${v ? ` data-val="${esc(v)}"` : ""} aria-pressed="${on}" title="${title}">${label}</button>`;
   $("interestRow").innerHTML = allRegions().map(r => btn("region", r, esc(r), inc.includes(r), `${esc(r)} parks`)).join("")
-    + `<i class="sep"></i>` + btn("council", "", "🏛 Council", interests.council, "Council-run parks") + btn("priv", "", "◆ Club-operated", interests.priv, "Council parks a club operates (ask the club first)")
+    + `<i class="sep"></i>` + OWNER_TYPES.map(t => btn("type", t.id, `${t.icon} ${t.label}`, interests.types[t.id] !== false, t.title)).join("")
     + `<i class="sep"></i>` + btn("lit", "", "💡 Lights / ?", interests.lit, "Parks with lights, or not known yet") + btn("dark", "", "🚫 No lights", interests.dark, "Parks known to have no lights")
     + (interestsSet() ? `<button data-int="reset" title="Serve every park again">↺ All</button>` : "");
   $("interestBtn").setAttribute("aria-pressed", String(interestsSet()));
@@ -1482,7 +1483,7 @@ function buildCity() {
       icon: L.divIcon({ className: "", html: `<span class="unplacedlbl">${esc(g)} · no location (${n})</span>`, iconSize: null }) }).addTo(cityLayer); });
   drawMyFieldPins(reg);
   // Private grounds that aren't in the council maps: hollow diamonds with the operator's contacts.
-  PRIV.operators.filter(o => !o.park_id || !BYID[o.park_id]).forEach(o => {
+  PRIV.operators.filter(o => (!o.park_id || !BYID[o.park_id]) && (!BYID["op-" + o.id] || interestOk(BYID["op-" + o.id]))).forEach(o => {
     const ll = [o.lat, o.lon]; pts.push(ll);
     const own = ownedPriv(o);
     (o.icons ? logoMarker(ll, o.icons, own ? COMM_COLOR : o.amua ? "#e0a647" : PRIV_COLOR, false, o.amua ? 700 : 550, false, !!o.lit, own)
@@ -1555,17 +1556,8 @@ function ownMarker(ll) {
 // like a park: each gets a park entry "op-<id>" in BYID (not in PARKS, so it stays out of
 // the queue and the park counts) with no council map, in the region of the nearest park.
 function addVenueParks() {
-  (PRIV.operators || []).filter(o => (!o.park_id || !BYID[o.park_id]) && o.lat != null).forEach(o => {
-    const id = "op-" + o.id;
-    if (BYID[id]) return;
-    let near = null, best = Infinity;
-    PARKS.forEach(x => { if (x.lat == null) return; const d = (x.lat - o.lat) ** 2 + (x.lon - o.lon) ** 2; if (d < best) { best = d; near = x; } });
-    BYID[id] = { id, region: near?.region || "Central", name: o.park, maps: [], fields: [], lat: o.lat, lon: o.lon, venue: o };
-    PRIV_BY_PARK[id] = [o];
-  });
+  opVenues(PRIV.operators, PARKS).forEach(v => { if (BYID[v.id]) return; BYID[v.id] = v; PRIV_BY_PARK[v.id] = [v.venue]; });
 }
-// Private ownership (not council land) vs private operation (a council park a club runs).
-const ownedPriv = o => o.ownership === "private" || o.category === "community";
 function privMarker(ll, fill, isCur, top, club, lit = false) {
   const style = club
     ? `background:${club.pattern || club.fill};border-color:${club.edge || "#fff"};box-shadow:0 0 0 2.5px ${PRIV_COLOR},0 1px 5px rgba(0,0,0,.5);width:18px;height:18px;margin:2px`
@@ -1689,7 +1681,6 @@ function editUndo() {
 // to that booker (and admins), with the council or council + private-operator workflow.
 const BOOK_KEY = "council_facilities";
 let bookLocs = {}, bookFor = "";
-const slug = s => String(s).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 async function loadBookLocs() {
   if (supabase && session) {
     const { data, error } = await supabase.from("settings").select("value").eq("key", BOOK_KEY).maybeSingle();
@@ -1741,19 +1732,9 @@ async function saveBookLocsRaw() {
 // A privately managed park's booking is filed under the club that manages the fields, but
 // requests go to its booking contact: a booking-only club (e.g. Ellerslie Ultimate Club at
 // Michaels Ave, managed by Ellerslie AFC), else the manager itself.
-function parkWorkflow(p) {
-  // A privately owned venue (school, club, trust) is booked with its owner, as a community facility.
-  if (p.venue && ownedPriv(p.venue)) { const o = p.venue;
-    return { kind: "community", provider: "cm_" + o.id, operator: { id: o.id, name: o.operator, short: o.short, email: o.contact?.email || "", phone: o.contact?.phone || "" } }; }
-  const ops = privOps(p);
-  const manager = ops.find(o => o.code !== "ultimate") || ops.find(o => o.booking_only);
-  const contact = ops.find(o => o.booking_only) || manager;
-  return manager ? { kind: "council_private", provider: "op_" + manager.id, operator: { id: manager.id, name: manager.operator, short: manager.short,
-      contact_name: contact.operator, email: contact.contact?.email || "", phone: contact.contact?.phone || "", url: contact.contact?.url || "" } }
-    : { kind: "council", provider: "akl_council", operator: null };
-}
+const parkWorkflow = p => sharedParkWorkflow(p, privOps(p));
 const venueLink = (provider, park) => `${BASE}?venue=${encodeURIComponent(provider + "|" + park)}`;
-const cartId = (p, key) => `cf-${p.id}--${slug(key)}`;
+const cartId = fieldEntryId;
 const whoBooks = () => (bookFor = (bookFor || session?.user?.email || "demo@local").toLowerCase());
 // A booker's council fields: "cart" entries are being chosen; saving the cart makes them
 // "active" bookings, which the booking site offers as Provider → Location → Facility.
@@ -2181,12 +2162,12 @@ function renderCity() {
   // Parks the region dropdown or 🎯 Interests hide from the map, said plainly, with one tap
   // to show them all (a filter left on otherwise looks like missing data).
   const hiddenBy = [reg && (reg === defaultRegion() ? `🎯 Interests: ${interests.regions.join(", ")}` : `region: ${regionLabel(reg)} (for now)`),
-    !interests.council && "council-run hidden", !interests.priv && "club-run hidden", !interests.lit && "lit hidden", !interests.dark && "unlit hidden"].filter(Boolean);
+    ...typesHidden().map(t => `${t.label.toLowerCase()} hidden`), !interests.lit && "lit hidden", !interests.dark && "unlit hidden"].filter(Boolean);
   const nHidden = PARKS.filter(x => !regionOk(x) || !interestOk(x)).length;
   if (nHidden) $("cityInfo").insertAdjacentHTML("afterbegin", `<span class="cityhidden">⚠ ${nHidden} of ${PARKS.length} parks hidden (${esc(hiddenBy.join(" · "))}) <button id="showAllParks">Show all parks</button></span>`);
   const sa = $("showAllParks"); if (sa) sa.onclick = () => {
     // All regions for now (Interests stay your default); park-type filters switched back on.
-    interests = { ...interests, council: true, priv: true, lit: true, dark: true }; store.set("vet-interests", interests); renderInterests();
+    interests = { ...interests, types: ALL_TYPES(), lit: true, dark: true }; store.set("vet-interests", interests); renderInterests();
     $("region").value = ""; cursor = 0; setView("city", { refit: true }); };
   const nb = $("nextUnrated"); if (nb) nb.onclick = () => openPark(nextUp.id);
   $("emptyState").hidden = true; $("card").hidden = false; $("behind").hidden = true;
@@ -2500,13 +2481,15 @@ function bind() {
   $("interestRow").addEventListener("click", e => {
     const b = e.target.closest("[data-int]"); if (!b) return;
     const k = b.dataset.int;
-    if (k === "reset") interests = { regions: [], council: true, priv: true, lit: true, dark: true };
+    if (k === "reset") interests = { regions: [], types: ALL_TYPES(), lit: true, dark: true };
     else if (k === "region") {
       const all = allRegions(), inc = new Set(interests.regions.length ? interests.regions : all);
       inc.has(b.dataset.val) ? inc.delete(b.dataset.val) : inc.add(b.dataset.val);
       interests.regions = !inc.size || inc.size === all.length ? [] : all.filter(r => inc.has(r));
+    } else if (k === "type") {
+      const v = b.dataset.val; interests.types = { ...interests.types, [v]: interests.types[v] === false };
+      if (OWNER_TYPES.every(t => interests.types[t.id] === false)) interests.types[v] = true;   // keep one type on
     } else { interests[k] = !interests[k];
-      if (!interests.council && !interests.priv) interests[k === "council" ? "priv" : "council"] = true;
       if (!interests.lit && !interests.dark) interests[k === "lit" ? "dark" : "lit"] = true; }
     store.set("vet-interests", interests); cursor = 0; if (view === "park" && !focusId) shownPark = null;
     syncRegionSelect(); renderInterests(); if (view === "city") return setView("city", { refit: true }); render(); });
