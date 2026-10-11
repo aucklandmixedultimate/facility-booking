@@ -25,7 +25,8 @@ mindmap
         shared UI: Modal, Badge, pickers
       Always loaded
         calendar.jsx — Week, Month, day timeline
-        facilityStrip.jsx — facility chips, Fields menu
+        facilityStrip.jsx — facility chips, Fields menu, top-rated venues
+        bookingsList.jsx — the Bookings tab's two lists
         forms.jsx — booking form, cart, detail
         modals.jsx — user mgmt, activity log, dialogs
         schedule.jsx — Grouped view, pricing rules
@@ -100,10 +101,10 @@ Things the picture shows:
 |---|---|---|
 | Sign-in and identity | `core.jsx` `EmailLoginScreen`, `actor.js` | Google sign-in. A "who's using this login" prompt for shared accounts. Admins can "view as" a booker. |
 | Calendars | `calendar.jsx` | Week view: drag to create, NZ holidays. Month view: select and bulk actions. Day timeline per facility. |
-| Facility strip | `facilityStrip.jsx` | Facility chips, the 📍 Fields menu (vendor › location › field), Reset. |
+| Facility strip | `facilityStrip.jsx`, `topVenues.js` | Facility chips, the 📍 Fields menu (vendor › location › field, plus ⭐ All venues · top rated, which previews unbooked venues), Reset. Also used as the All Bookings list's location filter. |
 | Booking form | `forms.jsx` `BookingForm` | Several slots, a day-grid picker, weekly repeat, council application details, booking on someone's behalf. |
 | Cart | `forms.jsx` `CartModal`, `App.handleCartSubmit` | The single outbox: new bookings and edits, status changes, notices, room requests, invoice emails, shared-slot changes. Nothing is written until **Submit**. |
-| Bookings list | `App` itemised table, `schedule.jsx` Grouped view | Filters, bulk status changes, clashes. |
+| Bookings tab | `bookingsList.jsx` (`BookingsList`, Itemised table or `schedule.jsx` Grouped view) | Two lists: **Filtered Bookings** follows the page's 📍 Fields selection; **All Bookings** has its own location filter (default: every location except Cornwall Park). Each has its own filters, sort and view. |
 | Booking detail | `forms.jsx` `BookingDetail` | Status, GTEC mismatch, cost split or fixed price, shared slot, removal. |
 | GTEC sync | `App.handleSyncMonth`, `gtec.jsx` | Every 4 h for admins, or by hand. Matches the vendor feed to bookings, flags clashes and mismatches, adds GTEC's own blocks. |
 | Council | `App`, `admin.jsx` `CouncilAllocationTab`, `councilMail.js` | Send to council, with the fee split. Reads council replies from Gmail. Allocate outcomes. |
