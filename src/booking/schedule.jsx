@@ -1,5 +1,5 @@
 import { useState, useRef, Fragment } from "react";
-import { Badge, rowSelect, isMultiSelectClick, COUNCIL_STAGE_STATUSES, groupStatusLabel, CopyableTable, DURATIONS, FACILITIES, Modal, S, STATUS_META, T, emailColor, fmtCost, fmtDate, fmtDateShort, fmtTime, isAdminBooking, newId, parseGroupRef, todayKey, venueFacilities, visibleFacilities } from "./core.jsx";
+import { Badge, rowSelect, isMultiSelectClick, groupStatusLabel, CopyableTable, DURATIONS, FACILITIES, Modal, S, STATUS_META, T, emailColor, fmtCost, fmtDate, fmtDateShort, fmtTime, isAdminBooking, newId, parseGroupRef, todayKey, venueFacilities, visibleFacilities } from "./core.jsx";
 import { DateRangePicker } from "./modals.jsx";
 import { isLive, isLegacyStatus } from "../statuses.js";
 // `canon` folds a (lowercased) email onto its canonical primary so linked

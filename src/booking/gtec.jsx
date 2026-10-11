@@ -1,6 +1,5 @@
-import { COUNCIL_STAGE_STATUSES, facShort, fmtTimeShort } from "./core.jsx";
+import { facShort, fmtTimeShort } from "./core.jsx";
 import { isClosed, isLive } from "../statuses.js";
-// ─── Main App ─────────────────────────────────────────────────────────────────
 // ─── CARLTON JUNIORS RUGBY SYNC ──────────────────────────────────────────────
 // (sync bookings use empty email/name and are deduped by date+facility+time+purpose)
 export const CJR_ORG_ID = "14520";
@@ -336,7 +335,7 @@ export function parseCJRDateTime(dt) {
 // "paste the feed" fallback (a top-level page isn't subject to CORS, so it always shows the JSON).
 export function cjrMonthUrl(year, month) {
   const dateStr = `${year}-${String(month+1).padStart(2,"0")}-01`;
-  return `https://www.carltonjuniorsrugby.co.nz/api/v1/calendar/MonthCalendarEvents?organisationId=%2014520&sportId=0&ical=${encodeURIComponent(CJR_ICAL)}&date=${dateStr}`;
+  return `https://www.carltonjuniorsrugby.co.nz/api/v1/calendar/MonthCalendarEvents?organisationId=%20${CJR_ORG_ID}&sportId=0&ical=${encodeURIComponent(CJR_ICAL)}&date=${dateStr}`;
 }
 // The feed as an array of events, from raw JSON text or a relay's wrapper ({ contents: "…" }).
 export function parseFeedText(text) {
