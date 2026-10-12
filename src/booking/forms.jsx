@@ -1,5 +1,5 @@
 import { useState, useRef, Fragment } from "react";
-import { T, parseVendorVariance, setVendorVariance, vendorVarianceText, stepLabel, BILLED_RE, Badge, CAL_SLOTS, CAL_START, CAL_TOTAL, DAY_EVENING_CUTOFF, DURATIONS, EmailChip, FACILITIES, FACILITY_TINT, FLOODLIT_FIELD_ID, FacilityOptions, INVOICED_META, Modal, ProviderVenuePicker, buildCommunityRequestItem, REVIEW_STATUSES, S, SLOTS_PER_HOUR, SLOT_HOURS, START_TIMES, STATUS_META, addDays, councilContactOk, emailColor, facColLabel, facShort, fmtCost, fmtDate, fmtDuration, fmtLoggedAt, fmtRefDate, fmtTime, fmtTimeShort, getCrossFacilityOverlaps, getSameFacilityOverlaps, isAdminBooking, newGroupRef, newId, parseCouncilInfo, parseFunctionCost, parseGroupRef, parseGtecSnapshot, parseMismatchNote, parseSlotLink, parseSplit, setCouncilInfo, setFunctionCost, setGroupRef, setSplit, slotGroupMembers, slotGroupName, splitReason, stripMismatchNote, timeOverlaps, todayKey, useMobile, vendorShortFor, venueFacilities, workflowOf, isDraftItem } from "./core.jsx";
+import { T, parseVendorVariance, setVendorVariance, vendorVarianceText, stepLabel, BILLED_RE, Badge, CAL_SLOTS, CAL_START, CAL_TOTAL, DAY_EVENING_CUTOFF, DURATIONS, EmailChip, FACILITIES, FACILITY_TINT, FLOODLIT_FIELD_ID, FacilityOptions, INVOICED_META, Modal, ProviderVenuePicker, buildCommunityRequestItem, vendorRequestItems, REVIEW_STATUSES, S, SLOTS_PER_HOUR, SLOT_HOURS, START_TIMES, STATUS_META, addDays, councilContactOk, emailColor, facColLabel, facShort, fmtCost, fmtDate, fmtDuration, fmtLoggedAt, fmtRefDate, fmtTime, fmtTimeShort, getCrossFacilityOverlaps, getSameFacilityOverlaps, isAdminBooking, newGroupRef, newId, parseCouncilInfo, parseFunctionCost, parseGroupRef, parseGtecSnapshot, parseMismatchNote, parseSlotLink, parseSplit, setCouncilInfo, setFunctionCost, setGroupRef, setSplit, slotGroupMembers, slotGroupName, splitReason, stripMismatchNote, timeOverlaps, todayKey, useMobile, vendorShortFor, venueFacilities, workflowOf, isDraftItem } from "./core.jsx";
 import { OverlapWarning } from "./modals.jsx";
 import { FacilityPicker } from "./facilityPicker.jsx";
 import { GUEST } from "../actor.js";
@@ -267,6 +267,8 @@ export function CartModal({ cart, setCart, onClose, onSubmit, openNew, silentMod
   const totalStatus = cart.filter(i=>i.statusChange).reduce((s,i)=>s+(i.ids?.length||i.drafts?.length||0),0);
   const totalNotify = cart.filter(i=>i.notifyOnly&&!i.informCpsa&&!i.roomRequest&&!i.clashNotify&&!i.invoiceEmail).reduce((s,i)=>s+(i.drafts?.length||0),0);
   const totalInvoice = cart.filter(i=>i.invoiceEmail&&!i.vendorRequest).reduce((s,i)=>s+(i.count||1),0);
+  // New bookings at school / club / trust grounds: drafted per vendor on submit (App.handleCartSubmit).
+  const newVendorReqs = vendorRequestItems(cart.filter(i=>isDraftItem(i)&&!i.isEdit&&!i.isMultiEdit).flatMap(i=>i.drafts));
   const vendorReqs = cart.filter(i=>i.vendorRequest), totalVendorReq = vendorReqs.reduce((s,i)=>s+i.count,0);
   const totalSlot    = cart.filter(i=>i.slotChange).length;
   const totalClash  = cart.filter(i=>i.clashNotify).length;
@@ -617,6 +619,14 @@ export function CartModal({ cart, setCart, onClose, onSubmit, openNew, silentMod
                 );
               })}
             </div>
+            {newVendorReqs.length>0&&(
+              <div style={{padding:'8px 12px',borderRadius:10,marginTop:8,flexShrink:0,background:'#f0f9ff',border:'1.5px solid #7dd3fc',fontSize:12,color:'#0369a1'}}>
+                {(()=>{ const list=newVendorReqs.map(it=>`${it.name} (${it.count} slot${it.count>1?'s':''})`).join(', '), n=newVendorReqs.length;
+                  return silentMode
+                    ? `✉ Silent mode is on, so no field hire request is drafted for ${list}. Enable emails to draft ${n>1?'them (one per vendor)':'it'} on submit, or request ${n>1?'them':'it'} later from the Admin panel.`
+                    : `✉ Submitting also drafts ${n>1?`${n} field hire requests, one per vendor,`:'a field hire request'} to AMUA's inbox: ${list}.`; })()}
+              </div>
+            )}
             {onToggleSilent&&(
               <div style={{display:'flex',alignItems:'center',gap:10,padding:'10px 12px',borderRadius:10,marginTop:8,flexShrink:0,background:silentMode?'#fffbeb':'#ecfdf5',border:`1.5px solid ${silentMode?'#fde68a':'#6ee7b7'}`}}>
                 <span style={{fontSize:18}}>{silentMode?'🔇':'🔔'}</span>
