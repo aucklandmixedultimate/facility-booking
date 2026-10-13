@@ -289,10 +289,13 @@ export function CartModal({ cart, setCart, onClose, onSubmit, openNew, silentMod
   function removeItem(gi) { setCart(prev => prev.filter((_,i)=>i!==gi)); }
 
   // "Reapply" an edit: the bookings it came from stay exactly as they are, and its slots are
-  // added as new bookings (pending AMUA review), skipping any a live booking already covers.
+  // added as new bookings (Pending AMUA review, unless the edit changed the status), skipping
+  // any a live booking already covers.
   // The item then submits like any new request; "Back to edit" restores the edit.
   const sameSlot = (a,b) => a.facility_id===b.facility_id && a.date===b.date && a.start_hour===b.start_hour && a.duration===b.duration && (a.email||"").toLowerCase()===(b.email||"").toLowerCase();
   const reapplyFresh = item => item.drafts.filter(d => !bookings.some(b => !isClosed(b.status) && sameSlot(b, d)));
+  // A reapplied slot keeps a status the edit changed; otherwise it starts at Pending AMUA review.
+  const keptStatus = d => { const orig = bookings.find(b => b.id === d.id); return orig && d.status && d.status !== orig.status ? d.status : "pending_amua"; };
   function toggleReapply(gi) {
     setCart(prev => prev.map((it,i) => { if (i!==gi) return it;
       if (it.reapplyOf) return it.reapplyOf;
@@ -300,7 +303,7 @@ export function CartModal({ cart, setCart, onClose, onSubmit, openNew, silentMod
       const gid = fresh.length > 1 ? newGroupRef() : null, at = new Date().toISOString();
       const drafts = fresh.map(d => { const ci = parseCouncilInfo(d.system_notes); let sys = ci ? setCouncilInfo("", ci) : ""; if (gid) sys = setGroupRef(sys, gid);
         return { facility_id:d.facility_id, date:d.date, start_hour:d.start_hour, duration:d.duration, purpose:d.purpose, notes:d.notes, name:d.name, email:d.email,
-          status:"pending_amua", id:newId(), created_at:at, updated_at:at, system_notes:sys }; });
+          status:keptStatus(d), id:newId(), created_at:at, updated_at:at, system_notes:sys }; });
       return { drafts, name:it.name, email:it.email, sourceIds:[], isEdit:false, reapplyOf:it, reapplyKept:it.drafts.length-fresh.length };
     }));
     setEditingDraft(null);
