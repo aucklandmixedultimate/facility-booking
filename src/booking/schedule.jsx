@@ -60,7 +60,7 @@ export function ReassignControl({ count, bookers=[], onReassign, dark=false }) {
   );
 }
 
-// Admin: a pricing rule from a set of bookings — their bookers and facilities over their
+// Admin: a pricing rule (queued in the cart) from a set of bookings — their bookers and facilities over their
 // first–last dates (editable), at a day and/or evening $/hr. Like every rule it then applies
 // to all of those bookers' bookings on those facilities in that range.
 function PricingRuleControl({ ticked, onAdd }) {
@@ -78,7 +78,7 @@ function PricingRuleControl({ ticked, onAdd }) {
   const lbl = {fontSize:11,color:T.muted,fontWeight:600};
   const ok = ticked.length && from && to && from<=to &&
     (period==="day" ? dayRate!=="" : period==="evening" ? eveRate!=="" : (dayRate!==""||eveRate!==""));
-  if (done) return <div style={{fontSize:12,color:T.turf,fontWeight:600}}>✓ Pricing rule added — see ⚙ Pricing rules (Admin / Summary) to edit or remove it.</div>;
+  if (done) return <div style={{fontSize:12,color:T.turf,fontWeight:600}}>✓ Pricing rule queued in the cart — it&apos;s added when you submit the cart.</div>;
   return (
     <div style={{display:"flex",flexDirection:"column",gap:6}}>
       <div style={{fontSize:11,color:T.ink2}}>

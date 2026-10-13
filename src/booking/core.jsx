@@ -1417,7 +1417,7 @@ export let _bookerEmails = new Set();   // every booking's email (and its alias 
 export let _vendorEmails = new Set();   // vendor profile emails: never bookers, even if they appear in bookings
 // A cart item that carries bookings to save (new or edited drafts), as opposed to a status
 // change, notification, invoice email or shared-slot change, which have no `drafts`.
-export const isDraftItem = i => !i.notifyOnly && !i.statusChange && !i.slotChange;
+export const isDraftItem = i => !i.notifyOnly && !i.statusChange && !i.slotChange && !i.pricingRule;
 export function isBookerAddress(email) {
   const e = (email || "").trim().toLowerCase(); if (!e) return false;
   if (e === AMUA_INBOX) return true;

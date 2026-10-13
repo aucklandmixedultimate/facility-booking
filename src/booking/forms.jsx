@@ -271,6 +271,7 @@ export function CartModal({ cart, setCart, onClose, onSubmit, openNew, silentMod
   const newVendorReqs = vendorRequestItems(cart.filter(i=>isDraftItem(i)&&!i.isEdit&&!i.isMultiEdit).flatMap(i=>i.drafts));
   const vendorReqs = cart.filter(i=>i.vendorRequest), totalVendorReq = vendorReqs.reduce((s,i)=>s+i.count,0);
   const totalSlot    = cart.filter(i=>i.slotChange).length;
+  const ruleItems    = cart.filter(i=>i.pricingRule);
   const totalClash  = cart.filter(i=>i.clashNotify).length;
   const totalInform = cart.filter(i=>i.informCpsa).reduce((s,i)=>s+(i.drafts?.length||0),0);
   const totalRoom = cart.filter(i=>i.roomRequest).reduce((s,i)=>s+(i.drafts?.length||0),0);
@@ -374,7 +375,7 @@ export function CartModal({ cart, setCart, onClose, onSubmit, openNew, silentMod
         : (
           <>
             <div style={{fontSize:13,color:'#64748b',marginBottom:12}}>
-              {[totalNew>0&&`${totalNew} new booking${totalNew>1?'s':''}`, totalEdits>0&&`${totalEdits} edit${totalEdits>1?'s':''}`, totalStatus>0&&`${totalStatus} status change${totalStatus>1?'s':''}`, totalClash>0&&`${totalClash} clash alert${totalClash>1?'s':''}`, totalNotify>0&&`${totalNotify} GTEC notification${totalNotify>1?'s':''}`, totalInform>0&&`${totalInform} Inform-GTEC email${totalInform>1?'s':''}`, totalRoom>0&&`${totalRoom} room request${totalRoom>1?'s':''}`, totalVendorReq>0&&`${totalVendorReq} vendor request${totalVendorReq>1?'s':''} (${vendorReqs.length} draft${vendorReqs.length>1?'s':''}, one per vendor)`, totalInvoice>0&&`${totalInvoice} invoice email${totalInvoice>1?'s':''}`, totalSlot>0&&`${totalSlot} shared-slot change${totalSlot>1?'s':''}`].filter(Boolean).join(' · ')} ready to submit.
+              {[totalNew>0&&`${totalNew} new booking${totalNew>1?'s':''}`, totalEdits>0&&`${totalEdits} edit${totalEdits>1?'s':''}`, totalStatus>0&&`${totalStatus} status change${totalStatus>1?'s':''}`, totalClash>0&&`${totalClash} clash alert${totalClash>1?'s':''}`, totalNotify>0&&`${totalNotify} GTEC notification${totalNotify>1?'s':''}`, totalInform>0&&`${totalInform} Inform-GTEC email${totalInform>1?'s':''}`, totalRoom>0&&`${totalRoom} room request${totalRoom>1?'s':''}`, totalVendorReq>0&&`${totalVendorReq} vendor request${totalVendorReq>1?'s':''} (${vendorReqs.length} draft${vendorReqs.length>1?'s':''}, one per vendor)`, totalInvoice>0&&`${totalInvoice} invoice email${totalInvoice>1?'s':''}`, totalSlot>0&&`${totalSlot} shared-slot change${totalSlot>1?'s':''}`, ruleItems.length>0&&`${ruleItems.length} pricing rule${ruleItems.length>1?'s':''}`].filter(Boolean).join(' · ')} ready to submit.
             </div>
             <div style={{flex:1,minHeight:0,overflowY:'auto',display:'flex',flexDirection:'column',gap:10,paddingRight:2}}>
               {/* Regular (non-notify) cart items */}
@@ -388,7 +389,7 @@ export function CartModal({ cart, setCart, onClose, onSubmit, openNew, silentMod
                         <EmailChip email={item.email}/>
                         <span style={{fontSize:13,fontWeight:600,color:'#0f172a'}}>{item.name}</span>
                         {(item.isEdit||item.isMultiEdit)
-                          ? <span style={{fontSize:11,fontWeight:700,color:'#1d4ed8',background:'#dbeafe',border:'1px solid #93c5fd',borderRadius:4,padding:'1px 7px'}}>✏ edit</span>
+                          ? <span style={{fontSize:11,fontWeight:700,color:'#1d4ed8',background:'#dbeafe',border:'1px solid #93c5fd',borderRadius:4,padding:'1px 7px'}}>{item.reassign?`👤 reassign from ${item.reassign.from.join(', ')}`:'✏ edit'}</span>
                           : item.reapplyOf
                           ? <span title="The original bookings stay as they are; these are added as new bookings" style={{fontSize:11,fontWeight:700,color:'#15803d',background:'#dcfce7',border:'1px solid #86efac',borderRadius:4,padding:'1px 7px'}}>↻ reapply · {item.drafts.length} new{item.reapplyKept?` · ${item.reapplyKept} already booked`:''}</span>
                           : <span style={{fontSize:12,color:'#94a3b8'}}>· {item.drafts.length} booking{item.drafts.length>1?'s':''}</span>
@@ -551,6 +552,22 @@ export function CartModal({ cart, setCart, onClose, onSubmit, openNew, silentMod
                       <span style={{fontFamily:'monospace',color:'#475569'}}>{(item.refs||[]).join(', ')}</span>
                       <span style={{marginLeft:'auto',fontWeight:700,color:'#0f172a'}}>{fmtCost(item.total||0)}</span>
                     </div>}
+                  </div>
+                );
+              })}
+              {/* Pricing rules queued from a booking group's action bar — added on submit */}
+              {cart.map((item,gi)=>{
+                if(!item.pricingRule) return null;
+                const r=item.pricingRule, facs=(r.facilityIds||[]).map(id=>FACILITIES.find(f=>f.id===id)?.name||id);
+                return (
+                  <div key={'rule-'+gi} style={{border:'1.5px solid #c7d2fe',borderRadius:12,overflow:'hidden'}}>
+                    <div style={{background:'#eef2ff',padding:'10px 14px',display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
+                      <span style={{fontSize:13,fontWeight:700,color:'#4338ca',flex:1}}>💲 Pricing rule</span>
+                      <button onClick={()=>removeItem(gi)} title="Remove" style={{background:'none',border:'none',cursor:'pointer',color:'#f43f5e',fontSize:15,padding:'2px 4px',lineHeight:1}}>✕</button>
+                    </div>
+                    <div style={{padding:'8px 14px',fontSize:12,color:'#475569',background:'#fff'}}>
+                      {(r.bookerEmails||[]).length} booker{(r.bookerEmails||[]).length!==1?'s':''} · {facs.join(', ')} · {r.dayRate!=null?`day ${fmtCost(r.dayRate)}`:''}{r.dayRate!=null&&r.eveningRate!=null?' / ':''}{r.eveningRate!=null?`eve ${fmtCost(r.eveningRate)}`:''}/hr · {fmtDate(r.dateFrom)} → {fmtDate(r.dateTo)}
+                    </div>
                   </div>
                 );
               })}
