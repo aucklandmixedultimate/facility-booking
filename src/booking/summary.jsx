@@ -14,19 +14,25 @@ export function SummaryTab({ bookings, loggedInEmail, onRemoveBookings, facility
   const [customFrom,  setCustomFrom]  = useState("");
   const [customTo,    setCustomTo]    = useState("");
   // Multi-select booker filter — Set of lowercased emails. Empty Set = all bookers.
-  const [emailFilterSet, setEmailFilterSet] = useState(()=>{
+  // With no header pills picked, a booker (or an admin viewing as one) sees their own bookings —
+  // their address and its linked aliases — and an admin sees every booker's.
+  const defaultFilter = () => {
     if (bookerFilter.size>0) return new Set([...bookerFilter].map(e=>e.toLowerCase()));
-    return loggedInEmail ? new Set([loggedInEmail.toLowerCase()]) : new Set();
-  });
-  // Keep in sync with the global header booker pills (parent → child only; avoid loop via content comparison).
+    if (isAdmin || !loggedInEmail) return new Set();
+    const me = loggedInEmail.toLowerCase(), primary = emailAliases[me] || me;
+    return new Set([primary, ...Object.entries(emailAliases).filter(([,p])=>p===primary).map(([e])=>e), me]);
+  };
+  const [emailFilterSet, setEmailFilterSet] = useState(defaultFilter);
+  // Keep in sync with the global header booker pills and the viewing user (parent → child only;
+  // avoid a loop via content comparison).
   useEffect(()=>{
-    const next = new Set([...bookerFilter].map(e=>e.toLowerCase()));
+    const next = defaultFilter();
     setEmailFilterSet(prev=>{
       if(prev.size!==next.size) return next;
       for(const e of next) if(!prev.has(e)) return next;
       return prev;
     });
-  },[bookerFilter]);
+  },[bookerFilter, isAdmin, loggedInEmail]); // eslint-disable-line react-hooks/exhaustive-deps
   // Honour load-from-billing requests: switch to custom preset and stamp the
   // record's date range. Tracked by version so re-loading the same record works.
   const lastLoadVersionRef = useRef(null);
@@ -120,12 +126,13 @@ export function SummaryTab({ bookings, loggedInEmail, onRemoveBookings, facility
   const allEmails = [...new Set(bookings.filter(b=>!isAdminBooking(b)).map(b=>b.email).filter(Boolean))].sort();
 
   // Prune email filter entries that no longer match any booker in the dataset
+  // (Admins only: a booker's own filter stays, even with nothing booked, so it never widens to all.)
   useEffect(()=>{
-    if(emailFilterSet.size===0||!allEmails.length) return;
+    if(!isAdmin||emailFilterSet.size===0||!allEmails.length) return;
     const present=new Set(allEmails.map(e=>e.toLowerCase()));
     const pruned=[...emailFilterSet].filter(e=>present.has(e));
     if(pruned.length!==emailFilterSet.size) setEmailFilterSet(new Set(pruned));
-  },[allEmails,emailFilterSet]);
+  },[allEmails,emailFilterSet,isAdmin]);
 
   const active = bookings.filter(b => {
     if (isAdminBooking(b)) return false;
@@ -303,15 +310,17 @@ export function SummaryTab({ bookings, loggedInEmail, onRemoveBookings, facility
 
   // Per-facility cost (adapts to pricing mode) — always includes ALL facilities
   const byFacility = {};
-  visibleFacilities().forEach(fac => { byFacility[fac.id] = { fac, dayHrs: 0, eveningHrs: 0, bkgCount: 0, cost: 0 }; });
+  const facEntry = fac => byFacility[fac.id] ||= { fac, dayHrs: 0, eveningHrs: 0, bkgCount: 0, cost: 0 };
+  visibleFacilities().forEach(facEntry);
   active.forEach(b => {
     const fac = FACILITIES.find(x => x.id === b.facility_id);
     if (!fac) return;
-    const { day, evening } = splitHours(b);
-    byFacility[fac.id].dayHrs     += day;
-    byFacility[fac.id].eveningHrs += evening;
-    byFacility[fac.id].bkgCount   += 1;
-    byFacility[fac.id].cost       += getBookingCost(b);
+    // A booking on a facility this viewer can't pick (another booker's council field…) still counts.
+    const e = facEntry(fac), { day, evening } = splitHours(b);
+    e.dayHrs     += day;
+    e.eveningHrs += evening;
+    e.bkgCount   += 1;
+    e.cost       += getBookingCost(b);
   });
   const facCosts = Object.values(byFacility).map(({ fac, dayHrs, eveningHrs, bkgCount, cost }) => {
     const rates = getFacRates(fac.id);

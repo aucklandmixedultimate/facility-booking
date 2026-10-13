@@ -159,9 +159,10 @@ type (one application each), and the extension payload carries `bookingType`, ea
 ### `settings` keys
 
 - **Booking site:**
-  - Rates and pricing: `facility_rates` (every field from All Auckland fields shares `council`; a
-    field's own entry counts only with `specific: true`, else its known hire rate; older `cf-…`
-    entries are ignored and can be cleared from the Council fields card), `pricing_conditions`, `approx_players`, `approx_durations`.
+  - Rates and pricing: `facility_rates` (council fields, council-run and club-run parks, share
+    `council`; a field's own entry counts only with `specific: true`, else its known hire rate;
+    older per-field entries are ignored and can be cleared from the Council fields card; schools'
+    and clubs' own grounds keep their own rates), `pricing_conditions`, `approx_players`, `approx_durations`.
   - People: `email_aliases`, `alias_names`, `booker_seasons`, `booker_info` (council participant
     details: junior / senior, grade, teams, players, team names), `amua_org`.
   - Council and contacts: `council_outcomes`, `provider_contact_reviews`, `council_fees`

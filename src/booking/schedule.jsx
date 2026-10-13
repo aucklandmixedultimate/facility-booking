@@ -642,9 +642,9 @@ export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkA
   );
 }
 
-// Admin rates: every field from All Auckland fields shares one day / evening rate
-// (facilityRates.council), with specific cases for single fields (an admin's, or a ground's known
-// hire rate), and the council's fees (a one-off application fee and a fee per field, settings
+// Admin rates: every council field (council-run or club-run council park) shares one day /
+// evening rate (facilityRates.council), with specific cases for single fields (an admin's, or a
+// field's known hire rate), and the council's fees (a one-off application fee and a fee per field, settings
 // "council_fees"). Per-field entries saved before this (no `specific`) are ignored, and can be
 // cleared here. Used by the Summary tab's Edit Rates and the Rates modal.
 export function CouncilRatesCard({ facilityRates = {}, councilFees = { application: 0, perField: 0 }, onUpdateFacilityRate, onSetFacilityRate, onRemoveFacilityRates, onUpdateCouncilFees }) {
@@ -652,8 +652,8 @@ export function CouncilRatesCard({ facilityRates = {}, councilFees = { applicati
   if (!cfs.length && !onUpdateCouncilFees) return null;
   const c = facilityRates.council || {}, isSpecific = f => facilityRates[f.id]?.specific || f.defaultRate > 0;
   const specific = cfs.filter(isSpecific), others = cfs.filter(f => !isSpecific(f));
-  // Old per-field rates for these fields (ids "cf-…"), saved before they were grouped.
-  const legacy = Object.keys(facilityRates).filter(k => k.startsWith("cf-") && !facilityRates[k]?.specific);
+  // Old per-field rates for these fields, saved before they were grouped (ignored now).
+  const legacy = cfs.map(f => f.id).filter(id => id in facilityRates && !facilityRates[id]?.specific);
   const num = (val, onChange, label) => (
     <label style={{display:"flex",alignItems:"center",gap:6,minWidth:0}}>
       <span style={{fontSize:11,fontWeight:600,color:T.muted,flex:1,minWidth:0}}>{label}</span><span style={{fontSize:11,color:T.faint}}>$</span>
@@ -662,7 +662,7 @@ export function CouncilRatesCard({ facilityRates = {}, councilFees = { applicati
     </label>);
   return (
     <div style={{marginTop:10,background:T.surface,border:"1.5px solid #99f6e4",borderRadius:10,padding:"10px 12px",display:"flex",flexDirection:"column",gap:8}}>
-      <div style={{fontSize:12,fontWeight:700,color:"#115e59"}}>🏛 Council fields <span style={{fontWeight:400,color:T.muted}}>· one rate for all {cfs.length} field{cfs.length!==1?"s":""} from All Auckland fields</span></div>
+      <div style={{fontSize:12,fontWeight:700,color:"#115e59"}}>🏛 Council fields <span style={{fontWeight:400,color:T.muted}}>· one rate for all {cfs.length} council field{cfs.length!==1?"s":""} (council-run and club-run parks)</span></div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,190px),1fr))",gap:8}}>
         {num(c.day, v=>onUpdateFacilityRate("council","day",v), "Day /hr")}
         {num(c.evening, v=>onUpdateFacilityRate("council","evening",v), "Evening /hr")}
