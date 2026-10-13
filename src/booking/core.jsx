@@ -417,8 +417,9 @@ export function linkCouncilChildren(newDrafts, existing, canon) {
   });
   return Object.entries(patches).map(([id, system_notes]) => ({ id, system_notes }));
 }
-// An Auckland Council field (priced as one "council" rate, with optional per-field cases).
-export const isCouncilField = f => f?.provider === "akl_council";
+// A field from All Auckland fields (council parks, club-run parks, schools, club and trust
+// grounds): priced together as one "council" rate, with optional per-field specific cases.
+export const isCouncilField = f => !!f?.council;
 export function isCouncilBooking(b) { const wf = workflowOf(b.facility_id); return wf === "council" || wf === "council_private"; }
 // Ready to go to the council: a plain council booking once AMUA has it, or a council +
 // operator booking once the operator has given permission (it's then at council_apply).

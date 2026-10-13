@@ -1371,6 +1371,12 @@ export default function App() {
     try{localStorage.setItem("fb_facility_rates",JSON.stringify(newRates));}catch{ /* ignore */ }
     persistSetting("facility_rates", newRates);
   }
+  function removeFacilityRates(ids) {
+    const newRates = { ...facilityRates }; ids.forEach(id => delete newRates[id]);
+    setFacilityRates(newRates);
+    try{localStorage.setItem("fb_facility_rates",JSON.stringify(newRates));}catch{ /* ignore */ }
+    persistSetting("facility_rates", newRates);
+  }
   function updateFacilityRate(facilityId, type, value) {
     const existing = typeof facilityRates[facilityId] === "object" ? facilityRates[facilityId] : { day: 0, evening: 0 };
     const newRates = { ...facilityRates, [facilityId]: { ...existing, [type]: parseFloat(value) || 0 } };
@@ -2516,7 +2522,7 @@ export default function App() {
 
         {tab==="list"&&bookingsLists}
 
-        {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<Suspense fallback={<TabLoading/>}><SummaryTab bookings={bookings} loggedInEmail={loggedInEmail} onRemoveBookings={queueMultiForRemoval} facilityRates={facilityRates} pricingConditions={pricingConditions} onAddPricingCondition={addPricingCondition} onQueuePricingRule={queuePricingRule} onUpdatePricingCondition={updatePricingCondition} onRemovePricingCondition={removePricingCondition} isAdmin={isAdmin} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onUpdateFacilityRate={updateFacilityRate} onSetFacilityRate={setFacilityRateEntry} councilFees={councilFees} onUpdateCouncilFees={saveCouncilFees} pricingMode={pricingMode} onSetPricingMode={setPricingMode} onProposeMerge={handleProposeMerge} onBulkApply={handleBulkApply} onMarkInvoiced={handleMarkInvoiced} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} bookerFilter={listBookerFilter} profiles={profiles} emailAliases={emailAliases} aliasNames={aliasNames} onCreateOfficialInvoice={handleCreateOfficialInvoice} onEmailInvoice={handleEmailInvoicePreview} loadRequest={summaryLoadRequest}/></Suspense>}</div>}
+        {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<Suspense fallback={<TabLoading/>}><SummaryTab bookings={bookings} loggedInEmail={loggedInEmail} onRemoveBookings={queueMultiForRemoval} facilityRates={facilityRates} pricingConditions={pricingConditions} onAddPricingCondition={addPricingCondition} onQueuePricingRule={queuePricingRule} onUpdatePricingCondition={updatePricingCondition} onRemovePricingCondition={removePricingCondition} isAdmin={isAdmin} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onUpdateFacilityRate={updateFacilityRate} onSetFacilityRate={setFacilityRateEntry} onRemoveFacilityRates={removeFacilityRates} councilFees={councilFees} onUpdateCouncilFees={saveCouncilFees} pricingMode={pricingMode} onSetPricingMode={setPricingMode} onProposeMerge={handleProposeMerge} onBulkApply={handleBulkApply} onMarkInvoiced={handleMarkInvoiced} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} bookerFilter={listBookerFilter} profiles={profiles} emailAliases={emailAliases} aliasNames={aliasNames} onCreateOfficialInvoice={handleCreateOfficialInvoice} onEmailInvoice={handleEmailInvoicePreview} loadRequest={summaryLoadRequest}/></Suspense>}</div>}
         {tab==="billing"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<Suspense fallback={<TabLoading/>}><BillingTab billingRecords={billingRecords} onUpdateRecord={handleUpdateBillingRecord} onDeleteRecord={id=>setBillingRecords(prev=>prev.filter(r=>r.id!==id))} onCreateReceipt={handleCreateReceipt} onLoadToSummary={handleLoadBillingToSummary} isAdmin={isAdmin} loggedInEmail={loggedInEmail} emailAliases={emailAliases} aliasNames={aliasNames} driveEnabled={driveConfigured()} onDriveSync={handleDriveSync} onRenameBatch={handleRenameBatch} onDriveAttach={handleDriveAttachGtec} onEmailOfficial={handleEmailOfficialInvoices} onQueueInvoiceEmails={handleQueueInvoiceEmails} silentMode={silentMode} onToggleSilent={isAdmin?setSilentMode:undefined}/></Suspense>}</div>}
         {tab==="about"&&<div style={{padding:"8px 0"}}><Suspense fallback={<TabLoading/>}><AboutTab/></Suspense></div>}
         {tab==="allocation"&&isAdmin&&<div style={S.card}><Suspense fallback={<TabLoading/>}><CouncilAllocationTab outcomes={councilOutcomes} bookings={bookings} syncing={councilSyncing} syncLog={councilSyncLog} onSync={handleCouncilMailSync} portalSync={councilPortalSync} onApplyPortal={handleApplyPortal} onSaveOutcomes={saveCouncilOutcomes} onBulkStatusChange={handleBulkStatusChange} onQueueNotifications={queueNotifications} onLinkApp={handleLinkCouncilApp} aliasNames={aliasNames} loggedInEmail={loggedInEmail}/></Suspense></div>}
@@ -2634,7 +2640,7 @@ export default function App() {
               );
             })}
           </div>
-          <CouncilRatesCard facilityRates={facilityRates} councilFees={councilFees} onUpdateFacilityRate={updateFacilityRate} onSetFacilityRate={setFacilityRateEntry} onUpdateCouncilFees={saveCouncilFees}/>
+          <CouncilRatesCard facilityRates={facilityRates} councilFees={councilFees} onUpdateFacilityRate={updateFacilityRate} onSetFacilityRate={setFacilityRateEntry} onRemoveFacilityRates={removeFacilityRates} onUpdateCouncilFees={saveCouncilFees}/>
           <div style={{marginTop:12,display:"flex",justifyContent:"flex-end"}}>
             <button onClick={()=>setShowRatesModal(false)} style={S.btn({background:"#0f172a",color:"#fff",fontSize:12})}>Done</button>
           </div>

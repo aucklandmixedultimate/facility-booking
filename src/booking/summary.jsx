@@ -4,7 +4,7 @@ import { CouncilRatesCard, OneOffModal, PatternModal, PricingConditionsManager, 
 import { InvoiceOptionRow, InvoicePill, invLineLabel, renderInvoiceDocHtml } from "./billingDocs.jsx";
 import { isClosed } from "../statuses.js";
 import { csvCell } from "../html.js";
-export function SummaryTab({ bookings, loggedInEmail, onRemoveBookings, facilityRates = {}, pricingConditions = [], onAddPricingCondition, onQueuePricingRule, onUpdatePricingCondition, onRemovePricingCondition, isAdmin = false, approxPlayers = {}, onUpdateApproxPlayers, approxDurations = {}, onUpdateApproxDuration, onUpdateFacilityRate, onSetFacilityRate, councilFees = { application: 0, perField: 0 }, onUpdateCouncilFees, pricingMode = "hourly", onSetPricingMode, onProposeMerge, onBulkApply, onMarkInvoiced, onMarkAdjustmentSettled, bookerFilter=new Set(), profiles={}, emailAliases={}, aliasNames={}, onCreateOfficialInvoice, onEmailInvoice, loadRequest=null }) {
+export function SummaryTab({ bookings, loggedInEmail, onRemoveBookings, facilityRates = {}, pricingConditions = [], onAddPricingCondition, onQueuePricingRule, onUpdatePricingCondition, onRemovePricingCondition, isAdmin = false, approxPlayers = {}, onUpdateApproxPlayers, approxDurations = {}, onUpdateApproxDuration, onUpdateFacilityRate, onSetFacilityRate, onRemoveFacilityRates, councilFees = { application: 0, perField: 0 }, onUpdateCouncilFees, pricingMode = "hourly", onSetPricingMode, onProposeMerge, onBulkApply, onMarkInvoiced, onMarkAdjustmentSettled, bookerFilter=new Set(), profiles={}, emailAliases={}, aliasNames={}, onCreateOfficialInvoice, onEmailInvoice, loadRequest=null }) {
   const now = new Date();
   const thisYear = now.getFullYear();
 
@@ -933,7 +933,7 @@ export function SummaryTab({ bookings, loggedInEmail, onRemoveBookings, facility
                   );
                 })}
               </div>
-              <CouncilRatesCard facilityRates={facilityRates} councilFees={councilFees} onUpdateFacilityRate={onUpdateFacilityRate} onSetFacilityRate={onSetFacilityRate} onUpdateCouncilFees={onUpdateCouncilFees}/>
+              <CouncilRatesCard facilityRates={facilityRates} councilFees={councilFees} onUpdateFacilityRate={onUpdateFacilityRate} onSetFacilityRate={onSetFacilityRate} onRemoveFacilityRates={onRemoveFacilityRates} onUpdateCouncilFees={onUpdateCouncilFees}/>
             </div>
           )}
           {isAdmin && onAddPricingCondition && (
