@@ -642,35 +642,47 @@ export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkA
   );
 }
 
-// Admin rates: every council field shares one day / evening rate (facilityRates.council), with
-// specific cases for single fields, and the council's fees (a one-off application fee and a fee
-// per field, settings "council_fees"). Used by the Summary tab's Edit Rates and the Rates modal.
-export function CouncilRatesCard({ facilityRates = {}, councilFees = { application: 0, perField: 0 }, onUpdateFacilityRate, onSetFacilityRate, onUpdateCouncilFees }) {
+// Admin rates: every field from All Auckland fields shares one day / evening rate
+// (facilityRates.council), with specific cases for single fields (an admin's, or a ground's known
+// hire rate), and the council's fees (a one-off application fee and a fee per field, settings
+// "council_fees"). Per-field entries saved before this (no `specific`) are ignored, and can be
+// cleared here. Used by the Summary tab's Edit Rates and the Rates modal.
+export function CouncilRatesCard({ facilityRates = {}, councilFees = { application: 0, perField: 0 }, onUpdateFacilityRate, onSetFacilityRate, onRemoveFacilityRates, onUpdateCouncilFees }) {
   const cfs = visibleFacilities().filter(isCouncilField);
   if (!cfs.length && !onUpdateCouncilFees) return null;
-  const c = facilityRates.council || {}, specific = cfs.filter(f => facilityRates[f.id]?.specific), others = cfs.filter(f => !facilityRates[f.id]?.specific);
+  const c = facilityRates.council || {}, isSpecific = f => facilityRates[f.id]?.specific || f.defaultRate > 0;
+  const specific = cfs.filter(isSpecific), others = cfs.filter(f => !isSpecific(f));
+  // Old per-field rates for these fields (ids "cf-…"), saved before they were grouped.
+  const legacy = Object.keys(facilityRates).filter(k => k.startsWith("cf-") && !facilityRates[k]?.specific);
   const num = (val, onChange, label) => (
-    <label style={{display:"flex",alignItems:"center",gap:6}}>
-      <span style={{fontSize:11,fontWeight:600,color:T.muted,flex:1,whiteSpace:"nowrap"}}>{label}</span><span style={{fontSize:11,color:T.faint}}>$</span>
+    <label style={{display:"flex",alignItems:"center",gap:6,minWidth:0}}>
+      <span style={{fontSize:11,fontWeight:600,color:T.muted,flex:1,minWidth:0}}>{label}</span><span style={{fontSize:11,color:T.faint}}>$</span>
       <input type="number" min="0" step="0.5" value={val||""} placeholder="0" onChange={e=>onChange(e.target.value)} aria-label={label}
-        style={{width:60,padding:"3px 6px",borderRadius:6,border:`1.5px solid ${T.line}`,fontSize:13,textAlign:"right",fontFamily:"inherit",outline:"none"}}/>
+        style={{width:60,flex:"none",padding:"3px 6px",borderRadius:6,border:`1.5px solid ${T.line}`,fontSize:13,textAlign:"right",fontFamily:"inherit",outline:"none"}}/>
     </label>);
   return (
     <div style={{marginTop:10,background:T.surface,border:"1.5px solid #99f6e4",borderRadius:10,padding:"10px 12px",display:"flex",flexDirection:"column",gap:8}}>
-      <div style={{fontSize:12,fontWeight:700,color:"#115e59"}}>🏛 Council fields <span style={{fontWeight:400,color:T.muted}}>· one rate for all {cfs.length} council field{cfs.length!==1?"s":""}</span></div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:8}}>
+      <div style={{fontSize:12,fontWeight:700,color:"#115e59"}}>🏛 Council fields <span style={{fontWeight:400,color:T.muted}}>· one rate for all {cfs.length} field{cfs.length!==1?"s":""} from All Auckland fields</span></div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,190px),1fr))",gap:8}}>
         {num(c.day, v=>onUpdateFacilityRate("council","day",v), "Day /hr")}
         {num(c.evening, v=>onUpdateFacilityRate("council","evening",v), "Evening /hr")}
         {onUpdateCouncilFees&&num(councilFees.application, v=>onUpdateCouncilFees({...councilFees,application:parseFloat(v)||0}), "Application fee (one-off)")}
         {onUpdateCouncilFees&&num(councilFees.perField, v=>onUpdateCouncilFees({...councilFees,perField:parseFloat(v)||0}), "Fee per field")}
       </div>
-      {specific.map(f => { const r = facilityRates[f.id]; return (
+      {specific.map(f => { const r = defaultFacRates(facilityRates, f.id), saved = facilityRates[f.id]?.specific;
+        const set = (k, v) => onSetFacilityRate ? onSetFacilityRate(f.id, { ...r, [k]: parseFloat(v) || 0, specific: true }) : onUpdateFacilityRate(f.id, k, v);
+        return (
         <div key={f.id} style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",borderTop:`1px solid ${T.lineSoft}`,paddingTop:6}}>
-          <span style={{fontSize:12,fontWeight:600,color:T.ink,flex:"1 1 160px",minWidth:0}}>{f.name}</span>
-          {num(r.day, v=>onUpdateFacilityRate(f.id,"day",v), "Day /hr")}
-          {num(r.evening, v=>onUpdateFacilityRate(f.id,"evening",v), "Evening /hr")}
-          {onSetFacilityRate&&<button type="button" onClick={()=>onSetFacilityRate(f.id,null)} title="Back to the council fields rate" aria-label={`Remove the specific rate for ${f.name}`} style={{border:"none",background:"none",color:T.danger,cursor:"pointer",fontSize:13}}>✕</button>}
+          <span style={{fontSize:12,fontWeight:600,color:T.ink,flex:"1 1 160px",minWidth:0}}>{f.name}{!saved&&<span style={{fontWeight:400,color:T.muted}}> · its hire rate</span>}</span>
+          {num(r.day, v=>set("day",v), "Day /hr")}
+          {num(r.evening, v=>set("evening",v), "Evening /hr")}
+          {onSetFacilityRate&&saved&&<button type="button" onClick={()=>onSetFacilityRate(f.id,null)} title="Back to the shared rate" aria-label={`Remove the specific rate for ${f.name}`} style={{border:"none",background:"none",color:T.danger,cursor:"pointer",fontSize:13}}>✕</button>}
         </div>); })}
+      {onRemoveFacilityRates&&legacy.length>0&&(
+        <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",fontSize:11,color:"#92400e",background:"#fffbeb",border:"1px solid #fde68a",borderRadius:8,padding:"5px 8px"}}>
+          <span style={{flex:1}}>{legacy.length} older per-field rate{legacy.length!==1?"s":""} from before fields were grouped {legacy.length!==1?"are":"is"} ignored.</span>
+          <button type="button" onClick={()=>onRemoveFacilityRates(legacy)} style={{border:"1px solid #f59e0b",background:"#fff",color:"#92400e",borderRadius:6,fontSize:11,fontWeight:700,padding:"2px 8px",cursor:"pointer",fontFamily:"inherit"}}>Clear them</button>
+        </div>)}
       {onSetFacilityRate&&others.length>0&&(
         <select value="" aria-label="Add a specific council field" onChange={e=>{ if(e.target.value) onSetFacilityRate(e.target.value,{ day:+c.day||0, evening:+c.evening||0, specific:true }); }}
           style={{alignSelf:"flex-start",padding:"3px 6px",borderRadius:6,border:"1.5px dashed #99f6e4",fontSize:12,fontFamily:"inherit",color:"#115e59",background:T.surface}}>
@@ -693,7 +705,10 @@ export function defaultFacRates(facilityRates, facId) {
   // a field's own entry applies only when it's marked as a specific case.
   const fac = FACILITIES.find(f => f.id === facId);
   if (isCouncilField(fac)) {
-    const own = (facilityRates || {})[facId], c = (own && typeof own === "object" && own.specific) ? own : ((facilityRates || {}).council || {});
+    const own = (facilityRates || {})[facId];
+    if (own && typeof own === "object" && own.specific) return { day: +own.day || 0, evening: +own.evening || 0 };
+    if (fac.defaultRate > 0) return { day: fac.defaultRate, evening: fac.defaultRate };   // a ground's known hire rate
+    const c = (facilityRates || {}).council || {};
     return { day: +c.day || 0, evening: +c.evening || 0 };
   }
   // A facility can carry its own default $/hr (a ground hired at a flat rate); otherwise
