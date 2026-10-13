@@ -259,7 +259,7 @@ function SlotRow({ slot, idx, onChange, onRemove, canRemove, allBookings, onSpli
 }
 
 // ─── Cart Modal ───────────────────────────────────────────────────────────────
-export function CartModal({ cart, setCart, onClose, onSubmit, openNew, silentMode=false, onToggleSilent }) {
+export function CartModal({ cart, setCart, onClose, onSubmit, openNew, silentMode=false, onToggleSilent, bookings=[] }) {
   const [editingDraft, setEditingDraft] = useState(null); // {gi, di, draft}
   const [expandedNotify, setExpandedNotify] = useState(new Set()); // email keys that are open
   const totalNew    = cart.filter(i=>isDraftItem(i)&&!i.isEdit&&!i.isMultiEdit).reduce((s,i)=>s+i.drafts.length,0);
@@ -287,6 +287,24 @@ export function CartModal({ cart, setCart, onClose, onSubmit, openNew, silentMod
   });
 
   function removeItem(gi) { setCart(prev => prev.filter((_,i)=>i!==gi)); }
+
+  // "Reapply" an edit: the bookings it came from stay exactly as they are, and its slots are
+  // added as new bookings (pending AMUA review), skipping any a live booking already covers.
+  // The item then submits like any new request; "Back to edit" restores the edit.
+  const sameSlot = (a,b) => a.facility_id===b.facility_id && a.date===b.date && a.start_hour===b.start_hour && a.duration===b.duration && (a.email||"").toLowerCase()===(b.email||"").toLowerCase();
+  const reapplyFresh = item => item.drafts.filter(d => !bookings.some(b => !isClosed(b.status) && sameSlot(b, d)));
+  function toggleReapply(gi) {
+    setCart(prev => prev.map((it,i) => { if (i!==gi) return it;
+      if (it.reapplyOf) return it.reapplyOf;
+      const fresh = reapplyFresh(it); if (!fresh.length) return it;
+      const gid = fresh.length > 1 ? newGroupRef() : null, at = new Date().toISOString();
+      const drafts = fresh.map(d => { const ci = parseCouncilInfo(d.system_notes); let sys = ci ? setCouncilInfo("", ci) : ""; if (gid) sys = setGroupRef(sys, gid);
+        return { facility_id:d.facility_id, date:d.date, start_hour:d.start_hour, duration:d.duration, purpose:d.purpose, notes:d.notes, name:d.name, email:d.email,
+          status:"pending_amua", id:newId(), created_at:at, updated_at:at, system_notes:sys }; });
+      return { drafts, name:it.name, email:it.email, sourceIds:[], isEdit:false, reapplyOf:it, reapplyKept:it.drafts.length-fresh.length };
+    }));
+    setEditingDraft(null);
+  }
   function toggleItemSkip(gi) { setCart(prev => prev.map((it,i)=>i===gi?{...it,skipEmail:!it.skipEmail}:it)); }
 
   // A vendor request draft (one per vendor) loses one booking and is rebuilt from the rest.
@@ -368,9 +386,17 @@ export function CartModal({ cart, setCart, onClose, onSubmit, openNew, silentMod
                         <span style={{fontSize:13,fontWeight:600,color:'#0f172a'}}>{item.name}</span>
                         {(item.isEdit||item.isMultiEdit)
                           ? <span style={{fontSize:11,fontWeight:700,color:'#1d4ed8',background:'#dbeafe',border:'1px solid #93c5fd',borderRadius:4,padding:'1px 7px'}}>✏ edit</span>
+                          : item.reapplyOf
+                          ? <span title="The original bookings stay as they are; these are added as new bookings" style={{fontSize:11,fontWeight:700,color:'#15803d',background:'#dcfce7',border:'1px solid #86efac',borderRadius:4,padding:'1px 7px'}}>↻ reapply · {item.drafts.length} new{item.reapplyKept?` · ${item.reapplyKept} already booked`:''}</span>
                           : <span style={{fontSize:12,color:'#94a3b8'}}>· {item.drafts.length} booking{item.drafts.length>1?'s':''}</span>
                         }
                       </div>
+                      {(item.isEdit||item.isMultiEdit||item.reapplyOf)&&(()=>{ const n=item.reapplyOf?0:reapplyFresh(item).length;
+                        return <button type="button" onClick={()=>toggleReapply(gi)} disabled={!item.reapplyOf&&!n}
+                          title={item.reapplyOf?"Back to editing the existing bookings":n?`Keep the existing bookings unchanged and add ${n} new booking${n>1?'s':''} from this edit`:"Nothing new to add: every slot is already booked"}
+                          style={{border:'1.5px solid #86efac',background:'#fff',color:(item.reapplyOf||n)?'#15803d':'#94a3b8',borderRadius:6,fontSize:11,fontWeight:700,padding:'3px 8px',cursor:(item.reapplyOf||n)?'pointer':'not-allowed',fontFamily:'inherit',whiteSpace:'nowrap'}}>
+                          {item.reapplyOf?'↩ Back to edit':`↻ Reapply${n?` (+${n})`:''}`}
+                        </button>; })()}
                     </div>
                     {groups.map((g,gi2)=>{
                       if(g.type==='recur'||g.type==='group') {

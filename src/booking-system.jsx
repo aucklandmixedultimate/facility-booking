@@ -2682,7 +2682,7 @@ export default function App() {
 
       {showCart&&(
         <Modal title="🛒 Booking Cart" onClose={()=>setShowCart(false)} width={660}>
-          <CartModal cart={cart} setCart={setCart} onClose={()=>setShowCart(false)} onSubmit={handleCartSubmit} openNew={openNew} silentMode={silentMode} onToggleSilent={isAdmin?setSilentMode:undefined}/>
+          <CartModal cart={cart} setCart={setCart} bookings={bookings} onClose={()=>setShowCart(false)} onSubmit={handleCartSubmit} openNew={openNew} silentMode={silentMode} onToggleSilent={isAdmin?setSilentMode:undefined}/>
         </Modal>
       )}
       {roomRequestFor&&(
