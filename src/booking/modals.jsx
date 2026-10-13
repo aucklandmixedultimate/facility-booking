@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
 import { LEAGUE_SEASONS, seasonOfBooker } from "../seasons.js";
+import { JUNIOR_GRADES, participantText } from "../councilBooking.js";
 import { ACTIVITY_LABELS, ACTIVITY_PUBLIC_ACTIONS, AMUA_CONTACT_ROLES, AMUA_DEFAULT_NAME, Badge, CopyableTable, EMAIL_COLORS, FACILITIES, Modal, PROVIDERS, PROVIDER_GROUPS, S, SUPABASE_URL, VENDOR_GTEC, activityActor, activitySlot, authHeaders, deriveRecipientCode, describeActivity, emailColor, fmtDate, fmtDateShort, fmtDateShortDow, fmtTime, isAdminBooking, providerGroupOf, providerLabel, sb, useMobile, workflowOf } from "./core.jsx";
 export function ActivityLogModal({onClose, inline=false, bookers=[], isAdmin=true}) {
   const isMobile = useMobile();
@@ -271,7 +272,35 @@ function groupVendors(vendors, profiles) {
   const rank = id => ({ gtec: 0, stcuthberts: 1, council: 2, community: 3, other: 9 })[id] ?? 5;
   return [...groups.values()].sort((a, b) => rank(a.id) - rank(b.id));
 }
-export function UserMgmtModal({ bookings, aliases, aliasNames, aliasColors={}, bookerSeasons={}, onChangeSeasons, onChange, onChangeNames, onChangeColors, profiles, onUpdateProfile, adminEmail, onClose, onViewAs }) {
+// A booker's council participant details (settings "booker_info"): senior, or junior with a
+// grade, teams, players and team names. Text fields save when they lose focus.
+function BookerInfoRow({ info = {}, onSave, si }) {
+  // Local while editing (keyed by booker, so it starts fresh per booker); saves never reset it.
+  const [d, setD] = useState(info);
+  const save = patch => { const next = { ...d, ...patch }; setD(next); onSave(next); };
+  const junior = d.level === "junior";
+  const btn = on => ({padding:"3px 10px",borderRadius:12,border:`1.5px solid ${on?"#0f172a":"#e2e8f0"}`,background:on?"#0f172a":"#fff",color:on?"#fff":"#475569",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"});
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:6}}>
+      <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+        <button type="button" onClick={()=>save({ level:"senior" })} style={btn(!junior)}>Senior</button>
+        <button type="button" onClick={()=>save({ level:"junior", grade:d.grade||"high" })} style={btn(junior)}>Junior</button>
+      </div>
+      {junior&&<div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+        <select aria-label="Junior grade" value={d.grade||"high"} onChange={e=>save({ grade:e.target.value })} style={{...si,width:"auto"}}>
+          {JUNIOR_GRADES.map(g=><option key={g.id} value={g.id}>{g.label}</option>)}
+        </select>
+        <input aria-label="Teams" type="number" min="1" placeholder="teams" value={d.teams??""} onChange={e=>setD({...d,teams:e.target.value})} onBlur={()=>onSave(d)} style={{...si,width:70}}/>
+        <input aria-label="Players" type="number" min="1" placeholder="players" value={d.players??""} onChange={e=>setD({...d,players:e.target.value})} onBlur={()=>onSave(d)} style={{...si,width:80}}/>
+        <input aria-label="Team names" placeholder="team names" value={d.teamNames??""} onChange={e=>setD({...d,teamNames:e.target.value})} onBlur={()=>onSave(d)} style={{...si,flex:1,minWidth:140}}/>
+      </div>}
+      {!junior&&<input aria-label="Players" type="number" min="1" placeholder="players (optional)" value={d.players??""} onChange={e=>setD({...d,players:e.target.value})} onBlur={()=>onSave(d)} style={{...si,width:150}}/>}
+      <span style={{fontSize:11,color:"#0f766e"}}>Council form: {participantText(d)}</span>
+    </div>
+  );
+}
+
+export function UserMgmtModal({ bookings, aliases, aliasNames, aliasColors={}, bookerSeasons={}, onChangeSeasons, bookerInfo={}, onChangeBookerInfo, onChange, onChangeNames, onChangeColors, profiles, onUpdateProfile, adminEmail, onClose, onViewAs }) {
   const allEmails = useMemo(() => {
     const s = new Set();
     bookings.forEach(b => { if (b.email && !isAdminBooking(b)) s.add(b.email.toLowerCase()); });
@@ -498,6 +527,10 @@ export function UserMgmtModal({ bookings, aliases, aliasNames, aliasColors={}, b
                             {x.name} <span style={{fontWeight:400,opacity:.7}}>{x.span}</span>
                           </button>); })}
                       </div>
+                    )}
+                    {/* Council participant details: junior / senior, teams and players */}
+                    {onChangeBookerInfo && ptype!=="vendor" && fieldRow("Council",
+                      <BookerInfoRow key={primary} info={bookerInfo[primary]||{}} si={si} onSave={v=>onChangeBookerInfo(primary,v)}/>
                     )}
                     {/* Chip colour override */}
                     {onChangeColors && fieldRow("Colour",

@@ -4,13 +4,13 @@ import { gmailToken, fetchCouncilEmails, parseCouncilEmail } from "./councilMail
 import { driveConfigured, getDriveToken, renameFile, ensureFolderPath, DRIVE_ROOT_FOLDER, ensureFolder, findChildFile, uploadFile, keepLatestRevisionForever } from "./drive-client.js";
 import { htmlToPdfBlob } from "./pdf-utils.js";
 import { currentLeagueSeason, LEAGUE_SEASONS, seasonOfBooker } from "./seasons.js";
-import { COUNCIL_APPLICATION_FEE, COUNCIL_APPLICATION_URL, COUNCIL_APP_RE, EmailLoginScreen, FACILITIES, LOGO_SRC, MOBILE_STYLE, MONTHS, Modal, PROVIDERS, REVIEW_STATUSES, S, STATUS_META, SUPABASE_URL, T, _emailAliases, applyAmuaOrg, applyCouncilFacilities, authHeaders, isDraftItem, previewEntries, setPreviewEntries, buildApprovalEmailHtml, buildClashEmailHtml, buildCommunityRequestItem, setVendorReqDraft, vendorRequestItems, buildInformCpsaEmailHtml, buildMismatchEmailHtml, buildOrderEmailHtml, buildRoomRequestEmailHtml, canSendToCouncil, clearSlotLink, councilFeeSplit, councilOverlaps, emailColor, evenSlotShares, facShort, fmtDate, fmtDateShortDow, fmtTime, fmtTimeShort, getClashes, inActiveVenue, isAdminBooking, linkCouncilChildren, logActivity, newId, newSlotRef, parseClashPrevStatus, parseCouncilApp, parseCpsaOrig, parseCpsaRefs, parseCpsaResolution, parseSlotLink, reachedGtecQueue, sb, sendApprovalEmail, sendEmail, setBilledSnapshot, setClashPrevStatus, setCpsaResolution, setGtecSnapshot, setMismatchNote, setModuleState, setSlotLink, setVendorVariance, slotGroupMembers, stripClashPrevStatus, stripMismatchNote, supabase, timeOverlaps, todayKey, useMobile, venueFacilities, visibleFacilities, workflowOf, ALL_VENUES, activeFacilities, defaultVenueKey, listVenues, venueKeyOf } from "./booking/core.jsx";
+import { councilFeeLabel, isCouncilField, COUNCIL_APPLICATION_URL, COUNCIL_APP_RE, EmailLoginScreen, FACILITIES, LOGO_SRC, MOBILE_STYLE, MONTHS, Modal, PROVIDERS, REVIEW_STATUSES, S, STATUS_META, SUPABASE_URL, T, _emailAliases, applyAmuaOrg, applyCouncilFacilities, authHeaders, isDraftItem, previewEntries, setPreviewEntries, buildApprovalEmailHtml, buildClashEmailHtml, buildCommunityRequestItem, setVendorReqDraft, vendorRequestItems, buildInformCpsaEmailHtml, buildMismatchEmailHtml, buildOrderEmailHtml, buildRoomRequestEmailHtml, canSendToCouncil, clearSlotLink, councilFeeSplit, councilOverlaps, emailColor, evenSlotShares, facShort, fmtDate, fmtDateShortDow, fmtTime, fmtTimeShort, getClashes, inActiveVenue, isAdminBooking, linkCouncilChildren, logActivity, newId, newSlotRef, parseClashPrevStatus, parseCouncilApp, parseCpsaOrig, parseCpsaRefs, parseCpsaResolution, parseSlotLink, reachedGtecQueue, sb, sendApprovalEmail, sendEmail, setBilledSnapshot, setClashPrevStatus, setCpsaResolution, setGtecSnapshot, setMismatchNote, setModuleState, setSlotLink, setVendorVariance, slotGroupMembers, stripClashPrevStatus, stripMismatchNote, supabase, timeOverlaps, todayKey, useMobile, venueFacilities, visibleFacilities, workflowOf, ALL_VENUES, activeFacilities, defaultVenueKey, listVenues, venueKeyOf } from "./booking/core.jsx";
 import { FacilityStrip } from "./booking/facilityStrip.jsx";
 import { BookingsList } from "./booking/bookingsList.jsx";
 import { councilAppBookings, mergeCouncilOutcomes } from "./booking/councilData.jsx";
 import { cjrMonthUrl, extractCPSATeam, extractEventDetailsEmail, fetchCJREvents, parseFeedText, findMatchingUserBooking, purgeObsolete, gtecTeamKey, mapCJRFacility, parseCJRDate, parseCJRDateTime } from "./booking/gtec.jsx";
 import { DRIVE_SUBFOLDERS, billingDocBaseName, buildBillingDocHtml, driveBatchFolderName, drivePoFolderName } from "./booking/billingDocs.jsx";
-import { resolveRates } from "./booking/schedule.jsx";
+import { CouncilRatesCard, resolveRates } from "./booking/schedule.jsx";
 import { ActivityLogModal, AmuaDetailsModal, Banner, CouncilContactModal, UserMenuItem, UserMgmtModal } from "./booking/modals.jsx";
 import { DayTimelinePopup, MonthCalendar, WeekCalendar } from "./booking/calendar.jsx";
 import { BookingDetail, BookingForm, CartModal, DeleteCartModal } from "./booking/forms.jsx";
@@ -148,6 +148,12 @@ export default function App() {
   useEffect(()=>{ try{ localStorage.setItem("fb_gtec_links", JSON.stringify(gtecLinks)); }catch{ /* ignore */ } }, [gtecLinks]);
   // aliasNames: { primaryEmail: displayName } — overrides the default email-prefix label.
   const [bookerSeasons, setBookerSeasons] = useState(()=>{ try{ return JSON.parse(localStorage.getItem("fb_booker_seasons")||"{}"); }catch{ return {}; } });
+  // Council participant details per booker (settings "booker_info") and the council's fees
+  // (settings "council_fees"); both mirrored into core.jsx module state for the council helpers.
+  const [bookerInfo, setBookerInfoState] = useState(()=>{ try{ const v=JSON.parse(localStorage.getItem("fb_booker_info")||"{}"); setModuleState({ _bookerInfo: v }); return v; }catch{ return {}; } });
+  const [councilFees, setCouncilFeesState] = useState(()=>{ try{ const v={ application:0, perField:0, ...JSON.parse(localStorage.getItem("fb_council_fees")||"{}") }; setModuleState({ _councilFees: v }); return v; }catch{ return { application:0, perField:0 }; } });
+  const applyBookerInfo = v => { setModuleState({ _bookerInfo: v }); setBookerInfoState(v); try{ localStorage.setItem("fb_booker_info", JSON.stringify(v)); }catch{ /* ignore */ } };
+  const applyCouncilFees = v => { const f = { application:0, perField:0, ...v }; setModuleState({ _councilFees: f }); setCouncilFeesState(f); try{ localStorage.setItem("fb_council_fees", JSON.stringify(f)); }catch{ /* ignore */ } };
   const [aliasNames, setAliasNames] = useState(()=>{
     try{ return JSON.parse(localStorage.getItem("fb_alias_names")||"{}"); }catch{ return {}; }
   });
@@ -368,7 +374,7 @@ export default function App() {
 
   function showToast(msg,type="success"){setToast({msg,type});setTimeout(()=>setToast(null),3500);}
   // Send a batch of council bookings to the council as one application: fixes each booking's
-  // share of the $10-per-field fee and moves it to "awaiting council decision".
+  // share of the council fee and moves it to "awaiting council decision".
   async function handleSendToCouncil(ids) {
     const bkgs = bookings.filter(b => ids.includes(b.id) && canSendToCouncil(b));
     if (!bkgs.length) return;
@@ -378,7 +384,7 @@ export default function App() {
     const ref = raw.trim().replace(/\s+/g,"");
     const appId = ref || `CA-${todayKey().replace(/-/g,"")}-${Math.random().toString(36).slice(2,6).toUpperCase()}`;
     const split = Object.entries(sp.byBooker).map(([e,v])=>`${aliasNames[e]||e}: $${v.toFixed(2)}`).join("\n");
-    if (!window.confirm(`Send ${bkgs.length} booking${bkgs.length!==1?"s":""} to the council as application ${appId}?\n\n${sp.fields} field${sp.fields!==1?"s":""} × $${COUNCIL_APPLICATION_FEE} = $${sp.total.toFixed(2)}, split:\n${split}`)) return;
+    if (!window.confirm(`Send ${bkgs.length} booking${bkgs.length!==1?"s":""} to the council as application ${appId}?\n\n${sp.fields} field${sp.fields!==1?"s":""} · ${councilFeeLabel()} = $${sp.total.toFixed(2)}, split:\n${split}`)) return;
     const at = new Date().toISOString();
     try {
       const notes = {};
@@ -530,6 +536,8 @@ export default function App() {
         setAliasNames(map.alias_names);
         try{localStorage.setItem("fb_alias_names",JSON.stringify(map.alias_names));}catch{ /* ignore */ }
       }
+      if (map.booker_info && typeof map.booker_info === "object") applyBookerInfo(map.booker_info);
+      if (map.council_fees && typeof map.council_fees === "object") applyCouncilFees(map.council_fees);
       if (map.booker_seasons && typeof map.booker_seasons === "object") {
         setBookerSeasons(map.booker_seasons);
         try{localStorage.setItem("fb_booker_seasons",JSON.stringify(map.booker_seasons));}catch{ /* ignore */ }
@@ -1356,6 +1364,13 @@ export default function App() {
   const handleMergeSlots = (a, b) => stageSlotChange(buildMergeSlotChange(a, b));
   const handleUnlinkSlot = (booking) => stageSlotChange(buildUnlinkSlotChange(booking));
 
+  // Replaces (or, with null, removes) a facility's whole rate entry: council fields' specific cases.
+  function setFacilityRateEntry(facilityId, entry) {
+    const newRates = { ...facilityRates }; if (entry) newRates[facilityId] = entry; else delete newRates[facilityId];
+    setFacilityRates(newRates);
+    try{localStorage.setItem("fb_facility_rates",JSON.stringify(newRates));}catch{ /* ignore */ }
+    persistSetting("facility_rates", newRates);
+  }
   function updateFacilityRate(facilityId, type, value) {
     const existing = typeof facilityRates[facilityId] === "object" ? facilityRates[facilityId] : { day: 0, evening: 0 };
     const newRates = { ...facilityRates, [facilityId]: { ...existing, [type]: parseFloat(value) || 0 } };
@@ -1427,6 +1442,14 @@ export default function App() {
     try{ localStorage.setItem(colorKey(u?.email), JSON.stringify(next)); }catch{ /* ignore */ }
     if (u) { u.user_metadata = { ...(u.user_metadata||{}), booker_colors: next }; supabase.auth.updateUser({ data: { booker_colors: next } }).catch(()=>{}); }
   }
+  // One booker's council details: a partial update (settings_merge), falling back to a whole
+  // write before supabase-setup.sql has the function.
+  async function saveBookerInfo(email, info) {
+    const next = { ...bookerInfo, [email]: info }; applyBookerInfo(next);
+    try { const { data, error } = await supabase.rpc("settings_merge", { setting_key: "booker_info", patch: { [email]: info } }); if (error) throw error; if (data && typeof data === "object") applyBookerInfo(data); }
+    catch { await persistSetting("booker_info", next); }
+  }
+  function saveCouncilFees(f) { applyCouncilFees(f); persistSetting("council_fees", { application:+f.application||0, perField:+f.perField||0 }); }
   function saveBookerSeasons(next) { setBookerSeasons(next); try{localStorage.setItem("fb_booker_seasons",JSON.stringify(next));}catch{ /* ignore */ } persistSetting("booker_seasons", next); }
   function saveAmuaOrg(next) {
     applyAmuaOrg(next); setAmuaOrg(next);
@@ -2493,7 +2516,7 @@ export default function App() {
 
         {tab==="list"&&bookingsLists}
 
-        {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<Suspense fallback={<TabLoading/>}><SummaryTab bookings={bookings} loggedInEmail={loggedInEmail} onRemoveBookings={queueMultiForRemoval} facilityRates={facilityRates} pricingConditions={pricingConditions} onAddPricingCondition={addPricingCondition} onQueuePricingRule={queuePricingRule} onUpdatePricingCondition={updatePricingCondition} onRemovePricingCondition={removePricingCondition} isAdmin={isAdmin} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onUpdateFacilityRate={updateFacilityRate} pricingMode={pricingMode} onSetPricingMode={setPricingMode} onProposeMerge={handleProposeMerge} onBulkApply={handleBulkApply} onMarkInvoiced={handleMarkInvoiced} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} bookerFilter={listBookerFilter} profiles={profiles} emailAliases={emailAliases} aliasNames={aliasNames} onCreateOfficialInvoice={handleCreateOfficialInvoice} onEmailInvoice={handleEmailInvoicePreview} loadRequest={summaryLoadRequest}/></Suspense>}</div>}
+        {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<Suspense fallback={<TabLoading/>}><SummaryTab bookings={bookings} loggedInEmail={loggedInEmail} onRemoveBookings={queueMultiForRemoval} facilityRates={facilityRates} pricingConditions={pricingConditions} onAddPricingCondition={addPricingCondition} onQueuePricingRule={queuePricingRule} onUpdatePricingCondition={updatePricingCondition} onRemovePricingCondition={removePricingCondition} isAdmin={isAdmin} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onUpdateFacilityRate={updateFacilityRate} onSetFacilityRate={setFacilityRateEntry} councilFees={councilFees} onUpdateCouncilFees={saveCouncilFees} pricingMode={pricingMode} onSetPricingMode={setPricingMode} onProposeMerge={handleProposeMerge} onBulkApply={handleBulkApply} onMarkInvoiced={handleMarkInvoiced} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} bookerFilter={listBookerFilter} profiles={profiles} emailAliases={emailAliases} aliasNames={aliasNames} onCreateOfficialInvoice={handleCreateOfficialInvoice} onEmailInvoice={handleEmailInvoicePreview} loadRequest={summaryLoadRequest}/></Suspense>}</div>}
         {tab==="billing"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<Suspense fallback={<TabLoading/>}><BillingTab billingRecords={billingRecords} onUpdateRecord={handleUpdateBillingRecord} onDeleteRecord={id=>setBillingRecords(prev=>prev.filter(r=>r.id!==id))} onCreateReceipt={handleCreateReceipt} onLoadToSummary={handleLoadBillingToSummary} isAdmin={isAdmin} loggedInEmail={loggedInEmail} emailAliases={emailAliases} aliasNames={aliasNames} driveEnabled={driveConfigured()} onDriveSync={handleDriveSync} onRenameBatch={handleRenameBatch} onDriveAttach={handleDriveAttachGtec} onEmailOfficial={handleEmailOfficialInvoices} onQueueInvoiceEmails={handleQueueInvoiceEmails} silentMode={silentMode} onToggleSilent={isAdmin?setSilentMode:undefined}/></Suspense>}</div>}
         {tab==="about"&&<div style={{padding:"8px 0"}}><Suspense fallback={<TabLoading/>}><AboutTab/></Suspense></div>}
         {tab==="allocation"&&isAdmin&&<div style={S.card}><Suspense fallback={<TabLoading/>}><CouncilAllocationTab outcomes={councilOutcomes} bookings={bookings} syncing={councilSyncing} syncLog={councilSyncLog} onSync={handleCouncilMailSync} portalSync={councilPortalSync} onApplyPortal={handleApplyPortal} onSaveOutcomes={saveCouncilOutcomes} onBulkStatusChange={handleBulkStatusChange} onQueueNotifications={queueNotifications} onLinkApp={handleLinkCouncilApp} aliasNames={aliasNames} loggedInEmail={loggedInEmail}/></Suspense></div>}
@@ -2581,7 +2604,7 @@ export default function App() {
         <Modal title="💲 Facility Rates" onClose={()=>setShowRatesModal(false)} width={620}>
           <div style={{fontSize:12,color:"#64748b",marginBottom:12}}>Day rate = before 5:30 pm · Evening rate = 5:30 pm onwards.</div>
           <div style={{display:"flex",flexDirection:"column",gap:8}}>
-            {visibleFacilities().map(fac => {
+            {visibleFacilities().filter(fac=>!isCouncilField(fac)).map(fac => {
               const r = typeof facilityRates[fac.id]==="object" ? facilityRates[fac.id] : { day: facilityRates[fac.id]||0, evening: 50 };
               return (
                 <div key={fac.id} style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,padding:"10px 14px"}}>
@@ -2611,6 +2634,7 @@ export default function App() {
               );
             })}
           </div>
+          <CouncilRatesCard facilityRates={facilityRates} councilFees={councilFees} onUpdateFacilityRate={updateFacilityRate} onSetFacilityRate={setFacilityRateEntry} onUpdateCouncilFees={saveCouncilFees}/>
           <div style={{marginTop:12,display:"flex",justifyContent:"flex-end"}}>
             <button onClick={()=>setShowRatesModal(false)} style={S.btn({background:"#0f172a",color:"#fff",fontSize:12})}>Done</button>
           </div>
@@ -2660,6 +2684,8 @@ export default function App() {
           aliasColors={aliasColors}
           bookerSeasons={bookerSeasons}
           onChangeSeasons={saveBookerSeasons}
+          bookerInfo={bookerInfo}
+          onChangeBookerInfo={saveBookerInfo}
           onChange={saveEmailAliases}
           onChangeNames={saveAliasNames}
           onChangeColors={saveAliasColors}

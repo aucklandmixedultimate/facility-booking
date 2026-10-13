@@ -1,5 +1,5 @@
 import { useState, useRef, Fragment } from "react";
-import { AMUA_INBOX, AMUA_INFO, Badge, buildCommunityRequestItem, parseVendorReqDraft, vendorRequestItems, rowSelect, isMultiSelectClick, venueKeyOf, bareStatusLabel, groupStatusLabel, COUNCIL_APPLICATION_FEE, ClashPair, CopyableTable, EmailChip, FACILITIES, INVOICED_META, Modal, PROVIDERS, REVIEW_STATUSES, S, STATUS_META, SUPABASE_URL, TableViewToggle, _contactReviews, _currentUser, _sessionStartIso, authHeaders, bookingCost, buildCouncilPayload, canSendToCouncil, councilFeeSplit, councilOverlaps, emailColor, extractCpsaAmendValues, facCellLabel, fmt24, fmtCost, fmtDate, fmtDateShort, fmtDateShortDow, fmtGtecEvent, fmtLoggedAt, fmtTime, getBillingDrift, getCrossFacilityOverlaps, getSameFacilityOverlaps, isAdminBooking, isCouncilBooking, isSocialFac, nextWorkflowStatus, parseClashPrevStatus, parseCouncilApp, parseCpsaRefs, parseCpsaResolution, parseGtecSnapshot, parseMismatchNote, parseSlotLink, providerOfFacility, sb, setCpsaOrig, setCpsaResolution, setModuleState, stripMismatchNote, todayKey, useTableView, vendorShortFor, vendorsIn, visibleFacilities, workflowOf, workflowStep } from "./core.jsx";
+import { AMUA_INBOX, AMUA_INFO, Badge, buildCommunityRequestItem, parseVendorReqDraft, vendorRequestItems, rowSelect, isMultiSelectClick, venueKeyOf, bareStatusLabel, groupStatusLabel, councilFeeLabel, councilTypeOf, bookerParticipant, ClashPair, CopyableTable, EmailChip, FACILITIES, INVOICED_META, Modal, PROVIDERS, REVIEW_STATUSES, S, STATUS_META, SUPABASE_URL, TableViewToggle, _contactReviews, _currentUser, _sessionStartIso, authHeaders, bookingCost, buildCouncilPayload, canSendToCouncil, councilFeeSplit, councilOverlaps, emailColor, extractCpsaAmendValues, facCellLabel, fmt24, fmtCost, fmtDate, fmtDateShort, fmtDateShortDow, fmtGtecEvent, fmtLoggedAt, fmtTime, getBillingDrift, getCrossFacilityOverlaps, getSameFacilityOverlaps, isAdminBooking, isCouncilBooking, isSocialFac, nextWorkflowStatus, parseClashPrevStatus, parseCouncilApp, parseCpsaRefs, parseCpsaResolution, parseGtecSnapshot, parseMismatchNote, parseSlotLink, providerOfFacility, sb, setCpsaOrig, setCpsaResolution, setModuleState, stripMismatchNote, todayKey, useTableView, vendorShortFor, vendorsIn, visibleFacilities, workflowOf, workflowStep } from "./core.jsx";
 import { councilAppBookings } from "./councilData.jsx";
 import { ActivityLogModal, DateRangePicker } from "./modals.jsx";
 import { PatternModal, PricingConditionsManager, ReassignControl, ScheduleSummaryModal } from "./schedule.jsx";
@@ -959,12 +959,20 @@ export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDel
               {/* Council bookings go to the council as one batch application; the $10-per-field
                   fee is fixed then, split by the bookers sharing each field. */}
               {onSendToCouncil&&(()=>{ const ready=bookings.filter(b=>selected.has(b.id)&&canSendToCouncil(b)); if(!ready.length) return null;
-                const sp=councilFeeSplit(ready);
-                return <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",background:"#f0fdfa",border:"1px solid #99f6e4",borderRadius:10,padding:"8px 10px"}}>
-                  <button onClick={async()=>{ const txt=JSON.stringify(buildCouncilPayload(ready, approxPlayers)); try{ await navigator.clipboard.writeText(txt); alert("Copied. On the council's application form, open the AMUA Council panel and paste it in."); }catch{ window.prompt("Copy this, then paste it into the AMUA Council panel on the council form:", txt); } }}
-                    title="Copy this batch for the AMUA Council Application extension, which fills the council's form" style={S.btn({background:"#fff",color:"#0f766e",border:"1.5px solid #0d9488"})}>📋 Copy for council form</button>
-                  <button onClick={()=>onSendToCouncil(ready.map(b=>b.id))} style={S.btn({background:"#0d9488",color:"#fff"})}>🏛 Send {ready.length} to council</button>
-                  <span style={{fontSize:12,color:"#115e59"}}>{sp.fields} field{sp.fields!==1?"s":""} · fee ${sp.total.toFixed(2)} ({Object.entries(sp.byBooker).map(([e,v])=>`${adminAlias(e)} $${v.toFixed(2)}`).join(", ")})</span>
+                // Seasonal and casual go to the council as separate applications (councilTypeOf).
+                const byType={ seasonal:ready.filter(b=>councilTypeOf(b,bookings)==="seasonal"), casual:ready.filter(b=>councilTypeOf(b,bookings)==="casual") };
+                const bookersOf=bs=>[...new Set(bs.map(b=>(b.email||"").toLowerCase()))];
+                return <div style={{display:"flex",flexDirection:"column",gap:8,background:"#f0fdfa",border:"1px solid #99f6e4",borderRadius:10,padding:"8px 10px"}}>
+                  {Object.entries(byType).filter(([,bs])=>bs.length).map(([type,bs])=>{ const sp=councilFeeSplit(bs);
+                    return <div key={type} style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+                      <span title={type==="seasonal"?"Seasonal: the council's seasonal applications are open, or the booker has 10+ council bookings this financial year":"Casual: fewer than 10 council bookings in the financial year (1 July – 30 June) while seasonal applications are closed"}
+                        style={{fontSize:11,fontWeight:800,padding:"2px 8px",borderRadius:6,background:type==="seasonal"?"#115e59":"#fff",color:type==="seasonal"?"#fff":"#115e59",border:"1.5px solid #115e59"}}>{type==="seasonal"?"🗓 Seasonal":"👟 Casual"} · {bs.length}</span>
+                      <button onClick={async()=>{ const txt=JSON.stringify(buildCouncilPayload(bs, approxPlayers, bookings)); try{ await navigator.clipboard.writeText(txt); alert(`Copied the ${type} application. On the council's application form, open the AMUA Council panel and paste it in.`); }catch{ window.prompt("Copy this, then paste it into the AMUA Council panel on the council form:", txt); } }}
+                        title={`Copy this ${type} batch for the AMUA Council Application extension, which fills the council's form`} style={S.btn({background:"#fff",color:"#0f766e",border:"1.5px solid #0d9488"})}>📋 Copy for council form</button>
+                      <button onClick={()=>onSendToCouncil(bs.map(b=>b.id))} style={S.btn({background:"#0d9488",color:"#fff"})}>🏛 Send {bs.length} to council</button>
+                      <span style={{fontSize:12,color:"#115e59"}}>{sp.fields} field{sp.fields!==1?"s":""} · fee ${sp.total.toFixed(2)} ({Object.entries(sp.byBooker).map(([e,v])=>`${adminAlias(e)} $${v.toFixed(2)}`).join(", ")})</span>
+                      <div style={{flexBasis:"100%",fontSize:11,color:"#334155"}}>{bookersOf(bs).map(e=><div key={e}>👥 {adminAlias(e)}: {bookerParticipant(e, approxPlayers[e])}</div>)}</div>
+                    </div>; })}
                   <CouncilOccupancyNotes bookings={bookings} ids={new Set(ready.map(b=>b.id))} who={adminAlias}/>
                 </div>; })()}
               {(()=>{ const ready=vendorRequestable(bookings.filter(b=>selected.has(b.id))); if(!ready.length) return null;
@@ -1859,7 +1867,7 @@ export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDel
                 const wf=workflowOf(b.facility_id), isCouncilWf=wf==="council"||wf==="council_private"||wf==="community", nxt=nextWorkflowStatus(b);
                 const opContact=PROVIDERS[providerOfFacility(b.facility_id)]?.contact;
                 const opHint=(opContact&&(nxt==="op_permission"||nxt==="op_confirm")?` — ${[opContact.contact_name||opContact.name,opContact.email,opContact.phone].filter(Boolean).join(" · ")}`:"")
-                  +(nxt==="council_apply"?` — council application fee $${COUNCIL_APPLICATION_FEE} per field (pay later)`:"");
+                  +(nxt==="council_apply"?` — council fee ${councilFeeLabel()} (pay later)`:"");
                 return (
                   <tr key={b.id} onClick={e=>{ if(isPending&&isMultiSelectClick(e)){ setSelected(rowSelect(e,b.id,list.filter(x=>REVIEW_STATUSES.has(x.status)).map(x=>x.id),selected,selAnchor)); return; } onView&&onView(b); }}
                     onMouseDown={e=>{ if(e.shiftKey) e.preventDefault(); }} style={{background:rowBg,borderTop:ri>0?"1px solid #f1f5f9":"none",transition:"background 0.1s",cursor:"pointer"}}
@@ -1887,8 +1895,10 @@ export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDel
                     <td style={{padding:"3px 6px"}}>
                       <Badge status={b.status} wf={workflowOf(b.facility_id)} fid={b.facility_id}/>
                       {workflowStep(b)&&<span title="Step in the council workflow" style={{fontSize:9,fontWeight:700,color:"#0f766e",marginLeft:3}}>{workflowStep(b)}</span>}
+                      {isCouncilBooking(b)&&!isClosed(b.status)&&(()=>{ const t=councilTypeOf(b,bookings);
+                        return <span title={t==="seasonal"?"Seasonal council application":"Casual council application (fewer than 10 council bookings this financial year)"} style={{fontSize:9,fontWeight:700,marginLeft:3,padding:"0 4px",borderRadius:4,border:"1px solid #99f6e4",color:"#115e59"}}>{t==="seasonal"?"🗓 seasonal":"👟 casual"}</span>; })()}
                       {isCouncilBooking(b)&&!isClosed(b.status)&&(()=>{ const app=parseCouncilApp(b.system_notes);
-                        return <span title={app?`Council application ${app.id} (sent ${fmtDate(app.at.slice(0,10))}): this booking's share of the $${COUNCIL_APPLICATION_FEE}-per-field fee`:`Council application fee: pending until AMUA sends the application ($${COUNCIL_APPLICATION_FEE} per field, shared)`}
+                        return <span title={app?`Council application ${app.id} (sent ${fmtDate(app.at.slice(0,10))}): this booking's share of the council fee`:`Council application fee: pending until AMUA sends the application (${councilFeeLabel()}, shared)`}
                           style={{fontSize:9,fontWeight:700,marginLeft:3,padding:"0 4px",borderRadius:4,background:app?"#ccfbf1":"#f1f5f9",color:app?"#115e59":"#64748b"}}>🏛 {app?`$${app.fee.toFixed(2)}`:"fee pending"}</span>; })()}
                       {b.invoiced&&<span style={{fontSize:9,fontWeight:700,background:INVOICED_META.bg,color:INVOICED_META.text,border:`1px solid ${INVOICED_META.border}`,borderRadius:4,padding:"1px 4px",marginLeft:2}}>🧾</span>}
                       {queueLabel&&<div style={{fontSize:9,fontWeight:700,color:queued.newStatus==="rejected"?"#991b1b":"#166634"}}>{queueLabel}</div>}

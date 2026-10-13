@@ -1,5 +1,5 @@
 import { useState, useRef, Fragment } from "react";
-import { Badge, rowSelect, isMultiSelectClick, groupStatusLabel, CopyableTable, DURATIONS, FACILITIES, Modal, PROVIDERS, S, STATUS_META, T, providerOfFacility, emailColor, fmtCost, fmtDate, fmtDateShort, fmtTime, isAdminBooking, newId, parseGroupRef, todayKey, venueFacilities, visibleFacilities } from "./core.jsx";
+import { Badge, rowSelect, isMultiSelectClick, groupStatusLabel, CopyableTable, DURATIONS, FACILITIES, Modal, PROVIDERS, S, STATUS_META, T, isCouncilField, providerOfFacility, emailColor, fmtCost, fmtDate, fmtDateShort, fmtTime, isAdminBooking, newId, parseGroupRef, todayKey, venueFacilities, visibleFacilities } from "./core.jsx";
 import { DateRangePicker } from "./modals.jsx";
 import { isLive } from "../statuses.js";
 // `canon` folds a (lowercased) email onto its canonical primary so linked
@@ -642,6 +642,45 @@ export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkA
   );
 }
 
+// Admin rates: every council field shares one day / evening rate (facilityRates.council), with
+// specific cases for single fields, and the council's fees (a one-off application fee and a fee
+// per field, settings "council_fees"). Used by the Summary tab's Edit Rates and the Rates modal.
+export function CouncilRatesCard({ facilityRates = {}, councilFees = { application: 0, perField: 0 }, onUpdateFacilityRate, onSetFacilityRate, onUpdateCouncilFees }) {
+  const cfs = visibleFacilities().filter(isCouncilField);
+  if (!cfs.length && !onUpdateCouncilFees) return null;
+  const c = facilityRates.council || {}, specific = cfs.filter(f => facilityRates[f.id]?.specific), others = cfs.filter(f => !facilityRates[f.id]?.specific);
+  const num = (val, onChange, label) => (
+    <label style={{display:"flex",alignItems:"center",gap:6}}>
+      <span style={{fontSize:11,fontWeight:600,color:T.muted,flex:1,whiteSpace:"nowrap"}}>{label}</span><span style={{fontSize:11,color:T.faint}}>$</span>
+      <input type="number" min="0" step="0.5" value={val||""} placeholder="0" onChange={e=>onChange(e.target.value)} aria-label={label}
+        style={{width:60,padding:"3px 6px",borderRadius:6,border:`1.5px solid ${T.line}`,fontSize:13,textAlign:"right",fontFamily:"inherit",outline:"none"}}/>
+    </label>);
+  return (
+    <div style={{marginTop:10,background:T.surface,border:"1.5px solid #99f6e4",borderRadius:10,padding:"10px 12px",display:"flex",flexDirection:"column",gap:8}}>
+      <div style={{fontSize:12,fontWeight:700,color:"#115e59"}}>🏛 Council fields <span style={{fontWeight:400,color:T.muted}}>· one rate for all {cfs.length} council field{cfs.length!==1?"s":""}</span></div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:8}}>
+        {num(c.day, v=>onUpdateFacilityRate("council","day",v), "Day /hr")}
+        {num(c.evening, v=>onUpdateFacilityRate("council","evening",v), "Evening /hr")}
+        {onUpdateCouncilFees&&num(councilFees.application, v=>onUpdateCouncilFees({...councilFees,application:parseFloat(v)||0}), "Application fee (one-off)")}
+        {onUpdateCouncilFees&&num(councilFees.perField, v=>onUpdateCouncilFees({...councilFees,perField:parseFloat(v)||0}), "Fee per field")}
+      </div>
+      {specific.map(f => { const r = facilityRates[f.id]; return (
+        <div key={f.id} style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",borderTop:`1px solid ${T.lineSoft}`,paddingTop:6}}>
+          <span style={{fontSize:12,fontWeight:600,color:T.ink,flex:"1 1 160px",minWidth:0}}>{f.name}</span>
+          {num(r.day, v=>onUpdateFacilityRate(f.id,"day",v), "Day /hr")}
+          {num(r.evening, v=>onUpdateFacilityRate(f.id,"evening",v), "Evening /hr")}
+          {onSetFacilityRate&&<button type="button" onClick={()=>onSetFacilityRate(f.id,null)} title="Back to the council fields rate" aria-label={`Remove the specific rate for ${f.name}`} style={{border:"none",background:"none",color:T.danger,cursor:"pointer",fontSize:13}}>✕</button>}
+        </div>); })}
+      {onSetFacilityRate&&others.length>0&&(
+        <select value="" aria-label="Add a specific council field" onChange={e=>{ if(e.target.value) onSetFacilityRate(e.target.value,{ day:+c.day||0, evening:+c.evening||0, specific:true }); }}
+          style={{alignSelf:"flex-start",padding:"3px 6px",borderRadius:6,border:"1.5px dashed #99f6e4",fontSize:12,fontFamily:"inherit",color:"#115e59",background:T.surface}}>
+          <option value="">＋ Specific case for a field…</option>
+          {others.map(f=><option key={f.id} value={f.id}>{f.name}</option>)}
+        </select>)}
+    </div>
+  );
+}
+
 // ─── Pricing conditions ─────────────────────────────────────────────────────
 // A condition pins a booker's rate for one facility over a date range. All
 // conditions are stored even when they overlap/conflict; at price time the
@@ -650,9 +689,16 @@ export function ScheduleSummaryModal({ bookings, isAdmin, loggedInEmail, onBulkA
 // { id, bookerEmail, facilityId, period:"day"|"evening"|"both",
 //   dayRate, eveningRate, dateFrom, dateTo, locked, source, createdAt }
 export function defaultFacRates(facilityRates, facId) {
+  // Council fields share one rate (facilityRates.council, $0 day and evening by default);
+  // a field's own entry applies only when it's marked as a specific case.
+  const fac = FACILITIES.find(f => f.id === facId);
+  if (isCouncilField(fac)) {
+    const own = (facilityRates || {})[facId], c = (own && typeof own === "object" && own.specific) ? own : ((facilityRates || {}).council || {});
+    return { day: +c.day || 0, evening: +c.evening || 0 };
+  }
   // A facility can carry its own default $/hr (a ground hired at a flat rate); otherwise
   // the house default applies. Either way an explicit admin-set rate still wins.
-  const own = FACILITIES.find(f => f.id === facId)?.defaultRate;
+  const own = fac?.defaultRate;
   const dflt = own != null ? { day: own, evening: own } : { day: 0, evening: 50 };
   const r = (facilityRates || {})[facId];
   if (!r) return dflt;

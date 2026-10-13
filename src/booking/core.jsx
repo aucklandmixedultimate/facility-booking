@@ -3,6 +3,8 @@ import { createClient } from "@supabase/supabase-js";
 import { getActor } from "../actor.js";
 import { useState, useRef, useEffect } from "react";
 import { escHtml } from "../html.js";
+import { councilBookingType, participantText, seasonalAppsOpen } from "../councilBooking.js";
+import { councilState } from "../councilSeasons.js";
 import { isClosed, isAmuaReview, isLegacyStatus, normaliseStatus, stepOf, stepTag, WORKFLOW_STEPS, VENDOR_QUEUE_STATUSES } from "../statuses.js";
 // ─── LOGO ─────────────────────────────────────────────────────────────────────
 export const LOGO_SRC = logoUrl;
@@ -257,6 +259,12 @@ const COMMUNITY_RATES = { "ani-epsom": 20, "ani-lower": 20 };
 // Contact details AMUA has reviewed before its first request to a community facility
 // (settings "provider_contact_reviews": { providerId: {email, phone, contact_name, by, at} }).
 export let _contactReviews = {};
+// Council fees (settings "council_fees"): a one-off fee per application and a fee per field
+// applied for. Both $0 until the council charges again.
+export let _councilFees = { application: 0, perField: 0 };
+// Booker info (settings "booker_info", by canonical email): { level: "junior" | "senior",
+// grade, teams, players, teamNames } — the council form's participant details.
+export let _bookerInfo = {};
 const isContactReviewed = pid => !!_contactReviews[pid];
 // invoiced is an orthogonal billing flag (booking.invoiced boolean), not a workflow status.
 export const INVOICED_META = {bg:"#f5f3ff",border:"#7c3aed",text:"#5b21b6",dot:"#7c3aed",label:"🧾 Invoiced"};
@@ -353,12 +361,13 @@ export const PROVIDERS = {
 // Each becomes a facility at the "<provider>|<park>" venue. Plain council parks use the
 // Auckland Council provider; a council ground run by a club/trust/CCO gets that operator as
 // its provider (kind council_private), so the booking walks the operator + council steps.
-// The council's booking portal lists its sports-field permit (SSPPERMITBK) at $10 per field
-// per application, paid later. The fee stays "pending" while bookings wait with AMUA; it's
+// Council fees come from settings "council_fees" (_councilFees): a one-off application fee
+// plus a fee per field, paid later. The fee stays "pending" while bookings wait with AMUA; it's
 // fixed when AMUA sends a batch of applications to the council (handleSendToCouncil).
 // Auckland Council's online sports-field application (the form the council extension fills).
 export const COUNCIL_APPLICATION_URL = "https://onlineservices.aucklandcouncil.govt.nz/councilonline/application/sportapplication?bookingApplicationType=SEASONAL_ALL_SPORTS_PARKS&productCode=SSPPERMITBK";
-export const COUNCIL_APPLICATION_FEE = 10;
+// "$0 application + $0 per field": the council fee, for labels.
+export const councilFeeLabel = () => `$${+_councilFees.application || 0} per application + $${+_councilFees.perField || 0} per field`;
 // Stamped in system_notes when a booking is sent: [COUNCIL_APP <app id> <sent at> fee=<share>].
 export const COUNCIL_APP_RE = /\[COUNCIL_APP (\S+) (\S+) fee=([\d.]+)\]/;
 export function parseCouncilApp(sysNotes) {
@@ -408,6 +417,8 @@ export function linkCouncilChildren(newDrafts, existing, canon) {
   });
   return Object.entries(patches).map(([id, system_notes]) => ({ id, system_notes }));
 }
+// An Auckland Council field (priced as one "council" rate, with optional per-field cases).
+export const isCouncilField = f => f?.provider === "akl_council";
 export function isCouncilBooking(b) { const wf = workflowOf(b.facility_id); return wf === "council" || wf === "council_private"; }
 // Ready to go to the council: a plain council booking once AMUA has it, or a council +
 // operator booking once the operator has given permission (it's then at council_apply).
@@ -419,7 +430,7 @@ export function canSendToCouncil(b) {
 // The batch as the council form wants it, for the AMUA Council Application extension
 // ("📋 Copy for council form"): one Park details block per park with its fields, date
 // range and per-weekday times, plus AMUA's organisation and contacts (AMUA details).
-export function buildCouncilPayload(bkgs, approxPlayers = {}) {
+export function buildCouncilPayload(bkgs, approxPlayers = {}, allBookings = bkgs) {
   const hh = h => `${String(Math.floor(h)).padStart(2,"0")}:${String(Math.round((h % 1) * 60)).padStart(2,"0")}`;
   const DAYS = ["sun","mon","tue","wed","thu","fri","sat"];
   const parks = {};
@@ -435,15 +446,20 @@ export function buildCouncilPayload(bkgs, approxPlayers = {}) {
   });
   const list = Object.values(parks).map(p => {
     p.dates.sort();
-    const players = [...p.bookers].reduce((n, e) => n + (parseInt(approxPlayers[e], 10) || parseInt(AMUA_INFO.council?.playersPerTeam, 10) || 0), 0);
+    const info = e => _bookerInfo[e] || {};
+    const playersOf = e => parseInt(info(e).players, 10) || parseInt(approxPlayers[e], 10) || parseInt(AMUA_INFO.council?.playersPerTeam, 10) || 0;
+    const players = [...p.bookers].reduce((n, e) => n + playersOf(e), 0);
+    const teams = [...p.bookers].reduce((n, e) => n + (parseInt(info(e).teams, 10) || 1), 0);
     return { region: p.region, park: p.park, fields: p.fields, firstDate: p.dates[0], lastDate: p.dates[p.dates.length - 1], dates: p.dates,
       days: Object.fromEntries(Object.entries(p.days).map(([d, t]) => [d, { start: hh(t.start), end: hh(t.end) }])),
-      teams: p.bookers.size, players: players || null, bookingIds: p.bookingIds };
+      teams, players: players || null, participants: [...p.bookers].map(e => bookerParticipant(e, playersOf(e) || null)), bookingIds: p.bookingIds };
   });
   const ct = AMUA_INFO.contacts || {};
   return { v: 1, source: "amua-facility-booking", createdAt: new Date().toISOString(),
     feeEstimate: councilFeeSplit(bkgs).total,
-    bookingType: list.every(p => p.dates.length === 1) ? "casual" : "seasonal",
+    // Seasonal or casual (councilTypeOf); a batch should be one type — the batch panel splits them.
+    bookingType: bkgs.some(b => councilTypeOf(b, allBookings) === "seasonal") ? "seasonal" : "casual",
+    participantInfo: [...new Set(list.flatMap(p => p.participants))].join(" "),
     purpose: "training", sport: "Other",
     activityName: `Training - ${AMUA_INFO.name}`,
     org: { name: AMUA_INFO.name, orgType: AMUA_INFO.council?.orgType || "Club/Team", rso: AMUA_INFO.council?.rso || "",
@@ -451,24 +467,43 @@ export function buildCouncilPayload(bkgs, approxPlayers = {}) {
       primary: ct.operations || {}, secondary: ct.secondary || {}, keyHolder: ct.keyHolder || {} },
     parks: list };
 }
-// Split a batch's fee: each field applied for costs COUNCIL_APPLICATION_FEE, shared equally
+// Split a batch's fee: each field applied for costs the per-field fee, shared equally
 // by the bookers applying for it; a booker's share is spread over their bookings on it.
+// The one-off application fee is shared equally by the batch's bookers, the same way.
 export function councilFeeSplit(bkgs) {
   const canon = e => { const x = (e || "").toLowerCase(); return _emailAliases[x] || x; };
+  const perField = +_councilFees.perField || 0, application = +_councilFees.application || 0;
   const byField = {};
   bkgs.forEach(b => (byField[b.facility_id] ||= []).push(b));
-  const fees = {}, byBooker = {};
-  Object.values(byField).forEach(list => {
+  const raw = {}, byBooker = {};
+  const charge = (list, amount) => {
     const groups = {};
     list.forEach(b => (groups[canon(b.email)] ||= []).push(b));
-    const per = COUNCIL_APPLICATION_FEE / Object.keys(groups).length;
+    const per = amount / Object.keys(groups).length;
     Object.entries(groups).forEach(([who, bs]) => {
       byBooker[who] = (byBooker[who] || 0) + per;
-      bs.forEach(b => { fees[b.id] = Math.round(per / bs.length * 10000) / 10000; });
+      bs.forEach(b => { raw[b.id] = (raw[b.id] || 0) + per / bs.length; });
     });
-  });
+  };
+  Object.values(byField).forEach(list => charge(list, perField));
+  if (bkgs.length) charge(bkgs, application);
+  const fees = Object.fromEntries(bkgs.map(b => [b.id, Math.round((raw[b.id] || 0) * 10000) / 10000]));
   const fields = Object.keys(byField).length;
-  return { fees, byBooker, fields, total: fields * COUNCIL_APPLICATION_FEE };
+  return { fees, byBooker, fields, total: bkgs.length ? fields * perField + application : 0 };
+}
+// Seasonal or casual council application for booking `b` (src/councilBooking.js): seasonal
+// while the council's seasonal applications are open, otherwise casual for a booker with
+// fewer than 10 live council bookings in the booking's financial year.
+export function councilTypeOf(b, bookings = [], date = new Date()) {
+  const canon = e => { const x = (e || "").toLowerCase(); return _emailAliases[x] || x; };
+  const who = canon(b.email);
+  const mine = bookings.filter(x => !isClosed(x.status) && canon(x.email) === who && isCouncilBooking(x));
+  return councilBookingType(b, mine, { appsOpen: seasonalAppsOpen(councilState(date).now), canon });
+}
+// The council form's participant line for a booker (their booker info, else a player count).
+export function bookerParticipant(email, fallbackPlayers = null) {
+  const x = (email || "").toLowerCase(), info = _bookerInfo[_emailAliases[x] || x] || _bookerInfo[x] || {};
+  return participantText(info, fallbackPlayers);
 }
 const COUNCIL_COLORS = ["#0d9488","#0891b2","#7c3aed","#be185d","#b45309","#15803d","#4338ca","#9f1239"];
 // Venues previewed from the 📍 Fields menu's "All venues (top rated)" list: My fields
@@ -2020,6 +2055,8 @@ export function setModuleState(patch) {
   if ("_bookerContacts" in patch) _bookerContacts = patch._bookerContacts;
   if ("_emailColorOverrides" in patch) _emailColorOverrides = patch._emailColorOverrides;
   if ("_contactReviews" in patch) _contactReviews = patch._contactReviews;
+  if ("_councilFees" in patch) _councilFees = patch._councilFees;
+  if ("_bookerInfo" in patch) _bookerInfo = patch._bookerInfo;
   if ("_activeVenue" in patch) _activeVenue = patch._activeVenue;
   if ("_bookerEmails" in patch) _bookerEmails = patch._bookerEmails;
   if ("_vendorEmails" in patch) _vendorEmails = patch._vendorEmails;
