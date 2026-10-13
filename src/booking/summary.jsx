@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef, Fragment } from "react";
-import { AMUA_INFO, Badge, vendorVarianceText, COUNCIL_APPLICATION_FEE, CopyableTable, DURATIONS, FACILITIES, PROVIDERS, RECIPIENT_CODE_AMUA, S, cleanRecipientCode, deriveRecipientCode, emailColor, facCellLabel, fmt24, fmtCost, fmtDate, fmtDateShort, fmtTime, genBankRef, isAdminBooking, parseBilledSnapshot, parseCouncilApp, parseCpsaResolution, parseFunctionCost, parseSlotLink, parseSplit, providerOfFacility, todayKey, visibleFacilities, workflowOf } from "./core.jsx";
-import { OneOffModal, PatternModal, PricingConditionsManager, buildOverlapPatternMap, defaultFacRates, resolveRates } from "./schedule.jsx";
+import { AMUA_INFO, Badge, isCouncilField, vendorVarianceText, CopyableTable, DURATIONS, FACILITIES, PROVIDERS, RECIPIENT_CODE_AMUA, S, cleanRecipientCode, deriveRecipientCode, emailColor, facCellLabel, fmt24, fmtCost, fmtDate, fmtDateShort, fmtTime, genBankRef, isAdminBooking, parseBilledSnapshot, parseCouncilApp, parseCpsaResolution, parseFunctionCost, parseSlotLink, parseSplit, providerOfFacility, todayKey, visibleFacilities, workflowOf } from "./core.jsx";
+import { CouncilRatesCard, OneOffModal, PatternModal, PricingConditionsManager, buildOverlapPatternMap, defaultFacRates, resolveRates } from "./schedule.jsx";
 import { InvoiceOptionRow, InvoicePill, invLineLabel, renderInvoiceDocHtml } from "./billingDocs.jsx";
 import { isClosed } from "../statuses.js";
 import { csvCell } from "../html.js";
-export function SummaryTab({ bookings, loggedInEmail, onRemoveBookings, facilityRates = {}, pricingConditions = [], onAddPricingCondition, onQueuePricingRule, onUpdatePricingCondition, onRemovePricingCondition, isAdmin = false, approxPlayers = {}, onUpdateApproxPlayers, approxDurations = {}, onUpdateApproxDuration, onUpdateFacilityRate, pricingMode = "hourly", onSetPricingMode, onProposeMerge, onBulkApply, onMarkInvoiced, onMarkAdjustmentSettled, bookerFilter=new Set(), profiles={}, emailAliases={}, aliasNames={}, onCreateOfficialInvoice, onEmailInvoice, loadRequest=null }) {
+export function SummaryTab({ bookings, loggedInEmail, onRemoveBookings, facilityRates = {}, pricingConditions = [], onAddPricingCondition, onQueuePricingRule, onUpdatePricingCondition, onRemovePricingCondition, isAdmin = false, approxPlayers = {}, onUpdateApproxPlayers, approxDurations = {}, onUpdateApproxDuration, onUpdateFacilityRate, onSetFacilityRate, councilFees = { application: 0, perField: 0 }, onUpdateCouncilFees, pricingMode = "hourly", onSetPricingMode, onProposeMerge, onBulkApply, onMarkInvoiced, onMarkAdjustmentSettled, bookerFilter=new Set(), profiles={}, emailAliases={}, aliasNames={}, onCreateOfficialInvoice, onEmailInvoice, loadRequest=null }) {
   const now = new Date();
   const thisYear = now.getFullYear();
 
@@ -378,10 +378,10 @@ export function SummaryTab({ bookings, loggedInEmail, onRemoveBookings, facility
           const k = b.facility_id; const fac = FACILITIES.find(f => f.id === k);
           g[k] ||= { desc: `Council application fee – ${fac?.name || k}`, facilityId: k, detail: "", hours: null, rate: null, fixedPrice: true, cost: 0, apps: new Set() };
           g[k].cost += app.fee; g[k].apps.add(app.id); return g; }, {}))
-          .map(({ apps, ...l }) => ({ ...l, cost: Math.round(l.cost * 100) / 100, detail: `$${COUNCIL_APPLICATION_FEE} per field per application, shared · ${[...apps].join(", ")}` }))
+          .map(({ apps, ...l }) => ({ ...l, cost: Math.round(l.cost * 100) / 100, detail: `Council fee, shared · ${[...apps].join(", ")}` }))
       : feeBkgs.map(({ b, app }) => ({ date: b.date, facilityId: b.facility_id, hours: null, rate: null, fixedPrice: true,
           desc: `Council application fee · ${FACILITIES.find(f => f.id === b.facility_id)?.name || b.facility_id}`,
-          detail: `Application ${app.id} ($${COUNCIL_APPLICATION_FEE} per field, shared)`, cost: Math.round(app.fee * 100) / 100 }));
+          detail: `Application ${app.id} (council fee, shared)`, cost: Math.round(app.fee * 100) / 100 }));
     return [...buildInvoiceLinesCore(bkgs, detail), ...feeLines];
   }
   function buildInvoiceLinesCore(bkgs, detail) {
@@ -906,7 +906,7 @@ export function SummaryTab({ bookings, loggedInEmail, onRemoveBookings, facility
             <div style={{ background:"#f8fafc", border:"1.5px solid #e0e7ff", borderRadius:12, padding:14, marginBottom:14 }}>
               <div style={{ fontSize:12, color:"#64748b", marginBottom:10 }}>Day rate = before 5:30 pm · Evening rate = 5:30 pm onwards</div>
               <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))", gap:10 }}>
-                {visibleFacilities().map(fac => {
+                {visibleFacilities().filter(fac=>!isCouncilField(fac)).map(fac => {
                   const r = typeof facilityRates[fac.id]==="object" ? facilityRates[fac.id] : { day: facilityRates[fac.id]||0, evening: 50 };
                   const day = r.day ?? 0, evening = r.evening ?? 50;
                   const rateRow = (label, color, type, val) => (
@@ -933,6 +933,7 @@ export function SummaryTab({ bookings, loggedInEmail, onRemoveBookings, facility
                   );
                 })}
               </div>
+              <CouncilRatesCard facilityRates={facilityRates} councilFees={councilFees} onUpdateFacilityRate={onUpdateFacilityRate} onSetFacilityRate={onSetFacilityRate} onUpdateCouncilFees={onUpdateCouncilFees}/>
             </div>
           )}
           {isAdmin && onAddPricingCondition && (

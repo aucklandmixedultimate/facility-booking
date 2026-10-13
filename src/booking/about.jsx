@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { councilState, allPhases, fmtDay, fmtRange, COUNCIL_LINKS, COUNCIL_CONTACTS } from "../councilSeasons.js";
-import { Badge, COUNCIL_APPLICATION_FEE, STATUS_META, stepLabel, venueFacilities } from "./core.jsx";
+import { Badge, councilFeeLabel, STATUS_META, stepLabel, venueFacilities } from "./core.jsx";
 import { WORKFLOW_STEPS } from "../statuses.js";
 import cornwallMap from "../assets/cornwall-park-fields.webp";
 import councilMap from "../assets/council-fields-map.webp";
@@ -86,7 +86,7 @@ export function AboutTab() {
         {howTab==="council"&&(<>
           <p style={{margin:"0 0 12px",fontSize:13,color:"#475569"}}>
             Auckland Council parks are booked through the council's online services portal. AMUA batches its bookers' council fields into one application,
-            and the council charges <b>${COUNCIL_APPLICATION_FEE} per field per application</b>, split between the bookers sharing each field. Pick fields on the{" "}
+            and the council's fee (currently <b>{councilFeeLabel()}</b>) is split between the bookers sharing each field. Applications go in as <b>seasonal</b> while the council's seasonal applications are open; otherwise a booker with fewer than 10 council bookings in the financial year (1 July – 30 June) applies as <b>casual</b>. Pick fields on the{" "}
             <a href={import.meta.env.BASE_URL+"vetting.html"} style={link}>All Auckland fields</a> page (rate them, then mark them bookable in 📌 My fields); they then appear here under
             Vendor → 📍 Location.
           </p>

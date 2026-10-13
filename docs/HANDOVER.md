@@ -146,13 +146,25 @@ Things the picture shows:
 | `set_my_council_facilities()` | Council fields | Lets bookers save their own My fields list. |
 | `is_admin()` | policies | `app_metadata.role = 'admin'`. |
 
+### Council applications: seasonal or casual
+
+`src/councilBooking.js` decides it per booking (`councilTypeOf` in `core.jsx`): **seasonal** while
+the council's seasonal applications are open (an `*_apps` phase in `councilSeasons.js`);
+otherwise **casual** for a booker with fewer than 10 live council bookings in the booking's
+financial year (1 July – 30 June), seasonal from 10 on. The Admin batch panel splits a batch by
+type (one application each), and the extension payload carries `bookingType`, each park's
+`participants` and `participantInfo` ("Junior (high school) mixed ultimate frisbee: 1 team,
+25 players. Teams: Matchbox.") from `booker_info`.
+
 ### `settings` keys
 
 - **Booking site:**
-  - Rates and pricing: `facility_rates`, `pricing_conditions`, `approx_players`,
-    `approx_durations`.
-  - People: `email_aliases`, `alias_names`, `booker_seasons`, `amua_org`.
-  - Council and contacts: `council_outcomes`, `provider_contact_reviews`.
+  - Rates and pricing: `facility_rates` (council fields share `council`; a field's own entry
+    counts only with `specific: true`), `pricing_conditions`, `approx_players`, `approx_durations`.
+  - People: `email_aliases`, `alias_names`, `booker_seasons`, `booker_info` (council participant
+    details: junior / senior, grade, teams, players, team names), `amua_org`.
+  - Council and contacts: `council_outcomes`, `provider_contact_reviews`, `council_fees`
+    (`application` one-off and `perField`, both $0 for now).
   - `log_retention_months`.
 - **Council fields:** `council_facilities` (also read by the booking site), `council_only_parks`,
   `council_offsets`, `operator_relations`, `vet_park_views`, `vet_park_activity`.

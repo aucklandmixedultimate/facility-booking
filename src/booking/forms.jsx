@@ -1,5 +1,5 @@
 import { useState, useRef, Fragment } from "react";
-import { T, parseVendorVariance, setVendorVariance, vendorVarianceText, stepLabel, BILLED_RE, Badge, CAL_SLOTS, CAL_START, CAL_TOTAL, DAY_EVENING_CUTOFF, DURATIONS, EmailChip, FACILITIES, FACILITY_TINT, FLOODLIT_FIELD_ID, FacilityOptions, INVOICED_META, Modal, ProviderVenuePicker, buildCommunityRequestItem, vendorRequestItems, REVIEW_STATUSES, S, SLOTS_PER_HOUR, SLOT_HOURS, START_TIMES, STATUS_META, addDays, councilContactOk, emailColor, facColLabel, facShort, fmtCost, fmtDate, fmtDuration, fmtLoggedAt, fmtRefDate, fmtTime, fmtTimeShort, getCrossFacilityOverlaps, getSameFacilityOverlaps, isAdminBooking, newGroupRef, newId, parseCouncilInfo, parseFunctionCost, parseGroupRef, parseGtecSnapshot, parseMismatchNote, parseSlotLink, parseSplit, setCouncilInfo, setFunctionCost, setGroupRef, setSplit, slotGroupMembers, slotGroupName, splitReason, stripMismatchNote, timeOverlaps, todayKey, useMobile, vendorShortFor, venueFacilities, workflowOf, isDraftItem } from "./core.jsx";
+import { T, parseVendorVariance, setVendorVariance, vendorVarianceText, stepLabel, BILLED_RE, Badge, CAL_SLOTS, CAL_START, CAL_TOTAL, DAY_EVENING_CUTOFF, DURATIONS, EmailChip, FACILITIES, FACILITY_TINT, FLOODLIT_FIELD_ID, FacilityOptions, INVOICED_META, Modal, ProviderVenuePicker, _bookerInfo, bookerParticipant, buildCommunityRequestItem, vendorRequestItems, REVIEW_STATUSES, S, SLOTS_PER_HOUR, SLOT_HOURS, START_TIMES, STATUS_META, addDays, councilContactOk, emailColor, facColLabel, facShort, fmtCost, fmtDate, fmtDuration, fmtLoggedAt, fmtRefDate, fmtTime, fmtTimeShort, getCrossFacilityOverlaps, getSameFacilityOverlaps, isAdminBooking, newGroupRef, newId, parseCouncilInfo, parseFunctionCost, parseGroupRef, parseGtecSnapshot, parseMismatchNote, parseSlotLink, parseSplit, setCouncilInfo, setFunctionCost, setGroupRef, setSplit, slotGroupMembers, slotGroupName, splitReason, stripMismatchNote, timeOverlaps, todayKey, useMobile, vendorShortFor, venueFacilities, workflowOf, isDraftItem } from "./core.jsx";
 import { OverlapWarning } from "./modals.jsx";
 import { FacilityPicker } from "./facilityPicker.jsx";
 import { GUEST } from "../actor.js";
@@ -836,7 +836,8 @@ export function BookingForm({ booking, allBookings, onAddToCart, onClose, isAdmi
   const [slots, setSlots] = useState(initSlots);
   // Council application details (council fields only): see parseCouncilInfo.
   const ci0 = parseCouncilInfo(booking?.system_notes) || {};
-  const [cPlayers, setCPlayers] = useState(ci0.players ? String(ci0.players) : "");
+  // Players default to the booker's council details (User Management → Council).
+  const [cPlayers, setCPlayers] = useState(ci0.players ? String(ci0.players) : String(_bookerInfo[(booking?.email || loggedInEmail || "").toLowerCase()]?.players || ""));
   const [cUse, setCUse]         = useState(ci0.use || "training");
   const [cGrade, setCGrade]     = useState(ci0.grade || "");
   const [cNotes, setCNotes]     = useState(ci0.notes || "");
@@ -1126,6 +1127,7 @@ export function BookingForm({ booking, allBookings, onAddToCart, onClose, isAdmi
           <div style={{border:"1.5px solid #99f6e4",background:"#f0fdfa",borderRadius:10,padding:"10px 12px",display:"flex",flexDirection:"column",gap:8}}>
             <div style={{fontWeight:700,fontSize:13,color:"#115e59"}}>🏛 Council application details</div>
             <div style={{fontSize:12,color:"#475569"}}>AMUA applies to the council for this field and names you and your team on the application. Fields marked * are required.</div>
+            <div style={{fontSize:12,color:"#0f766e"}}>👥 {bookerParticipant(email, cPlayers)}</div>
             <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",fontSize:13}}>
               <span>📇 Key holder (your council contact) *: {okC ? <b style={{color:"#15803d"}}>✓ on file</b> : <b style={{color:"#b91c1c"}}>missing — name and phone needed</b>}</span>
               {onEditContact && <button type="button" onClick={()=>onEditContact(email)} style={S.btn({padding:"4px 10px",fontSize:12,background:okC?"#fff":"#0d9488",color:okC?"#0f766e":"#fff",border:"1.5px solid #0d9488"})}>{okC ? "Edit council contact" : "📇 Fill in council contact"}</button>}
