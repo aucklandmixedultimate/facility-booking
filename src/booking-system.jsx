@@ -1371,6 +1371,8 @@ export default function App() {
     persistSetting("pricing_conditions", next);
   }
   function addPricingCondition(cond) { savePricingConditions([...pricingConditions, cond]); }
+  // A pricing rule from a booking group's action bar: queued in the cart, added when it's submitted.
+  function queuePricingRule(cond) { setCart(c => [...c, { pricingRule: cond, name: "Pricing rule", email: "" }]); showToast("Pricing rule queued in cart."); }
   function updatePricingCondition(id, patch) { savePricingConditions(pricingConditions.map(c=>c.id===id?{...c,...patch}:c)); }
   function removePricingCondition(id) { savePricingConditions(pricingConditions.filter(c=>c.id!==id)); }
 
@@ -1481,26 +1483,34 @@ export default function App() {
     showToast(`Linked ${list.length} booking${list.length!==1?"s":""} to GTEC${remember?" — future syncs will auto-link this org":""}.`);
   }
 
-  async function handleBulkApply({bkgs, bulkTime, bulkDur, bulkFac, cancelFrom}) {
+  // Queues `patch` on bookings `ids` as one cart edit per booker (nothing is written until the
+  // cart is submitted). Each starts from the booking's latest version in the cart, so edits
+  // queued one after another (time, then reassign…) add up instead of undoing each other.
+  function queueEdits(ids, patch, extra = {}) {
+    setCart(c => {
+      const latest = id => { let d = bookings.find(b => b.id === id);
+        c.forEach(it => { if (isDraftItem(it)) it.drafts.forEach(x => { if (x.id === id) d = x; }); }); return d; };
+      const byEmail = {};
+      ids.map(latest).filter(Boolean).forEach(b => { const d = { ...b, ...patch, updated_at: new Date().toISOString() }, k = (d.email||"").toLowerCase();
+        (byEmail[k] ||= { name: d.name, email: d.email, drafts: [] }).drafts.push(d); });
+      return [...c, ...Object.values(byEmail).map(g => ({ ...g, isMultiEdit: true, sourceIds: g.drafts.map(d => d.id), ...extra }))];
+    });
+  }
+  function handleBulkApply({bkgs, bulkTime, bulkDur, bulkFac, cancelFrom}) {
     const toCancel = cancelFrom ? bkgs.filter(b=>b.date>=cancelFrom) : [];
     const toUpdate = bkgs.filter(b=>!cancelFrom||b.date<cancelFrom);
-    // Apply edits immediately. Cancellations are NOT deleted here — they're routed
-    // through the removal (email) cart so the booker gets a cancellation email on submit.
+    // Edits go to the cart (saved, and the booker emailed, when it's submitted). Cancellations
+    // go to the removal cart so the booker gets a cancellation email on submit.
     // A field left undefined keeps each booking's own value (mixed groups).
     const patch={...(bulkTime!=null&&{start_hour:bulkTime}),...(bulkDur!=null&&{duration:bulkDur}),...(bulkFac&&{facility_id:bulkFac})};
     const changes=toUpdate.filter(b=>Object.entries(patch).some(([k,v])=>b[k]!==v));
-    if(changes.length>0){
-      try{
-        for(const b of changes) await sb.update("bookings",b.id,{...patch,updated_at:new Date().toISOString()});
-        await loadBookings();
-      }catch(e){showToast("Bulk apply failed: "+e.message,"error");return;}
-    }
+    if(changes.length>0) queueEdits(changes.map(b=>b.id), patch);
     if(toCancel.length>0){
       setDeleteQueue(prev => { const have=new Set(prev.map(b=>b.id)); return [...prev, ...toCancel.filter(b=>!have.has(b.id))]; });
       setShowDeleteCart(true);
     }
     const parts=[
-      changes.length>0&&`${changes.length} updated`,
+      changes.length>0&&`${changes.length} edit${changes.length!==1?"s":""} queued in cart`,
       toCancel.length>0&&`${toCancel.length} queued for removal`,
     ].filter(Boolean);
     showToast(parts.join(", ")||"Applied.");
@@ -1857,16 +1867,15 @@ export default function App() {
   // Reassign bookings to another booker (admin). Applied straight away, without emailing;
   // user_id is cleared so the previous booker can no longer manage them — the database
   // (supabase-setup.sql v4) links them to the new booker's account from the email.
-  async function handleBulkReassign(ids, { email, name }) {
+  // Reassigning is a cart edit too: the bookings move to the new booker when the cart is submitted.
+  function handleBulkReassign(ids, { email, name }) {
     const to = (email||"").trim().toLowerCase(); if (!/\S+@\S+\.\S+/.test(to)) return;
     ids = ids.filter(id => (bookings.find(b=>b.id===id)?.email||"").toLowerCase() !== to);
     if (!ids.length) { showToast("Those bookings are already with that booker."); return; }
-    const patch = { email: to, name: name || to.split("@")[0], user_id: null, updated_at: new Date().toISOString() };
-    const from = [...new Set(bookings.filter(b=>ids.includes(b.id)).map(b=>b.email))];
-    try { for (const id of ids) await sb.update("bookings", id, patch); await loadBookings(); }
-    catch(e){ showToast("Reassign failed: "+e.message, "error"); return; }
-    logActivity("booking_edit", { ids, reassigned_from: from, reassigned_to: to });
-    showToast(`${ids.length} booking${ids.length!==1?"s":""} reassigned to ${patch.name}.`);
+    const patch = { email: to, name: name || to.split("@")[0], user_id: null };
+    const moving = bookings.filter(b=>ids.includes(b.id));
+    queueEdits(ids, patch, { reassign: { from: [...new Set(moving.map(b=>b.email))], to } });
+    showToast(`Reassigning ${ids.length} booking${ids.length!==1?"s":""} to ${patch.name}: queued in cart.`);
   }
 
   // Resolve past bookings still awaiting approval. decisions: [{id, action, variance?}] with
@@ -2003,6 +2012,12 @@ export default function App() {
       if (!(await handleSave(allDrafts, name, email, { skipEmail: true }))) return;
       await savePreviewFields(allDrafts);
     }
+
+    // Reassignments ride the edits above; log who they moved from and to.
+    saveItems.filter(item => item.reassign).forEach(item => logActivity("booking_edit", { ids: item.sourceIds, reassigned_from: item.reassign.from, reassigned_to: item.reassign.to }));
+    // Pricing rules queued from a booking group's action bar.
+    const ruleItems = cart.filter(item => item.pricingRule);
+    if (ruleItems.length) savePricingConditions([...pricingConditions, ...ruleItems.map(item => item.pricingRule)]);
 
     // 1b. Shared-slot changes: insert the split's new booking, then rewrite every
     // member's link so the shares total 1 again.
@@ -2253,7 +2268,7 @@ export default function App() {
   // has its own location filter (default: every active venue except Cornwall Park).
   const listProps = { bookings, loading, isAdmin, isMobile, loggedInEmail, allClashes, bookerGroups, emailLegend, canonEmail, displayNameFor,
     aliasNames, emailAliases, facilityRates, knownBookers, listBookerFilter, setListBookerFilter, toggleBooker,
-    addPricingCondition, handleBulkApply, handleBulkReassign, handleBulkStatusChange, queueMultiForRemoval, setViewing };
+    addPricingCondition: queuePricingRule, handleBulkApply, handleBulkReassign, handleBulkStatusChange, queueMultiForRemoval, setViewing };
   const allListDefault = listVenues(activeFacilities()).map(v => v.key).filter(k => k !== defaultVenueKey());
   const allListShown = allListKeys ?? allListDefault;
   const allListOk = id => { const f = FACILITIES.find(x => x.id === id); if (!f || allListHidden.has(id)) return !f && allListShown === ALL_VENUES;
@@ -2478,12 +2493,12 @@ export default function App() {
 
         {tab==="list"&&bookingsLists}
 
-        {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<Suspense fallback={<TabLoading/>}><SummaryTab bookings={bookings} loggedInEmail={loggedInEmail} onRemoveBookings={queueMultiForRemoval} facilityRates={facilityRates} pricingConditions={pricingConditions} onAddPricingCondition={addPricingCondition} onUpdatePricingCondition={updatePricingCondition} onRemovePricingCondition={removePricingCondition} isAdmin={isAdmin} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onUpdateFacilityRate={updateFacilityRate} pricingMode={pricingMode} onSetPricingMode={setPricingMode} onProposeMerge={handleProposeMerge} onBulkApply={handleBulkApply} onMarkInvoiced={handleMarkInvoiced} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} bookerFilter={listBookerFilter} profiles={profiles} emailAliases={emailAliases} aliasNames={aliasNames} onCreateOfficialInvoice={handleCreateOfficialInvoice} onEmailInvoice={handleEmailInvoicePreview} loadRequest={summaryLoadRequest}/></Suspense>}</div>}
+        {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<Suspense fallback={<TabLoading/>}><SummaryTab bookings={bookings} loggedInEmail={loggedInEmail} onRemoveBookings={queueMultiForRemoval} facilityRates={facilityRates} pricingConditions={pricingConditions} onAddPricingCondition={addPricingCondition} onQueuePricingRule={queuePricingRule} onUpdatePricingCondition={updatePricingCondition} onRemovePricingCondition={removePricingCondition} isAdmin={isAdmin} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onUpdateFacilityRate={updateFacilityRate} pricingMode={pricingMode} onSetPricingMode={setPricingMode} onProposeMerge={handleProposeMerge} onBulkApply={handleBulkApply} onMarkInvoiced={handleMarkInvoiced} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} bookerFilter={listBookerFilter} profiles={profiles} emailAliases={emailAliases} aliasNames={aliasNames} onCreateOfficialInvoice={handleCreateOfficialInvoice} onEmailInvoice={handleEmailInvoicePreview} loadRequest={summaryLoadRequest}/></Suspense>}</div>}
         {tab==="billing"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<Suspense fallback={<TabLoading/>}><BillingTab billingRecords={billingRecords} onUpdateRecord={handleUpdateBillingRecord} onDeleteRecord={id=>setBillingRecords(prev=>prev.filter(r=>r.id!==id))} onCreateReceipt={handleCreateReceipt} onLoadToSummary={handleLoadBillingToSummary} isAdmin={isAdmin} loggedInEmail={loggedInEmail} emailAliases={emailAliases} aliasNames={aliasNames} driveEnabled={driveConfigured()} onDriveSync={handleDriveSync} onRenameBatch={handleRenameBatch} onDriveAttach={handleDriveAttachGtec} onEmailOfficial={handleEmailOfficialInvoices} onQueueInvoiceEmails={handleQueueInvoiceEmails} silentMode={silentMode} onToggleSilent={isAdmin?setSilentMode:undefined}/></Suspense>}</div>}
         {tab==="about"&&<div style={{padding:"8px 0"}}><Suspense fallback={<TabLoading/>}><AboutTab/></Suspense></div>}
         {tab==="allocation"&&isAdmin&&<div style={S.card}><Suspense fallback={<TabLoading/>}><CouncilAllocationTab outcomes={councilOutcomes} bookings={bookings} syncing={councilSyncing} syncLog={councilSyncLog} onSync={handleCouncilMailSync} portalSync={councilPortalSync} onApplyPortal={handleApplyPortal} onSaveOutcomes={saveCouncilOutcomes} onBulkStatusChange={handleBulkStatusChange} onQueueNotifications={queueNotifications} onLinkApp={handleLinkCouncilApp} aliasNames={aliasNames} loggedInEmail={loggedInEmail}/></Suspense></div>}
         {tab==="admin"&&isAdmin&&<div style={S.card}>
-          {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<Suspense fallback={<TabLoading/>}><AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onView={setViewing} onQueueDelete={queueForRemovalSilent} clashes={allClashes} deleteIds={new Set(deleteQueue.map(b=>b.id))} facilityRates={facilityRates} onResolveOldUnapproved={handleResolveOldUnapproved} onReassign={handleBulkReassign} bookers={knownBookers} approxPlayers={approxPlayers} onBulkApply={handleBulkApply} onSaveMismatch={handleSaveMismatch} onInformCpsa={setInformCpsaFor} onRequestRoom={setRoomRequestFor} onQueueNotifications={queueNotifications} onDropVendorRequest={dropVendorRequest} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} onLinkClash={handleLinkClashToGtec} loggedInEmail={loggedInEmail} syncResults={syncResults} onClearSyncResults={()=>setSyncResults([])} showSyncResults={showSyncPanel} onToggleSyncResults={()=>setShowSyncPanel(v=>!v)} bookerFilter={listBookerFilter} onToggleBooker={toggleBooker} onSetBookerFilter={setListBookerFilter} aliasNames={aliasNames} emailAliases={emailAliases} pricingConditions={pricingConditions} onAddPricingCondition={addPricingCondition} onUpdatePricingCondition={updatePricingCondition} onRemovePricingCondition={removePricingCondition} cpsaDeleteLog={cpsaDeleteLog} onClearDeleteLogEntry={id=>setCpsaDeleteLog(prev=>prev.filter(e=>e.id!==id))} onClearDeleteLog={()=>setCpsaDeleteLog([])} syncFeed={syncFeed} onPasteFeed={handlePasteFeed} cjrMonthUrl={cjrMonthUrl} onSendToCouncil={handleSendToCouncil}/></Suspense>}
+          {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<Suspense fallback={<TabLoading/>}><AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onView={setViewing} onQueueDelete={queueForRemovalSilent} clashes={allClashes} deleteIds={new Set(deleteQueue.map(b=>b.id))} facilityRates={facilityRates} onResolveOldUnapproved={handleResolveOldUnapproved} onReassign={handleBulkReassign} bookers={knownBookers} approxPlayers={approxPlayers} onBulkApply={handleBulkApply} onSaveMismatch={handleSaveMismatch} onInformCpsa={setInformCpsaFor} onRequestRoom={setRoomRequestFor} onQueueNotifications={queueNotifications} onDropVendorRequest={dropVendorRequest} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} onLinkClash={handleLinkClashToGtec} loggedInEmail={loggedInEmail} syncResults={syncResults} onClearSyncResults={()=>setSyncResults([])} showSyncResults={showSyncPanel} onToggleSyncResults={()=>setShowSyncPanel(v=>!v)} bookerFilter={listBookerFilter} onToggleBooker={toggleBooker} onSetBookerFilter={setListBookerFilter} aliasNames={aliasNames} emailAliases={emailAliases} pricingConditions={pricingConditions} onAddPricingCondition={addPricingCondition} onQueuePricingRule={queuePricingRule} onUpdatePricingCondition={updatePricingCondition} onRemovePricingCondition={removePricingCondition} cpsaDeleteLog={cpsaDeleteLog} onClearDeleteLogEntry={id=>setCpsaDeleteLog(prev=>prev.filter(e=>e.id!==id))} onClearDeleteLog={()=>setCpsaDeleteLog([])} syncFeed={syncFeed} onPasteFeed={handlePasteFeed} cjrMonthUrl={cjrMonthUrl} onSendToCouncil={handleSendToCouncil}/></Suspense>}
         </div>}
       </div>
 

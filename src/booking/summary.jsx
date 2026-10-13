@@ -4,7 +4,7 @@ import { OneOffModal, PatternModal, PricingConditionsManager, buildOverlapPatter
 import { InvoiceOptionRow, InvoicePill, invLineLabel, renderInvoiceDocHtml } from "./billingDocs.jsx";
 import { isClosed } from "../statuses.js";
 import { csvCell } from "../html.js";
-export function SummaryTab({ bookings, loggedInEmail, onRemoveBookings, facilityRates = {}, pricingConditions = [], onAddPricingCondition, onUpdatePricingCondition, onRemovePricingCondition, isAdmin = false, approxPlayers = {}, onUpdateApproxPlayers, approxDurations = {}, onUpdateApproxDuration, onUpdateFacilityRate, pricingMode = "hourly", onSetPricingMode, onProposeMerge, onBulkApply, onMarkInvoiced, onMarkAdjustmentSettled, bookerFilter=new Set(), profiles={}, emailAliases={}, aliasNames={}, onCreateOfficialInvoice, onEmailInvoice, loadRequest=null }) {
+export function SummaryTab({ bookings, loggedInEmail, onRemoveBookings, facilityRates = {}, pricingConditions = [], onAddPricingCondition, onQueuePricingRule, onUpdatePricingCondition, onRemovePricingCondition, isAdmin = false, approxPlayers = {}, onUpdateApproxPlayers, approxDurations = {}, onUpdateApproxDuration, onUpdateFacilityRate, pricingMode = "hourly", onSetPricingMode, onProposeMerge, onBulkApply, onMarkInvoiced, onMarkAdjustmentSettled, bookerFilter=new Set(), profiles={}, emailAliases={}, aliasNames={}, onCreateOfficialInvoice, onEmailInvoice, loadRequest=null }) {
   const now = new Date();
   const thisYear = now.getFullYear();
 
@@ -1746,7 +1746,7 @@ export function SummaryTab({ bookings, loggedInEmail, onRemoveBookings, facility
           onClose={()=>setPatternModal(null)}
           onBulkApply={args=>{onBulkApply&&onBulkApply(args);}}
           onRemove={onRemoveBookings}
-          onAddPricingRule={isAdmin?onAddPricingCondition:undefined}
+          onAddPricingRule={isAdmin?(onQueuePricingRule||onAddPricingCondition):undefined}
         />
       )}
       {oneOffModal && (
@@ -1755,7 +1755,7 @@ export function SummaryTab({ bookings, loggedInEmail, onRemoveBookings, facility
           isAdmin={isAdmin}
           canEdit={isAdmin || (oneOffModal.email||"").toLowerCase()===(loggedInEmail||"").toLowerCase()}
           onRemove={onRemoveBookings}
-          onAddPricingRule={isAdmin?onAddPricingCondition:undefined}
+          onAddPricingRule={isAdmin?(onQueuePricingRule||onAddPricingCondition):undefined}
           onClose={()=>setOneOffModal(null)}
         />
       )}
