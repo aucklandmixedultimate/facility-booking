@@ -13,6 +13,7 @@
 --   3. Bookers: booker_contacts, set_my_council_facilities()
 --   4. Council fields: field_reviews, field_flags, field_ratings, vetting_history
 --   5. settings_merge(): atomic partial updates of a settings value
+--   5b. gtec_feed: GTEC's calendar, pushed by the FacilityBook widget
 --   6. Making someone an admin (commented out)
 -- =============================================================================
 
@@ -513,10 +514,29 @@ $$;
 revoke all on function public.settings_merge(text, jsonb, text[]) from public, anon;
 grant execute on function public.settings_merge(text, jsonb, text[]) to authenticated;
 
+-- ── 5b. gtec_feed: GTEC's calendar, pushed by the FacilityBook widget ─────────────
+-- One row per month of GTEC's calendar feed (MonthCalendarEvents), written by the FacilityBook
+-- widget's "Sync from GTEC" button on GTEC's calendar page, where the feed can be read without
+-- a CORS relay. The booking site syncs any month pushed since its last good sync, and falls
+-- back to the pushed month when it can't read GTEC itself. Admins only: the events carry
+-- bookers' names and emails.
+create table if not exists public.gtec_feed (
+  month       text primary key check (month ~ '^[0-9]{4}-[0-9]{2}$'),   -- "2026-10"
+  events      jsonb not null default '[]'::jsonb,                      -- GTEC's events, as sent
+  fetched_at  timestamptz not null default now(),                      -- when the widget read GTEC
+  source      text not null default 'widget',
+  pushed_by   text                                                     -- first name, last initial
+);
+alter table public.gtec_feed enable row level security;
+drop policy if exists "gtec_feed admin all" on public.gtec_feed;
+create policy "gtec_feed admin all" on public.gtec_feed
+  for all to authenticated using (public.is_admin()) with check (public.is_admin());
+
 -- ── Version stamp ───────────────────────────────────────────────────────────────
+-- v10: gtec_feed (GTEC's calendar pushed by the FacilityBook widget). Admins only.
 -- v9: removed a policy that was created and then dropped, and the field_ratings guard (the
 -- table is created above). No data or permission changes.
-insert into public.schema_version (id, version, applied_at) values (1, 9, now())
+insert into public.schema_version (id, version, applied_at) values (1, 10, now())
 on conflict (id) do update set version = excluded.version, applied_at = now();
 
 -- ── 6. Making someone an admin ──────────────────────────────────────────────────
