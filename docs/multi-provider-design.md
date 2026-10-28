@@ -4,7 +4,8 @@ Status: **proposal** (phase 0 shipped; later phases need sign-off).
 > **Design history (2026-10).** Phase 0 is live: vendors are named per facility, one PO per vendor,
 > AMUA details are a setting, and council / community vendors come from Council fields' My fields.
 > Phase 1 (vendors stored in Supabase) is not built. Phase 3's email intake was superseded by
-> the in-browser Gmail read-only sync (`src/councilMail.js`, option D in §email intake). What runs
+> the in-browser Gmail read-only sync (`src/councilMail.js`, option D in §email intake), since
+> replaced by the council extension reading AMUA's applications from the council portal. What runs
 > today is described in [`HANDOVER.md`](HANDOVER.md).
 Scope: move from "one facility authority (GTEC), hard-coded" to "any number of
 providers, defined in Supabase", with automated intake from the Auckland Council
@@ -326,8 +327,8 @@ council icon. It signs in to Supabase with the AMUA admin Google account (PKCE v
    - the $10-per-field fee split between bookers.
 
    The applicant, contacts and council answers come from the **AMUA details** setting
-   (`amua_org`). The admin ticks the parks to include. The booking site's **📋 Copy for council
-   form** (`buildCouncilPayload`, same shape) plus the panel's Paste box remain as a fallback.
+   (`amua_org`). The admin ticks the parks to include. (The old copy-and-paste fallback was
+   removed.)
 2. **Fill each page.** **Fill this page** sets every control it recognises on the current
    page (by control name, matching dropdowns by label). It fires input/change/blur and
    waits for Orbeon's loading indicator between fields, because region → park → fields

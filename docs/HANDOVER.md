@@ -47,11 +47,11 @@ mindmap
       actor.js, people.js — who, privacy
       seasons.js, councilSeasons.js
       holidays.js, appnav.js, theme.css
-      drive-client.js, councilMail.js, pdf-utils.js
+      drive-client.js, pdf-utils.js
     Backend
       supabase-setup.sql
       send-email edge function → EmailJS
-      Google Drive, Gmail read-only
+      Google Drive
 ```
 
 Module dependencies (arrows point at what is imported):
@@ -69,7 +69,7 @@ flowchart LR
   summary --> schedule & billingDocs
   billing --> billingDocs & drive[drive-client.js]
   admin --> modals & schedule & forms & gtec & councilData
-  App --> actor & councilMail & drive & pdf[pdf-utils.js] & seasons & statuses & appnav
+  App --> actor & drive & pdf[pdf-utils.js] & seasons & statuses & appnav
   core --> statuses & actor & html[html.js]
   calendar --> people & holidays
   modals --> seasons
@@ -79,7 +79,8 @@ flowchart LR
   vetting --> SB
   core --> EF[send-email] --> EmailJS
   drive --> GDrive[Google Drive]
-  councilMail --> Gmail
+  CouncilExt[council extension] --> Portal[council portal: My applications]
+  CouncilExt --> SB
   gtec --> Proxies[public CORS proxies] --> Feeds[GTEC / CJR calendars]
 ```
 
@@ -107,7 +108,7 @@ Things the picture shows:
 | Bookings tab | `bookingsList.jsx` (`BookingsList`, Itemised table or `schedule.jsx` Grouped view) | Two lists: **Filtered Bookings** follows the page's 📍 Fields selection; **All Bookings** has its own location filter (default: every active venue, whichever booker added it, except Cornwall Park's GTEC / CPSA facilities). Each has its own filters, sort and view. The Grouped view's **Vendor-sensitive** option splits each booker into one row per vendor (patterns, status chips, one-offs, totals). |
 | Booking detail | `forms.jsx` `BookingDetail` | Status, GTEC mismatch, cost split or fixed price, shared slot, removal. |
 | GTEC sync | `App.handleSyncMonth`, `gtec.jsx`, `gtecFeed.js` | Every 4 h for admins, or by hand, plus any month the widget pushed (`applyPushedFeeds`). Matches the vendor feed to bookings, flags clashes and mismatches, adds GTEC's own blocks. |
-| Council | `App`, `admin.jsx` `CouncilAllocationTab`, `councilMail.js` | Send to council, with the fee split. The council extension reads AMUA's applications from the council portal into `council_outcomes` (and `council_portal_sync`); **🏛 Load portal results** queues the booking changes. Reading the council's replies from Gmail stays as a fallback. Allocate outcomes. |
+| Council | `App`, `admin.jsx` `CouncilAllocationTab` | Send to council, with the fee split. The council extension reads AMUA's applications from the council portal (myAUCKLAND → My applications, the `paginated-booking-applications` list) into `council_outcomes` and `council_portal_sync`. This replaced reading the council's emails from Gmail (`councilMail.js`, removed). **🏛 Load portal results** queues the booking changes. Allocate outcomes. |
 | Summary | `summary.jsx` | Hours and costs by booker, pricing rules, schedule summary. Invoice / PO builder (draft and official). |
 | Billing | `billing.jsx` | Pipeline of official documents, receipts, Drive sync, invoice emails. |
 | Admin | `admin.jsx` `AdminPanel` | Activity log, sync results, clashes, mismatch triage, track changes, pricing rules, GTEC purge requests, bookings table. |
@@ -234,7 +235,7 @@ the markers it doesn't own.
 |---|---|---|
 | EmailJS | `supabase/functions/send-email` | Holds the keys as Supabase secrets. Only bookers are emailed: non-admins mail AMUA, themselves and their linked aliases; admins also mail anyone with a booking. Everything else becomes a draft to AMUA's inbox. The browser applies the same rule first (`core.jsx` `sendEmail`). |
 | Google Drive | `drive-client.js` | Billing documents, the backup. Needs `VITE_GOOGLE_CLIENT_ID`. |
-| Gmail (read-only) | `councilMail.js` | Reads council replies for the Allocation tab. It has **its own OAuth client id hard-coded** (`councilMail.js`), not the env var. |
+| Council portal | council extension | The extension reads AMUA's applications from myAUCKLAND (signed in in the browser) and writes `council_outcomes` / `council_portal_sync` with `settings_merge`. Portal status → outcome: Submitted / Processing → info, More information required → action, Confirmed → confirmed, Declined / Withdrawn / Cancelled → declined. |
 | GTEC / CJR calendars | `gtecFeed.js`, `gtec.jsx`, `supabase/functions/gtec-feed` | Read by the `gtec-feed` edge function (server-side, no CORS). When it isn't deployed or fails, the site falls back to free public CORS relays, then to the month the FacilityBook widget last pushed (`gtec_feed` table, see [gtec-widget-sync.md](gtec-widget-sync.md)), then to pasting the feed by hand. A feed that comes back empty while GTEC blocks are saved, or holds the wrong month, is refused. A failed month changes nothing, so its saved GTEC blocks stay. |
 | Map tiles and data | `vetting/main.js` | Esri imagery, LINZ, `public/council-maps` (43 MB of council maps). |
 | NZ holidays | `holidays.js` | date.nager.at, cached for a week. |

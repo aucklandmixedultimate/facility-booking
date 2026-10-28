@@ -13,7 +13,7 @@ Two apps on GitHub Pages (`/facility-booking/`), one Supabase project:
   - lazily loaded tabs: `summary.jsx`, `billing.jsx`, `admin.jsx`, `about.jsx`
 - **All Auckland fields** (was Council fields) — `vetting.html` → `src/vetting/main.js` (Leaflet, vanilla JS).
 - Shared: `src/actor.js` (who's using a shared login), `src/people.js`, `src/seasons.js`,
-  `src/councilSeasons.js`, `src/drive-client.js`, `src/councilMail.js`, `src/statuses.js` (the status model),
+  `src/councilSeasons.js`, `src/drive-client.js`, `src/statuses.js` (the status model),
   `src/holidays.js` (NZ public holidays from date.nager.at, Mondayised, cached a week on the device),
   `src/html.js` (`escHtml`, `csvCell` — escape any user text put into HTML or CSV),
   `src/venues.js` (venue scoring, owner type and vendor ids, shared by both pages),

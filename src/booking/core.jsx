@@ -429,46 +429,6 @@ export function canSendToCouncil(b) {
   return (wf === "council" && (isAmuaReview(b.status) || b.status === "council_apply"))
       || (wf === "council_private" && b.status === "council_apply");
 }
-// The batch as the council form wants it, for the AMUA Council Application extension
-// ("📋 Copy for council form"): one Park details block per park with its fields, date
-// range and per-weekday times, plus AMUA's organisation and contacts (AMUA details).
-export function buildCouncilPayload(bkgs, approxPlayers = {}, allBookings = bkgs) {
-  const hh = h => `${String(Math.floor(h)).padStart(2,"0")}:${String(Math.round((h % 1) * 60)).padStart(2,"0")}`;
-  const DAYS = ["sun","mon","tue","wed","thu","fri","sat"];
-  const parks = {};
-  bkgs.forEach(b => {
-    const c = FACILITIES.find(f => f.id === b.facility_id)?.council; if (!c) return;
-    const p = parks[c.park_id] ||= { region: c.region || "", park: c.park, fields: [], dates: [], days: {}, bookingIds: [], bookers: new Set() };
-    // A grouped venue field lists each council field it covers.
-    (c.council_fields?.length ? c.council_fields : [c.field]).forEach(fl => { if (!p.fields.includes(fl)) p.fields.push(fl); });
-    if (!p.dates.includes(b.date)) p.dates.push(b.date);
-    p.bookingIds.push(b.id); p.bookers.add((b.email || "").toLowerCase());
-    const d = DAYS[new Date(b.date + "T12:00").getDay()], t = p.days[d] ||= { start: b.start_hour, end: b.start_hour + b.duration };
-    t.start = Math.min(t.start, b.start_hour); t.end = Math.max(t.end, b.start_hour + b.duration);
-  });
-  const list = Object.values(parks).map(p => {
-    p.dates.sort();
-    const info = e => _bookerInfo[e] || {};
-    const playersOf = e => parseInt(info(e).players, 10) || parseInt(approxPlayers[e], 10) || parseInt(AMUA_INFO.council?.playersPerTeam, 10) || 0;
-    const players = [...p.bookers].reduce((n, e) => n + playersOf(e), 0);
-    const teams = [...p.bookers].reduce((n, e) => n + (parseInt(info(e).teams, 10) || 1), 0);
-    return { region: p.region, park: p.park, fields: p.fields, firstDate: p.dates[0], lastDate: p.dates[p.dates.length - 1], dates: p.dates,
-      days: Object.fromEntries(Object.entries(p.days).map(([d, t]) => [d, { start: hh(t.start), end: hh(t.end) }])),
-      teams, players: players || null, participants: [...p.bookers].map(e => bookerParticipant(e, playersOf(e) || null)), bookingIds: p.bookingIds };
-  });
-  const ct = AMUA_INFO.contacts || {};
-  return { v: 1, source: "amua-facility-booking", createdAt: new Date().toISOString(),
-    feeEstimate: councilFeeSplit(bkgs).total,
-    // Seasonal or casual (councilTypeOf); a batch should be one type — the batch panel splits them.
-    bookingType: bkgs.some(b => councilTypeOf(b, allBookings) === "seasonal") ? "seasonal" : "casual",
-    participantInfo: [...new Set(list.flatMap(p => p.participants))].join(" "),
-    purpose: "training", sport: "Other",
-    activityName: `Training - ${AMUA_INFO.name}`,
-    org: { name: AMUA_INFO.name, orgType: AMUA_INFO.council?.orgType || "Club/Team", rso: AMUA_INFO.council?.rso || "",
-      postalAddressSearch: (AMUA_INFO.council?.postalAddressSearch || "").trim() || String(AMUA_INFO.address || "").split(/\n+/).map(x => x.trim()).filter(Boolean).join(" "), keyCodes: (AMUA_INFO.council?.keyCodes || "").trim() || "N/A",
-      primary: ct.operations || {}, secondary: ct.secondary || {}, keyHolder: ct.keyHolder || {} },
-    parks: list };
-}
 // Split a batch's fee: each field applied for costs the per-field fee, shared equally
 // by the bookers applying for it; a booker's share is spread over their bookings on it.
 // The one-off application fee is shared equally by the batch's bookers, the same way.
