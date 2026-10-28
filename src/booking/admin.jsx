@@ -1,5 +1,5 @@
 import { useState, useRef, Fragment } from "react";
-import { AMUA_INBOX, AMUA_INFO, Badge, buildCommunityRequestItem, parseVendorReqDraft, vendorRequestItems, rowSelect, isMultiSelectClick, venueKeyOf, bareStatusLabel, groupStatusLabel, councilFeeLabel, councilTypeOf, bookerParticipant, ClashPair, CopyableTable, EmailChip, FACILITIES, INVOICED_META, Modal, PROVIDERS, REVIEW_STATUSES, S, STATUS_META, SUPABASE_URL, TableViewToggle, _contactReviews, _currentUser, _sessionStartIso, authHeaders, bookingCost, buildCouncilPayload, canSendToCouncil, councilFeeSplit, councilOverlaps, emailColor, extractCpsaAmendValues, facCellLabel, fmt24, fmtCost, fmtDate, fmtDateShort, fmtDateShortDow, fmtGtecEvent, fmtLoggedAt, fmtTime, getBillingDrift, getCrossFacilityOverlaps, getSameFacilityOverlaps, isAdminBooking, isCouncilBooking, isSocialFac, nextWorkflowStatus, parseClashPrevStatus, parseCouncilApp, parseCpsaRefs, parseCpsaResolution, parseGtecSnapshot, parseMismatchNote, parseSlotLink, providerOfFacility, sb, setCpsaOrig, setCpsaResolution, setModuleState, stripMismatchNote, todayKey, useTableView, vendorShortFor, vendorsIn, visibleFacilities, workflowOf, workflowStep } from "./core.jsx";
+import { AMUA_INBOX, AMUA_INFO, Badge, buildCommunityRequestItem, parseVendorReqDraft, vendorRequestItems, rowSelect, isMultiSelectClick, venueKeyOf, bareStatusLabel, groupStatusLabel, councilFeeLabel, councilTypeOf, bookerParticipant, ClashPair, CopyableTable, EmailChip, FACILITIES, INVOICED_META, Modal, PROVIDERS, REVIEW_STATUSES, S, STATUS_META, SUPABASE_URL, TableViewToggle, _contactReviews, _currentUser, _sessionStartIso, authHeaders, bookingCost, canSendToCouncil, councilFeeSplit, councilOverlaps, emailColor, extractCpsaAmendValues, facCellLabel, fmt24, fmtCost, fmtDate, fmtDateShort, fmtDateShortDow, fmtGtecEvent, fmtLoggedAt, fmtTime, getBillingDrift, getCrossFacilityOverlaps, getSameFacilityOverlaps, isAdminBooking, isCouncilBooking, isSocialFac, nextWorkflowStatus, parseClashPrevStatus, parseCouncilApp, parseCpsaRefs, parseCpsaResolution, parseGtecSnapshot, parseMismatchNote, parseSlotLink, providerOfFacility, sb, setCpsaOrig, setCpsaResolution, setModuleState, stripMismatchNote, todayKey, useTableView, vendorShortFor, vendorsIn, visibleFacilities, workflowOf, workflowStep } from "./core.jsx";
 import { councilAppBookings } from "./councilData.jsx";
 import { ActivityLogModal, DateRangePicker } from "./modals.jsx";
 import { PatternModal, PricingConditionsManager, ReassignControl, ScheduleSummaryModal } from "./schedule.jsx";
@@ -109,15 +109,17 @@ export function CouncilOccupancyNotes({ bookings, ids, who = e => e }) {
   </div>;
 }
 // ─── Council allocation (🏛 Allocation tab) ──────────────────────────────────────
-// Outcomes per council application number, merged from the council's emails (see
-// src/councilMail.js): { id, outcome: "action"|"confirmed"|"declined"|"info", park, fields,
-// start, end, reason, coordinator:{name,email}, threadId, subject, outcomeAt, history[],
-// replied:{kind,at,by}, manual }.
+// Outcomes per council application number (settings "council_outcomes"), written by the
+// council extension's 🔄 Sync with portal from AMUA's application list on the council portal:
+// { id, outcome: "action"|"confirmed"|"declined"|"info", portal:{status,statusLabel,name,
+// lodgedAt,modifiedAt,url,syncedAt}, park, fields, start, end, reason, outcomeAt, history[],
+// replied:{kind,at,by}, manual }. Older entries also carry coordinator/threadId from the
+// retired Gmail sync.
 const COUNCIL_OUTCOME_META = {
-  action:    { label: "Offer — AMUA to confirm", bg: "#ffedd5", border: "#ea580c", text: "#7c2d12", rank: 0 },
+  action:    { label: "Needs AMUA's answer", bg: "#ffedd5", border: "#ea580c", text: "#7c2d12", rank: 0 },
   confirmed: { label: "Granted — allocate",      bg: "#ecfccb", border: "#65a30d", text: "#365314", rank: 1 },
   declined:  { label: "Declined",                bg: "#fff1f2", border: "#f43f5e", text: "#881337", rank: 2 },
-  info:      { label: "Update",                  bg: "#f1f5f9", border: "#94a3b8", text: "#334155", rank: 3 },
+  info:      { label: "Submitted · waiting",     bg: "#f1f5f9", border: "#94a3b8", text: "#334155", rank: 3 },
 };
 // AMUA's reply to the council about an offer, drafted to AMUA's own inbox (the app never
 // emails the council: see the email rule at sendEmail). AMUA sends it from Gmail, in the thread.
@@ -134,12 +136,11 @@ function buildCouncilReplyItem(o, kind, rationale) {
   return { notifyOnly: true, invoiceEmail: true, amuaDraft: true, email: o.coordinator?.email || AMUA_INBOX, name: o.coordinator?.name || "Auckland Council",
     drafts: [], count: 1, refs: [o.id], total: 0, subject: `Re: Application # ${o.id}${kind === "accept" ? " — AMUA confirms" : " — AMUA withdraws"}`, html };
 }
-export function CouncilAllocationTab({ outcomes = {}, bookings = [], syncing, syncLog = [], onSync, portalSync = null, onApplyPortal, onSaveOutcomes, onBulkStatusChange, onQueueNotifications, onLinkApp, aliasNames = {}, loggedInEmail }) {
+export function CouncilAllocationTab({ outcomes = {}, bookings = [], syncing, portalSync = null, onApplyPortal, onSaveOutcomes, onBulkStatusChange, onQueueNotifications, onLinkApp, aliasNames = {}, loggedInEmail }) {
   const [filter, setFilter] = useState("open");
   const [sel, setSel] = useState({});        // appId → Set of booking ids picked for allocation
   const [notes, setNotes] = useState({});    // appId → rationale for the reply to the council
   const [linkSel, setLinkSel] = useState({}); // appId → Set of booking ids to link
-  const [showLog, setShowLog] = useState(false);
   const apps = Object.values(outcomes).sort((a, b) => (COUNCIL_OUTCOME_META[a.outcome]?.rank ?? 9) - (COUNCIL_OUTCOME_META[b.outcome]?.rank ?? 9) || (b.outcomeAt || b.date || "").localeCompare(a.outcomeAt || a.date || ""));
   const count = k => apps.filter(a => k === "open" ? a.outcome === "action" || a.outcome === "confirmed" : k === "all" || a.outcome === k).length;
   const shown = apps.filter(a => filter === "all" ? true : filter === "open" ? a.outcome === "action" || a.outcome === "confirmed" : a.outcome === filter);
@@ -173,26 +174,23 @@ export function CouncilAllocationTab({ outcomes = {}, bookings = [], syncing, sy
   }
   const box = { border: "1px solid #e2e8f0", borderRadius: 12, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8 };
   const small = { fontSize: 12, color: "#64748b" };
-  const lastRun = syncLog[0];
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
         <h2 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: "#0f172a" }}>🏛 Council allocation</h2>
         <button onClick={onApplyPortal} disabled={syncing} title="Load the application statuses the council extension read from the council portal, and queue the booking changes"
           style={S.btn({ background: "#0d9488", color: "#fff", opacity: syncing ? 0.6 : 1, cursor: syncing ? "wait" : "pointer" })}>🏛 Load portal results</button>
-        <button onClick={onSync} disabled={syncing} title="Fallback: read the council's replies from AMUA's Gmail" style={S.btn({ background: "#fff", color: "#0f766e", border: "1.5px solid #5eead4", opacity: syncing ? 0.6 : 1, cursor: syncing ? "wait" : "pointer" })}>{syncing ? "Syncing…" : "✉ Sync council emails"}</button>
-        <span style={small}>{lastRun ? (lastRun.error ? `Last sync failed: ${lastRun.error}` : `Last sync ${new Date(lastRun.at).toLocaleString("en-NZ")} · ${lastRun.emails} email${lastRun.emails !== 1 ? "s" : ""} read · ${lastRun.queued} booking change${lastRun.queued !== 1 ? "s" : ""} queued`) : "Not synced yet: sign in with the AMUA Google account when asked (read-only Gmail access)."}</span>
       </div>
       <div style={small}>{portalSync?.at ? `Council portal: synced ${new Date(portalSync.at).toLocaleString("en-NZ")} · ${portalSync.apps} application${portalSync.apps !== 1 ? "s" : ""}, ${portalSync.bookings} booking${portalSync.bookings !== 1 ? "s" : ""}${portalSync.changed?.length ? ` · ${portalSync.changed.length} updated` : ""}`
-        : "Council portal: not synced yet. In the council extension (🏛 side panel), open the council portal and press 🔄 Sync with portal."}</div>
+        : "Council portal: not synced yet. Sign in to myAUCKLAND, open My applications, and press 🔄 Sync to FacilityBook (council extension)."}</div>
       <p style={{ margin: 0, fontSize: 13, color: "#475569" }}>
-        The council extension reads AMUA's applications from the council portal (🔄 Sync with portal in its side panel); <b>Load portal results</b> brings them in. The AMUA Gmail sync reads the council's emails as a fallback. An <b>offer</b> needs AMUA's answer: draft an acceptance or a withdrawal below.
+        The council extension reads AMUA's applications from the council portal (myAUCKLAND → My applications: <b>🔄 Sync to FacilityBook</b> on the page, or <b>🔄 Sync with portal</b> in its side panel). This replaces reading the council's emails. <b>Load portal results</b> brings them in and queues the booking changes. When the portal asks for <b>more information</b>, AMUA answers: draft an acceptance or a withdrawal below.
         Replies are drafted to AMUA's own inbox with the council's address on top (the app never emails the council) — send them from Gmail in the thread.
         Once the council <b>grants</b> an application, allocate its fields to the bookers who applied: they're approved and emailed; the rest are told it wasn't allocated.
         Booking changes go to the cart for you to submit.
       </p>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-        {[["open", "Needs AMUA"], ["action", "Offers"], ["confirmed", "Granted"], ["declined", "Declined"], ["info", "Updates"], ["all", "All"]].map(([k, l]) => (
+        {[["open", "Needs AMUA"], ["action", "More info"], ["confirmed", "Granted"], ["declined", "Declined"], ["info", "Submitted"], ["all", "All"]].map(([k, l]) => (
           <button key={k} onClick={() => setFilter(k)} style={S.btn({ padding: "5px 12px", fontSize: 12, background: filter === k ? "#0f172a" : "#fff", color: filter === k ? "#fff" : "#334155", border: "1px solid #e2e8f0" })}>{l} ({count(k)})</button>))}
       </div>
       {!shown.length && <div style={{ ...small, padding: 20, textAlign: "center" }}>{apps.length ? "Nothing here." : "No council applications yet. Sync with the council portal (council extension), then press 🏛 Load portal results."}</div>}
@@ -210,7 +208,7 @@ export function CouncilAllocationTab({ outcomes = {}, bookings = [], syncing, sy
               {o.threadId && <a href={`https://mail.google.com/mail/u/0/#all/${o.threadId}`} target="_blank" rel="noreferrer" style={{ marginLeft: "auto", fontSize: 12, color: "#0e7490" }}>Gmail thread ↗</a>}
             </div>
             <div style={{ fontSize: 13, color: "#0f172a" }}><b>{o.park || o.portal?.name || "Park not given"}</b>{o.fields ? ` · ${o.fields}` : ""}{o.start ? ` · ${o.start}${o.end ? " – " + o.end : ""}` : ""}</div>
-            <div style={small}>{o.coordinator?.name || o.coordinator?.email ? `From ${o.coordinator.name || ""}${o.coordinator.email ? ` <${o.coordinator.email}>` : ""} · ` : ""}{(o.outcomeAt || o.date) ? new Date(o.outcomeAt || o.date).toLocaleDateString("en-NZ", { day: "numeric", month: "short", year: "numeric" }) : ""}{o.history?.length > 1 ? ` · ${o.history.length} emails` : ""}</div>
+            <div style={small}>{o.coordinator?.name || o.coordinator?.email ? `From ${o.coordinator.name || ""}${o.coordinator.email ? ` <${o.coordinator.email}>` : ""} · ` : ""}{(o.outcomeAt || o.date) ? new Date(o.outcomeAt || o.date).toLocaleDateString("en-NZ", { day: "numeric", month: "short", year: "numeric" }) : ""}{o.history?.length > 1 ? ` · ${o.history.length} updates` : ""}</div>
             {o.reason && <div style={{ fontSize: 13, color: "#881337", background: "#fff1f2", borderRadius: 8, padding: "6px 10px" }}>{o.reason}</div>}
             {linked.length ? (
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -256,17 +254,11 @@ export function CouncilAllocationTab({ outcomes = {}, bookings = [], syncing, sy
               <select value={o.outcome} onChange={e => mark(o, { outcome: e.target.value, manual: true, manualAt: new Date().toISOString() })} style={{ fontSize: 12, padding: "2px 6px", borderRadius: 6, border: "1px solid #e2e8f0" }}>
                 {Object.entries(COUNCIL_OUTCOME_META).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
               </select>
-              {o.manual && <button onClick={() => mark(o, { manual: false })} style={{ fontSize: 11, border: "none", background: "none", color: "#0e7490", cursor: "pointer", padding: 0 }}>use the emails' outcome on the next sync</button>}
+              {o.manual && <button onClick={() => mark(o, { manual: false })} style={{ fontSize: 11, border: "none", background: "none", color: "#0e7490", cursor: "pointer", padding: 0 }}>use the portal's outcome on the next sync</button>}
             </div>
           </div>
         );
       })}
-      <div>
-        <button onClick={() => setShowLog(v => !v)} style={S.btn({ padding: "5px 12px", fontSize: 12, background: "#fff", color: "#334155", border: "1px solid #e2e8f0" })}>Sync log ({syncLog.length}) {showLog ? "▴" : "▾"}</button>
-        {showLog && <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 4 }}>
-          {syncLog.map((r, i) => <div key={i} style={{ fontSize: 12, color: r.error ? "#b91c1c" : "#475569" }}>{new Date(r.at).toLocaleString("en-NZ")} — {r.error ? r.error : `${r.emails} emails · ${r.changed.length} updated${r.changed.length ? ` (${r.changed.join(", ")})` : ""} · ${r.queued} booking change${r.queued !== 1 ? "s" : ""} queued`}</div>)}
-        </div>}
-      </div>
     </div>
   );
 }
@@ -974,8 +966,6 @@ export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDel
                     return <div key={type} style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
                       <span title={type==="seasonal"?"Seasonal: the council's seasonal applications are open, or the booker has 10+ council bookings this financial year":"Casual: fewer than 10 council bookings in the financial year (1 July – 30 June) while seasonal applications are closed"}
                         style={{fontSize:11,fontWeight:800,padding:"2px 8px",borderRadius:6,background:type==="seasonal"?"#115e59":"#fff",color:type==="seasonal"?"#fff":"#115e59",border:"1.5px solid #115e59"}}>{type==="seasonal"?"🗓 Seasonal":"👟 Casual"} · {bs.length}</span>
-                      <button onClick={async()=>{ const txt=JSON.stringify(buildCouncilPayload(bs, approxPlayers, bookings)); try{ await navigator.clipboard.writeText(txt); alert(`Copied the ${type} application. On the council's application form, open the AMUA Council panel and paste it in.`); }catch{ window.prompt("Copy this, then paste it into the AMUA Council panel on the council form:", txt); } }}
-                        title={`Copy this ${type} batch for the AMUA Council Application extension, which fills the council's form`} style={S.btn({background:"#fff",color:"#0f766e",border:"1.5px solid #0d9488"})}>📋 Copy for council form</button>
                       <button onClick={()=>onSendToCouncil(bs.map(b=>b.id))} style={S.btn({background:"#0d9488",color:"#fff"})}>🏛 Send {bs.length} to council</button>
                       <span style={{fontSize:12,color:"#115e59"}}>{sp.fields} field{sp.fields!==1?"s":""} · fee ${sp.total.toFixed(2)} ({Object.entries(sp.byBooker).map(([e,v])=>`${adminAlias(e)} $${v.toFixed(2)}`).join(", ")})</span>
                       <div style={{flexBasis:"100%",fontSize:11,color:"#334155"}}>{bookersOf(bs).map(e=><div key={e}>👥 {adminAlias(e)}: {bookerParticipant(e, approxPlayers[e])}</div>)}</div>

@@ -1,13 +1,12 @@
 import { useState, useEffect, useRef, useCallback, lazy, Suspense } from "react";
 import { askActor, getActor, clearActor } from "./actor.js";
-import { gmailToken, fetchCouncilEmails, parseCouncilEmail } from "./councilMail.js";
 import { driveConfigured, getDriveToken, renameFile, ensureFolderPath, DRIVE_ROOT_FOLDER, ensureFolder, findChildFile, uploadFile, keepLatestRevisionForever } from "./drive-client.js";
 import { htmlToPdfBlob } from "./pdf-utils.js";
 import { currentLeagueSeason, LEAGUE_SEASONS, seasonOfBooker } from "./seasons.js";
 import { councilFeeLabel, isCouncilField, COUNCIL_APPLICATION_URL, COUNCIL_APP_RE, EmailLoginScreen, FACILITIES, LOGO_SRC, MOBILE_STYLE, MONTHS, Modal, PROVIDERS, REVIEW_STATUSES, S, STATUS_META, SUPABASE_URL, T, _emailAliases, applyAmuaOrg, applyCouncilFacilities, authHeaders, isDraftItem, previewEntries, setPreviewEntries, buildApprovalEmailHtml, buildClashEmailHtml, buildCommunityRequestItem, setVendorReqDraft, vendorRequestItems, buildInformCpsaEmailHtml, buildMismatchEmailHtml, buildOrderEmailHtml, buildRoomRequestEmailHtml, canSendToCouncil, clearSlotLink, councilFeeSplit, councilOverlaps, emailColor, evenSlotShares, facShort, fmtDate, fmtDateShortDow, fmtTime, fmtTimeShort, getClashes, inActiveVenue, isAdminBooking, linkCouncilChildren, logActivity, newId, newSlotRef, parseClashPrevStatus, parseCouncilApp, parseCpsaOrig, parseCpsaRefs, parseCpsaResolution, parseSlotLink, reachedGtecQueue, sb, sendApprovalEmail, sendEmail, setBilledSnapshot, setClashPrevStatus, setCpsaResolution, setGtecSnapshot, setMismatchNote, setModuleState, setSlotLink, setVendorVariance, slotGroupMembers, stripClashPrevStatus, stripMismatchNote, supabase, timeOverlaps, todayKey, useMobile, venueFacilities, visibleFacilities, workflowOf, ALL_VENUES, activeFacilities, defaultVenueKey, listVenues, venueKeyOf } from "./booking/core.jsx";
 import { FacilityStrip } from "./booking/facilityStrip.jsx";
 import { BookingsList } from "./booking/bookingsList.jsx";
-import { councilAppBookings, mergeCouncilOutcomes } from "./booking/councilData.jsx";
+import { councilAppBookings } from "./booking/councilData.jsx";
 import { cjrMonthUrl, extractCPSATeam, extractEventDetailsEmail, fetchGtecMonth, feedProblem, monthKeyOf, parseFeedText, findMatchingUserBooking, purgeObsolete, gtecTeamKey, mapCJRFacility, parseCJRDate, parseCJRDateTime } from "./booking/gtec.jsx";
 import { DRIVE_SUBFOLDERS, billingDocBaseName, buildBillingDocHtml, driveBatchFolderName, drivePoFolderName } from "./booking/billingDocs.jsx";
 import { CouncilRatesCard, resolveRates } from "./booking/schedule.jsx";
@@ -108,15 +107,13 @@ export default function App() {
   // log survives reloads; old entries are purged per the admin retention setting).
   // Each entry: { monthKey, label, added, skipped, removed, cpsaConfirmed,
   //   cpsaReviewNeeded, clashes, notified, syncedAt, lastChangeAt }
-  // Council email sync (🏛 Allocation): outcomes per council application number, from the
-  // council's replies in AMUA's Gmail (settings "council_outcomes"), and a log of sync runs.
+  // Council applications (🏛 Allocation): outcomes per council application number (settings
+  // "council_outcomes"), read from the council portal by the council extension.
   const [councilOutcomes, setCouncilOutcomes] = useState(()=>{ try{ return JSON.parse(localStorage.getItem("fb_council_outcomes")||"{}"); }catch{ return {}; } });
   // The council extension's last portal sync (settings "council_portal_sync": {at, apps, bookings, changed, by}).
   const [councilPortalSync, setCouncilPortalSync] = useState(null);
-  const [councilSyncLog, setCouncilSyncLog] = useState(()=>{ try{ return JSON.parse(localStorage.getItem("fb_council_sync_log")||"[]"); }catch{ return []; } });
   const [councilSyncing, setCouncilSyncing] = useState(false);
   const councilOpenCount = Object.values(councilOutcomes).filter(o => o.outcome === "action" || (o.outcome === "confirmed" && !o.allocated)).length;
-  useEffect(()=>{ try{ localStorage.setItem("fb_council_sync_log", JSON.stringify(councilSyncLog.slice(0,30))); }catch{ /* ignore */ } }, [councilSyncLog]);
   // What the last sync received from the GTEC feed, by date (admins see it on a booking's
   // details): { at, byDate: { "YYYY-MM-DD": [{ name, when, fields, start_hour, duration, facilityIds, matched }] } }.
   const [syncFeed, setSyncFeed] = useState(()=>{ try { const v = JSON.parse(localStorage.getItem("fb_sync_feed")||"null"); if (v && v.byDate) return { at: v.at||null, months: v.months||[], byDate: v.byDate }; } catch { /* ignore */ } return { at: null, months: [], byDate: {} }; });
@@ -419,34 +416,23 @@ export default function App() {
     } catch(e) { showToast("Couldn't record the council application: "+e.message, "error"); }
   }
 
-  // ── Council email sync ─────────────────────────────────────────────────────────
-  // Same shape as the GTEC sync: read the source (the council's emails in AMUA's Gmail,
-  // read-only), merge what changed into the stored outcomes, then queue the bookings'
-  // status changes in the cart for the admin to submit. Nothing is ever sent to the council.
+  // ── Council applications ───────────────────────────────────────────────────────
+  // The council extension reads AMUA's applications from the council portal (myAUCKLAND →
+  // My applications) into "council_outcomes"; that replaced reading the council's emails.
+  // AMUA's own changes (outcome set by hand, reply drafted, allocated) are saved per
+  // application with settings_merge, so they never overwrite what the extension wrote.
   async function saveCouncilOutcomes(next) {
+    const prev = councilOutcomes;
     setCouncilOutcomes(next);
     try{localStorage.setItem("fb_council_outcomes",JSON.stringify(next));}catch{ /* ignore */ }
-    return persistSetting("council_outcomes", next);
-  }
-  async function handleCouncilMailSync() {
-    if (councilSyncing) return;
-    setCouncilSyncing(true);
-    const at = new Date().toISOString();
+    const patch = Object.fromEntries(Object.entries(next).filter(([id, o]) => JSON.stringify(o) !== JSON.stringify(prev[id])));
+    const remove = Object.keys(prev).filter(id => !(id in next));
+    if (!Object.keys(patch).length && !remove.length) return true;
     try {
-      const tok = await gmailToken();
-      const mails = await fetchCouncilEmails(tok);
-      const parsed = mails.map(parseCouncilEmail).filter(m => Object.keys(m.apps).length).sort((a,b)=>a.date.localeCompare(b.date));
-      const { next, changed } = mergeCouncilOutcomes(councilOutcomes, parsed);
-      if (changed.length) await saveCouncilOutcomes(next);
-      const queued = queueCouncilOutcomeChanges(next);
-      const entry = { at, emails: mails.length, apps: Object.keys(next).length, changed, queued };
-      setCouncilSyncLog(l => [entry, ...l].slice(0, 30));
-      logActivity("council_mail_sync", { emails: mails.length, changed: changed.length, queued });
-      showToast(`🏛 Council emails: ${mails.length} read · ${changed.length} application update${changed.length!==1?"s":""} · ${queued} booking change${queued!==1?"s":""} queued`);
-    } catch(e) {
-      setCouncilSyncLog(l => [{ at, error: String(e?.message||e) }, ...l].slice(0, 30));
-      showToast("Council email sync: "+(e?.message||e), "error");
-    } finally { setCouncilSyncing(false); }
+      const { error } = await supabase.rpc("settings_merge", { setting_key: "council_outcomes", patch, remove_keys: remove });
+      if (error) throw error;
+      return true;
+    } catch(e) { console.warn("council_outcomes:", e?.message || e); showToast("Couldn't save the council application: "+(e?.message||e), "error"); return false; }
   }
   // The council extension writes the portal's application statuses into "council_outcomes"
   // (🔄 Sync with portal). Load them, then queue the bookings' status changes, as the email
@@ -2598,7 +2584,7 @@ export default function App() {
         {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<Suspense fallback={<TabLoading/>}><SummaryTab bookings={bookings} loggedInEmail={loggedInEmail} onRemoveBookings={queueMultiForRemoval} facilityRates={facilityRates} pricingConditions={pricingConditions} onAddPricingCondition={addPricingCondition} onQueuePricingRule={queuePricingRule} onUpdatePricingCondition={updatePricingCondition} onRemovePricingCondition={removePricingCondition} isAdmin={isAdmin} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onUpdateFacilityRate={updateFacilityRate} onSetFacilityRate={setFacilityRateEntry} onRemoveFacilityRates={removeFacilityRates} councilFees={councilFees} onUpdateCouncilFees={saveCouncilFees} pricingMode={pricingMode} onSetPricingMode={setPricingMode} onProposeMerge={handleProposeMerge} onBulkApply={handleBulkApply} onMarkInvoiced={handleMarkInvoiced} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} bookerFilter={listBookerFilter} profiles={profiles} emailAliases={emailAliases} aliasNames={aliasNames} onCreateOfficialInvoice={handleCreateOfficialInvoice} onEmailInvoice={handleEmailInvoicePreview} loadRequest={summaryLoadRequest}/></Suspense>}</div>}
         {tab==="billing"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<Suspense fallback={<TabLoading/>}><BillingTab billingRecords={billingRecords} onUpdateRecord={handleUpdateBillingRecord} onDeleteRecord={id=>setBillingRecords(prev=>prev.filter(r=>r.id!==id))} onCreateReceipt={handleCreateReceipt} onLoadToSummary={handleLoadBillingToSummary} isAdmin={isAdmin} loggedInEmail={loggedInEmail} emailAliases={emailAliases} aliasNames={aliasNames} driveEnabled={driveConfigured()} onDriveSync={handleDriveSync} onRenameBatch={handleRenameBatch} onDriveAttach={handleDriveAttachGtec} onEmailOfficial={handleEmailOfficialInvoices} onQueueInvoiceEmails={handleQueueInvoiceEmails} silentMode={silentMode} onToggleSilent={isAdmin?setSilentMode:undefined}/></Suspense>}</div>}
         {tab==="about"&&<div style={{padding:"8px 0"}}><Suspense fallback={<TabLoading/>}><AboutTab/></Suspense></div>}
-        {tab==="allocation"&&isAdmin&&<div style={S.card}><Suspense fallback={<TabLoading/>}><CouncilAllocationTab outcomes={councilOutcomes} bookings={bookings} syncing={councilSyncing} syncLog={councilSyncLog} onSync={handleCouncilMailSync} portalSync={councilPortalSync} onApplyPortal={handleApplyPortal} onSaveOutcomes={saveCouncilOutcomes} onBulkStatusChange={handleBulkStatusChange} onQueueNotifications={queueNotifications} onLinkApp={handleLinkCouncilApp} aliasNames={aliasNames} loggedInEmail={loggedInEmail}/></Suspense></div>}
+        {tab==="allocation"&&isAdmin&&<div style={S.card}><Suspense fallback={<TabLoading/>}><CouncilAllocationTab outcomes={councilOutcomes} bookings={bookings} syncing={councilSyncing} portalSync={councilPortalSync} onApplyPortal={handleApplyPortal} onSaveOutcomes={saveCouncilOutcomes} onBulkStatusChange={handleBulkStatusChange} onQueueNotifications={queueNotifications} onLinkApp={handleLinkCouncilApp} aliasNames={aliasNames} loggedInEmail={loggedInEmail}/></Suspense></div>}
         {tab==="admin"&&isAdmin&&<div style={S.card}>
           {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<Suspense fallback={<TabLoading/>}><AdminPanel bookings={bookings} onBulkStatusChange={handleBulkStatusChange} onEdit={openEdit} onView={setViewing} onQueueDelete={queueForRemovalSilent} clashes={allClashes} deleteIds={new Set(deleteQueue.map(b=>b.id))} facilityRates={facilityRates} onResolveOldUnapproved={handleResolveOldUnapproved} onReassign={handleBulkReassign} bookers={knownBookers} approxPlayers={approxPlayers} onBulkApply={handleBulkApply} onSaveMismatch={handleSaveMismatch} onInformCpsa={setInformCpsaFor} onRequestRoom={setRoomRequestFor} onQueueNotifications={queueNotifications} onDropVendorRequest={dropVendorRequest} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} onLinkClash={handleLinkClashToGtec} loggedInEmail={loggedInEmail} syncResults={syncResults} onClearSyncResults={()=>setSyncResults([])} showSyncResults={showSyncPanel} onToggleSyncResults={()=>setShowSyncPanel(v=>!v)} bookerFilter={listBookerFilter} onToggleBooker={toggleBooker} onSetBookerFilter={setListBookerFilter} aliasNames={aliasNames} emailAliases={emailAliases} pricingConditions={pricingConditions} onAddPricingCondition={addPricingCondition} onQueuePricingRule={queuePricingRule} onUpdatePricingCondition={updatePricingCondition} onRemovePricingCondition={removePricingCondition} cpsaDeleteLog={cpsaDeleteLog} onClearDeleteLogEntry={id=>setCpsaDeleteLog(prev=>prev.filter(e=>e.id!==id))} onClearDeleteLog={()=>setCpsaDeleteLog([])} syncFeed={syncFeed} onPasteFeed={handlePasteFeed} cjrMonthUrl={cjrMonthUrl} onSendToCouncil={handleSendToCouncil}/></Suspense>}
         </div>}
