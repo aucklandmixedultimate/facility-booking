@@ -705,6 +705,12 @@ export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDel
                     {r.error
                       ? <div style={{display:"flex",flexDirection:"column",gap:6}}>
                           <div style={{fontSize:12,color:"#b91c1c"}}>⚠ {r.error}</div>
+                          {(()=>{ const kept = bookings.filter(b=>isAdminBooking(b)&&(b.date||"").startsWith(r.monthKey)).length; return (
+                            <div style={{fontSize:12,color:"#334155",background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:8,padding:"6px 10px"}}>
+                              🛡 Nothing was changed: {kept>0?<><b>{kept}</b> saved GTEC block{kept!==1?"s":""} for {r.label} {kept!==1?"are":"is"} kept and still shown</>:<>{r.label}&apos;s bookings are as they were</>}
+                              {r.lastGoodAt?<> · last good sync {fmt(r.lastGoodAt)}{r.lastGoodSource?` (${r.lastGoodSource})`:""}</>:null}.
+                              {" "}Try Sync again, press <b>🔄 Sync from GTEC</b> in the Booking Autofill extension (or <b>🔄 Sync to FacilityBook</b> on GTEC&apos;s calendar page), or paste the feed below.
+                            </div>); })()}
                           {onPasteFeed&&cjrMonthUrl&&(()=>{ const [y,m]=r.monthKey.split("-").map(Number); return (
                             <div style={{display:"flex",flexDirection:"column",gap:6,background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:10}}>
                               <div style={{fontSize:12,color:"#334155"}}>
@@ -721,6 +727,7 @@ export function AdminPanel({bookings,onBulkStatusChange,onEdit,onView,onQueueDel
                             </div>); })()}
                         </div>
                       : <div style={{display:"flex",flexDirection:"column",gap:3,paddingLeft:12,borderLeft:"2px solid #e0f2fe"}}>
+                          {r.source&&<span style={{color:"#94a3b8",fontSize:11}}>Read from: {r.source}</span>}
                           {[
                             r.added>0 && ((r.addedBookings&&r.addedBookings.length)
                               ? <details><summary style={{color:"#0e7490",fontSize:12,cursor:"pointer"}}>＋ <strong>{r.added}</strong> booking{r.added!==1?"s":""} added <span style={{color:"#94a3b8",fontWeight:400}}>· expand each for clashes / mismatches</span></summary>

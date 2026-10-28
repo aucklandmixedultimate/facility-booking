@@ -9,7 +9,7 @@ Two apps on GitHub Pages (`/facility-booking/`), one Supabase project:
   - `modals.jsx`, `forms.jsx`, `calendar.jsx`, `schedule.jsx` (Grouped view / schedule
     summary, pricing rules), `billingDocs.jsx` (invoice/PO rendering), `councilData.jsx`,
     `facilityStrip.jsx` (the Week / Month / List facility chips, 📍 Fields menu and Reset),
-    `gtec.jsx` (GTEC calendar sync helpers)
+    `gtec.jsx` (GTEC calendar sync helpers; reading the feed is in `src/gtecFeed.js`)
   - lazily loaded tabs: `summary.jsx`, `billing.jsx`, `admin.jsx`, `about.jsx`
 - **All Auckland fields** (was Council fields) — `vetting.html` → `src/vetting/main.js` (Leaflet, vanilla JS).
 - Shared: `src/actor.js` (who's using a shared login), `src/people.js`, `src/seasons.js`,

@@ -8,7 +8,7 @@ import { councilFeeLabel, isCouncilField, COUNCIL_APPLICATION_URL, COUNCIL_APP_R
 import { FacilityStrip } from "./booking/facilityStrip.jsx";
 import { BookingsList } from "./booking/bookingsList.jsx";
 import { councilAppBookings, mergeCouncilOutcomes } from "./booking/councilData.jsx";
-import { cjrMonthUrl, extractCPSATeam, extractEventDetailsEmail, fetchCJREvents, parseFeedText, findMatchingUserBooking, purgeObsolete, gtecTeamKey, mapCJRFacility, parseCJRDate, parseCJRDateTime } from "./booking/gtec.jsx";
+import { cjrMonthUrl, extractCPSATeam, extractEventDetailsEmail, fetchGtecMonth, feedProblem, monthKeyOf, parseFeedText, findMatchingUserBooking, purgeObsolete, gtecTeamKey, mapCJRFacility, parseCJRDate, parseCJRDateTime } from "./booking/gtec.jsx";
 import { DRIVE_SUBFOLDERS, billingDocBaseName, buildBillingDocHtml, driveBatchFolderName, drivePoFolderName } from "./booking/billingDocs.jsx";
 import { CouncilRatesCard, resolveRates } from "./booking/schedule.jsx";
 import { ActivityLogModal, AmuaDetailsModal, Banner, CouncilContactModal, UserMenuItem, UserMgmtModal } from "./booking/modals.jsx";
@@ -102,6 +102,8 @@ export default function App() {
   // and each creates its own copy of every admin block. A ref flips synchronously, so
   // the second caller sees it immediately and bails.
   const syncRunningRef = useRef(false);
+  const isAdminRef = useRef(false);
+  useEffect(()=>{ isAdminRef.current = realIsAdmin; }, [realIsAdmin]);
   // Cumulative sync log across all months ever synced (persisted so the monthly
   // log survives reloads; old entries are purged per the admin retention setting).
   // Each entry: { monthKey, label, added, skipped, removed, cpsaConfirmed,
@@ -123,6 +125,11 @@ export default function App() {
     try{ return JSON.parse(localStorage.getItem("fb_sync_results")||"[]"); }catch{ return []; }
   });
   useEffect(()=>{ try{ localStorage.setItem("fb_sync_results", JSON.stringify(syncResults)); }catch{ /* ignore */ } }, [syncResults]);
+  // Read by the sync (which runs inside one long closure) for each month's last good sync.
+  const syncResultsRef = useRef(syncResults);
+  // When a month last synced from a good feed (results saved before lastGoodAt existed: syncedAt).
+  const lastGoodSyncOf = monthKey => { const r = syncResultsRef.current.find(x => x.monthKey === monthKey); return r?.lastGoodAt || (r && !r.error ? r.syncedAt || "" : ""); };
+  useEffect(()=>{ syncResultsRef.current = syncResults; }, [syncResults]);
   // Admin-configurable retention (in months) for activity & sync logs. 0 = keep forever.
   const [logRetentionMonths, setLogRetentionMonthsState] = useState(()=>{
     const v = parseInt(localStorage.getItem("fb_log_retention_months"),10);
@@ -573,17 +580,43 @@ export default function App() {
     catch(e) { console.warn("persistSetting "+key+":", e.message); return false; }
   }
 
-  async function handleSyncMonth(year, month, pastedEvents = null) {
+  // The month GTEC's calendar pushed by the FacilityBook widget (table gtec_feed), or null —
+  // also null until supabase-setup.sql v10 has been run.
+  async function loadPushedFeeds() {
+    try { const rows = await sb.selectAll("gtec_feed"); return Array.isArray(rows) ? rows.filter(r => r && /^\d{4}-\d{2}$/.test(r.month || "") && Array.isArray(r.events) && r.fetched_at) : []; }
+    catch { return []; }
+  }
+
+  // pastedEvents: the feed pasted by hand or pushed by the widget (source says which); otherwise
+  // it is fetched. Nothing is written until the feed has been read and checked, so a failed or
+  // doubtful read leaves the month's saved GTEC blocks exactly as they were.
+  async function handleSyncMonth(year, month, pastedEvents = null, source = "pasted") {
     setSyncingMonth(true);
+    const monthStr = monthKeyOf(year, month);
     try {
       setSyncProgress(p => p && { ...p, phase: "Reading GTEC…" });
-      const events = pastedEvents || await fetchCJREvents(year, month);
+      const currentBookings = await sb.select("bookings");
+      const savedBlocks = currentBookings.filter(b => isAdminBooking(b) && (b.date || "").startsWith(monthStr)).length;
+      let events, feedSource = source;
+      if (pastedEvents) events = pastedEvents;
+      else {
+        try {
+          ({ events, source: feedSource } = await fetchGtecMonth(year, month, { functionUrl: SUPABASE_URL ? `${SUPABASE_URL}/functions/v1/gtec-feed` : null, headers: authHeaders(), savedBlocks }));
+        } catch (e) {
+          // Every live source failed: use the widget's push for this month if it is newer than
+          // the month's last good sync and passes the same checks.
+          const lastGood = lastGoodSyncOf(monthStr);
+          const pushed = (await loadPushedFeeds()).find(r => r.month === monthStr);
+          if (!pushed || pushed.fetched_at <= lastGood || feedProblem(pushed.events, year, month, savedBlocks)) throw e;
+          events = pushed.events;
+          feedSource = `widget (${new Date(pushed.fetched_at).toLocaleString("en-NZ", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })})`;
+        }
+      }
       setSyncProgress(p => p && { ...p, phase: `Matching ${events.length} entr${events.length === 1 ? "y" : "ies"}…` });
       let added = 0, skipped = 0, removed = 0, cpsaConfirmed = 0, cpsaReviewNeeded = 0;
       const addedBookings = []; // snapshots of bookings added this sync (for the expandable log)
       const reviewBookings = []; // user bookings flagged needing review (mismatch) this sync
       const clashBookings = [];  // user bookings flagged as clash this sync
-      const currentBookings = await sb.select("bookings");
       const matchedUserIds = new Set();
       const cpsaNotifications = []; // notify-only cart items for first-time CPSA status changes
 
@@ -601,7 +634,6 @@ export default function App() {
       }
 
       // Remove admin bookings in this month that are no longer in the feed (only future dates)
-      const monthStr = `${year}-${String(month+1).padStart(2,"0")}`;
       const syncToday = todayKey();
       const staleAdminBks = currentBookings.filter(b =>
         isAdminBooking(b) &&
@@ -899,15 +931,18 @@ export default function App() {
         // lastChangeAt = when this month last produced an actual new change; preserved
         // from the prior result when this sync turned up nothing new.
         const lastChangeAt = hadChanges ? syncedAt : (existing?.lastChangeAt || null);
-        return [...without, { monthKey, label, added, skipped, removed, cpsaConfirmed, cpsaReviewNeeded, clashes: clashUpdates, clashesResolved: clashResolved, notified: cpsaNotifications.length, addedBookings, reviewBookings, clashBookings, syncedAt, lastChangeAt }];
+        return [...without, { monthKey, label, added, skipped, removed, cpsaConfirmed, cpsaReviewNeeded, clashes: clashUpdates, clashesResolved: clashResolved, notified: cpsaNotifications.length, addedBookings, reviewBookings, clashBookings, syncedAt, lastChangeAt, lastGoodAt: syncedAt, source: feedSource }];
       });
+      return true;
     } catch(e) {
+      // The month's saved GTEC blocks are untouched (nothing is written before the feed is
+      // read); the result keeps when the month last synced properly so the panel can say so.
       setSyncResults(prev => {
-        const monthKey = `${year}-${String(month+1).padStart(2,"0")}`;
-        const existing = prev.find(r => r.monthKey === monthKey);
-        const without = prev.filter(r => r.monthKey !== monthKey);
-        return [...without, { monthKey, label: `${MONTHS[month]} ${year}`, error: e.message, syncedAt: new Date().toISOString(), lastChangeAt: existing?.lastChangeAt || null }];
+        const existing = prev.find(r => r.monthKey === monthStr);
+        const without = prev.filter(r => r.monthKey !== monthStr);
+        return [...without, { monthKey: monthStr, label: `${MONTHS[month]} ${year}`, error: e.message, syncedAt: new Date().toISOString(), lastChangeAt: existing?.lastChangeAt || null, lastGoodAt: existing?.lastGoodAt || (existing && !existing.error ? existing.syncedAt : null) || null, lastGoodSource: existing?.source || existing?.lastGoodSource || null }];
       });
+      return false;
     } finally {
       setSyncingMonth(false);
     }
@@ -921,10 +956,39 @@ export default function App() {
     if (syncRunningRef.current) { showToast("A sync is already running…", "info"); return false; }
     const [y, m] = monthKey.split("-").map(Number);
     syncRunningRef.current = true;
-    try { await handleSyncMonth(y, m - 1, events); logActivity("cpsa_sync_pasted", { month: monthKey, events: events.length }); }
+    let ok = false;
+    try { ok = await handleSyncMonth(y, m - 1, events, "pasted"); logActivity("cpsa_sync_pasted", { month: monthKey, events: events.length }); }
     finally { syncRunningRef.current = false; }
+    if (!ok) { showToast(`Couldn't sync ${MONTHS[m-1]} ${y} from the pasted feed — see the sync results.`, "error"); return false; }
     showToast(`Synced ${MONTHS[m-1]} ${y} from the pasted feed (${events.length} entr${events.length===1?"y":"ies"}).`);
     return true;
+  }
+
+  // Months the FacilityBook widget pushed from GTEC's calendar page (table gtec_feed) that are
+  // newer than the month's last good sync on this device: sync each from the pushed feed. Runs
+  // when an admin opens the site or comes back to the tab, so pressing the widget's
+  // "Sync from GTEC" and switching back here applies it.
+  const pushCheckRef = useRef(0);
+  async function applyPushedFeeds() {
+    if (syncRunningRef.current || Date.now() - pushCheckRef.current < 10000) return;
+    pushCheckRef.current = Date.now();
+    const thisMonth = todayKey().slice(0, 7);
+    const due = (await loadPushedFeeds()).filter(r => r.month >= thisMonth
+      && r.fetched_at > lastGoodSyncOf(r.month)
+      && !feedProblem(r.events, +r.month.slice(0, 4), +r.month.slice(5) - 1, 0))
+      .sort((a, b) => a.month.localeCompare(b.month));
+    if (!due.length || syncRunningRef.current) return;
+    syncRunningRef.current = true;
+    const done = [];
+    try {
+      for (const [i, r] of due.entries()) {
+        const [y, m] = r.month.split("-").map(Number);
+        setSyncProgress({ done: i, total: due.length, label: `${MONTHS[m-1].slice(0,3)} ${y}`, phase: "" });
+        if (await handleSyncMonth(y, m - 1, r.events, `widget${r.pushed_by ? ` · ${r.pushed_by}` : ""}`)) done.push(`${MONTHS[m-1].slice(0,3)} ${y}`);
+      }
+      logActivity("cpsa_sync_widget", { months: due.map(r => r.month), ok: done.length });
+    } finally { syncRunningRef.current = false; setSyncProgress(null); }
+    if (done.length) { showToast(`🔄 Synced ${done.join(", ")} from GTEC's calendar, pushed by the Booking Autofill extension.`); setShowSyncPanel(true); }
   }
 
   async function handleSyncAll() {
@@ -965,17 +1029,22 @@ export default function App() {
       // Drop months that have aged out of the retention window before re-syncing.
       purgeOldLogs();
       logActivity("cpsa_sync_start", { months: sorted.length });
+      let failed = 0;
       for (const [i,[y,m]] of sorted.entries()) {
         setSyncProgress({ done: i, total: sorted.length, label: `${MONTHS[m].slice(0,3)} ${y}`, phase: "" });
-        await handleSyncMonth(y, m);
+        if (!await handleSyncMonth(y, m)) failed++;
       }
-      try{localStorage.setItem("fb_last_sync_at", String(Date.now()));}catch{ /* ignore */ }
-      logActivity("cpsa_sync_complete", { months: sorted.length });
+      // Only a sync that read something counts as "last synced", so a failed one is retried
+      // at the next page load rather than four hours later.
+      if (failed < sorted.length) { try{localStorage.setItem("fb_last_sync_at", String(Date.now()));}catch{ /* ignore */ } }
+      logActivity("cpsa_sync_complete", { months: sorted.length, failed });
       purgeOldLogs();
       // Notify with a non-intrusive toast
       setSyncResults(cur => {
         const total = cur.reduce((s,r)=>s+(r.added||0),0);
-        showToast(`🔄 Sync complete — ${sorted.length} month${sorted.length!==1?"s":""}, ${total} new booking${total!==1?"s":""}`);
+        showToast(failed
+          ? `⚠ GTEC sync: ${failed} of ${sorted.length} month${sorted.length!==1?"s":""} couldn't be read — their saved GTEC blocks are kept. See the sync results.`
+          : `🔄 Sync complete — ${sorted.length} month${sorted.length!==1?"s":""}, ${total} new booking${total!==1?"s":""}`, failed ? "error" : "success");
         return cur;
       });
       setShowSyncPanel(true);
@@ -998,8 +1067,8 @@ export default function App() {
         // matcher uses authoritative identity data. Running early — before loadSettings
         // populates DB aliases — makes the matcher flag false mismatches that a later
         // manual sync then resolves. handleSyncAll fetches fresh bookings itself.
-        (async()=>{ await loadSettings(); await handleSyncAll(); })();
-      }
+        (async()=>{ await loadSettings(); await applyPushedFeeds(); await handleSyncAll(); })();
+      } else applyPushedFeeds();
     }
   },[session]);
   // If the booker filter points at an email with no bookings, fall back to "all"
@@ -1018,7 +1087,11 @@ export default function App() {
     if(!signedInId) return;
     (async()=>{ await loadSettings(); purgeOldLogs(); loadBookerContacts(); })();
     let last = Date.now();
-    const onVis = () => { if (document.visibilityState === "visible" && Date.now() - last > 15000) { last = Date.now(); loadSettings(); } };
+    const onVis = () => {
+      if (document.visibilityState !== "visible") return;
+      if (isAdminRef.current) applyPushedFeeds(); // rate-limited inside
+      if (Date.now() - last > 15000) { last = Date.now(); loadSettings(); }
+    };
     document.addEventListener("visibilitychange", onVis); window.addEventListener("focus", onVis);
     return () => { document.removeEventListener("visibilitychange", onVis); window.removeEventListener("focus", onVis); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
