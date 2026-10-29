@@ -1095,7 +1095,7 @@ export default function App() {
       if (document.querySelector(".modal-backdrop, .actor-ov")) return;
       const tabs = ["about","calendar","month","list","summary", ...(loggedInEmail?["billing"]:[]), ...(isAdmin?["admin","allocation"]:[])];
       if (/^[1-8]$/.test(e.key) && tabs[+e.key-1]) { setTab(tabs[+e.key-1]); e.preventDefault(); }
-      else if (e.key === "n") { openNew(todayKey(), 18, 1); e.preventDefault(); }
+      else if (e.key === "n") { openNew(null); e.preventDefault(); }
       else if (e.key === "[" || e.key === "]") { setFocusedDate(d => { const nd = new Date(d); nd.setDate(nd.getDate() + (e.key === "]" ? 7 : -7)); return nd; }); if (tab !== "calendar") setTab("calendar"); }
       else if (e.key === "t") { setFocusedDate(new Date()); }
       else if (e.key === "?") showToast("Shortcuts: 1–8 tabs · n new booking · [ ] previous/next week · t this week");
@@ -2008,9 +2008,11 @@ export default function App() {
     showToast(`${drafts.length} bookings added to cart for editing!`);
   }
 
-  function handleAddToCart(drafts, name, email, sourceIds=[]) {
+  // meta.daylightKept: ids of weekend daylight bookings kept on Field #1 / #2 although Field #3
+  // was free (BookingForm); the cart asks for an acknowledgement before submitting them.
+  function handleAddToCart(drafts, name, email, sourceIds=[], meta) {
     const isEdit = drafts.some(d => d.id && bookings.find(b => b.id === d.id));
-    setCart(prev => [...prev, { drafts, name, email, sourceIds, isEdit }]);
+    setCart(prev => [...prev, { drafts, name, email, sourceIds, isEdit, ...(meta?.daylightKept?.length ? { daylightKept: meta.daylightKept } : {}) }]);
     setShowForm(false);
     setEditing(null);
     showToast(isEdit ? "Edit added to cart." : `${drafts.length} booking${drafts.length>1?"s":""} added to cart!`);
@@ -2437,7 +2439,7 @@ export default function App() {
                   </button>
                 );
               })()}
-              <button onClick={()=>openNew(todayKey(),9,1)} style={S.btn({background:"#2d4a1e",color:"#fff",padding:"7px 10px",fontSize:12})}>
+              <button onClick={()=>openNew(null)} style={S.btn({background:"#2d4a1e",color:"#fff",padding:"7px 10px",fontSize:12})}>
                 {isMobile?"+ Book":"+ New Booking"}
               </button>
               {/* User dropdown — replaces inline status pill + admin buttons */}

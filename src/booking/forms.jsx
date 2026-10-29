@@ -1,6 +1,7 @@
 import { useState, useRef, Fragment } from "react";
 import { T, parseVendorVariance, setVendorVariance, vendorVarianceText, stepLabel, BILLED_RE, Badge, CAL_SLOTS, CAL_START, CAL_TOTAL, DAY_EVENING_CUTOFF, DURATIONS, EmailChip, FACILITIES, FACILITY_TINT, FLOODLIT_FIELD_ID, FacilityOptions, INVOICED_META, Modal, ProviderVenuePicker, _bookerInfo, bookerParticipant, buildCommunityRequestItem, vendorRequestItems, REVIEW_STATUSES, S, SLOTS_PER_HOUR, SLOT_HOURS, START_TIMES, STATUS_META, addDays, councilContactOk, emailColor, facColLabel, facShort, fmtCost, fmtDate, fmtDuration, fmtLoggedAt, fmtRefDate, fmtTime, fmtTimeShort, getCrossFacilityOverlaps, getSameFacilityOverlaps, isAdminBooking, newGroupRef, newId, parseCouncilInfo, parseFunctionCost, parseGroupRef, parseGtecSnapshot, parseMismatchNote, parseSlotLink, parseSplit, setCouncilInfo, setFunctionCost, setGroupRef, setSplit, slotGroupMembers, slotGroupName, splitReason, stripMismatchNote, timeOverlaps, todayKey, useMobile, vendorShortFor, venueFacilities, workflowOf, isDraftItem } from "./core.jsx";
 import { OverlapWarning } from "./modals.jsx";
+import { DAYLIGHT_AVOID_FIELDS, DAYLIGHT_FIELD, daylightMoves, isWeekend } from "../fieldPrefs.js";
 import { FacilityPicker } from "./facilityPicker.jsx";
 import { GUEST } from "../actor.js";
 import { isClosed } from "../statuses.js";
@@ -262,6 +263,13 @@ function SlotRow({ slot, idx, onChange, onRemove, canRemove, allBookings, onSpli
 export function CartModal({ cart, setCart, onClose, onSubmit, openNew, silentMode=false, onToggleSilent, bookings=[] }) {
   const [editingDraft, setEditingDraft] = useState(null); // {gi, di, draft}
   const [expandedNotify, setExpandedNotify] = useState(new Set()); // email keys that are open
+  // Weekend daylight bookings the booker chose to keep on Field #1 / #2 (BookingForm's
+  // "Keep" choice): still there, still on #1/#2, and still in daylight. They must be
+  // acknowledged before the cart is submitted.
+  const [daylightAck, setDaylightAck] = useState(null); // null = not asked; false/true = the tick
+  const keptDaylight = cart.flatMap(i => (i.daylightKept || []).length ? i.drafts.filter(d => i.daylightKept.includes(d.id)
+    && DAYLIGHT_AVOID_FIELDS.includes(d.facility_id) && isWeekend(d.date) && d.start_hour + d.duration <= DAY_EVENING_CUTOFF) : []);
+  const submit = () => { if (keptDaylight.length && daylightAck !== true) { setDaylightAck(false); return; } onSubmit(); };
   const totalNew    = cart.filter(i=>isDraftItem(i)&&!i.isEdit&&!i.isMultiEdit).reduce((s,i)=>s+i.drafts.length,0);
   const totalEdits  = cart.filter(i=>i.isEdit||i.isMultiEdit).reduce((s,i)=>s+i.drafts.length,0);
   const totalStatus = cart.filter(i=>i.statusChange).reduce((s,i)=>s+(i.ids?.length||i.drafts?.length||0),0);
@@ -685,11 +693,26 @@ export function CartModal({ cart, setCart, onClose, onSubmit, openNew, silentMod
                 </button>
               </div>
             )}
+            {daylightAck!==null&&keptDaylight.length>0&&(
+              <div style={{marginTop:8,padding:'12px 14px',borderRadius:10,background:'#fffbeb',border:'1.5px solid #f59e0b',display:'flex',flexDirection:'column',gap:8,flexShrink:0}}>
+                <div style={{fontWeight:700,fontSize:14,color:'#92400e'}}>☀️ Weekend daylight on Field #1 / #2</div>
+                <div style={{fontSize:12,color:'#78350f',lineHeight:1.5}}>
+                  {keptDaylight.length===1?'This booking stays':`These ${keptDaylight.length} bookings stay`} on Field #1 / #2 in daylight, although Field #3 was free. Fields #1 and #2 are kept for evening play, so please confirm before submitting.
+                </div>
+                <ul style={{margin:0,paddingLeft:18,fontSize:12,color:'#78350f'}}>
+                  {keptDaylight.map(d=><li key={d.id}>{fmtDate(d.date)} · {fmtTime(d.start_hour)}–{fmtTime(d.start_hour+d.duration)} · {FACILITIES.find(f=>f.id===d.facility_id)?.name}</li>)}
+                </ul>
+                <label style={{display:'flex',gap:8,alignItems:'center',fontSize:13,fontWeight:600,color:'#92400e',cursor:'pointer'}}>
+                  <input type="checkbox" checked={daylightAck===true} onChange={e=>setDaylightAck(e.target.checked)}/>
+                  I understand, and still want Field #1 / #2
+                </label>
+              </div>
+            )}
             <div style={{display:'flex',gap:10,justifyContent:'space-between',paddingTop:12,marginTop:4,borderTop:'1px solid #f1f5f9',flexShrink:0}}>
               <button onClick={()=>setCart([])} style={S.btn({border:'1.5px solid #f43f5e',background:'#fff',color:'#f43f5e'})}>Clear All</button>
               <div style={{display:'flex',gap:10}}>
-                <button onClick={()=>{onClose();openNew(todayKey(),9,1);}} style={S.btn({border:'1.5px solid #e2e8f0',background:'#fff',color:'#475569'})}>+ Add More</button>
-                <button onClick={onSubmit} style={S.btn({background:'#2d4a1e',color:'#fff'})}>
+                <button onClick={()=>{onClose();openNew(null);}} style={S.btn({border:'1.5px solid #e2e8f0',background:'#fff',color:'#475569'})}>+ Add More</button>
+                <button onClick={submit} disabled={daylightAck===false&&keptDaylight.length>0} style={S.btn({background:'#2d4a1e',color:'#fff',opacity:daylightAck===false&&keptDaylight.length>0?0.5:1,cursor:daylightAck===false&&keptDaylight.length>0?'default':'pointer'})}>
                   ✓ {totalEdits>0&&totalNew===0 ? "Save All Edits" : totalEdits>0 ? "Submit All" : "Submit All Bookings"}
                 </button>
               </div>
@@ -800,6 +823,36 @@ export function DeleteCartModal({ deleteQueue, setDeleteQueue, onClose, onSubmit
             🗑 Confirm Removal ({deleteQueue.length})
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// Weekend daylight: Fields #1 and #2 are kept for evening play, so a daytime weekend booking
+// goes on Field #3 when it's free. Accept moves it; keep leaves it on #1/#2, and the cart asks
+// for an acknowledgement before submitting.
+export function DaylightFieldWarning({ drafts, onAccept, onKeep, onCancel }) {
+  const fname = id => FACILITIES.find(f => f.id === id)?.name || id;
+  const from = [...new Set(drafts.map(d => fname(d.facility_id)))].join(" / ");
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:16}}>
+      <div style={{background:"#fffbeb",border:"1.5px solid #f59e0b",borderRadius:10,padding:"14px 16px",display:"flex",gap:12}}>
+        <span style={{fontSize:24,lineHeight:1}}>☀️</span>
+        <div><div style={{fontWeight:700,fontSize:15,color:"#92400e",marginBottom:6}}>Your booking will be made on Field #3</div>
+          <div style={{fontSize:13,color:"#78350f",lineHeight:1.6}}>On weekends in daylight, Fields #1 and #2 aren&apos;t preferred: they&apos;re kept for evening play (Field #1 has the only floodlights). Field #3 is free at {drafts.length>1?"these times":"this time"}, so {drafts.length>1?`these ${drafts.length} bookings move`:"this booking moves"} to Field #3 to conserve {from}.</div></div>
+      </div>
+      <div style={{display:"flex",flexDirection:"column",gap:8}}>
+        {[...drafts].sort((a,b)=>a.date.localeCompare(b.date)||a.start_hour-b.start_hour).map(d => (
+          <div key={d.id} style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",padding:"10px 14px",background:"#f8fafc",borderRadius:8,border:"1px solid #e2e8f0",fontSize:13}}>
+            <b style={{color:"#0f172a"}}>{fmtDate(d.date)}</b>
+            <span style={{color:"#64748b"}}>{fmtTime(d.start_hour)}–{fmtTime(d.start_hour+d.duration)}</span>
+            <span style={{color:"#475569"}}>{fname(d.facility_id)} → <b style={{color:"#15803d"}}>{fname(DAYLIGHT_FIELD)}</b></span>
+          </div>))}
+      </div>
+      <div style={{display:"flex",gap:10,justifyContent:"flex-end",flexWrap:"wrap",paddingTop:4}}>
+        <button onClick={onCancel} style={S.btn({border:"none",background:"none",color:"#64748b",padding:"8px 4px"})}>← Back</button>
+        <button onClick={onKeep} style={S.btn({border:"1.5px solid #f59e0b",background:"#fff",color:"#92400e"})}>Keep {from}</button>
+        <button onClick={onAccept} style={S.btn({background:"#15803d",color:"#fff"})}>✓ Use Field #3</button>
       </div>
     </div>
   );
@@ -936,29 +989,36 @@ export function BookingForm({ booking, allBookings, onAddToCart, onClose, isAdmi
     if (!validate()) return;
     setError("");
     const drafts = expandRows();
-    const others  = allBookings.filter(b => !drafts.find(d=>d.id===b.id));
-    const same    = drafts.flatMap(d=>getSameFacilityOverlaps(d,others));
-    if (same.length > 0 && !warn?.sameDismissed) { setWarn({type:"same",list:[...new Map(same.map(x=>[x.id,x])).values()],drafts}); return; }
-    const cross   = drafts.flatMap(d=>getCrossFacilityOverlaps(d,others));
-    if (cross.length > 0 && !warn?.crossDismissed) { setWarn({type:"cross",list:[...new Map(cross.map(x=>[x.id,x])).values()],drafts}); return; }
-    setWarn(null);
-    onAddToCart(drafts, name, email);
+    // Weekend daylight on Field #1 or #2 with Field #3 free: offer Field #3 first (new
+    // bookings only), since the overlap checks depend on which field it ends up on.
+    const moves = isEditing ? [] : daylightMoves(drafts, allBookings, DAY_EVENING_CUTOFF);
+    if (moves.length) { setWarn({ type:"daylight", drafts, moves }); return; }
+    checkOverlaps(drafts, []);
   }
+  // accept: the drafts move to Field #3. Otherwise they stay, and the cart asks the booker to
+  // acknowledge it again before submitting (kept: their ids).
+  function chooseDaylight(accept) {
+    const { drafts, moves } = warn;
+    if (accept) checkOverlaps(drafts.map(d => moves.includes(d.id) ? { ...d, facility_id: DAYLIGHT_FIELD } : d), []);
+    else checkOverlaps(drafts, moves);
+  }
+  function checkOverlaps(drafts, kept, sameDismissed = false) {
+    const others = allBookings.filter(b => !drafts.find(d=>d.id===b.id));
+    const uniq = list => [...new Map(list.map(x=>[x.id,x])).values()];
+    const same = sameDismissed ? [] : drafts.flatMap(d=>getSameFacilityOverlaps(d,others));
+    if (same.length > 0) { setWarn({ type:"same", list:uniq(same), drafts, kept }); return; }
+    const cross = drafts.flatMap(d=>getCrossFacilityOverlaps(d,others));
+    if (cross.length > 0) { setWarn({ type:"cross", list:uniq(cross), drafts, kept }); return; }
+    finishAdd(drafts, kept);
+  }
+  function finishAdd(drafts, kept) {
+    setWarn(null);
+    onAddToCart(drafts, name, email, undefined, kept.length ? { daylightKept: kept } : undefined);
+  }
+  const proceedSame  = () => checkOverlaps(warn.drafts, warn.kept || [], true);
+  const proceedCross = () => finishAdd(warn.drafts, warn.kept || []);
 
-  function proceedSame() {
-    const drafts = warn?.drafts; if(!drafts) return;
-    const others = allBookings.filter(b=>!drafts.find(d=>d.id===b.id));
-    const cross  = drafts.flatMap(d=>getCrossFacilityOverlaps(d,others));
-    if (cross.length>0) { setWarn({type:"cross",list:[...new Map(cross.map(x=>[x.id,x])).values()],drafts,sameDismissed:true}); return; }
-    setWarn(null);
-    onAddToCart(drafts, name, email);
-  }
-  function proceedCross() {
-    const drafts = warn?.drafts; if(!drafts) return;
-    setWarn(null);
-    onAddToCart(drafts, name, email);
-  }
-
+  if (warn?.type==="daylight") return <DaylightFieldWarning drafts={warn.drafts.filter(d => warn.moves.includes(d.id))} onAccept={()=>chooseDaylight(true)} onKeep={()=>chooseDaylight(false)} onCancel={()=>setWarn(null)}/>;
   // Overlap warnings
   if (warn?.type==="same" && warn.list) return <OverlapWarning title="Same Facility Already Booked" description="This facility already has bookings at this time. Shared use is allowed — confirm you are aware." bookings={warn.list} onProceed={proceedSame} onCancel={()=>setWarn(null)}/>;
   if (warn?.type==="cross" && warn.list) return <OverlapWarning title="Other Facilities Also Booked" description="Other facilities are booked at the same time. Simultaneous use is allowed — heads-up only." bookings={warn.list} onProceed={proceedCross} onCancel={()=>setWarn(null)}/>;
