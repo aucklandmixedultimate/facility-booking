@@ -1232,7 +1232,9 @@ export default function App() {
     try { await sb.update("bookings", booking.id, full); await loadBookings(); }
     catch(e){ showToast("Save failed: "+e.message, "error"); return; }
     setViewing(prev => prev && prev.id===booking.id ? { ...prev, ...full } : prev);
-    logActivity("booking_edit", { ids:[booking.id], booker: booking.email, pricing: true });
+    // Admin edits from the booking's details: pricing / split (system_notes) or the details themselves.
+    logActivity("booking_edit", { ids:[booking.id], booker: booking.email, fields: Object.keys(patch), ...(patch.system_notes!==undefined ? { pricing: true } : {}),
+      ...(Object.keys(patch).some(k => k !== "system_notes") ? { from: Object.fromEntries(Object.keys(patch).filter(k => k !== "system_notes").map(k => [k, booking[k]])) } : {}) });
     showToast("Booking updated.");
   }
 

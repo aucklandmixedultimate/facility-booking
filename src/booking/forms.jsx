@@ -1302,6 +1302,22 @@ export function BookingDetail({booking,syncFeed=null,onEdit,onClose,onCancel,isA
   function removeCo(email){ setSplitParts(splitParts.filter(p=>p.email!==email)); }
   function setWeight(email,w){ setSplitParts(splitParts.map(p=>p.email===email?{...p,weight:Math.max(0,parseFloat(w)||0)}:p)); }
   function equalize(){ setSplitParts(splitParts.map(p=>({...p,weight:1}))); }
+  // ── Admin: edit the booking's details in place (saved straight away, no cart, no email) ──
+  const detFields = b => ({ facility_id:b.facility_id, date:b.date, start_hour:b.start_hour, duration:b.duration, purpose:b.purpose||"", name:b.name||"", email:b.email||"", notes:b.notes||"" });
+  const [editDet, setEditDet] = useState(false);
+  const [det, setDet] = useState(()=>detFields(booking));
+  const [detErr, setDetErr] = useState("");
+  const setD = (k, v) => setDet(d => ({ ...d, [k]: v }));
+  function openDetails() { setDet(detFields(booking)); setDetErr(""); setEditDet(true); }
+  function saveDetails() {
+    if (!det.date) { setDetErr("Choose a date."); return; }
+    if (!isAdminBk && !/\S+@\S+\.\S+/.test(det.email.trim())) { setDetErr("Enter a valid email."); return; }
+    const next = { ...det, purpose: det.purpose.trim(), name: det.name.trim(), email: isAdminBk ? det.email : det.email.trim().toLowerCase() };
+    const was = detFields(booking);
+    const patch = Object.fromEntries(Object.entries(next).filter(([k, v]) => v !== was[k]));
+    if (Object.keys(patch).length) onPatch && onPatch(booking, patch);
+    setEditDet(false);
+  }
   function savePricing() {
     let sn = booking.system_notes||"";
     sn = setFunctionCost(sn, fnCost===""?null:fnCost);
@@ -1415,8 +1431,40 @@ export function BookingDetail({booking,syncFeed=null,onEdit,onClose,onCancel,isA
       {isAdmin&&!isAdminBk&&onPatch ? <VendorVarianceSection key={booking.id+(booking.system_notes||"")} booking={booking} onPatch={onPatch}/>
         : vendorVarianceText(booking) ? <div style={{background:"#fefce8",border:"1px solid #fde047",borderRadius:10,padding:"8px 14px",fontSize:12,color:"#713f12"}}>⚠ {vendorVarianceText(booking)}</div> : null}
       {isPast&&<div style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:8,padding:"8px 12px",fontSize:12,color:"#64748b",display:"flex",alignItems:"center",gap:6}}>🔒 Past booking — {isAdmin?"admin can delete":"read-only"}</div>}
-      <div><EmailChip email={booking.email}/></div>
-      {[
+      <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}><EmailChip email={booking.email}/>
+        {isAdmin&&onPatch&&!editDet&&<button onClick={openDetails} title="Change this booking's field, date, time, purpose, booker or notes. Saved straight away, without an email." style={S.btn({marginLeft:"auto",padding:"5px 12px",fontSize:12,border:"1.5px solid #c7d2fe",background:"#eef2ff",color:"#4338ca",fontWeight:700})}>✏ Edit details</button>}
+      </div>
+      {editDet ? (
+        <div style={{display:"flex",flexDirection:"column",gap:10,background:"#f8fafc",border:"1.5px solid #c7d2fe",borderRadius:10,padding:"12px 14px"}}>
+          {detErr&&<div style={{fontSize:12,color:"#b91c1c",fontWeight:600}}>{detErr}</div>}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10}}>
+            <label style={{margin:0}}><span style={S.lbl}>Facility</span>
+              <select style={S.inp} value={det.facility_id} onChange={e=>setD("facility_id",e.target.value)}><FacilityOptions keepId={booking.facility_id}/></select></label>
+            <label style={{margin:0}}><span style={S.lbl}>Date</span>
+              <input style={S.inp} type="date" value={det.date} onChange={e=>setD("date",e.target.value)}/></label>
+            <label style={{margin:0}}><span style={S.lbl}>Start</span>
+              <select style={S.inp} value={det.start_hour} onChange={e=>setD("start_hour",parseFloat(e.target.value))}>
+                {(START_TIMES.includes(det.start_hour)?START_TIMES:[...START_TIMES,det.start_hour].sort((a,b)=>a-b)).map(h=><option key={h} value={h}>{fmtTime(h)}</option>)}
+              </select></label>
+            <label style={{margin:0}}><span style={S.lbl}>Duration</span>
+              <select style={S.inp} value={det.duration} onChange={e=>setD("duration",parseFloat(e.target.value))}>
+                {(DURATIONS.some(d=>d.value===det.duration)?DURATIONS:[...DURATIONS,{value:det.duration,label:fmtDuration(det.duration)}].sort((a,b)=>a.value-b.value)).map(d=><option key={d.value} value={d.value}>{d.label}</option>)}
+              </select></label>
+          </div>
+          <label style={{margin:0}}><span style={S.lbl}>Purpose</span><input style={S.inp} value={det.purpose} onChange={e=>setD("purpose",e.target.value)}/></label>
+          {!isAdminBk&&<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:10}}>
+            <label style={{margin:0}}><span style={S.lbl}>Booked by</span><input style={S.inp} value={det.name} onChange={e=>setD("name",e.target.value)}/></label>
+            <label style={{margin:0}}><span style={S.lbl}>Email</span><input style={S.inp} type="email" list="detail-booker-list" value={det.email} onChange={e=>setD("email",e.target.value)}/>
+              <datalist id="detail-booker-list">{bookers.map(bk=><option key={bk.email} value={bk.email}>{bk.name}</option>)}</datalist></label>
+          </div>}
+          <label style={{margin:0}}><span style={S.lbl}>Notes</span><textarea style={{...S.inp,minHeight:60,resize:"vertical"}} value={det.notes} onChange={e=>setD("notes",e.target.value)}/></label>
+          <div style={{fontSize:11,color:"#64748b"}}>Saved straight away; nobody is emailed. To change a booking and notify the booker, use <b>Edit</b> below (it goes through the cart).</div>
+          <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+            <button onClick={()=>setEditDet(false)} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#475569",fontSize:12})}>Cancel</button>
+            <button onClick={saveDetails} style={S.btn({background:"#4338ca",color:"#fff",fontSize:12,fontWeight:700})}>✓ Save details</button>
+          </div>
+        </div>
+      ) : [
         ["Facility",<span style={{display:"inline-flex",alignItems:"center",gap:6}}><span style={{width:10,height:10,borderRadius:"50%",background:f?.color,display:"inline-block"}}/>{f?.name}</span>],
         ["Date",fmtDate(booking.date)],
         ["Time",`${fmtTime(booking.start_hour)} – ${fmtTime(booking.start_hour+booking.duration)}`],
@@ -1431,7 +1479,7 @@ export function BookingDetail({booking,syncFeed=null,onEdit,onClose,onCancel,isA
           <span style={{fontSize:14,color:"#0f172a"}}>{value}</span>
         </div>
       ))}
-      {(()=>{
+      {!editDet&&(()=>{
         // Parse system markers from system_notes; fall back to notes for pre-migration rows.
         const sysNotesSrc = booking.system_notes || booking.notes || "";
         const userNotesSrc = booking.notes || "";
