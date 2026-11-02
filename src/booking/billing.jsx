@@ -3,6 +3,7 @@ import { downloadDriveFile, DRIVE_ROOT_FOLDER, testDriveConnection, disconnectDr
 import { billingDocFields, buildBillingDocHtml, invLineLabel, renderInvoiceDocHtml } from "./billingDocs.jsx";
 import { AMUA_INFO, rowSelect, CopyableTable, Modal, PROVIDERS, S, VENDOR_GTEC, deriveRecipientCode, fmtCost, genBankRef, todayKey } from "./core.jsx";
 import { csvCell, escHtml } from "../html.js";
+import { buildComponent, claimed, normaliseSelection, poBookers, selectionCovers, selectionEmpty } from "../poSplit.js";
 const PIPELINE_STATES = [
   { key:"draft",         label:"Draft",           color:"#94a3b8", description:"Invoice created, not yet submitted" },
   { key:"submitted",     label:"Submitted",        color:"#f59e0b", description:"Sent to Grammar TEC" },
@@ -74,12 +75,15 @@ function buildInvoiceBundleHtml({ recipientName, recipientEmail, docs, note = ""
   </body></html>`.replace(/\n\s+/g, "\n");
 }
 
-export function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onCreateReceipt, onLoadToSummary, isAdmin=false, loggedInEmail="", emailAliases={}, aliasNames={}, driveEnabled=false, onDriveSync, onRenameBatch, onDriveAttach, onEmailOfficial, onQueueInvoiceEmails, silentMode=false, onToggleSilent }) {
+export function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onCreateReceipt, onSavePoComponent, onLoadToSummary, isAdmin=false, loggedInEmail="", emailAliases={}, aliasNames={}, driveEnabled=false, onDriveSync, onRenameBatch, onDriveAttach, onEmailOfficial, onQueueInvoiceEmails, silentMode=false, onToggleSilent }) {
   const [filterStatus, setFilterStatus] = useState("all");
   const [expandedId, setExpandedId] = useState(null);
   const [expandedBatchId, setExpandedBatchId] = useState(null);
   const [expandedSubId, setExpandedSubId] = useState(null);
   const [exportMode, setExportMode] = useState("grouped"); // "grouped" | "individual"
+  // Split form on a vendor PO: poId → selection ({ bookerKey: true | [itemKey…] }); absent = whole PO.
+  const [splitSel, setSplitSel] = useState({});
+  const [splitOpen, setSplitOpen] = useState({}); // poId → { bookerKey: true } expanded to their bookings
   const [viewMode, setViewMode] = useState("grouped"); // "grouped" = batch cards | "individual" = flat rows
   const [driveTest, setDriveTest] = useState(null); // { ok, msg } from Connect & test
   const [driveBusy, setDriveBusy] = useState(false);
@@ -123,9 +127,10 @@ export function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, 
     const bs = Object.entries(batchMap).map(([batchId, recs]) => {
       const invRecs = recs.filter(r => r.type !== "purchase_order");
       const poRecs = recs.filter(r => r.type === "purchase_order");
-      const poRec = poRecs[0];
+      const poRec = poRecs.find(r => !r.parentPoId) || poRecs[0];
       // Display order: POs → grouped INVs (future: GTEC receipt → club receipts)
-      const ordered = [...poRecs, ...invRecs];
+      const ordered = [...poRecs.filter(r => !r.parentPoId).flatMap(p => [p, ...poRecs.filter(c => c.parentPoId === p.id)]),
+        ...poRecs.filter(c => c.parentPoId && !poRecs.some(p => p.id === c.parentPoId)), ...invRecs];
       const worstStatus = recs.reduce((worst, r) => {
         const wi = PIPELINE_KEYS.indexOf(worst);
         const ri = PIPELINE_KEYS.indexOf(r.status || "draft");
@@ -212,6 +217,143 @@ export function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, 
       batchId: undefined, // receipts render as standalone records, not inside invoice batches
     };
   }
+  // ─── Splitting a saved vendor PO into component POs (src/poSplit.js) ─────────
+  // The PO's bookers and bookings, its saved components, and what the form has selected.
+  function poSplitState(rec) {
+    const invoices = billingRecords.filter(r => r.type !== "purchase_order" && r.type !== "receipt"
+      && ((rec.linkedInvoiceIds||[]).includes(r.id) || (rec.batchId && r.batchId === rec.batchId)));
+    const bookers = poBookers(rec, invoices);
+    const components = billingRecords.filter(r => r.parentPoId === rec.id);
+    const taken = claimed(rec, components, bookers);
+    const custom = splitSel[rec.id];
+    const sel = custom ? normaliseSelection(bookers, custom) : null;
+    const whole = !sel || selectionCovers(bookers, sel);
+    const preview = sel && !whole && !selectionEmpty(sel) ? buildComponent(rec, bookers, sel, { components, invoices }) : null;
+    return { invoices, bookers, components, taken, sel, whole, preview, empty: !!sel && selectionEmpty(sel) };
+  }
+  // A PO's download buttons: the whole PO, or the selected part saved as a component PO first.
+  function downloadPo(rec, fmt) {
+    if (rec.parentPoId || !isAdmin) return downloadRecord(rec, fmt, "purchase_order", exportMode);
+    const st = poSplitState(rec);
+    if (st.empty) return;
+    if (st.whole) return downloadRecord(rec, fmt, "purchase_order", exportMode);
+    const comp = st.preview;
+    if (!st.components.some(c => c.id === comp.id)) onSavePoComponent && onSavePoComponent(comp);
+    downloadRecord(comp, fmt, "purchase_order", exportMode);
+  }
+  function renderPoSplitForm(rec) {
+    const st = poSplitState(rec);
+    const { bookers, taken, sel, components } = st;
+    const custom = !!sel;
+    const set = next => setSplitSel(m => ({ ...m, [rec.id]: next }));
+    const free = b => b.items.filter(i => !taken[i.key]).map(i => i.key);
+    const bookerTaken = b => b.items.length ? b.items.every(i => taken[i.key]) : !!taken[b.key];
+    const bState = b => !custom ? "all" : sel[b.key] === true ? "all" : Array.isArray(sel[b.key]) ? "some" : "none";
+    function toggleBooker(b) {
+      const cur = { ...(sel||{}) };
+      if (bState(b) !== "none") delete cur[b.key];
+      else if (b.items.length) { const f = free(b); if (f.length) cur[b.key] = f.length === b.items.length ? true : f; }
+      else if (!taken[b.key]) cur[b.key] = true;
+      set(cur);
+    }
+    function toggleItem(b, k) {
+      const cur = { ...(sel||{}) };
+      const now = cur[b.key] === true ? b.items.map(i => i.key) : (cur[b.key] || []);
+      const next = now.includes(k) ? now.filter(x => x !== k) : [...now, k];
+      if (next.length) cur[b.key] = next; else delete cur[b.key];
+      set(cur);
+    }
+    const open = splitOpen[rec.id] || {};
+    const cell = { padding:"5px 8px", borderBottom:"1px solid #f1f5f9", fontSize:11, verticalAlign:"middle" };
+    const tag = (txt, title) => <span title={title} style={{fontSize:10,fontWeight:700,padding:"1px 6px",borderRadius:999,background:"#e0e7ff",color:"#4338ca",whiteSpace:"nowrap"}}>{txt}</span>;
+    const short = id => id.slice(rec.id.length + 1);
+    const compFor = key => components.find(c => c.id === taken[key]);
+    return (
+      <div style={{marginTop:10,display:"flex",flexDirection:"column",gap:8}}>
+        <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+          <div style={{fontSize:11,fontWeight:700,color:"#475569"}}>Purchase order lines</div>
+          <label style={{display:"inline-flex",alignItems:"center",gap:6,fontSize:11,fontWeight:600,color:"#1d4ed8",cursor:"pointer"}}>
+            <input type="checkbox" checked={!custom} onChange={e=>setSplitSel(m=>{ const n={...m}; if (e.target.checked) delete n[rec.id]; else n[rec.id]={}; return n; })}/>
+            Whole PO
+          </label>
+          <span style={{fontSize:11,color:"#64748b"}}>{custom ? "Tick the bookers (or expand one for its bookings) to export as a separate part of this PO." : "Untick to pick bookers or bookings for GTEC to invoice separately."}</span>
+        </div>
+        <CopyableTable>
+        <table style={{width:"100%",borderCollapse:"collapse"}}>
+          <thead><tr style={{background:"#f8fafc"}}>
+            {["","Booker / booking","Amount"].map((h,i)=><th key={i} style={{...cell,fontWeight:700,color:"#64748b",textAlign:h==="Amount"?"right":"left",borderBottom:"1px solid #e2e8f0"}}>{h}</th>)}
+          </tr></thead>
+          <tbody>
+            {bookers.map(b => { const bs = bState(b), isOpen = !!open[b.key], bt = bookerTaken(b);
+              const parts = [...new Set((b.items.length ? b.items.map(i => taken[i.key]) : [taken[b.key]]).filter(Boolean))];
+              return (<Fragment key={b.key}>
+                <tr style={{background:bs!=="none"?"#eff6ff":"#fff"}}>
+                  <td style={{...cell,width:24}}>
+                    <input type="checkbox" aria-label={`Include ${b.name}`} disabled={!custom || (bt && bs==="none")} checked={bs!=="none"}
+                      ref={el=>{ if (el) el.indeterminate = bs==="some"; }} onChange={()=>toggleBooker(b)}/>
+                  </td>
+                  <td style={{...cell,fontWeight:700,color:"#0f172a"}}>
+                    {b.items.length>0&&<button onClick={()=>setSplitOpen(m=>({...m,[rec.id]:{...open,[b.key]:!isOpen}}))} title={isOpen?"Hide bookings":"Show bookings"}
+                      style={{border:"none",background:"none",cursor:"pointer",padding:"0 4px 0 0",fontSize:10,color:"#64748b"}}>{isOpen?"▾":"▸"}</button>}
+                    {b.name} <span style={{fontWeight:400,color:"#94a3b8"}}>{b.items.length?`· ${b.items.length} booking${b.items.length!==1?"s":""}`:""}</span>
+                    {parts.map(id => <span key={id} style={{marginLeft:6}}>{tag(`in -${short(id)}`, `Already in component PO ${id}`)}</span>)}
+                    {b.invoiceId&&<div style={{fontWeight:400,fontFamily:"monospace",fontSize:10,color:"#64748b"}}>{b.invoiceId}</div>}
+                  </td>
+                  <td style={{...cell,textAlign:"right",fontWeight:600}}>{fmtMoney(b.line.cost)}</td>
+                </tr>
+                {isOpen && b.items.map(it => { const on = custom ? (sel[b.key] === true || (sel[b.key]||[]).includes(it.key)) : true, c = compFor(it.key);
+                  return (
+                    <tr key={it.key} style={{background:on?"#f8fbff":"#fff"}}>
+                      <td style={cell}/>
+                      <td style={{...cell,paddingLeft:26,color:"#334155"}}>
+                        <label style={{display:"inline-flex",gap:6,alignItems:"center",cursor:custom&&!c?"pointer":"default"}}>
+                          <input type="checkbox" disabled={!custom || (!!c && !on)} checked={on} onChange={()=>toggleItem(b, it.key)}/>
+                          {invLineLabel({ ...it.line, desc: (it.line.desc||"").replace(`${b.name} · `, "") })}
+                          {c && tag(`in -${short(c.id)}`, `Already in component PO ${c.id}`)}
+                        </label>
+                      </td>
+                      <td style={{...cell,textAlign:"right"}}>{fmtMoney(it.line.cost)}</td>
+                    </tr>);
+                })}
+              </Fragment>);
+            })}
+          </tbody>
+        </table>
+        </CopyableTable>
+        <div style={{fontSize:11,color:st.empty?"#b45309":"#334155",background:custom?"#eff6ff":"transparent",borderRadius:8,padding:custom?"6px 10px":0}}>
+          {!custom ? null
+            : st.empty ? "Nothing selected. Tick at least one booker or booking."
+            : st.whole ? "Everything is selected: the downloads give the whole PO."
+            : <>Downloads give <b style={{fontFamily:"monospace"}}>{st.preview.id}</b> ({st.preview.splitBookers.join(", ")}): {fmtMoney(st.preview.subtotal)} + GST {fmtMoney(st.preview.gst)} = <b>{fmtMoney(st.preview.total)}</b>.
+                {st.components.some(c=>c.id===st.preview.id) ? " Already saved." : " It's saved as a component of this PO the first time you download it."}
+                <span style={{display:"flex",gap:6,marginTop:6,flexWrap:"wrap"}}>
+                  {[{fmt:"html",label:"HTML",icon:"🌐"},{fmt:"print",label:"PDF",icon:"🖨"},{fmt:"csv",label:"CSV",icon:"📊"}].map(({fmt,label,icon})=>(
+                    <button key={fmt} onClick={()=>downloadPo(rec,fmt)} style={{padding:"4px 10px",borderRadius:6,border:"1px solid #bfdbfe",background:"#fff",color:"#1d4ed8",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"}}>{icon} {label}</button>))}
+                </span></>}
+        </div>
+        {components.length>0&&(
+          <div style={{display:"flex",flexDirection:"column",gap:4}}>
+            <div style={{fontSize:11,fontWeight:700,color:"#475569"}}>Component POs ({components.length})</div>
+            {components.map(c=>(
+              <div key={c.id} style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",fontSize:11,padding:"5px 8px",border:"1px solid #dbeafe",borderRadius:8,background:"#fff"}}>
+                <b style={{fontFamily:"monospace",color:"#1d4ed8"}}>{c.id}</b>
+                <span style={{color:"#475569"}}>{(c.splitBookers||[]).join(", ")}</span>
+                <span style={{fontWeight:700}}>{fmtMoney(c.total)}</span>
+                <StatusPill status={c.status||"draft"}/>
+                {c.gtecInvoiceNumber&&<span style={{color:"#64748b"}}>GTEC #{c.gtecInvoiceNumber}</span>}
+                <span style={{marginLeft:"auto",display:"inline-flex",gap:4}}>
+                  {[{fmt:"html",icon:"🌐"},{fmt:"print",icon:"🖨"},{fmt:"csv",icon:"📊"}].map(({fmt,icon})=>(
+                    <button key={fmt} onClick={()=>downloadRecord(c,fmt,"purchase_order",exportMode)} title={`Download ${c.id} (${fmt==="print"?"PDF":fmt.toUpperCase()})`}
+                      style={{padding:"2px 6px",border:"1px solid #e2e8f0",borderRadius:6,background:"#fff",cursor:"pointer",fontSize:11}}>{icon}</button>))}
+                  {rec.batchId&&<button onClick={()=>{ setExpandedBatchId(rec.batchId); setExpandedSubId(c.id); }} style={{padding:"2px 8px",border:"1px solid #bfdbfe",borderRadius:6,background:"#eff6ff",color:"#1d4ed8",cursor:"pointer",fontSize:11,fontWeight:700}}>Open</button>}
+                </span>
+              </div>))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   // Reusable expanded detail panel for any billing record
   function renderRecordExpanded(rec) {
     const isPO = rec.type==="purchase_order" || rec.bookerEmail==="gtec";
@@ -221,6 +363,12 @@ export function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, 
     return (
       <div style={{borderTop:"1px solid #f1f5f9",padding:"14px 16px",background:"#fafafa"}}>
         {!isReceipt && <ProgressTrack status={rec.status||"draft"}/>}
+        {rec.parentPoId && (
+          <div style={{marginBottom:10,fontSize:12,color:"#1d4ed8",fontWeight:700}}>
+            🧩 Part of purchase order <span style={{fontFamily:"monospace"}}>{rec.parentPoId}</span>
+            <span style={{color:"#64748b",fontWeight:400}}> · {(rec.splitBookers||[]).join(", ")}. Give GTEC this number to invoice this part separately.</span>
+          </div>
+        )}
         {isReceipt && (
           <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10,fontSize:12,color:"#15803d",fontWeight:700}}>
             🧾 Receipt — payment received{rec.paidOn?` · ${fmtDate(rec.paidOn)}`:""}
@@ -320,15 +468,17 @@ export function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, 
             ].filter(x=>x.show).map(({dt,id})=>(
               <div key={dt} style={{display:"flex",gap:0,border:"1px solid #e2e8f0",borderRadius:8,overflow:"hidden",alignItems:"stretch"}}>
                 <span style={{padding:"5px 10px",fontSize:11,fontWeight:700,color:"#475569",background:"#f8fafc",borderRight:"1px solid #e2e8f0",display:"flex",alignItems:"center",gap:4}}>
-                  {dt==="purchase_order"?"📋 PO":dt==="receipt"?"✅ Receipt":"🧾 Invoice"} <span style={{fontFamily:"monospace",fontSize:10,color:"#94a3b8"}}>{id}</span>
+                  {dt==="purchase_order"?"📋 PO":dt==="receipt"?"✅ Receipt":"🧾 Invoice"} <span style={{fontFamily:"monospace",fontSize:10,color:"#94a3b8"}}>{(()=>{ if (dt!=="purchase_order"||rec.parentPoId||!isAdmin) return id; const st=poSplitState(rec); return st.preview ? st.preview.id : id; })()}</span>
                 </span>
-                {[{fmt:"html",label:"HTML",icon:"🌐"},{fmt:"print",label:"PDF",icon:"🖨"},{fmt:"csv",label:"CSV",icon:"📊"}].map(({fmt,label,icon})=>(
-                  <button key={fmt} onClick={()=>downloadRecord(rec,fmt,dt,exportMode)}
-                    title={`${exportMode==="individual"?"Itemised":"Grouped"} ${label}`}
-                    style={{padding:"5px 9px",border:"none",borderLeft:"1px solid #f1f5f9",background:"#fff",cursor:"pointer",fontSize:11,fontWeight:600,color:"#0f172a",fontFamily:"inherit"}}>
+                {[{fmt:"html",label:"HTML",icon:"🌐"},{fmt:"print",label:"PDF",icon:"🖨"},{fmt:"csv",label:"CSV",icon:"📊"}].map(({fmt,label,icon})=>{
+                  const part = dt==="purchase_order" && !rec.parentPoId && isAdmin ? poSplitState(rec) : null;
+                  return (
+                  <button key={fmt} disabled={!!part?.empty} onClick={()=>dt==="purchase_order"?downloadPo(rec,fmt):downloadRecord(rec,fmt,dt,exportMode)}
+                    title={part && !part.whole && !part.empty ? `${part.preview.id} — the selected part of this PO (${label})` : `${exportMode==="individual"?"Itemised":"Grouped"} ${label}`}
+                    style={{padding:"5px 9px",border:"none",borderLeft:"1px solid #f1f5f9",background:part&&!part.whole&&!part.empty?"#eff6ff":"#fff",cursor:part?.empty?"default":"pointer",opacity:part?.empty?0.5:1,fontSize:11,fontWeight:600,color:"#0f172a",fontFamily:"inherit"}}>
                     {icon} {label}
-                  </button>
-                ))}
+                  </button>);
+                })}
               </div>
             ))}
           </div>
@@ -378,7 +528,7 @@ export function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, 
             </div>
           );
         })()}
-        {((exportMode==="individual"?(rec.individualLines||rec.lines):rec.lines)||[]).length>0&&(
+        {isPO&&isAdmin&&!rec.parentPoId&&(rec.lines||[]).length>0 ? renderPoSplitForm(rec) : ((exportMode==="individual"?(rec.individualLines||rec.lines):rec.lines)||[]).length>0&&(
           <div style={{marginTop:10}}>
             <div style={{fontSize:11,fontWeight:700,color:"#475569",marginBottom:4}}>Invoice Lines ({exportMode==="individual"?"Itemised — per booking":"Summary — grouped"})</div>
             <CopyableTable>
@@ -468,7 +618,8 @@ export function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, 
             <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
               <span style={{fontFamily:"monospace",fontSize:10,background:"#6366f1",padding:"2px 7px",borderRadius:4,color:"#fff",fontWeight:700,letterSpacing:"0.04em"}}>BATCH</span>
               {batch.orderName&&<span style={{fontSize:12,fontWeight:800,color:"#312e81"}}>{batch.orderName}</span>}
-              <span style={{fontSize:11,color:"#6366f1",fontWeight:600}}>{batch.invRecs.length} invoice{batch.invRecs.length!==1?"s":""} + {batch.poRecs.length?`${batch.poRecs.length} PO${batch.poRecs.length!==1?"s":""}`:"no PO"}</span>
+              <span style={{fontSize:11,color:"#6366f1",fontWeight:600}}>{batch.invRecs.length} invoice{batch.invRecs.length!==1?"s":""} + {(()=>{ const main = batch.poRecs.filter(r=>!r.parentPoId).length, parts = batch.poRecs.length-main;
+                return `${main?`${main} PO${main!==1?"s":""}`:"no PO"}${parts?` (${parts} part${parts!==1?"s":""})`:""}`; })()}</span>
             </div>
             <div style={{fontSize:11,color:"#6b7280",marginTop:3,display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
               <span>{fmtDate(batch.dateFrom)}{batch.dateTo&&batch.dateTo!==batch.dateFrom?` – ${fmtDate(batch.dateTo)}`:""}</span>
@@ -484,7 +635,7 @@ export function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, 
                   ? { borderActive:"#1d4ed8", borderIdle:"#bfdbfe", bgActive:"#1d4ed8", bgIdle:"#dbeafe", fgActive:"#fff", fgIdle:"#1d4ed8" }
                   : { borderActive:"#4f46e5", borderIdle:"#c7d2fe", bgActive:"#4f46e5", bgIdle:"#eef2ff", fgActive:"#fff", fgIdle:"#4338ca" };
                 const dt = isPOChip ? "purchase_order" : "invoice";
-                const label = isPOChip ? `PO · ${(PROVIDERS[r.provider||"gtec"]||PROVIDERS.gtec).short}` : `INV · ${displayName(r.bookerEmail)}`;
+                const label = isPOChip ? `PO · ${(PROVIDERS[r.provider||"gtec"]||PROVIDERS.gtec).short}${r.splitSuffix?` · part ${r.splitSuffix}`:""}` : `INV · ${displayName(r.bookerEmail)}`;
                 return (
                   <div key={r.id} style={{display:"inline-flex",borderRadius:6,overflow:"hidden",border:`1.5px solid ${active?tone.borderActive:tone.borderIdle}`}}>
                     <button onClick={e=>{e.stopPropagation();setExpandedBatchId(batch.batchId);setExpandedSubId(r.id);}}
