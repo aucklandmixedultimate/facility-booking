@@ -112,6 +112,7 @@ Things the picture shows:
 | Council | `App`, `admin.jsx` `CouncilAllocationTab` | Send to council, with the fee split. The council extension reads AMUA's applications from the council portal (myAUCKLAND → My applications, the `paginated-booking-applications` list) into `council_outcomes` and `council_portal_sync`. This replaced reading the council's emails from Gmail (`councilMail.js`, removed). **🏛 Load portal results** queues the booking changes. Allocate outcomes. |
 | Summary | `summary.jsx` | Hours and costs by booker, pricing rules, schedule summary. Invoice / PO builder (draft and official). |
 | Billing | `billing.jsx` | Pipeline of official documents, receipts, Drive sync, invoice emails. |
+| PO components | `billing.jsx` `renderPoSplitForm`, `poSplit.js` | Expand a saved vendor PO: its lines become a form (bookers, expandable to bookings). Downloading a selection saves it as a component PO (`<PO id>-<booker>`, `-OTHER` for all but one booker, else `-A`, `-B`…) with `parentPoId`, its own status, GTEC invoice # and Drive copy, and a "Part of purchase order" note. Works on POs saved before this (invoice ids from the line detail or description). |
 | Admin | `admin.jsx` `AdminPanel` | Activity log, sync results, clashes, mismatch triage, track changes, pricing rules, GTEC purge requests, bookings table. |
 | Admin menu | `App`, `modals.jsx` | Rates, player counts, log retention, AMUA details, user management, backup. |
 

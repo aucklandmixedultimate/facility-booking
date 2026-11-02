@@ -18,7 +18,8 @@ Two apps on GitHub Pages (`/facility-booking/`), one Supabase project:
   `src/html.js` (`escHtml`, `csvCell` — escape any user text put into HTML or CSV),
   `src/venues.js` (venue scoring, owner type and vendor ids, shared by both pages),
   `src/appnav.js` (the Bookings / All Auckland fields switcher in both headers — add a page there),
-  `src/fieldPrefs.js` (weekend daylight: Field #3 before Fields #1 / #2).
+  `src/fieldPrefs.js` (weekend daylight: Field #3 before Fields #1 / #2),
+  `src/poSplit.js` (splitting a saved vendor PO into component POs).
 
 Architecture map, data model, `system_notes` markers and operations: `docs/HANDOVER.md`.
 Latest review and backlog: `docs/REVIEW-2026-10.md`.

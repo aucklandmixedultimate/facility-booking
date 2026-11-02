@@ -290,13 +290,19 @@ export function billingDocFields(rec, docType, lines) {
   const pre   = rec.subtotal!=null ? rec.subtotal : (lines||[]).reduce((s,l)=>s+(l.cost||0),0);
   const gst   = rec.gst!=null ? rec.gst : 0;
   const total = rec.total!=null ? rec.total : pre + gst;
-  // Receipts carry a paid acknowledgement and a back-reference to the source invoice.
-  const banner = docType==="receipt" ? `<div style="margin:12px 28px 0;padding:10px 14px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px">
+  // Receipts carry a paid acknowledgement and a back-reference to the source invoice; a
+  // component PO (split from a vendor PO, src/poSplit.js) names the PO it's part of.
+  const partBanner = docType==="purchase_order" && rec.parentPoId ? `<div style="margin:12px 28px 0;padding:10px 14px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px">
+      <div style="font-size:13px;font-weight:800;color:#1d4ed8">Part of purchase order <span style="font-family:monospace">${escHtml(rec.parentPoId)}</span></div>
+      <div style="font-size:11px;color:#475569;margin-top:2px">${escHtml((rec.splitBookers||[]).join(", "))}${rec.splitBookers?.length?" · ":""}Please invoice this part separately, quoting <strong style="font-family:monospace">${escHtml(rec.id)}</strong>.</div>
+    </div>` : "";
+  const receiptBanner = docType==="receipt" ? `<div style="margin:12px 28px 0;padding:10px 14px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px">
       <div style="font-size:13px;font-weight:800;color:#15803d">✓ PAID — payment received with thanks</div>
       <div style="font-size:11px;color:#475569;margin-top:2px">
         ${rec.sourceInvoiceId?`For invoice <strong style="font-family:monospace">${rec.sourceInvoiceId}</strong>`:""}${rec.sourceInvoiceId&&rec.paidOn?" · ":""}${rec.paidOn?`Paid on ${fmtD(rec.paidOn)}`:""}
       </div>
     </div>` : "";
+  const banner = partBanner || receiptBanner;
   return {
     title: `${docLabel} ${docId}`,
     docLabel: docLabel.toUpperCase(), docId, bankRef: docId,
@@ -325,7 +331,9 @@ export function billingDocBaseName(rec) {
   const docTag = isPO ? "PO" : rec.type === "receipt" ? "Receipt" : "Invoice";
   const orderTag = rec.orderName ? ` - ${sanitizeDriveName(rec.orderName)}` : "";
   // Invoices add the booker so multiple invoices in one batch don't collide.
-  const whoTag = isPO ? "" : ` - ${sanitizeDriveName(rec.bookerName || (rec.bookerEmail||"").split("@")[0])}`;
+  // A component PO adds its part (and bookers) so it doesn't overwrite the whole PO's file.
+  const whoTag = isPO ? (rec.parentPoId ? ` - part ${sanitizeDriveName(rec.splitSuffix||"")} (${sanitizeDriveName((rec.splitBookers||[]).join(", "))})` : "")
+    : ` - ${sanitizeDriveName(rec.bookerName || (rec.bookerEmail||"").split("@")[0])}`;
   return `AMUA ${docTag}${orderTag}${whoTag} - ${(rec.dateFrom||"").replace(/-/g,"")}-${(rec.dateTo||"").replace(/-/g,"")}`;
 }
 export function driveBatchFolderName(records) {
