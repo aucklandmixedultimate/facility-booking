@@ -228,7 +228,9 @@ export function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, 
     const custom = splitSel[rec.id];
     const sel = custom ? normaliseSelection(bookers, custom) : null;
     const whole = !sel || selectionCovers(bookers, sel);
-    const preview = sel && !whole && !selectionEmpty(sel) ? buildComponent(rec, bookers, sel, { components, invoices }) : null;
+    // The suffix names a single booker by their alias (as shown across the app), not the official name.
+    const nameOf = b => b.bookerEmail ? displayName(b.bookerEmail) : b.name;
+    const preview = sel && !whole && !selectionEmpty(sel) ? buildComponent(rec, bookers, sel, { components, invoices, nameOf }) : null;
     return { invoices, bookers, components, taken, sel, whole, preview, empty: !!sel && selectionEmpty(sel) };
   }
   // A PO's download buttons: the whole PO, or the selected part saved as a component PO first.
@@ -346,6 +348,11 @@ export function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, 
                     <button key={fmt} onClick={()=>downloadRecord(c,fmt,"purchase_order",exportMode)} title={`Download ${c.id} (${fmt==="print"?"PDF":fmt.toUpperCase()})`}
                       style={{padding:"2px 6px",border:"1px solid #e2e8f0",borderRadius:6,background:"#fff",cursor:"pointer",fontSize:11}}>{icon}</button>))}
                   {rec.batchId&&<button onClick={()=>{ setExpandedBatchId(rec.batchId); setExpandedSubId(c.id); }} style={{padding:"2px 8px",border:"1px solid #bfdbfe",borderRadius:6,background:"#eff6ff",color:"#1d4ed8",cursor:"pointer",fontSize:11,fontWeight:700}}>Open</button>}
+                  {onDeleteRecord&&<button title={`Remove ${c.id}; its bookings can be picked again`} onClick={()=>{
+                      const st = stateInfo(c.status||"draft").label;
+                      const warn = (c.status||"draft")!=="draft" ? `\n\nIt's at "${st}"${c.gtecInvoiceNumber?` with GTEC invoice #${c.gtecInvoiceNumber}`:""}, so tell GTEC if they already have it.` : "";
+                      if (window.confirm(`Remove component PO ${c.id} (${(c.splitBookers||[]).join(", ")})? Its bookings go back to the PO and can be split again.${warn}${c.drive?.webViewLink?"\n\nIts copy in Google Drive stays there.":""}`)) onDeleteRecord(c.id);
+                    }} style={{padding:"2px 8px",border:"1px solid #fecaca",borderRadius:6,background:"#fef2f2",color:"#b91c1c",cursor:"pointer",fontSize:11,fontWeight:700}}>✕ Remove</button>}
                 </span>
               </div>))}
           </div>
@@ -410,6 +417,12 @@ export function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, 
                   onUpdateRecord({id:rec.id,status:prev});
                 }} style={{padding:"5px 12px",borderRadius:8,border:"1px solid #e2e8f0",cursor:"pointer",fontSize:11,fontWeight:600,fontFamily:"inherit",background:"#fff",color:"#64748b"}}>
                   ← Revert to {stateInfo(PIPELINE_KEYS[PIPELINE_KEYS.indexOf(rec.status||"draft")-1]).label}
+                </button>
+              )}
+              {rec.parentPoId && (rec.status||"draft")!=="draft" && onDeleteRecord && (
+                <button onClick={()=>{ if(window.confirm(`Remove component PO ${rec.id}? It's at "${stateInfo(rec.status).label}"${rec.gtecInvoiceNumber?` with GTEC invoice #${rec.gtecInvoiceNumber}`:""}, so tell GTEC if they already have it. Its bookings go back to ${rec.parentPoId} and can be split again.`)) onDeleteRecord(rec.id); }}
+                  style={{padding:"5px 12px",borderRadius:8,border:"1px solid #fecaca",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit",background:"#fef2f2",color:"#b91c1c",marginLeft:"auto"}}>
+                  ✕ Remove part
                 </button>
               )}
               {(rec.status||"draft")==="draft" && onDeleteRecord && (
