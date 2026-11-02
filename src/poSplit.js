@@ -55,13 +55,14 @@ const sameSelection = (a, b) => JSON.stringify(Object.entries(a || {}).sort()) =
 
 // The suffix a component carries after the PO number: the booker's name when it's one
 // booker, OTHER when it's every booker but one, otherwise the next free letter (A, B, …).
-// A suffix already used by another component gets a number (RORY2).
-export function componentSuffix(bookers, sel, taken = []) {
+// A suffix already used by another component gets a number (RORY2). nameOf gives the name
+// to use for a booker (the booking site passes the booker's alias, not their official name).
+export function componentSuffix(bookers, sel, taken = [], nameOf = b => b.name) {
   const keys = Object.keys(sel);
   const free = s => { if (!taken.includes(s)) return s; for (let n = 2; ; n++) if (!taken.includes(`${s}${n}`)) return `${s}${n}`; };
   if (keys.length === 1) {
     const b = bookers.find(x => x.key === keys[0]);
-    const slug = (b?.name || "").split(/\s+/)[0].toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10);
+    const slug = (b ? nameOf(b) || b.name || "" : "").split(/\s+/)[0].toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10);
     if (slug) return free(slug);
   }
   if (bookers.length > 2 && keys.length === bookers.length - 1 && keys.every(k => sel[k] === true)) return free("OTHER");
@@ -84,7 +85,7 @@ export function claimed(po, components, bookers) {
 }
 
 // The component PO record for a selection (or the saved one for the same selection).
-export function buildComponent(po, bookers, sel, { components = [], invoices = [], now = new Date().toISOString() } = {}) {
+export function buildComponent(po, bookers, sel, { components = [], invoices = [], now = new Date().toISOString(), nameOf } = {}) {
   const existing = components.find(c => sameSelection(c.splitSelection, sel));
   if (existing) return existing;
   const lines = [], individualLines = [], linkedInvoiceIds = [], bookingIds = [];
@@ -104,7 +105,7 @@ export function buildComponent(po, bookers, sel, { components = [], invoices = [
     const inv = invoices.find(r => r.id === b.invoiceId);
     if (s === true && inv) bookingIds.push(...(inv.bookingIds || []).filter(id => (po.bookingIds || []).includes(id)));
   }
-  const suffix = componentSuffix(bookers, sel, components.map(c => c.splitSuffix));
+  const suffix = componentSuffix(bookers, sel, components.map(c => c.splitSuffix), nameOf);
   const id = `${po.id}-${suffix}`;
   return {
     ...po, id, bankRef: id, parentPoId: po.id, splitSuffix: suffix, splitSelection: sel,

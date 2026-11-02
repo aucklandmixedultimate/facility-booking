@@ -51,6 +51,10 @@ test("componentSuffix: booker name, OTHER, then letters; taken suffixes get a nu
   assert.equal(componentSuffix(bs, { "I261111ROR02": true }), "RORY");
   assert.equal(componentSuffix(bs, { "I261111ROR02": ["i0"] }), "RORY");
   assert.equal(componentSuffix(bs, { "I261111ROR02": true }, ["RORY"]), "RORY2");
+  // The booking site names the booker by their alias.
+  const alias = b => ({ "rory@x.nz": "Rorz Crew" })[b.bookerEmail] || b.name;
+  assert.equal(componentSuffix(bs, { "I261111ROR02": true }, [], alias), "RORZ");
+  assert.equal(buildComponent(po, bs, { "I261111ROR02": true }, { invoices, nameOf: alias }).id, "P261111GTE02-RORZ");
   assert.equal(componentSuffix(bs, { "I261111MAT02": true, "I261111EUP02": true }), "OTHER");
   assert.equal(componentSuffix(bs, { "I261111MAT02": true, "I261111EUP02": ["i3"], "I261111ROR02": ["i0"] }), "A");
   assert.equal(componentSuffix(bs, { "I261111MAT02": true, "I261111EUP02": true }, ["OTHER"]), "OTHER2");
