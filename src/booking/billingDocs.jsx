@@ -35,6 +35,9 @@ export function InvoicePill({active, onClick, children}) {
 // a sheet never spills onto a second physical page and strands its subtotal there.
 const INV_ROWS_PAGE_1 = 28, INV_ROWS_PAGE_N = 34, INV_ROWS_FOR_TOTALS = 2;
 // A page-1 banner (receipt "PAID", preview notice) costs roughly this many rows of height.
+// A banner that's taller passes its own bannerRows (the component-PO banner: 3). Measured: the
+// "Part of purchase order" banner is 68px, and reserving only 2 rows left page 1 within ~20px
+// of the A4 limit, so a slightly larger font pushed it onto a second, nearly blank page.
 const INV_ROWS_PER_BANNER = 2;
 
 // A shared line also prints a footnote on its sheet, so it costs a second row.
@@ -128,7 +131,7 @@ export function renderInvoiceDocHtml({
   title, docLabel, docId, bankRef, dateStr, orderName = "",
   billToName, billToEmail, billToExtra = "", periodStr,
   lines = [], pre, gst, total, gstMode,
-  banner = "", previewNotice = false, footNote = "", paginate = true, fragment = false,
+  banner = "", bannerRows: bannerRowsIn, previewNotice = false, footNote = "", paginate = true, fragment = false,
 }) {
   // Styling is inline because this same HTML is emailed to bookers and mail clients
   // routinely drop <style> blocks; layout uses tables for the same reason. The <style>
@@ -165,7 +168,7 @@ export function renderInvoiceDocHtml({
        <tr><td colspan="4" style="${tdLbl}${edgeL};background:#f0fdf4;font-size:13px;font-weight:700;color:#0f172a">Total</td>${money(total, ";background:#f0fdf4;font-size:15px;font-weight:800;color:#15803d")}</tr>`;
 
   lines = lines.map(normaliseInvLine);
-  const bannerRows = (banner ? INV_ROWS_PER_BANNER : 0) + (previewNotice ? 1 : 0);
+  const bannerRows = (banner ? (bannerRowsIn ?? INV_ROWS_PER_BANNER) : 0) + (previewNotice ? 1 : 0);
   // Emails have no pages, so the emailed copy stays one continuous sheet.
   const pages = paginate ? paginateInvoiceLines(lines, { bannerRows }) : [lines];
   const multi = pages.length > 1;
@@ -281,9 +284,27 @@ export function renderInvoiceDocHtml({
   </style></head><body>${sheets}</body></html>`;
 }
 
+// A PO's itemised lines read "<booker> · <field> · <time>", so the bookers sharing a field are
+// the lines with the same date, field and time whose note says it's shared. POs saved before
+// the note named everyone get "(shared by A and B)" added here; context is the lines to look
+// in (a component PO passes its parent's, since it holds only some of the bookers).
+function withSharers(lines, context) {
+  const pool = (context || lines || []).map(normaliseInvLine);
+  const split = l => { const d = l.desc || l.description || l.label || "", i = d.indexOf(" · "); return i > 0 ? [d.slice(0, i), d.slice(i + 3)] : ["", d]; };
+  return (lines || []).map(l => {
+    const n = normaliseInvLine(l);
+    if (!/shared field/i.test(n.sharedNote || "") || /shared by/i.test(n.sharedNote)) return l;
+    const [, rest] = split(n);
+    const names = [...new Set(pool.filter(o => o.date === n.date && /shared field/i.test(o.sharedNote || "") && split(o)[1] === rest).map(o => split(o)[0]).filter(Boolean))];
+    if (names.length < 2) return l;
+    const who = `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+    return { ...n, sharedNote: n.sharedNote.replace(/(shared field, [^;]*)/i, `$1 (shared by ${who})`) };
+  });
+}
+
 // Builds invoice/PO HTML from the snapshot stored on the record. Falls back
 // to "draft" formatting (no GST extraction) when fields are missing.
-export function billingDocFields(rec, docType, lines) {
+export function billingDocFields(rec, docType, lines, context = null) {
   const fmtD = d => d ? new Date(d+"T00:00:00").toLocaleDateString("en-NZ",{day:"numeric",month:"short",year:"numeric"}) : "—";
   const docLabel = docType === "purchase_order" ? "Purchase Order" : docType === "receipt" ? "Receipt" : "Invoice";
   const docId = docType==="purchase_order" ? (rec.poId||rec.id) : rec.id;
@@ -292,9 +313,11 @@ export function billingDocFields(rec, docType, lines) {
   const total = rec.total!=null ? rec.total : pre + gst;
   // Receipts carry a paid acknowledgement and a back-reference to the source invoice; a
   // component PO (split from a vendor PO, src/poSplit.js) names the PO it's part of.
-  const partBanner = docType==="purchase_order" && rec.parentPoId ? `<div style="margin:12px 28px 0;padding:10px 14px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px">
-      <div style="font-size:13px;font-weight:800;color:#1d4ed8">Part of purchase order <span style="font-family:monospace">${escHtml(rec.parentPoId)}</span></div>
-      <div style="font-size:11px;color:#475569;margin-top:2px">${escHtml((rec.splitBookers||[]).join(", "))}${rec.splitBookers?.length?" · ":""}Please invoice this part separately, quoting <strong style="font-family:monospace">${escHtml(rec.id)}</strong>.</div>
+  // Two fixed lines (the bookers on one clipped line) so its height doesn't vary with them.
+  const oneLine = "white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
+  const partBanner = docType==="purchase_order" && rec.parentPoId ? `<div style="margin:12px 28px 0;padding:8px 14px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px">
+      <div style="font-size:12px;font-weight:800;color:#1d4ed8;${oneLine}">Part of purchase order <span style="font-family:monospace">${escHtml(rec.parentPoId)}</span> · please invoice it separately, quoting <span style="font-family:monospace">${escHtml(rec.id)}</span></div>
+      ${rec.splitBookers?.length ? `<div style="font-size:11px;color:#475569;margin-top:2px;${oneLine}">${escHtml(rec.splitBookers.join(", "))}</div>` : ""}
     </div>` : "";
   const receiptBanner = docType==="receipt" ? `<div style="margin:12px 28px 0;padding:10px 14px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px">
       <div style="font-size:13px;font-weight:800;color:#15803d">✓ PAID — payment received with thanks</div>
@@ -303,6 +326,7 @@ export function billingDocFields(rec, docType, lines) {
       </div>
     </div>` : "";
   const banner = partBanner || receiptBanner;
+  if (docType==="purchase_order") lines = withSharers(lines, context);
   return {
     title: `${docLabel} ${docId}`,
     docLabel: docLabel.toUpperCase(), docId, bankRef: docId,
@@ -315,12 +339,12 @@ export function billingDocFields(rec, docType, lines) {
     ].join(""),
     periodStr: rec.dateFrom&&rec.dateTo ? `${fmtD(rec.dateFrom)} – ${fmtD(rec.dateTo)}` : "All periods",
     lines: lines||[], pre, gst, total, gstMode: rec.gstMode,
-    banner,
+    banner, bannerRows: partBanner ? 3 : undefined,
     footNote: `${docType==="receipt"?"This receipt confirms payment has been received in full. · ":AMUA_INFO.bank?`Bank: ${AMUA_INFO.bank} · `:""}Generated by FacilityBook${rec.status==="draft"?" · DRAFT":""}`,
   };
 }
-export function buildBillingDocHtml(rec, docType, lines) {
-  return renderInvoiceDocHtml(billingDocFields(rec, docType, lines));
+export function buildBillingDocHtml(rec, docType, lines, context = null) {
+  return renderInvoiceDocHtml(billingDocFields(rec, docType, lines, context));
 }
 
 // Drive file/folder naming for billing documents. Names are deterministic so

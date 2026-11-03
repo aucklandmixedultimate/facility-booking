@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, Fragment } from "react";
-import { AMUA_INFO, Badge, isCouncilField, vendorVarianceText, CopyableTable, DURATIONS, FACILITIES, PROVIDERS, RECIPIENT_CODE_AMUA, S, cleanRecipientCode, deriveRecipientCode, emailColor, facCellLabel, fmt24, fmtCost, fmtDate, fmtDateShort, fmtTime, genBankRef, isAdminBooking, parseBilledSnapshot, parseCouncilApp, parseCpsaResolution, parseFunctionCost, parseSlotLink, parseSplit, providerOfFacility, todayKey, visibleFacilities, workflowOf } from "./core.jsx";
+import { AMUA_INFO, Badge, isCouncilField, vendorVarianceText, CopyableTable, DURATIONS, FACILITIES, PROVIDERS, RECIPIENT_CODE_AMUA, S, cleanRecipientCode, deriveRecipientCode, emailColor, facCellLabel, fmt24, fmtCost, fmtDate, fmtDateShort, fmtTime, genBankRef, isAdminBooking, parseBilledSnapshot, parseCouncilApp, parseCpsaResolution, parseFunctionCost, parseSlotLink, parseSplit, providerOfFacility, slotGroupMembers, todayKey, visibleFacilities, workflowOf } from "./core.jsx";
 import { CouncilRatesCard, OneOffModal, PatternModal, PricingConditionsManager, buildOverlapPatternMap, defaultFacRates, resolveRates } from "./schedule.jsx";
 import { InvoiceOptionRow, InvoicePill, invLineLabel, renderInvoiceDocHtml } from "./billingDocs.jsx";
 import { isClosed } from "../statuses.js";
@@ -363,9 +363,14 @@ export function SummaryTab({ bookings, loggedInEmail, onRemoveBookings, facility
     const slotNote = slotShare < 1 ? ` · shared field, ${Math.round(slotShare*100)}% of ${fmtCost(full)}` : "";
     const shareNote = share < 1 ? ` · split ${Math.round(share*100)}%` : "";
     const cost = full * slotShare * share;
+    // Every party sharing, by alias: the slot's live members, and the cost split's co-bookers.
+    const andList = xs => xs.length > 1 ? `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}` : xs[0] || "";
+    const slotId = parseSlotLink(b.system_notes)?.id;
+    const sharers = slotShare < 1 && slotId ? [...new Set(slotGroupMembers(bookings, slotId).filter(m => !isClosed(m.status)).map(m => summaryAlias(m.email)))] : [];
+    const splitters = share < 1 ? [...new Set((parseSplit(b.system_notes) || []).map(p => summaryAlias(p.email)))] : [];
     const sharedNote = [
-      slotShare < 1 ? `shared field, ${Math.round(slotShare*100)}% of ${fmtCost(full)}` : "",
-      share < 1 ? `cost split, ${Math.round(share*100)}% share` : "",
+      slotShare < 1 ? `shared field, ${Math.round(slotShare*100)}% of ${fmtCost(full)}${sharers.length > 1 ? ` (shared by ${andList(sharers)})` : ""}` : "",
+      share < 1 ? `cost split, ${Math.round(share*100)}% share${splitters.length > 1 ? ` (split between ${andList(splitters)})` : ""}` : "",
     ].filter(Boolean).join("; ");
     return {
       date:   b.date,

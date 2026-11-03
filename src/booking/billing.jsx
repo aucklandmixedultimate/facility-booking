@@ -172,7 +172,9 @@ export function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, 
       URL.revokeObjectURL(url);
       return;
     }
-    const html = buildBillingDocHtml(rec, docType, lines);
+    // A component PO holds only some bookers: its parent's lines name everyone sharing a field.
+    const parent = rec.parentPoId ? billingRecords.find(r => r.id === rec.parentPoId) : null;
+    const html = buildBillingDocHtml(rec, docType, lines, parent?.individualLines || null);
     const win = window.open("","_blank");
     if (win) {
       win.document.write(html); win.document.close();
