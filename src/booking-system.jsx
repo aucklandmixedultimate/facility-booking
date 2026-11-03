@@ -1717,7 +1717,8 @@ export default function App() {
           const docType = isPO ? "purchase_order" : rec.type==="receipt" ? "receipt" : "invoice";
           const folder = isPO ? await poFolderFor(rec) : subClubs; // receipts file with the club-facing docs
           const base = billingDocBaseName(rec);
-          const html = buildBillingDocHtml(rec, docType, rec.lines||[]);
+          const parentPo = rec.parentPoId ? billingRecords.find(r => r.id === rec.parentPoId) : null;
+          const html = buildBillingDocHtml(rec, docType, rec.lines||[], parentPo?.individualLines || null);
           const pdfBlob = await htmlToPdfBlob(html);
           // Prefer the stored id; fall back to name lookup so a different browser
           // updates the same files instead of duplicating them.
