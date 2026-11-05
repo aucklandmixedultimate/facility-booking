@@ -385,15 +385,18 @@ export function SummaryTab({ bookings, loggedInEmail, onRemoveBookings, facility
     };
   }
   function buildInvoiceLines(bkgs, detail) {
-    // Council application fee shares, charged once the application has been sent.
-    const feeBkgs = bkgs.map(b => ({ b, app: parseCouncilApp(b.system_notes) })).filter(x => x.app && x.app.fee > 0);
+    // Council application fee shares, charged once the application has been sent. Only while a
+    // council fee is configured (Summary → council rates): the council extension used to stamp a
+    // fixed $10 a field on the bookings it recorded, whatever the settings said.
+    const feesOn = (+councilFees.application || 0) > 0 || (+councilFees.perField || 0) > 0;
+    const feeBkgs = feesOn ? bkgs.map(b => ({ b, app: parseCouncilApp(b.system_notes) })).filter(x => x.app && x.app.fee > 0) : [];
     const feeLines = detail === "grouped"
       ? Object.values(feeBkgs.reduce((g, { b, app }) => {
           const k = b.facility_id; const fac = FACILITIES.find(f => f.id === k);
-          g[k] ||= { desc: `Council application fee – ${fac?.name || k}`, facilityId: k, detail: "", hours: null, rate: null, fixedPrice: true, cost: 0, apps: new Set() };
+          g[k] ||= { desc: `Council application fee – ${fac?.name || k}`, facilityId: k, detail: "", hours: null, rate: null, fixedPrice: true, councilFee: true, cost: 0, apps: new Set() };
           g[k].cost += app.fee; g[k].apps.add(app.id); return g; }, {}))
           .map(({ apps, ...l }) => ({ ...l, cost: Math.round(l.cost * 100) / 100, detail: `Council fee, shared · ${[...apps].join(", ")}` }))
-      : feeBkgs.map(({ b, app }) => ({ date: b.date, facilityId: b.facility_id, hours: null, rate: null, fixedPrice: true,
+      : feeBkgs.map(({ b, app }) => ({ date: b.date, facilityId: b.facility_id, hours: null, rate: null, fixedPrice: true, councilFee: true,
           desc: `Council application fee · ${FACILITIES.find(f => f.id === b.facility_id)?.name || b.facility_id}`,
           detail: `Application ${app.id} (council fee, shared)`, cost: Math.round(app.fee * 100) / 100 }));
     return [...buildInvoiceLinesCore(bkgs, detail), ...feeLines];
@@ -533,7 +536,7 @@ export function SummaryTab({ bookings, loggedInEmail, onRemoveBookings, facility
       ? mismatchAdjustments.filter(b => invKey(b.email) === invKey(bookerEmail))
       : [];
     const lines = [
-      ...buildInvoiceLines(bkgsForInvoice, invDetail),
+      ...buildInvoiceLines(bkgsForInvoice, invDetail).filter(l => invDocType !== "purchase_order" || !l.councilFee),
       ...buildAdjustmentLines(adjBkgs),
     ];
     const dateRange = { from: dateFrom, to: dateTo };
@@ -575,7 +578,7 @@ export function SummaryTab({ bookings, loggedInEmail, onRemoveBookings, facility
       const adjBkgs = invIncludeAdjustments
         ? mismatchAdjustments.filter(b => invKey(b.email) === invKey(s.email))
         : [];
-      const lines = [...buildInvoiceLines(s.bkgs, invDetail), ...buildAdjustmentLines(adjBkgs)];
+      const lines = [...buildInvoiceLines(s.bkgs, invDetail).filter(l => invDocType !== "purchase_order" || !l.councilFee), ...buildAdjustmentLines(adjBkgs)];
       const dateRange = { from: dateFrom, to: dateTo };
       const invNumber = genBankRef({ type: invDocType==="purchase_order"?"P":"I", dateFrom, dateTo, recipientCode: recipientCodeFor(s.email) });
       const { total } = gstAmounts(lines.reduce((a,l)=>a+l.cost,0), invGst);
@@ -676,8 +679,10 @@ export function SummaryTab({ bookings, loggedInEmail, onRemoveBookings, facility
   // all booker scopes. Each PO carries only the lines for its provider's facilities, as
   // one entry per booker with their subtotal plus the invoice reference.
   function buildProviderPoRecords(scopes, invoiceRecords, allRecs) {
-    const lineProvider = l => providerOfFacility(l.facilityId);
-    const providerIds = [...new Set(invoiceRecords.flatMap(inv => (inv.lines||[]).map(lineProvider)))];
+    // Council application fees are owed to the council (paid with the application), never to
+    // the ground's vendor, so they stay on the bookers' invoices and off every PO.
+    const lineProvider = l => l.councilFee || /^Council application fee/.test(l.desc || "") ? null : providerOfFacility(l.facilityId);
+    const providerIds = [...new Set(invoiceRecords.flatMap(inv => (inv.lines||[]).map(lineProvider)))].filter(Boolean);
     const pos = [];
     for (const pid of providerIds) {
       const prov = PROVIDERS[pid] || PROVIDERS.gtec;
