@@ -2,6 +2,7 @@ import { useState, useRef, Fragment } from "react";
 import { T, parseVendorVariance, setVendorVariance, vendorVarianceText, stepLabel, BILLED_RE, Badge, CAL_SLOTS, CAL_START, CAL_TOTAL, DAY_EVENING_CUTOFF, DURATIONS, EmailChip, FACILITIES, FACILITY_TINT, FLOODLIT_FIELD_ID, FacilityOptions, INVOICED_META, Modal, ProviderVenuePicker, _bookerInfo, bookerParticipant, buildCommunityRequestItem, vendorRequestItems, REVIEW_STATUSES, S, SLOTS_PER_HOUR, SLOT_HOURS, START_TIMES, STATUS_META, addDays, councilContactOk, emailColor, facColLabel, facShort, fmtCost, fmtDate, fmtDuration, fmtLoggedAt, fmtRefDate, fmtTime, fmtTimeShort, getCrossFacilityOverlaps, getSameFacilityOverlaps, isAdminBooking, newGroupRef, newId, parseCouncilInfo, parseFunctionCost, parseGroupRef, parseGtecSnapshot, parseMismatchNote, parseSlotLink, parseSplit, setCouncilInfo, setFunctionCost, setGroupRef, setSplit, slotGroupMembers, slotGroupName, splitReason, stripMismatchNote, timeOverlaps, todayKey, useMobile, vendorShortFor, venueFacilities, workflowOf, isDraftItem } from "./core.jsx";
 import { OverlapWarning } from "./modals.jsx";
 import { DAYLIGHT_AVOID_FIELDS, DAYLIGHT_FIELD, daylightMoves, isWeekend } from "../fieldPrefs.js";
+import { atMost } from "../timeMath.js";
 import { FacilityPicker } from "./facilityPicker.jsx";
 import { GUEST } from "../actor.js";
 import { isClosed } from "../statuses.js";
@@ -268,7 +269,7 @@ export function CartModal({ cart, setCart, onClose, onSubmit, openNew, silentMod
   // acknowledged before the cart is submitted.
   const [daylightAck, setDaylightAck] = useState(null); // null = not asked; false/true = the tick
   const keptDaylight = cart.flatMap(i => (i.daylightKept || []).length ? i.drafts.filter(d => i.daylightKept.includes(d.id)
-    && DAYLIGHT_AVOID_FIELDS.includes(d.facility_id) && isWeekend(d.date) && d.start_hour + d.duration <= DAY_EVENING_CUTOFF) : []);
+    && DAYLIGHT_AVOID_FIELDS.includes(d.facility_id) && isWeekend(d.date) && atMost(d.start_hour + d.duration, DAY_EVENING_CUTOFF)) : []);
   const submit = () => { if (keptDaylight.length && daylightAck !== true) { setDaylightAck(false); return; } onSubmit(); };
   const totalNew    = cart.filter(i=>isDraftItem(i)&&!i.isEdit&&!i.isMultiEdit).reduce((s,i)=>s+i.drafts.length,0);
   const totalEdits  = cart.filter(i=>i.isEdit||i.isMultiEdit).reduce((s,i)=>s+i.drafts.length,0);

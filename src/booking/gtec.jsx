@@ -1,5 +1,6 @@
 import { facShort, fmtTimeShort } from "./core.jsx";
 import { isClosed, isLive } from "../statuses.js";
+import { spansOverlap, toMinutes } from "../timeMath.js";
 // ─── CARLTON JUNIORS RUGBY SYNC ──────────────────────────────────────────────
 // (sync bookings use empty email/name and are deduped by date+facility+time+purpose)
 
@@ -141,8 +142,7 @@ export function findMatchingUserBooking(allBookings, ev, facilityIds, gtecLinks=
     if (b.email === "admin") return false;
     if (!(isLive(b.status) || b.status === "clash") && !b.invoiced) return false;
     if (b.date !== date) return false;
-    if (b.start_hour + b.duration <= start_hour) return false;
-    if (start_hour + duration <= b.start_hour) return false;
+    if (!spansOverlap(b.start_hour, b.duration, start_hour, duration)) return false;
     return true;
   });
   // The entry names the booker by email but sits at a different time (GTEC entered it wrongly,
@@ -160,8 +160,8 @@ export function findMatchingUserBooking(allBookings, ev, facilityIds, gtecLinks=
   // Identity dominates (×10) over the time/duration/facility tie-breakers.
   const scored = candidates.map(b => {
     const identityScore = gtecIdentityScore(team, b, { detailEmail, gtecLinks, canon });
-    const timeExact = b.start_hour === start_hour ? 2 : 0;
-    const durExact  = b.duration === duration ? 1 : 0;
+    const timeExact = toMinutes(b.start_hour) === toMinutes(start_hour) ? 2 : 0;
+    const durExact  = toMinutes(b.duration) === toMinutes(duration) ? 1 : 0;
     const facExact  = facilityIds.includes(b.facility_id) ? 1 : 0;
     return { booking: b, score: identityScore*10 + timeExact + durExact + facExact, identityScore };
   }).sort((a,b)=>b.score-a.score);
@@ -178,8 +178,8 @@ export function findMatchingUserBooking(allBookings, ev, facilityIds, gtecLinks=
   // An entry with no time holds the field all day, so a booking inside it isn't a time difference.
   const dimReasons = bk => {
     const rs = [];
-    if (!allDay && bk.start_hour !== start_hour) rs.push(`Time: ${fmtTimeShort(bk.start_hour)} → ${fmtTimeShort(start_hour)}`);
-    if (!allDay && bk.duration !== duration)     rs.push(`Dur: ${bk.duration}h → ${duration}h`);
+    if (!allDay && toMinutes(bk.start_hour) !== toMinutes(start_hour)) rs.push(`Time: ${fmtTimeShort(bk.start_hour)} → ${fmtTimeShort(start_hour)}`);
+    if (!allDay && toMinutes(bk.duration) !== toMinutes(duration))     rs.push(`Dur: ${bk.duration}h → ${duration}h`);
     if (!facilityIds.includes(bk.facility_id)) rs.push(`Field: ${facShort(bk.facility_id)} → ${facilityIds.map(facShort).join("/")}`);
     return rs;
   };
@@ -325,7 +325,9 @@ export function parseCJRDateTime(dt) {
   const start = parseCJRTime(parts[0]);
   const end   = parseCJRTime(parts[1]);
   if (start === null || end === null) return cjrAllDay();
-  const dur = end - start;
+  // Whole minutes, built the same way as the booking form's lengths, so a 6:20–7:40 entry
+  // equals an 80-minute booking exactly rather than by a rounding error.
+  const dur = toMinutes(end - start) / 60;
   return { start_hour: start, duration: dur > 0 ? dur : 1 };
 }
 
@@ -338,7 +340,7 @@ export { cjrMonthUrl, parseFeedText, feedProblem, fetchGtecMonth, monthKeyOf } f
 export function purgeHolder(r, syncFeed, canon) {
   const s0 = r.start_hour || 0, e0 = s0 + (r.duration || 0);
   return (syncFeed?.byDate?.[r.date] || []).find(ev => (ev.facilityIds || []).includes(r.facility_id)
-    && (ev.allDay || ((ev.start_hour || 0) < e0 && (ev.start_hour || 0) + (ev.duration || 0) > s0))
+    && (ev.allDay || spansOverlap(ev.start_hour || 0, ev.duration || 0, s0, e0 - s0))
     && (ev.email ? canon(ev.email) === canon(r.email)
       : gtecIdentityScore(ev.team ?? extractCPSATeam(ev.name || ""), { email: r.email, name: r.name, purpose: r.purpose || "" },
           { detailEmail: "", gtecLinks: {}, canon }) >= 2)) || null;
@@ -347,7 +349,7 @@ export function purgeObsolete(r, bookings, syncFeed, canon) {
   const s0 = r.start_hour || 0, e0 = s0 + (r.duration || 0);
   if (bookings.some(b => b.id !== r.id && b.email !== "admin" && !isClosed(b.status) && b.date === r.date
     && b.facility_id === r.facility_id && canon(b.email) === canon(r.email)
-    && (b.start_hour || 0) < e0 && (b.start_hour || 0) + (b.duration || 0) > s0)) return "rebooked";
+    && spansOverlap(b.start_hour || 0, b.duration || 0, s0, e0 - s0))) return "rebooked";
   if (syncFeed?.at && (syncFeed.months || []).includes((r.date || "").slice(0, 7)) && !purgeHolder(r, syncFeed, canon)) return "not_on_gtec";
   return null;
 }

@@ -2,12 +2,13 @@ import { useState, useRef, Fragment } from "react";
 import { Badge, rowSelect, isMultiSelectClick, groupStatusLabel, CopyableTable, DURATIONS, FACILITIES, Modal, PROVIDERS, S, STATUS_META, T, isCouncilField, providerOfFacility, emailColor, fmtCost, fmtDate, fmtDateShort, fmtTime, isAdminBooking, newId, parseGroupRef, todayKey, venueFacilities, visibleFacilities } from "./core.jsx";
 import { DateRangePicker } from "./modals.jsx";
 import { isLive } from "../statuses.js";
+import { spansOverlap } from "../timeMath.js";
 // `canon` folds a (lowercased) email onto its canonical primary so linked
 // secondary bookers group under one entry. Defaults to identity.
 export function buildOverlapPatternMap(active, facSensitive, canon) {
   const keyOf = canon || (e=>e);
   function dayName(d){return["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][new Date(d+"T12:00").getDay()];}
-  function timesOverlap(b1,b2){return b1.start_hour<b2.start_hour+b2.duration&&b2.start_hour<b1.start_hour+b1.duration;}
+  function timesOverlap(b1,b2){return spansOverlap(b1.start_hour,b1.duration,b2.start_hour,b2.duration);}
   const patternMap={};
   active.forEach(b=>{
     const email=keyOf((b.email||"").toLowerCase());

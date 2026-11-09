@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { getActor } from "../actor.js";
 import { useState, useRef, useEffect } from "react";
 import { escHtml } from "../html.js";
+import { DURATION_MINUTES, T_EPS, atMost, spansOverlap, startTimes, toMinutes } from "../timeMath.js";
 import { councilBookingType, participantText, seasonalAppsOpen } from "../councilBooking.js";
 import { councilState } from "../councilSeasons.js";
 import { isClosed, isAmuaReview, isLegacyStatus, normaliseStatus, stepOf, stepTag, WORKFLOW_STEPS, VENDOR_QUEUE_STATUSES } from "../statuses.js";
@@ -202,8 +203,9 @@ export const SLOTS_PER_HOUR = 4;
 export const SLOT_HOURS = 1/SLOTS_PER_HOUR;          // one slot expressed in hours (0.25)
 export const SLOT_H = HOUR_H*SLOT_HOURS;             // …and in pixels on the hour grids (14px)
 export const CAL_SLOTS = CAL_TOTAL*SLOTS_PER_HOUR;   // selectable slots in a day column
-// Every selectable start time, CAL_START…CAL_END inclusive.
-export const START_TIMES = Array.from({length:CAL_SLOTS+1},(_,i)=>CAL_START+i*SLOT_HOURS).filter(h=>h<=CAL_END);
+// Every selectable start time, CAL_START…CAL_END inclusive: quarter hours and 20-minute marks
+// (src/timeMath.js). The grids still drag in quarter hours.
+export const START_TIMES = startTimes(CAL_START, CAL_END);
 // Boundary between the "day" and "evening" pricing bands (5:30pm). Also used to mark
 // the floodlit Field #1 (f3) as a last resort during daylight: anything that starts
 // and ends before this cutoff is daytime, when an unlit field should be used instead.
@@ -214,16 +216,13 @@ export const FLOODLIT_FIELD_ID = "f3";
 // "45 min", "1 hr", "2 hrs 15 min" — one spelling for every duration, so the quarter-hour
 // options read consistently alongside the whole-hour ones.
 export function fmtDuration(h) {
-  const hh = Math.floor(h), m = Math.round((h-hh)*60);
+  const t = toMinutes(h), hh = Math.floor(t/60), m = t%60;
   if (!hh) return `${m} min`;
   return `${hh} hr${hh!==1?"s":""}${m?` ${m} min`:""}`;
 }
-// Quarter-hour steps up to 3 hrs (where bookings actually vary), then coarser for the
+// 15- and 20-minute steps up to 3 hrs (where bookings actually vary), then coarser for the
 // long all-day hires. Any other value still shows: the pickers fall back to the raw hours.
-export const DURATIONS = [
-  ...Array.from({length:12},(_,i)=>(i+1)*SLOT_HOURS), // 15 min … 3 hrs
-  3.5, 4, 5, 6, 8,
-].map(value=>({ value, label: fmtDuration(value) }));
+export const DURATIONS = DURATION_MINUTES.map(m => m/60).map(value=>({ value, label: fmtDuration(value) }));
 export const STATUS_META = {
   // Vendor stages name the provider of the booking's facility ({vendor}: GTEC for Cornwall
   // Park, St Cuthbert's, a school…); without a facility they read "vendor". desc = meaning.
@@ -389,7 +388,7 @@ export function councilOverlaps(bookings) {
     list.sort((a, b) => a.start_hour - b.start_hour);
     let cur = null;
     list.forEach(b => { const end = b.start_hour + b.duration;
-      if (cur && b.start_hour < cur.end) { cur.bookings.push(b); cur.end = Math.max(cur.end, end); }
+      if (cur && b.start_hour < cur.end - T_EPS) { cur.bookings.push(b); cur.end = Math.max(cur.end, end); }
       else { cur = { facility_id: b.facility_id, date: b.date, start: b.start_hour, end, bookings: [b] }; out.push(cur); } });
   });
   out.forEach(c => { c.cap = councilCap(c.bookings[0]); c.used = c.bookings.length; });
@@ -404,7 +403,7 @@ export function linkCouncilChildren(newDrafts, existing, canon) {
     if (!FACILITIES.find(f => f.id === d.facility_id)?.council || parseSlotLink(d.system_notes)) return;
     const who = canon((d.email || "").toLowerCase()), end = d.start_hour + d.duration;
     const over = (existing || []).filter(b => b.facility_id === d.facility_id && b.date === d.date && !isClosed(b.status)
-      && b.start_hour < end && d.start_hour < b.start_hour + b.duration && canon((b.email || "").toLowerCase()) !== who);
+      && b.start_hour < end - T_EPS && d.start_hour < b.start_hour + b.duration - T_EPS && canon((b.email || "").toLowerCase()) !== who);
     if (!over.length) return;
     const notesOf = b => patches[b.id] ?? b.system_notes ?? "";
     const linked = over.find(b => parseSlotLink(notesOf(b)));
@@ -773,12 +772,14 @@ export function genBankRef({ type, dateFrom, dateTo, recipientCode, existingRefs
   return ref;
 }
 
+// Times round to the minute first: an end worked out by adding 20-minute steps can be a hair
+// under the hour (18.9999…), which would otherwise print as "6:60 PM".
 export function fmtTime(h) {
-  const hh=Math.floor(h), m=Math.round((h%1)*60), dh=hh>12?hh-12:hh===0?12:hh;
+  const t=toMinutes(h), hh=Math.floor(t/60), m=t%60, dh=hh>12?hh-12:hh===0?12:hh;
   return `${dh}:${m===0?"00":String(m).padStart(2,"0")} ${hh>=12?"PM":"AM"}`;
 }
 export function fmt24(h) {
-  const hh=Math.floor(h), m=Math.round((h%1)*60);
+  const t=toMinutes(h), hh=Math.floor(t/60), m=t%60;
   return `${String(hh).padStart(2,"0")}:${m===0?"00":String(m).padStart(2,"0")}`;
 }
 export function fmtDateShort(s) {
@@ -817,7 +818,7 @@ export function fmtLoggedAt(s) {
 }
 export function fmtCost(n) { return "$" + Number(n).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g,","); }
 export function fmtTimeShort(h) {
-  const hh=Math.floor(h), m=Math.round((h%1)*60), dh=hh>12?hh-12:hh===0?12:hh;
+  const t=toMinutes(h), hh=Math.floor(t/60), m=t%60, dh=hh>12?hh-12:hh===0?12:hh;
   return `${dh}${m?":"+String(m).padStart(2,"0"):""}${hh>=12?"p":"a"}`;
 }
 const FAC_SHORT = { f1:"Mtg", f2:"Fn", f3:"Fld1", f4:"Fld2", f5:"Fld3", g1:"Ork1", g2:"Ork2", g3:"Ork3" };
@@ -914,7 +915,7 @@ export function getDaysInMonth(y,m) {
 export function timeOverlaps(a,b) {
   if(a.date!==b.date||a.id===b.id) return false;
   if(isClosed(a.status)||isClosed(b.status)) return false;
-  return a.start_hour<b.start_hour+b.duration && a.start_hour+a.duration>b.start_hour;
+  return spansOverlap(a.start_hour, a.duration, b.start_hour, b.duration);
 }
 export function isAdminBooking(b)  { return b.email === "admin"; }
 // Lay overlapping bookings out in side-by-side lanes so none is hidden behind another —
@@ -935,8 +936,8 @@ export function layoutOverlapLanes(items) {
   };
   for (const b of sorted) {
     const end = b.start_hour + b.duration;
-    if (cluster.length && b.start_hour >= clusterEnd) flush(); // gap → start a new cluster
-    let lane = laneEnds.findIndex(e => e <= b.start_hour);     // reuse a lane that has ended
+    if (cluster.length && atMost(clusterEnd, b.start_hour)) flush(); // gap → start a new cluster
+    let lane = laneEnds.findIndex(e => atMost(e, b.start_hour));     // reuse a lane that has ended
     if (lane === -1) { lane = laneEnds.length; laneEnds.push(end); }
     else laneEnds[lane] = end;
     cluster.push({ booking: b, lane, lanes: 1 });

@@ -3,6 +3,7 @@ import { initialsOf } from "../people.js";
 import { CAL_SLOTS, CAL_START, CAL_TOTAL, FACILITIES, FACILITY_TINT, HOUR_H, MONTHS, Modal, REVIEW_STATUSES, S, SLOTS_PER_HOUR, SLOT_H, SLOT_HOURS, STATUS_CAL_COLOR, STATUS_CAL_TEXT, T, dateKey, emailColor, facColLabel, fmt24, fmtTime, fmtTimeShort, getDaysInMonth, getWeekDates, inActiveVenue, isAdminBooking, isSocialFac, layoutOverlapLanes, parseMismatchNote, todayKey, useMobile, venueFacilities } from "./core.jsx";
 import { isClosed } from "../statuses.js";
 import { holidayLabel, loadNzHolidays } from "../holidays.js";
+import { spansOverlap } from "../timeMath.js";
 
 // NZ public holidays for the years shown (synced, cached on the device): date key → holiday.
 function useNzHolidays(years) {
@@ -94,7 +95,7 @@ export function WeekCalendar({ bookings, onNewBooking, onNewBookingRange, onBook
   } : null;
 
   function getStackStyle(b, dayBkgs) {
-    const ov = dayBkgs.filter(o => o.id !== b.id && o.start_hour < b.start_hour+b.duration && o.start_hour+o.duration > b.start_hour);
+    const ov = dayBkgs.filter(o => o.id !== b.id && spansOverlap(o.start_hour, o.duration, b.start_hour, b.duration));
     if (ov.length === 0) return { left:2, right:2 };
     const all = [b,...ov].sort((a,x)=>a.start_hour-x.start_hour||a.id.localeCompare(x.id));
     const idx = all.findIndex(x=>x.id===b.id), cnt=all.length, w=96/cnt;
@@ -486,7 +487,7 @@ export function DayTimelinePopup({ date, bookings, onClose, onBookingClick, onNe
   const dayBkgs = bookings.filter(b=>b.date===dk && !isClosed(b.status));
   // A field is free for the carried time when nothing on it overlaps that time.
   const freeForCarried = facId => !!carried && !dayBkgs.some(b => b.facility_id===facId
-    && b.start_hour < slotToHourC(carried.hi+1) && b.start_hour+b.duration > slotToHourC(carried.lo));
+    && spansOverlap(b.start_hour, b.duration, slotToHourC(carried.lo), slotToHourC(carried.hi+1) - slotToHourC(carried.lo)));
 
   const yToSlot   = y => Math.max(0, Math.min(Math.floor(y/SLOT_H), CAL_SLOTS-1));
   const slotToHour= s => CAL_START + s*SLOT_HOURS;
@@ -638,7 +639,7 @@ export function DayTimelinePopup({ date, bookings, onClose, onBookingClick, onNe
       </div>
       {carried && !pendingSel && (() => {
         const sH = slotToHour(carried.lo), eH = slotToHour(carried.hi+1), dur = +(eH-sH).toFixed(2);
-        const free = venueFacilities().filter(f => !dayBkgs.some(b => b.facility_id===f.id && b.start_hour < eH && b.start_hour+b.duration > sH));
+        const free = venueFacilities().filter(f => !dayBkgs.some(b => b.facility_id===f.id && spansOverlap(b.start_hour, b.duration, sH, eH - sH)));
         return (
           <div style={{display:"flex",alignItems:"center",gap:8,marginTop:12,padding:"10px 14px",background:"#eef2ff",border:"1.5px solid #c7d2fe",borderRadius:10,flexWrap:"wrap"}}>
             <div style={{fontSize:13,color:"#0f172a"}}><strong>{fmtTime(sH)}–{fmtTime(eH)}</strong> <span style={{color:"#64748b"}}>({+dur.toFixed(1)}h) · {free.length?"free:":"nothing free — pick another time above"}</span></div>
