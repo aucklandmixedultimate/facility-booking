@@ -15,6 +15,7 @@ import { DayTimelinePopup, MonthCalendar, WeekCalendar } from "./booking/calenda
 import { BookingDetail, BookingForm, CartModal, DeleteCartModal } from "./booking/forms.jsx";
 import { ST } from "./statuses.js";
 import { APPS, appHref } from "./appnav.js";
+import { spansOverlap } from "./timeMath.js";
 
 // Tabs loaded on first use, so the calendars open without downloading Summary, Billing,
 // Admin, Allocation or About.
@@ -725,7 +726,7 @@ export default function App() {
             && !(o.gtecSnap.facilityIds || []).includes(x.facility_id));
           if (!twin) continue;
           const fieldHeld = events.some(ev => parseCJRDate(ev.EventStartDate) === x.date && mapCJRFacility(ev.EventName || "", ev).includes(x.facility_id)
-            && (() => { const t = parseCJRDateTime(ev.EventDateTime); return t.allDay || (t.start_hour < x.start_hour + x.duration && t.start_hour + t.duration > x.start_hour); })()
+            && (() => { const t = parseCJRDateTime(ev.EventDateTime); return t.allDay || spansOverlap(t.start_hour, t.duration, x.start_hour, x.duration); })()
             && findMatchingUserBooking([x], ev, mapCJRFacility(ev.EventName || "", ev), gtecLinksRef.current, emailAliasesRef.current));
           if (fieldHeld) continue;
           d.match = { ...d.match, reasons: [`Duplicate of the GTEC-confirmed ${facShort(twin.match.booking.facility_id)} booking — GTEC holds ${(twin.gtecSnap.facilityIds||[]).map(facShort).join("/")} only; queued for removal`] };
