@@ -1,7 +1,7 @@
 import { useState, useMemo, useRef, Fragment } from "react";
 import { downloadDriveFile, DRIVE_ROOT_FOLDER, testDriveConnection, disconnectDrive } from "../drive-client.js";
 import { billingDocFields, buildBillingDocHtml, invLineLabel, renderInvoiceDocHtml } from "./billingDocs.jsx";
-import { AMUA_INFO, rowSelect, CopyableTable, Modal, PROVIDERS, S, VENDOR_GTEC, deriveRecipientCode, fmtCost, genBankRef, todayKey } from "./core.jsx";
+import { AMUA_INFO, PAY_FIELD_DEFAULTS, amuaAccountNote, amuaAccountText, amuaPayFields, rowSelect, CopyableTable, Modal, PROVIDERS, S, VENDOR_GTEC, deriveRecipientCode, fmtCost, genBankRef, todayKey } from "./core.jsx";
 import { csvCell, escHtml } from "../html.js";
 import { buildComponent, claimed, normaliseSelection, poBookers, selectionCovers, selectionEmpty } from "../poSplit.js";
 const PIPELINE_STATES = [
@@ -22,7 +22,7 @@ const PIPELINE_KEYS = PIPELINE_STATES.map(s=>s.key);
 const INV_EMAIL_MAX_BYTES = 45 * 1024;
 const htmlBytes = html => new TextEncoder().encode(html).length;
 
-function buildInvoiceBundleHtml({ recipientName, recipientEmail, docs, note = "", preview = false }) {
+function buildInvoiceBundleHtml({ recipientName, recipientEmail, docs, note = "", preview = false, account }) {
   const combined = docs.reduce((s, d) => s + (d.rec.total || 0), 0);
   const summaryRows = docs.map(d => {
     const f = billingDocFields(d.rec, d.docType, d.lines);
@@ -34,7 +34,7 @@ function buildInvoiceBundleHtml({ recipientName, recipientEmail, docs, note = ""
     </tr>`;
   }).join("");
   const body = docs.map(d => renderInvoiceDocHtml({
-    ...billingDocFields(d.rec, d.docType, d.lines), paginate: false, fragment: true, previewNotice: preview,
+    ...billingDocFields(d.rec, d.docType, d.lines), paginate: false, fragment: true, previewNotice: preview, account,
   })).join("");
   // Indentation is stripped: emails are size-limited (see INV_EMAIL_MAX_BYTES).
   return `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>${docs.length} document${docs.length!==1?"s":""} for ${recipientName||recipientEmail}</title><style>
@@ -68,7 +68,8 @@ function buildInvoiceBundleHtml({ recipientName, recipientEmail, docs, note = ""
             <td style="padding-top:8px;border-top:1.5px solid #e2e8f0;font-size:15px;font-weight:800;color:#15803d;text-align:right;white-space:nowrap">${fmtCost(combined)}</td>
           </tr></tfoot>
         </table>
-        <div style="font-size:11px;color:#94a3b8;margin-top:10px">${preview?"Each document is reproduced in full below for review. Nothing here is payable yet.":"Each document is reproduced in full below. Pay each against its own bank reference."}</div>
+        <div style="font-size:11px;color:#94a3b8;margin-top:10px">${preview?"Each document is reproduced in full below for review. Nothing here is payable yet.":`Each document is reproduced in full below. Pay each against its own bank reference${amuaAccountText(account)?` into ${escHtml(amuaAccountText(account))}`:""}.`}</div>
+        ${!preview&&amuaAccountText(account)&&amuaAccountNote(account)?`<div style="font-size:11px;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:5px 8px;margin-top:6px">${escHtml(amuaAccountNote(account))}</div>`:""}
       </div>
     </div>
     ${body}
@@ -92,6 +93,9 @@ export function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, 
   const [emailSendMode, setEmailSendMode] = useState("grouped"); // "grouped" = one email per booker | "individual" = one per invoice
   const [emailExportMode, setEmailExportMode] = useState("grouped"); // "grouped" = summary lines | "individual" = itemised — mirrors the Billing list's Export
   const [emailSelIds, setEmailSelIds] = useState(new Set()); // record ids staged to send
+  // AMUA's account for the email being prepared: starts from the saved one (AMUA details) and
+  // can be changed for this send only (e.g. a note for one batch).
+  const [emailAccount, setEmailAccount] = useState({});
   const emailAnchor = useRef(null); // last ticked invoice, for Shift-click ranges
   const [emailNote, setEmailNote] = useState("");
   const [emailBusy, setEmailBusy] = useState(false);
@@ -710,7 +714,7 @@ export function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, 
               </button>
             )}
             {isAdmin&&onEmailOfficial&&batch.invRecs.some(r=>r.bookerEmail&&r.bookerEmail!=="combined"&&r.bookerEmail!=="gtec")&&(
-              <button onClick={e=>{e.stopPropagation(); setEmailMode("official"); setEmailExportMode(exportMode); setEmailNote("");
+              <button onClick={e=>{e.stopPropagation(); setEmailMode("official"); setEmailExportMode(exportMode); setEmailNote(""); setEmailAccount({ ...(AMUA_INFO.account || {}) });
                 setEmailSelIds(new Set(batch.invRecs.filter(r=>r.bookerEmail&&r.bookerEmail!=="combined"&&r.bookerEmail!=="gtec").map(r=>r.id))); setShowEmailModal(true);}}
                 title="Email this batch's invoices to their bookers as official invoices (drafts are issued when they're sent)"
                 style={{padding:"3px 9px",borderRadius:6,border:"1.5px solid #7dd3fc",background:"#f0f9ff",color:"#0369a1",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"}}>
@@ -813,12 +817,12 @@ export function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, 
         {isAdmin&&onEmailOfficial&&(<>
           <div style={{width:1,height:18,background:"#e2e8f0",flexShrink:0}}/>
           <span style={{color:"#64748b",fontWeight:600,whiteSpace:"nowrap"}}>Email:</span>
-          <button onClick={()=>{ setEmailMode("preview"); setEmailExportMode(exportMode); setEmailSelIds(new Set()); setEmailNote(""); setShowEmailModal(true); }}
+          <button onClick={()=>{ setEmailMode("preview"); setEmailExportMode(exportMode); setEmailSelIds(new Set()); setEmailNote(""); setEmailAccount({ ...(AMUA_INFO.account || {}) }); setShowEmailModal(true); }}
             title="Email unofficial previews. Drafts and issued invoices can both be queued; several for one booker bundle into a single email."
             style={{padding:"3px 10px",borderRadius:6,border:"1px solid #b45309",background:"#b45309",color:"#fff",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"}}>
             ✉ Draft / preview
           </button>
-          <button onClick={()=>{ setEmailMode("official"); setEmailExportMode(exportMode); setEmailSelIds(new Set()); setEmailNote(""); setShowEmailModal(true); }}
+          <button onClick={()=>{ setEmailMode("official"); setEmailExportMode(exportMode); setEmailSelIds(new Set()); setEmailNote(""); setEmailAccount({ ...(AMUA_INFO.account || {}) }); setShowEmailModal(true); }}
             title="Email official payable invoices. Several invoices for one booker bundle into a single email."
             style={{padding:"3px 10px",borderRadius:6,border:"1px solid #0369a1",background:"#0369a1",color:"#fff",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"}}>
             ✉ Official invoices
@@ -898,8 +902,9 @@ export function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, 
               : (n===1 ? `Invoice ${recs[0].id} from ${AMUA_INFO.name}` : `${n} invoices from ${AMUA_INFO.name}`),
             html: buildInvoiceBundleHtml({
               recipientName: name, recipientEmail: recs[0].bookerEmail,
-              note: [emailNote.trim(), extraNote].filter(Boolean).join("\n\n"), preview,
-              docs: recs.map(r => ({ rec:r, docType:"invoice",
+              note: [emailNote.trim(), extraNote].filter(Boolean).join("\n\n"), preview, account: emailAccount,
+              // An official send issues its drafts, so they're rendered as issued (no "DRAFT").
+              docs: recs.map(r => ({ rec: !preview && isDraft(r) ? { ...r, status:"club_invoiced" } : r, docType:"invoice",
                 lines: detail==="individual" ? (r.individualLines||r.lines||[]) : (r.lines||[]) })),
             }),
           };
@@ -1030,6 +1035,35 @@ export function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, 
                   placeholder={preview?"e.g. Please check these before we issue them.":"e.g. Payment due by the 20th. Please use the bank reference on each invoice."}
                   style={{...S.inp,resize:"vertical",fontFamily:"inherit"}}/>
               </div>
+              {/* AMUA's account on these invoices: the saved details, editable for this send. */}
+              {!preview&&(()=>{ const dflt = AMUA_INFO.account || {}, changed = ["name","bank","number","tempName","tempBank","tempNumber","note","payParticulars","payCode","payReference"].some(k => (emailAccount[k]??PAY_FIELD_DEFAULTS[k]??"") !== (dflt[k]??PAY_FIELD_DEFAULTS[k]??""));
+                const sample = selectedRecs[0] || allSendable[0], sf = amuaPayFields(emailAccount, { booker: sample ? (sample.bookerName || displayName(sample.bookerEmail)) : "", invoice: sample?.id || "", batch: sample?.orderName || "" });
+                const tpl = (k, label) => <label style={{display:"flex",flexDirection:"column",gap:2,flex:"1 1 120px",minWidth:110,fontSize:10,fontWeight:700,color:"#64748b"}}>{label}
+                  <input aria-label={`Payment ${label}`} value={emailAccount[k] ?? PAY_FIELD_DEFAULTS[k]} onChange={e=>setEmailAccount(a=>({...a,[k]:e.target.value}))} style={{...S.inp,fontSize:12,padding:"5px 8px"}}/></label>;
+                const inp = (k, ph, w) => <input aria-label={`Payment ${k}`} value={emailAccount[k]||""} placeholder={ph} onChange={e=>setEmailAccount(a=>({...a,[k]:e.target.value}))} style={{...S.inp,flex:w,minWidth:120,fontSize:12,padding:"5px 8px"}}/>;
+                return (
+                  <details style={{flexShrink:0,border:"1px solid #bae6fd",borderRadius:8,background:"#f0f9ff",padding:"6px 10px"}}>
+                    <summary style={{cursor:"pointer",fontSize:12,fontWeight:700,color:"#0369a1"}}>
+                      🏦 Payment details{changed?" — changed for this email":""}: <span style={{fontWeight:400,color:"#334155"}}>{amuaAccountText(emailAccount)||"none set (AMUA details)"}{amuaAccountNote(emailAccount)?` · ${amuaAccountNote(emailAccount)}`:""}</span>
+                    </summary>
+                    <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>
+                      {inp("name","Account name","2 1 180px")}{inp("bank","Bank","1 1 90px")}{inp("number","Account number","2 1 160px")}
+                    </div>
+                    <div style={{fontSize:11,fontWeight:700,color:"#0369a1",marginTop:6}}>Temporary account <span style={{fontWeight:400,color:"#64748b"}}>· used instead while set</span></div>
+                    <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:4}}>
+                      {inp("tempName","Account name (blank = above)","2 1 180px")}{inp("tempBank","Bank","1 1 90px")}{inp("tempNumber","Temporary account number","2 1 160px")}
+                    </div>
+                    <div style={{fontSize:11,fontWeight:700,color:"#0369a1",marginTop:6}}>Payment references <span style={{fontWeight:400,color:"#64748b"}}>· per invoice, 12 characters each: {"{booker}"} {"{invoice}"} {"{batch}"}</span></div>
+                    <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:4}}>{tpl("payParticulars","Particulars")}{tpl("payCode","Code")}{tpl("payReference","Reference")}</div>
+                    {sample&&<div style={{fontSize:11,color:"#334155",marginTop:4}}>e.g. {sample.id}: Particulars <b>{sf.particulars||"—"}</b> · Code <b>{sf.code||"—"}</b> · Reference <b>{sf.reference||"—"}</b></div>}
+                    <textarea aria-label="Payment note" value={emailAccount.note||""} placeholder="Note shown with the account, e.g. temporary account while the official one is finalised" rows={2}
+                      onChange={e=>setEmailAccount(a=>({...a,note:e.target.value}))} style={{...S.inp,marginTop:6,fontSize:12,resize:"vertical",fontFamily:"inherit"}}/>
+                    <div style={{display:"flex",gap:8,alignItems:"center",marginTop:4,fontSize:11,color:"#64748b"}}>
+                      <span>For this email only — the saved details are in User menu → AMUA details.</span>
+                      {changed&&<button type="button" onClick={()=>setEmailAccount({ ...dflt })} style={{marginLeft:"auto",border:"none",background:"none",color:"#0369a1",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"}}>↺ Use saved</button>}
+                    </div>
+                  </details>);
+              })()}
               {/* Silent mode blocks every send, so surface it here rather than letting the
                   send fail with a toast telling you to go and find another menu. */}
               {onToggleSilent&&(

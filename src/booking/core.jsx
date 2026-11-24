@@ -291,7 +291,9 @@ export const AMUA_INFO = {
   name:      AMUA_DEFAULT_NAME,
   address:   "",
   gstNumber: "",
-  bank:      "",
+  bank:      "",   // the account as one line (amuaAccountText), kept for older readers of amua_org
+  account:   {},   // { name, bank, number, tempName, tempBank, tempNumber, note }: where bookers pay AMUA
+                   // (the temporary account while it's set, else the official one); the note goes wherever it's shown
   contacts:  {},   // { operations|secondary|keyHolder: { name, position, email, phone } }
   council:   {},   // { rso, orgType, postalAddressSearch, keyCodes, playersPerTeam } — council application answers
 };
@@ -305,9 +307,54 @@ export function applyAmuaOrg(org) {
   AMUA_INFO.name      = (o.name || "").trim() || AMUA_DEFAULT_NAME;
   AMUA_INFO.address   = o.address   || "";
   AMUA_INFO.gstNumber = o.gstNumber || "";
-  AMUA_INFO.bank      = o.bank      || "";
+  // A structured account; amua_org saved before it had one only has the free-text `bank`.
+  AMUA_INFO.account   = o.account && typeof o.account === "object" ? o.account : (o.bank ? { number: o.bank } : {});
+  AMUA_INFO.bank      = amuaAccountText();
   AMUA_INFO.contacts  = o.contacts  || {};
   AMUA_INFO.council   = o.council   || {};
+}
+// The account bookers pay into: the temporary account while one is set (its name defaults to the
+// official one's), otherwise the official account. { name, bank, number, temporary, official }:
+// `official` is the official account's one-line text when a temporary one is in use.
+const acctLine = (name, bank, number) => [name, bank, number].map(x => String(x || "").trim()).filter(Boolean).join(" · ");
+export function amuaPayAccount(acc = AMUA_INFO.account) {
+  const a = acc || {};
+  if (String(a.tempNumber || "").trim())
+    return { name: a.tempName || a.name, bank: a.tempBank, number: a.tempNumber, temporary: true, official: a.number ? acctLine(a.name, a.bank, a.number) : "" };
+  return { name: a.name, bank: a.bank, number: a.number, temporary: false, official: "" };
+}
+// The account to pay into as one line, "AMUA Inc · ASB · 12-3456-0123456-00" (a temporary one
+// says so), or "" when none is set. `acc` overrides the saved account (an invoice email's own).
+export function amuaAccountText(acc = AMUA_INFO.account) {
+  const p = amuaPayAccount(acc);
+  return p.number ? `${p.temporary ? "Temporary account: " : ""}${acctLine(p.name, p.bank, p.number)}` : "";
+}
+// The account's note (e.g. "Temporary account while the official one is set up"): shown with the
+// account wherever it appears.
+export const amuaAccountNote = (acc = AMUA_INFO.account) => String(acc?.note || "").trim();
+// What a booker types into their bank's Particulars / Code / Reference (12 characters each in
+// NZ): templates in the account (payParticulars, payCode, payReference) with {booker},
+// {invoice} and {batch} filled in per invoice. Defaults: the booker's name, nothing, the invoice id.
+export const PAY_FIELD_DEFAULTS = { payParticulars: "{booker}", payCode: "", payReference: "{invoice}" };
+export function amuaPayFields(acc = AMUA_INFO.account, ctx = {}) {
+  const a = acc || {};
+  const fill = t => String(t ?? "").replace(/\{(booker|invoice|batch)\}/g, (_, k) => ctx[k] || "")
+    .replace(/[^A-Za-z0-9 -]/g, "").replace(/\s+/g, " ").trim().slice(0, 12);
+  const tpl = k => a[k] ?? PAY_FIELD_DEFAULTS[k];
+  return { particulars: fill(tpl("payParticulars")), code: fill(tpl("payCode")), reference: fill(tpl("payReference")) };
+}
+// Email-safe (inline, literal colours) "How to pay" box for an invoice: the account, the
+// particulars / code / reference to quote and the account's note. "" when no account is set.
+// ctx: { booker, batch } for the reference templates (the invoice id is `ref`).
+export function amuaPaymentHtml(ref = "", acc = AMUA_INFO.account, ctx = {}) {
+  const a = amuaPayAccount(acc), note = amuaAccountNote(acc), f = amuaPayFields(acc, { ...ctx, invoice: ref });
+  if (!a.number) return "";
+  const row = (k, v) => v ? `<tr><td style="padding:1px 12px 1px 0;color:#64748b;white-space:nowrap">${k}</td><td style="padding:1px 0;color:#0f172a;font-weight:600">${escHtml(String(v))}</td></tr>` : "";
+  return `<div style="margin:10px 28px 0;padding:10px 14px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;font-size:12px">
+    <div style="font-size:11px;font-weight:800;color:#0369a1;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px">How to pay</div>
+    <table cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:12px">${row("Account name", a.name)}${row("Bank", a.bank)}${row(a.temporary ? "Account number (temporary)" : "Account number", a.number)}${row("Particulars", f.particulars)}${row("Code", f.code)}${row("Reference", f.reference)}${a.official ? row("Official account", `${a.official} (not in use yet)`) : ""}</table>
+    ${note ? `<div style="margin-top:6px;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:5px 8px;font-size:11px">${escHtml(note)}</div>` : ""}
+  </div>`;
 }
 // "Jane Smith · ops@amua.nz · 021 123 4567" for the operations contact, or "".
 export function amuaContactLine() {

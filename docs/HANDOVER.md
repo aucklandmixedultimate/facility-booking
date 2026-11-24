@@ -167,7 +167,13 @@ type (one application each), and the extension payload carries `bookingType`, ea
     older per-field entries are ignored and can be cleared from the Council fields card; schools'
     and clubs' own grounds keep their own rates), `pricing_conditions`, `approx_players`, `approx_durations`.
   - People: `email_aliases`, `alias_names`, `booker_seasons`, `booker_info` (council participant
-    details: junior / senior, grade, teams, players, team names), `amua_org`.
+    details: junior / senior, grade, teams, players, team names), `amua_org` (AMUA details;
+    `account: { name, bank, number, tempName, tempBank, tempNumber, note, payParticulars, payCode,
+    payReference }` is where bookers pay: the temporary account while `tempNumber` is set, else the
+    official one. Every invoice gets a "How to pay" box with it, the particulars / code / reference
+    to quote (templates with {booker}, {invoice}, {batch}; 12 characters each) and the note; document
+    headers and invoice emails show it with the note; an invoice email can change any of it for
+    that send only).
   - Council and contacts: `council_outcomes`, `provider_contact_reviews`, `council_fees`
     (`application` one-off and `perField`, both $0 for now).
   - `log_retention_months`.
