@@ -716,11 +716,14 @@ export function AmuaDetailsModal({ value, onSave, onClose }) {
   const [d, setD] = useState(() => ({
     name: value?.name || AMUA_DEFAULT_NAME,
     address: value?.address || "", gstNumber: value?.gstNumber || "", bank: value?.bank || "",
+    // The account bookers pay into; older saves only had the free-text `bank`.
+    account: { ...(value?.account || (value?.bank ? { number: value.bank } : {})) },
     contacts: { ...(value?.contacts || {}) },
     council: { rso: "Auckland Ultimate", orgType: "Club/Team", ...(value?.council || {}) },
   }));
   const set = (k, v) => setD(p => ({ ...p, [k]: v }));
   const setContact = (role, k, v) => setD(p => ({ ...p, contacts: { ...p.contacts, [role]: { ...(p.contacts[role] || {}), [k]: v } } }));
+  const setAccount = (k, v) => setD(p => ({ ...p, account: { ...p.account, [k]: v } }));
   const setCouncil = (k, v) => setD(p => ({ ...p, council: { ...p.council, [k]: v } }));
   const si = {padding:"6px 8px",fontSize:12,borderRadius:6,border:"1.5px solid #e2e8f0",fontFamily:"inherit",outline:"none",width:"100%",boxSizing:"border-box"};
   const row = (label, input) => (
@@ -738,7 +741,14 @@ export function AmuaDetailsModal({ value, onSave, onClose }) {
         {row("Name", <input style={si} value={d.name} onChange={e=>set("name", e.target.value)}/>)}
         {row("Postal address", <textarea style={{...si,minHeight:54,resize:"vertical"}} value={d.address} onChange={e=>set("address", e.target.value)} placeholder={"PO Box …\nAuckland"}/>)}
         {row("GST number", <input style={si} value={d.gstNumber} onChange={e=>set("gstNumber", e.target.value)} placeholder="e.g. 123-456-789"/>)}
-        {row("Bank account", <input style={si} value={d.bank} onChange={e=>set("bank", e.target.value)} placeholder="e.g. 12-3456-0123456-00 (AMUA)"/>)}
+      </div>
+      <div style={box}>
+        {head("Payments to AMUA (bank account)")}
+        <div style={{fontSize:11,color:"#64748b",marginBottom:8}}>Shown on every invoice as how to pay (with the invoice&apos;s bank reference), in invoice emails and in document headers. The note goes with it everywhere it&apos;s shown.</div>
+        {row("Account name", <input style={si} value={d.account.name||""} onChange={e=>setAccount("name", e.target.value)} placeholder="e.g. Auckland Mixed Ultimate Association Inc"/>)}
+        {row("Bank", <input style={si} value={d.account.bank||""} onChange={e=>setAccount("bank", e.target.value)} placeholder="e.g. ASB"/>)}
+        {row("Account number", <input style={si} value={d.account.number||""} onChange={e=>setAccount("number", e.target.value)} placeholder="e.g. 12-3456-0123456-00"/>)}
+        {row("Note", <textarea style={{...si,minHeight:46,resize:"vertical"}} value={d.account.note||""} onChange={e=>setAccount("note", e.target.value)} placeholder="e.g. Temporary account while the official AMUA account is being finalised"/>)}
       </div>
       {AMUA_CONTACT_ROLES.map(r => {
         const c = d.contacts[r.key] || {};
@@ -769,7 +779,7 @@ export function AmuaDetailsModal({ value, onSave, onClose }) {
       </div>
       <div style={{display:"flex",justifyContent:"flex-end",gap:8}}>
         <button onClick={onClose} style={S.btn({border:"1.5px solid #e2e8f0",background:"#fff",color:"#64748b"})}>Cancel</button>
-        <button onClick={()=>onSave(d)} style={S.btn({background:"#0f172a",color:"#fff",fontWeight:700})}>Save</button>
+        <button onClick={()=>onSave({ ...d, bank: [d.account.name, d.account.bank, d.account.number].map(x=>String(x||"").trim()).filter(Boolean).join(" · ") })} style={S.btn({background:"#0f172a",color:"#fff",fontWeight:700})}>Save</button>
       </div>
     </Modal>
   );
