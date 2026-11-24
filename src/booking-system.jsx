@@ -1284,6 +1284,15 @@ export default function App() {
   // Email official invoices to bookers, already bundled one email per recipient by the
   // Billing tab. Unlike previews these are real payable documents, so the send is
   // confirmed, respects silent mode, and is logged with the references sent.
+  // Draft invoices in an official send become official once their email has gone out:
+  // "Invoiced to Club", which marks their bookings invoiced and locks their rates
+  // (handleUpdateBillingRecord). Records already issued are left as they are.
+  async function issueInvoiceRecords(ids) {
+    for (const id of ids || []) {
+      const r = billingRecords.find(x => x.id === id);
+      if (r && (r.status || "draft") === "draft") await handleUpdateBillingRecord({ id, status: "club_invoiced" });
+    }
+  }
   async function handleEmailOfficialInvoices(items, { preview = false } = {}) {
     if (!items?.length) return false;
     if (silentMode) {
@@ -1297,10 +1306,11 @@ export default function App() {
     // official path spells out what it is before sending.
     if (!window.confirm(preview
       ? `Send ${totalDocs} ${noun}${totalDocs!==1?"s":""} to ${who}?\n\nMarked unofficial — nothing becomes payable.`
-      : `Send ${totalDocs} ${noun}${totalDocs!==1?"s":""} to ${who}?\n\nThese are real payable documents, not previews.`)) return false;
+      : `Send ${totalDocs} ${noun}${totalDocs!==1?"s":""} to ${who}?\n\nThese are real payable documents, not previews.${items.some(i => i.issueIds?.length) ? `\n\n${items.reduce((n, i) => n + (i.issueIds?.length || 0), 0)} draft(s) will be issued first: they become official (Invoiced to Club), their bookings are marked invoiced and their rates locked.` : ""}`)) return false;
     showToast(`Sending ${items.length} email${items.length!==1?"s":""}…`);
     for (const it of items) {
       await sendEmail({ to: it.to, subject: it.subject, html: it.html, kind: preview ? "invoice_preview" : "invoice" });
+      if (!preview) await issueInvoiceRecords(it.issueIds);
     }
     logActivity(preview ? "invoice_preview_emailed" : "official_invoice_emailed", {
       emails: items.length, documents: totalDocs, count: totalDocs,
@@ -1320,7 +1330,7 @@ export default function App() {
       // drafts is empty (not missing) so cart code that walks every item's drafts is safe.
       notifyOnly: true, invoiceEmail: true, preview, drafts: [],
       email: it.to, name: it.name, subject: it.subject, html: it.html,
-      count: it.count, refs: it.refs, total: it.total,
+      count: it.count, refs: it.refs, total: it.total, issueIds: it.issueIds || [],
     }))]);
     const docs = items.reduce((s, i) => s + (i.count || 1), 0);
     showToast(`🛒 ${docs} ${preview?"preview":"invoice"}${docs!==1?"s":""} added to cart in ${items.length} email${items.length!==1?"s":""}.`);
@@ -2226,6 +2236,7 @@ export default function App() {
         if (item.invoiceEmail) {
           await sendEmail({ to: item.email, subject: item.subject, html: item.html,
             kind: item.preview ? "invoice_preview" : "invoice" });
+          if (!item.preview) await issueInvoiceRecords(item.issueIds);
           logActivity(item.preview ? "invoice_preview_emailed" : "official_invoice_emailed", {
             emails: 1, documents: item.count || 1, count: item.count || 1,
             recipients: [item.email], refs: item.refs || [], total: item.total || 0,

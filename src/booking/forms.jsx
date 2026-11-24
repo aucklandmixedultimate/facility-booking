@@ -557,7 +557,7 @@ export function CartModal({ cart, setCart, onClose, onSubmit, openNew, silentMod
                         <button onClick={()=>removeRequest(gi,b.id)} title="Take this booking out of the request" style={{background:'none',border:'none',cursor:'pointer',color:'#f43f5e',fontSize:14,padding:'2px 4px',lineHeight:1}}>✕</button>
                       </div>); })
                     : <div style={{padding:'8px 14px',fontSize:12,color:'#64748b',background:'#fff',display:'flex',gap:10,flexWrap:'wrap'}}>
-                      <span>{item.count||1} document{(item.count||1)!==1?'s':''}</span>
+                      <span>{item.count||1} document{(item.count||1)!==1?'s':''}{item.issueIds?.length?` · issues ${item.issueIds.length} draft${item.issueIds.length!==1?'s':''} on submit`:''}</span>
                       <span style={{fontFamily:'monospace',color:'#475569'}}>{(item.refs||[]).join(', ')}</span>
                       <span style={{marginLeft:'auto',fontWeight:700,color:'#0f172a'}}>{fmtCost(item.total||0)}</span>
                     </div>}

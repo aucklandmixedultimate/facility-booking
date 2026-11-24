@@ -403,6 +403,8 @@ export function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, 
         {isAdmin&&!isReceipt&&(
           <div style={{display:"flex",flexDirection:"column",gap:8,padding:"10px 0",borderTop:"1px solid #e2e8f0"}}>
             <div style={{fontSize:11,fontWeight:700,color:"#475569",marginBottom:2}}>Pipeline Actions</div>
+            {(rec.status||"draft")==="draft"&&isInv&&<div style={{fontSize:11,color:"#0369a1",background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:8,padding:"6px 9px"}}>
+              <b>Draft</b> — not an official invoice yet. To issue it and email the booker, use <b>✉ Official invoices</b> (or the batch&apos;s <b>✉ Official</b>): sending makes it official. Moving it along the pipeline below also issues it.</div>}
             <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
               {PIPELINE_KEYS.indexOf(rec.status||"draft") < PIPELINE_KEYS.length-1&&(
                 <button onClick={()=>{
@@ -707,6 +709,14 @@ export function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, 
                 ↗ Summary
               </button>
             )}
+            {isAdmin&&onEmailOfficial&&batch.invRecs.some(r=>r.bookerEmail&&r.bookerEmail!=="combined"&&r.bookerEmail!=="gtec")&&(
+              <button onClick={e=>{e.stopPropagation(); setEmailMode("official"); setEmailExportMode(exportMode); setEmailNote("");
+                setEmailSelIds(new Set(batch.invRecs.filter(r=>r.bookerEmail&&r.bookerEmail!=="combined"&&r.bookerEmail!=="gtec").map(r=>r.id))); setShowEmailModal(true);}}
+                title="Email this batch's invoices to their bookers as official invoices (drafts are issued when they're sent)"
+                style={{padding:"3px 9px",borderRadius:6,border:"1.5px solid #7dd3fc",background:"#f0f9ff",color:"#0369a1",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"}}>
+                ✉ Official
+              </button>
+            )}
             {isAdmin&&batch.allDraft&&onDeleteRecord&&(
               <button onClick={e=>{e.stopPropagation();if(window.confirm(`Delete all ${batch.records.length} draft records in this batch? This cannot be undone.`)) batch.records.forEach(r=>onDeleteRecord(r.id));}}
                 style={{padding:"3px 9px",borderRadius:6,border:"1.5px solid #fecaca",background:"#fef2f2",color:"#b91c1c",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"}}>
@@ -819,13 +829,13 @@ export function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, 
       {showEmailModal&&isAdmin&&onEmailOfficial&&(()=>{
         const preview = emailMode === "preview";
         const perInvoice = emailSendMode === "individual";
-        // Previews may cover anything, including drafts — the point is "does this look
-        // right before I issue it". Official sends are restricted to issued invoices: a
-        // draft has no reference a booker could pay against. Purchase orders are excluded
-        // either way, since they go to GTEC rather than to a booker.
+        // Previews may cover anything — the point is "does this look right before I issue
+        // it". An official send may include drafts too: sending issues them first (they
+        // become official, their bookings are marked invoiced and their rates locked), so a
+        // batch of drafts can go out in one step. Purchase orders are excluded either way,
+        // since they go to GTEC rather than to a booker.
         const eligible = r => r.type !== "purchase_order" && r.bookerEmail &&
-          r.bookerEmail !== "combined" && r.bookerEmail !== "gtec" &&
-          (preview || (r.status||"draft") !== "draft");
+          r.bookerEmail !== "combined" && r.bookerEmail !== "gtec";
         const isDraft = r => (r.status||"draft") === "draft";
 
         // Organised exactly like the Billing list behind it: batch cards first, then
@@ -869,6 +879,7 @@ export function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, 
             <span style={{color:"#475569",fontWeight:600}}>{displayName(r.bookerEmail)}</span>
             <span style={{color:"#94a3b8"}}>{r.dateFrom?fmtDate(r.dateFrom):""}{r.dateTo&&r.dateTo!==r.dateFrom?` – ${fmtDate(r.dateTo)}`:""}</span>
             <StatusPill status={r.status}/>
+            {!preview&&isDraft(r)&&<span title="This draft becomes an official invoice (Invoiced to Club) when it's sent" style={{fontSize:10,fontWeight:700,color:"#0369a1",background:"#e0f2fe",border:"1px solid #7dd3fc",borderRadius:4,padding:"0 5px"}}>issued when sent</span>}
             <span style={{marginLeft:"auto",fontWeight:700,color:"#0f172a"}}>{fmtMoney(r.total)}</span>
           </label>
         );
@@ -880,6 +891,8 @@ export function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, 
             to: recs[0].bookerEmail, name, count: n,
             total: recs.reduce((s,r)=>s+(r.total||0),0),
             refs: recs.map(r=>r.id),
+            // Drafts in an official send are issued once it goes out (App.issueInvoiceRecords).
+            issueIds: preview ? [] : recs.filter(isDraft).map(r=>r.id),
             subject: preview
               ? (n===1 ? `Draft invoice ${recs[0].id} for review — ${AMUA_INFO.name}` : `Draft invoices for review — ${AMUA_INFO.name}`)
               : (n===1 ? `Invoice ${recs[0].id} from ${AMUA_INFO.name}` : `${n} invoices from ${AMUA_INFO.name}`),
@@ -935,7 +948,7 @@ export function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, 
               <div style={{fontSize:11.5,color:"#475569",background:preview?"#fffbeb":"#f0f9ff",border:`1px solid ${preview?"#fde68a":"#bae6fd"}`,borderRadius:8,padding:"8px 11px",flexShrink:0}}>
                 {preview
                   ? <>Copies marked <strong>unofficial — not a tax invoice</strong>, nothing payable. Drafts <em>and</em> issued invoices can be queued.</>
-                  : <>Real <strong>payable invoices</strong>. Drafts are hidden here — switch to Preview to send one for review.</>}
+                  : <>Real <strong>payable invoices</strong>. Drafts are included: sending one <strong>issues</strong> it first (it becomes official — Invoiced to Club — its bookings are marked invoiced and its rates locked). Use Preview to send a draft for review without issuing it.</>}
                 {" "}Same grouping and status filter as the list behind.
               </div>
 
@@ -963,14 +976,14 @@ export function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, 
 
               {allSendable.length===0
                 ? <div style={{textAlign:"center",padding:28,color:"#94a3b8",fontSize:13}}>
-                    {preview ? "No invoices to preview under the current status filter." : "No issued invoices to send. Create an official invoice, or use Preview for drafts."}
+                    {preview ? "No invoices to preview under the current status filter." : "No invoices to send under the current status filter."}
                   </div>
                 : (<>
                   <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center",flexShrink:0}}>
                     <span style={{fontSize:11,fontWeight:700,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.05em"}}>Quick select</span>
                     {quick("All", allSendable, "Select every listed invoice")}
-                    {preview && quick("Drafts", allSendable.filter(isDraft), "Select only draft invoices")}
-                    {preview && quick("Issued", allSendable.filter(r=>!isDraft(r)), "Select only already-issued invoices")}
+                    {quick("Drafts", allSendable.filter(isDraft), preview ? "Select only draft invoices" : "Select only draft invoices (issued when sent)")}
+                    {quick("Issued", allSendable.filter(r=>!isDraft(r)), "Select only already-issued invoices")}
                     <button onClick={()=>setIds([])} style={{padding:"3px 9px",borderRadius:6,border:"1px solid #e2e8f0",background:"#fff",color:"#94a3b8",cursor:"pointer",fontSize:11,fontWeight:600,fontFamily:"inherit"}}>Clear</button>
                   </div>
                   {/* The one scrolling region — flex:1 with a vh cap so it scrolls even if
@@ -1035,7 +1048,7 @@ export function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, 
               <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",borderTop:"1px solid #f1f5f9",paddingTop:10,flexShrink:0}}>
                 <span style={{fontSize:12,color:selectedRecs.length?"#0f172a":"#94a3b8",fontWeight:selectedRecs.length?700:400}}>
                   {selectedRecs.length
-                    ? `Queue: ${selectedRecs.length} invoice${selectedRecs.length!==1?"s":""} → ${outgoing.length} email${outgoing.length!==1?"s":""}${perInvoice?"":` (${[...new Set(selectedRecs.map(r=>displayName(r.bookerEmail)))].join(", ")})`}`
+                    ? `Queue: ${selectedRecs.length} invoice${selectedRecs.length!==1?"s":""} → ${outgoing.length} email${outgoing.length!==1?"s":""}${perInvoice?"":` (${[...new Set(selectedRecs.map(r=>displayName(r.bookerEmail)))].join(", ")})`}${!preview&&selectedRecs.some(isDraft)?` · issues ${selectedRecs.filter(isDraft).length} draft${selectedRecs.filter(isDraft).length!==1?"s":""}`:""}`
                     : "Nothing selected"}
                 </span>
                 <div style={{marginLeft:"auto",display:"flex",gap:8}}>
