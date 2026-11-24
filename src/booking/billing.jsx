@@ -987,13 +987,14 @@ export function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, 
                     <button onClick={()=>setIds([])} style={{padding:"3px 9px",borderRadius:6,border:"1px solid #e2e8f0",background:"#fff",color:"#94a3b8",cursor:"pointer",fontSize:11,fontWeight:600,fontFamily:"inherit"}}>Clear</button>
                   </div>
                   {/* The one scrolling region — flex:1 with a vh cap so it scrolls even if
-                      the flex chain can't resolve a height. */}
+                      the flex chain can't resolve a height. Its cards keep their full height
+                      (flexShrink:0), so the list scrolls instead of clipping their rows. */}
                   <div style={{flex:1,minHeight:120,maxHeight:"46vh",overflowY:"auto",display:"flex",flexDirection:"column",gap:8,paddingRight:2}}>
                     {emailBatches.map(b=>{
                       const all = b.recs.every(r=>emailSelIds.has(r.id));
                       const some = !all && b.recs.some(r=>emailSelIds.has(r.id));
                       return (
-                        <div key={b.batchId} style={{border:"2px solid #e0e7ff",borderRadius:12,overflow:"hidden"}}>
+                        <div key={b.batchId} style={{border:"2px solid #e0e7ff",borderRadius:12,overflow:"hidden",flexShrink:0}}>
                           <label style={{display:"flex",alignItems:"center",gap:9,padding:"8px 12px",background:"#f5f3ff",cursor:"pointer"}}>
                             <input type="checkbox" checked={all} ref={el=>{ if(el) el.indeterminate = some; }}
                               onChange={()=>toggleMany(b.recs)} style={{accentColor:accent,width:15,height:15}}/>
@@ -1007,7 +1008,7 @@ export function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, 
                       );
                     })}
                     {emailSingles.length>0&&(
-                      <div style={{border:"1.5px solid #e2e8f0",borderRadius:12,overflow:"hidden"}}>
+                      <div style={{border:"1.5px solid #e2e8f0",borderRadius:12,overflow:"hidden",flexShrink:0}}>
                         <label style={{display:"flex",alignItems:"center",gap:9,padding:"8px 12px",background:"#f8fafc",cursor:"pointer"}}>
                           <input type="checkbox"
                             checked={emailSingles.every(r=>emailSelIds.has(r.id))}
