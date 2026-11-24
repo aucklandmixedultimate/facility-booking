@@ -264,7 +264,7 @@ export function renderInvoiceDocHtml({
           ${isLast ? totalsRows : ""}
         </tbody>
       </table>
-      ${isLast && payment ? amuaPaymentHtml(bankRef || docId, account || undefined) : ""}
+      ${isLast && payment ? amuaPaymentHtml(bankRef || docId, account || undefined, { booker: billToName, batch: orderName }) : ""}
       <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse">
         <tr>
           <td style="padding:8px 28px 12px;font-size:10px;color:#94a3b8">${isLast ? footNote : ""}</td>

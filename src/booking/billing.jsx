@@ -1,7 +1,7 @@
 import { useState, useMemo, useRef, Fragment } from "react";
 import { downloadDriveFile, DRIVE_ROOT_FOLDER, testDriveConnection, disconnectDrive } from "../drive-client.js";
 import { billingDocFields, buildBillingDocHtml, invLineLabel, renderInvoiceDocHtml } from "./billingDocs.jsx";
-import { AMUA_INFO, amuaAccountNote, amuaAccountText, rowSelect, CopyableTable, Modal, PROVIDERS, S, VENDOR_GTEC, deriveRecipientCode, fmtCost, genBankRef, todayKey } from "./core.jsx";
+import { AMUA_INFO, PAY_FIELD_DEFAULTS, amuaAccountNote, amuaAccountText, amuaPayFields, rowSelect, CopyableTable, Modal, PROVIDERS, S, VENDOR_GTEC, deriveRecipientCode, fmtCost, genBankRef, todayKey } from "./core.jsx";
 import { csvCell, escHtml } from "../html.js";
 import { buildComponent, claimed, normaliseSelection, poBookers, selectionCovers, selectionEmpty } from "../poSplit.js";
 const PIPELINE_STATES = [
@@ -1036,7 +1036,10 @@ export function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, 
                   style={{...S.inp,resize:"vertical",fontFamily:"inherit"}}/>
               </div>
               {/* AMUA's account on these invoices: the saved details, editable for this send. */}
-              {!preview&&(()=>{ const dflt = AMUA_INFO.account || {}, changed = ["name","bank","number","note"].some(k => (emailAccount[k]||"") !== (dflt[k]||""));
+              {!preview&&(()=>{ const dflt = AMUA_INFO.account || {}, changed = ["name","bank","number","tempName","tempBank","tempNumber","note","payParticulars","payCode","payReference"].some(k => (emailAccount[k]??PAY_FIELD_DEFAULTS[k]??"") !== (dflt[k]??PAY_FIELD_DEFAULTS[k]??""));
+                const sample = selectedRecs[0] || allSendable[0], sf = amuaPayFields(emailAccount, { booker: sample ? (sample.bookerName || displayName(sample.bookerEmail)) : "", invoice: sample?.id || "", batch: sample?.orderName || "" });
+                const tpl = (k, label) => <label style={{display:"flex",flexDirection:"column",gap:2,flex:"1 1 120px",minWidth:110,fontSize:10,fontWeight:700,color:"#64748b"}}>{label}
+                  <input aria-label={`Payment ${label}`} value={emailAccount[k] ?? PAY_FIELD_DEFAULTS[k]} onChange={e=>setEmailAccount(a=>({...a,[k]:e.target.value}))} style={{...S.inp,fontSize:12,padding:"5px 8px"}}/></label>;
                 const inp = (k, ph, w) => <input aria-label={`Payment ${k}`} value={emailAccount[k]||""} placeholder={ph} onChange={e=>setEmailAccount(a=>({...a,[k]:e.target.value}))} style={{...S.inp,flex:w,minWidth:120,fontSize:12,padding:"5px 8px"}}/>;
                 return (
                   <details style={{flexShrink:0,border:"1px solid #bae6fd",borderRadius:8,background:"#f0f9ff",padding:"6px 10px"}}>
@@ -1046,6 +1049,13 @@ export function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, 
                     <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>
                       {inp("name","Account name","2 1 180px")}{inp("bank","Bank","1 1 90px")}{inp("number","Account number","2 1 160px")}
                     </div>
+                    <div style={{fontSize:11,fontWeight:700,color:"#0369a1",marginTop:6}}>Temporary account <span style={{fontWeight:400,color:"#64748b"}}>· used instead while set</span></div>
+                    <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:4}}>
+                      {inp("tempName","Account name (blank = above)","2 1 180px")}{inp("tempBank","Bank","1 1 90px")}{inp("tempNumber","Temporary account number","2 1 160px")}
+                    </div>
+                    <div style={{fontSize:11,fontWeight:700,color:"#0369a1",marginTop:6}}>Payment references <span style={{fontWeight:400,color:"#64748b"}}>· per invoice, 12 characters each: {"{booker}"} {"{invoice}"} {"{batch}"}</span></div>
+                    <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:4}}>{tpl("payParticulars","Particulars")}{tpl("payCode","Code")}{tpl("payReference","Reference")}</div>
+                    {sample&&<div style={{fontSize:11,color:"#334155",marginTop:4}}>e.g. {sample.id}: Particulars <b>{sf.particulars||"—"}</b> · Code <b>{sf.code||"—"}</b> · Reference <b>{sf.reference||"—"}</b></div>}
                     <textarea aria-label="Payment note" value={emailAccount.note||""} placeholder="Note shown with the account, e.g. temporary account while the official one is finalised" rows={2}
                       onChange={e=>setEmailAccount(a=>({...a,note:e.target.value}))} style={{...S.inp,marginTop:6,fontSize:12,resize:"vertical",fontFamily:"inherit"}}/>
                     <div style={{display:"flex",gap:8,alignItems:"center",marginTop:4,fontSize:11,color:"#64748b"}}>
