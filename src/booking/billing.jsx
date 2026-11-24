@@ -76,7 +76,7 @@ function buildInvoiceBundleHtml({ recipientName, recipientEmail, docs, note = ""
   </body></html>`.replace(/\n\s+/g, "\n");
 }
 
-export function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onCreateReceipt, onSavePoComponent, onLoadToSummary, isAdmin=false, loggedInEmail="", emailAliases={}, aliasNames={}, driveEnabled=false, onDriveSync, onRenameBatch, onDriveAttach, onEmailOfficial, onQueueInvoiceEmails, silentMode=false, onToggleSilent }) {
+export function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, onCreateReceipt, onSavePoComponent, onLoadToSummary, isAdmin=false, loggedInEmail="", emailAliases={}, aliasNames={}, driveEnabled=false, driveDetail="summary", onDriveDetail, onDriveSync, onRenameBatch, onDriveAttach, onEmailOfficial, onQueueInvoiceEmails, silentMode=false, onToggleSilent }) {
   const [filterStatus, setFilterStatus] = useState("all");
   const [expandedId, setExpandedId] = useState(null);
   const [expandedBatchId, setExpandedBatchId] = useState(null);
@@ -184,6 +184,26 @@ export function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, 
       win.document.write(html); win.document.close();
       if (format==="print") { win.focus(); win.print(); }
     }
+  }
+
+  // "Download all" for a batch: one HTML file holding every document, each on its own page (so
+  // one print gives a PDF set), rather than a tab per document that pop-up blockers stop.
+  function downloadBatch(batch) {
+    const docs = batch.records.map(r => {
+      const dt = r.type==="purchase_order" ? "purchase_order" : r.type==="receipt" ? "receipt" : "invoice";
+      const lines = exportMode==="individual" ? (r.individualLines||r.lines||[]) : (r.lines||[]);
+      const parent = r.parentPoId ? billingRecords.find(x => x.id === r.parentPoId) : null;
+      return renderInvoiceDocHtml({ ...billingDocFields(r, dt, lines, parent?.individualLines || null), fragment: true });
+    }).join("");
+    const name = `AMUA ${batch.orderName ? batch.orderName.replace(/[^\w- ]+/g,"") + " - " : ""}${(batch.dateFrom||"").replace(/-/g,"")}-${(batch.dateTo||"").replace(/-/g,"")} - all documents${exportMode==="individual"?" - itemised":""}`;
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>${escHtml(name)}</title><style>
+      @page { size:A4; margin:12mm }
+      body{font-family:'Segoe UI',Arial,sans-serif;background:#f1f5f9;margin:0;padding:24px 12px;color:#0f172a}
+      @media print { body{background:#fff;padding:0} .sheet{box-shadow:none !important;border-radius:0 !important;margin:0 !important;max-width:none !important;break-after:page;page-break-after:always} .sheet:last-child{break-after:auto;page-break-after:auto} }
+    </style></head><body>${docs}</body></html>`;
+    const url = URL.createObjectURL(new Blob([html], { type: "text/html" }));
+    const a = document.createElement("a"); a.href = url; a.download = `${name}.html`; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
   const stateInfo = key => PIPELINE_STATES.find(s=>s.key===key) || (key==="issued" ? { label:"Receipt Issued", color:"#15803d" } : { label: key, color:"#94a3b8" });
@@ -678,12 +698,8 @@ export function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, 
           <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
             <span style={{fontSize:13,fontWeight:700,color:"#312e81"}}>{fmtMoney(batch.total)}</span>
             <StatusPill status={batch.status}/>
-            <button onClick={e=>{e.stopPropagation();
-              batch.records.forEach(r=>{
-                const dt = r.type==="purchase_order"?"purchase_order":"invoice";
-                downloadRecord(r,"html",dt,exportMode);
-              });
-            }} title={`Open HTML for all ${batch.records.length} records (${exportMode})`}
+            <button onClick={e=>{e.stopPropagation(); downloadBatch(batch);}}
+              title={`Download one file with all ${batch.records.length} documents, each on its own page (${exportMode==="individual"?"itemised":"summary"}) — open it and print to PDF for a PDF set`}
               style={{padding:"3px 9px",borderRadius:6,border:"1.5px solid #c4b5fd",background:"#ede9fe",color:"#6d28d9",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"}}>
               📥 Download all
             </button>
@@ -786,6 +802,14 @@ export function BillingTab({ billingRecords=[], onUpdateRecord, onDeleteRecord, 
           </button>
           <button onClick={()=>{disconnectDrive(); setDriveTest({ok:true,msg:"Disconnected — the next sync will ask for Google consent again."});}}
             style={{padding:"4px 10px",borderRadius:6,border:"1px solid #e2e8f0",background:"#fff",color:"#94a3b8",cursor:"pointer",fontSize:11,fontWeight:600,fontFamily:"inherit"}}>Disconnect</button>
+          {onDriveDetail&&<div style={{flexBasis:"100%",display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+            <span style={{color:"#64748b",fontWeight:600}}>Save to Drive as:</span>
+            {[{k:"summary",l:"Summary",t:"One line per booking pattern (as now)"},{k:"itemised",l:"Itemised",t:"One line per booking"},{k:"both",l:"Both",t:"A summary copy and an itemised copy (\" - itemised\") of each document"}].map(o=>(
+              <button key={o.k} onClick={()=>onDriveDetail(o.k)} title={o.t} aria-pressed={driveDetail===o.k}
+                style={{padding:"3px 10px",borderRadius:6,border:"1px solid",cursor:"pointer",fontSize:11,fontWeight:600,fontFamily:"inherit",
+                  borderColor:driveDetail===o.k?"#047857":"#bbf7d0",background:driveDetail===o.k?"#047857":"#fff",color:driveDetail===o.k?"#fff":"#047857"}}>{o.l}</button>))}
+            <span style={{color:"#94a3b8",fontSize:11}}>Applies to new documents and to 📁 Sync / Re-sync.</span>
+          </div>}
           {driveTest&&<div style={{flexBasis:"100%",color:driveTest.ok?"#15803d":"#b91c1c",fontSize:11,fontWeight:600}}>{driveTest.ok?"✓ ":"⚠ "}{driveTest.msg}</div>}
         </div>
       )}

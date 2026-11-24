@@ -261,6 +261,10 @@ export default function App() {
   }, [bookings, profiles]);
   // fb_billing_records: official invoice history { id, referenceId, date, type, bookerEmails,
   //   amount, gstMode, status, gtecInvoiceNumber, clubPayment, amuaPayment, bookingIds }
+  // What Drive keeps of each billing document: "summary" (grouped lines), "itemised" (one
+  // line per booking) or "both". Per device, like the rest of Drive's set-up.
+  const [driveDetail, setDriveDetailState] = useState(()=>{ try{ return localStorage.getItem("fb_drive_detail")||"summary"; }catch{ return "summary"; } });
+  const setDriveDetail = v => { setDriveDetailState(v); try{ localStorage.setItem("fb_drive_detail", v); }catch{ /* ignore */ } };
   const [billingRecords, setBillingRecords] = useState(()=>{
     try{ return JSON.parse(localStorage.getItem("fb_billing_records")||"[]"); }catch{ return []; }
   });
@@ -1727,19 +1731,32 @@ export default function App() {
           const isPO = rec.type==="purchase_order";
           const docType = isPO ? "purchase_order" : rec.type==="receipt" ? "receipt" : "invoice";
           const folder = isPO ? await poFolderFor(rec) : subClubs; // receipts file with the club-facing docs
-          const base = billingDocBaseName(rec);
           const parentPo = rec.parentPoId ? billingRecords.find(r => r.id === rec.parentPoId) : null;
-          const html = buildBillingDocHtml(rec, docType, rec.lines||[], parentPo?.individualLines || null);
-          const pdfBlob = await htmlToPdfBlob(html);
-          // Prefer the stored id; fall back to name lookup so a different browser
-          // updates the same files instead of duplicating them.
-          const pdfId  = rec.drive?.pdfId  || (await findChildFile(`${base}.pdf`,  folder.id))?.id || null;
-          const pdfFile = await uploadFile({ name:`${base}.pdf`, parentId:folder.id, blob:pdfBlob, mimeType:"application/pdf", fileId:pdfId });
-          const htmlId = rec.drive?.htmlId || (await findChildFile(`${base}.html`, folder.id))?.id || null;
-          const htmlFile = await uploadFile({ name:`${base}.html`, parentId:folder.id, blob:new Blob([html],{type:"text/html"}), mimeType:"text/html", fileId:htmlId });
-          // Pin finalised PDFs so Drive never auto-purges that revision.
-          if ((rec.status||"draft")!=="draft") { try { await keepLatestRevisionForever(pdfFile.id); } catch { /* best-effort */ } }
-          setRecordDrive(rec.id, { pdfId:pdfFile.id, htmlId:htmlFile.id, folderId:folder.id, batchFolderId:batchFolder.id, webViewLink:pdfFile.webViewLink, uploadedAt:new Date().toISOString(), error:null });
+          // The summary (grouped lines) and/or itemised (one line per booking) copy, per the
+          // Drive setting; a record without itemised lines keeps just its summary.
+          const itemisable = (rec.individualLines||[]).length > 0;
+          const modes = driveDetail==="both" ? (itemisable ? ["summary","itemised"] : ["summary"])
+            : driveDetail==="itemised" && itemisable ? ["itemised"] : ["summary"];
+          const patch = { folderId:folder.id, batchFolderId:batchFolder.id, uploadedAt:new Date().toISOString(), error:null };
+          for (const mode of modes) {
+            const itemised = mode==="itemised";
+            const base = billingDocBaseName(rec) + (itemised ? " - itemised" : "");
+            const html = buildBillingDocHtml(rec, docType, (itemised ? rec.individualLines : rec.lines)||[], parentPo?.individualLines || null);
+            const pdfBlob = await htmlToPdfBlob(html);
+            // Prefer the stored id; fall back to name lookup so a different browser
+            // updates the same files instead of duplicating them.
+            const [pk, hk] = itemised ? ["itemPdfId","itemHtmlId"] : ["pdfId","htmlId"];
+            const pdfId  = rec.drive?.[pk] || (await findChildFile(`${base}.pdf`,  folder.id))?.id || null;
+            const pdfFile = await uploadFile({ name:`${base}.pdf`, parentId:folder.id, blob:pdfBlob, mimeType:"application/pdf", fileId:pdfId });
+            const htmlId = rec.drive?.[hk] || (await findChildFile(`${base}.html`, folder.id))?.id || null;
+            const htmlFile = await uploadFile({ name:`${base}.html`, parentId:folder.id, blob:new Blob([html],{type:"text/html"}), mimeType:"text/html", fileId:htmlId });
+            // Pin finalised PDFs so Drive never auto-purges that revision.
+            if ((rec.status||"draft")!=="draft") { try { await keepLatestRevisionForever(pdfFile.id); } catch { /* best-effort */ } }
+            patch[pk] = pdfFile.id; patch[hk] = htmlFile.id;
+            if (!itemised || !patch.webViewLink) patch.webViewLink = pdfFile.webViewLink;
+          }
+          setRecordDrive(rec.id, patch);
+          const base = billingDocBaseName(rec);
           logActivity("drive_upload", { record_id: rec.id, doc: base, reason });
           okCount++;
         } catch(e) {
@@ -2609,7 +2626,7 @@ export default function App() {
         {tab==="list"&&bookingsLists}
 
         {tab==="summary"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<Suspense fallback={<TabLoading/>}><SummaryTab bookings={bookings} loggedInEmail={loggedInEmail} onRemoveBookings={queueMultiForRemoval} facilityRates={facilityRates} pricingConditions={pricingConditions} onAddPricingCondition={addPricingCondition} onQueuePricingRule={queuePricingRule} onUpdatePricingCondition={updatePricingCondition} onRemovePricingCondition={removePricingCondition} isAdmin={isAdmin} approxPlayers={approxPlayers} onUpdateApproxPlayers={updateApproxPlayers} approxDurations={approxDurations} onUpdateApproxDuration={updateApproxDuration} onUpdateFacilityRate={updateFacilityRate} onSetFacilityRate={setFacilityRateEntry} onRemoveFacilityRates={removeFacilityRates} councilFees={councilFees} onUpdateCouncilFees={saveCouncilFees} pricingMode={pricingMode} onSetPricingMode={setPricingMode} onProposeMerge={handleProposeMerge} onBulkApply={handleBulkApply} onMarkInvoiced={handleMarkInvoiced} onMarkAdjustmentSettled={handleMarkAdjustmentSettled} bookerFilter={listBookerFilter} profiles={profiles} emailAliases={emailAliases} aliasNames={aliasNames} onCreateOfficialInvoice={handleCreateOfficialInvoice} onEmailInvoice={handleEmailInvoicePreview} loadRequest={summaryLoadRequest}/></Suspense>}</div>}
-        {tab==="billing"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<Suspense fallback={<TabLoading/>}><BillingTab billingRecords={billingRecords} onUpdateRecord={handleUpdateBillingRecord} onDeleteRecord={id=>setBillingRecords(prev=>prev.filter(r=>r.id!==id))} onCreateReceipt={handleCreateReceipt} onSavePoComponent={handleSavePoComponent} onLoadToSummary={handleLoadBillingToSummary} isAdmin={isAdmin} loggedInEmail={loggedInEmail} emailAliases={emailAliases} aliasNames={aliasNames} driveEnabled={driveConfigured()} onDriveSync={handleDriveSync} onRenameBatch={handleRenameBatch} onDriveAttach={handleDriveAttachGtec} onEmailOfficial={handleEmailOfficialInvoices} onQueueInvoiceEmails={handleQueueInvoiceEmails} silentMode={silentMode} onToggleSilent={isAdmin?setSilentMode:undefined}/></Suspense>}</div>}
+        {tab==="billing"&&<div style={S.card}>{loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>Loading…</div>:<Suspense fallback={<TabLoading/>}><BillingTab billingRecords={billingRecords} onUpdateRecord={handleUpdateBillingRecord} onDeleteRecord={id=>setBillingRecords(prev=>prev.filter(r=>r.id!==id))} onCreateReceipt={handleCreateReceipt} onSavePoComponent={handleSavePoComponent} onLoadToSummary={handleLoadBillingToSummary} isAdmin={isAdmin} loggedInEmail={loggedInEmail} emailAliases={emailAliases} aliasNames={aliasNames} driveEnabled={driveConfigured()} driveDetail={driveDetail} onDriveDetail={setDriveDetail} onDriveSync={handleDriveSync} onRenameBatch={handleRenameBatch} onDriveAttach={handleDriveAttachGtec} onEmailOfficial={handleEmailOfficialInvoices} onQueueInvoiceEmails={handleQueueInvoiceEmails} silentMode={silentMode} onToggleSilent={isAdmin?setSilentMode:undefined}/></Suspense>}</div>}
         {tab==="about"&&<div style={{padding:"8px 0"}}><Suspense fallback={<TabLoading/>}><AboutTab/></Suspense></div>}
         {tab==="allocation"&&isAdmin&&<div style={S.card}><Suspense fallback={<TabLoading/>}><CouncilAllocationTab outcomes={councilOutcomes} bookings={bookings} syncing={councilSyncing} portalSync={councilPortalSync} onApplyPortal={handleApplyPortal} onSaveOutcomes={saveCouncilOutcomes} onBulkStatusChange={handleBulkStatusChange} onQueueNotifications={queueNotifications} onLinkApp={handleLinkCouncilApp} aliasNames={aliasNames} loggedInEmail={loggedInEmail}/></Suspense></div>}
         {tab==="admin"&&isAdmin&&<div style={S.card}>
