@@ -163,13 +163,14 @@ export function renderInvoiceDocHtml({
       acct ? `Bank: ${escHtml(acct)}${acctNote ? ` <span style="color:#fcd34d">(${escHtml(acctNote)})</span>` : ""}` : "",
       amuaContactLine() ? `Contact: ${amuaContactLine()}` : ""]
     .filter(Boolean).map(l => `<div>${l}</div>`).join("");
-  const gstLabel = gstMode === "note" ? "" : gstMode === "exclusive" ? "excl. GST" : "incl. GST";
+  // `pre` is always the amount before GST (inclusive rates are split out of the total; exclusive
+  // rates are the subtotal), so the subtotal is "excl. GST" in both modes and the total includes it.
 
   const totalsRows = gstMode === "note"
     ? `<tr><td colspan="4" style="${tdLbl}${edgeL};background:#f0fdf4">GST inclusive</td>${money(total, ";background:#f0fdf4;font-size:15px;font-weight:800;color:#15803d")}</tr>`
-    : `<tr><td colspan="4" style="${tdLbl}${edgeL};background:#f8fafc">Subtotal (${gstLabel})</td>${money(pre, ";background:#f8fafc")}</tr>
+    : `<tr><td colspan="4" style="${tdLbl}${edgeL};background:#f8fafc">Subtotal (excl. GST)</td>${money(pre, ";background:#f8fafc")}</tr>
        <tr><td colspan="4" style="${tdLbl}${edgeL};background:#f8fafc">GST (15%)</td>${money(gst, ";background:#f8fafc")}</tr>
-       <tr><td colspan="4" style="${tdLbl}${edgeL};background:#f0fdf4;font-size:13px;font-weight:700;color:#0f172a">Total</td>${money(total, ";background:#f0fdf4;font-size:15px;font-weight:800;color:#15803d")}</tr>`;
+       <tr><td colspan="4" style="${tdLbl}${edgeL};background:#f0fdf4;font-size:13px;font-weight:700;color:#0f172a">Total (incl. GST)</td>${money(total, ";background:#f0fdf4;font-size:15px;font-weight:800;color:#15803d")}</tr>`;
 
   lines = lines.map(normaliseInvLine);
   const bannerRows = (banner ? (bannerRowsIn ?? INV_ROWS_PER_BANNER) : 0) + (previewNotice ? 1 : 0);
